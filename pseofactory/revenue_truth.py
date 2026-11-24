@@ -23,6 +23,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pseofactory.impact_planner import discover_active_tenants
+from pseofactory.lead_classification import is_verified_stripe_payment, verified_revenue_usd
 from pseofactory.tenant_facts import CANONICAL_TENANT_HOSTS
 
 ACTIVE_PSEOFACTORY_PROPERTIES = ("profithelm", "prexvo", "gainhelm", "lienbond")
@@ -241,8 +243,41 @@ def collect_pseofactory_truth(
     falsification_path = agy_dir / "monetization_falsification_report.json"
     captured_leads_path = agy_dir / "captured_leads.jsonl"
 
+    ws_root = _resolve_projects_root(root)
+    discovered_tenants = discover_active_tenants(ws_root)
+    active_prop_domains: Dict[str, str] = {}
+    for pid, repo_dir in discovered_tenants:
+        pid_norm = str(pid or "").strip().lower()
+        if not pid_norm:
+            continue
+        domain_val = ""
+        marker_path = Path(repo_dir) / ".pseofactory.json"
+        if marker_path.is_file():
+            try:
+                marker_doc = json.loads(marker_path.read_text(encoding="utf-8"))
+                if isinstance(marker_doc, dict):
+                    domain_val = str(marker_doc.get("domain") or "").strip().lower()
+                    if not domain_val and marker_doc.get("canonical_base"):
+                        domain_val = (
+                            str(marker_doc["canonical_base"])
+                            .strip()
+                            .lower()
+                            .replace("https://", "")
+                            .replace("http://", "")
+                            .split("/")[0]
+                        )
+            except Exception:
+                domain_val = ""
+        active_prop_domains[pid_norm] = domain_val or CANONICAL_TENANT_HOSTS.get(
+            pid_norm, f"{pid_norm}.com"
+        )
+    for canon_pid in ACTIVE_PSEOFACTORY_PROPERTIES:
+        active_prop_domains.setdefault(
+            canon_pid, CANONICAL_TENANT_HOSTS.get(canon_pid, f"{canon_pid}.com")
+        )
+
     local_leads_by_prop: Dict[str, Dict[str, Dict[str, Any]]] = {
-        p: {} for p in ACTIVE_PSEOFACTORY_PROPERTIES
+        p: {} for p in active_prop_domains
     }
     if captured_leads_path.exists():
         try:
@@ -299,8 +334,6 @@ def collect_pseofactory_truth(
             if net_val.get("portal_verified_clicks") is not None
             else (net_val.get("clicks") or 0)
         )
-        if net_key in ("firstpromoter_coinledger", "coinledger_firstpromoter") and clicks == 6:
-            clicks = 37
         conversions = int(
             net_val.get("conversions_count")
             if net_val.get("conversions_count") is not None
@@ -351,10 +384,11 @@ def collect_pseofactory_truth(
     total_internal_test_leads = 0
     total_synthetic_probe_leads = 0
     total_stripe_paid_checkouts = 0
+    realized_stripe_revenue_usd = 0.0
+    realized_partner_slot_revenue_usd = 0.0
     external_human_lead_records: List[Dict[str, Any]] = []
 
-    for prop_id in ACTIVE_PSEOFACTORY_PROPERTIES:
-        domain = CANONICAL_TENANT_HOSTS.get(prop_id, f"{prop_id}.com")
+    for prop_id, domain in active_prop_domains.items():
         gsc_metrics = _query_gsc_28d_property(domain, live_network=live_network)
         total_gsc_impressions_28d += int(gsc_metrics.get("impressions_28d") or 0)
         total_gsc_clicks_28d += int(gsc_metrics.get("clicks_28d") or 0)
@@ -383,10 +417,13 @@ def collect_pseofactory_truth(
         int_leads = 0
         syn_leads = 0
         paid_leads = 0
+        prop_stripe_rev = 0.0
+        prop_slot_rev = 0.0
         for ld in leads_list:
             if not isinstance(ld, dict):
                 continue
             cls = classify_captured_lead(ld)
+            verified_paid = is_verified_stripe_payment(ld)
             if cls == "external_human":
                 ext_leads += 1
                 total_external_human_leads += 1
@@ -397,12 +434,24 @@ def collect_pseofactory_truth(
                         "email_masked": ld.get("email_masked") or ld.get("email"),
                         "tool_slug": ld.get("tool_slug"),
                         "created_at": ld.get("created_at") or ld.get("captured_at"),
-                        "stripe_payment_verified": bool(ld.get("stripe_payment_verified")),
+                        "stripe_payment_verified": verified_paid,
                     }
                 )
-                if ld.get("stripe_payment_verified"):
+                if verified_paid:
                     paid_leads += 1
                     total_stripe_paid_checkouts += 1
+                    if ld.get("attributed_revenue_usd") is not None:
+                        rev_amt = verified_revenue_usd(ld)
+                    else:
+                        rev_amt = round(float(ld.get("offer_price_usd") or 0.0), 2)
+                    sku_low = str(ld.get("offer_sku") or "").strip().lower()
+                    vert_low = str(ld.get("vertical") or "").strip().lower()
+                    if sku_low.endswith("_verified_partner_slot") or "partner_slot" in vert_low:
+                        prop_slot_rev += rev_amt
+                        realized_partner_slot_revenue_usd += rev_amt
+                    else:
+                        prop_stripe_rev += rev_amt
+                        realized_stripe_revenue_usd += rev_amt
             elif cls == "internal_operator_test":
                 int_leads += 1
                 total_internal_test_leads += 1
@@ -443,6 +492,8 @@ def collect_pseofactory_truth(
                 "internal_operator_test_leads": int_leads,
                 "synthetic_probe_leads": syn_leads,
                 "stripe_paid_checkouts": paid_leads,
+                "realized_stripe_revenue_usd": round(prop_stripe_rev, 2),
+                "realized_partner_slot_revenue_usd": round(prop_slot_rev, 2),
                 "kv_quota_degraded": lead_kv_degraded,
             },
             "edge_telemetry_sample": {
@@ -454,13 +505,20 @@ def collect_pseofactory_truth(
             },
         }
 
+    total_realized_revenue_usd = round(
+        realized_stripe_revenue_usd
+        + realized_partner_slot_revenue_usd
+        + realized_affiliate_revenue_usd,
+        2,
+    )
+
     return {
         "engine": "pseofactory",
-        "realized_stripe_revenue_usd": 0.0,
-        "realized_partner_slot_revenue_usd": 0.0,
+        "realized_stripe_revenue_usd": round(realized_stripe_revenue_usd, 2),
+        "realized_partner_slot_revenue_usd": round(realized_partner_slot_revenue_usd, 2),
         "realized_affiliate_revenue_usd": round(realized_affiliate_revenue_usd, 2),
         "pending_affiliate_commissions_usd": round(pending_affiliate_commissions_usd, 2),
-        "total_realized_revenue_usd": round(realized_affiliate_revenue_usd, 2),
+        "total_realized_revenue_usd": total_realized_revenue_usd,
         "gsc_28d_total_impressions": total_gsc_impressions_28d,
         "gsc_28d_total_organic_clicks": total_gsc_clicks_28d,
         "portal_verified_clicks_non_synthetic": non_synthetic_portal_clicks,
@@ -913,6 +971,15 @@ def format_portfolio_revenue_truth_table(report: Dict[str, Any]) -> str:
     sol = report.get("engines", {}).get("solana_copy_trader", {})
     lc = pseo.get("lead_capture_totals", {})
 
+    props_dict = pseo.get("properties") or {}
+    prop_count = len(props_dict) or len(ACTIVE_PSEOFACTORY_PROPERTIES)
+    prop_labels = ", ".join(p.upper() for p in (props_dict.keys() or ACTIVE_PSEOFACTORY_PROPERTIES))
+    pseo_stripe_rev = float(pseo.get("realized_stripe_revenue_usd") or 0.0)
+    pseo_aff_rev = float(pseo.get("realized_affiliate_revenue_usd") or 0.0)
+    pseo_slot_rev = float(pseo.get("realized_partner_slot_revenue_usd") or 0.0)
+    ps_net = pseo.get("affiliate_networks", {}).get("partnerstack") or {}
+    ps_rev = float(ps_net.get("realized_revenue_usd") or 0.0)
+
     lines = [
         "================================================================================",
         "PORTFOLIO REVENUE & ATTRIBUTION TRUTH BOARD (\"DOES IT MAKE MONEY?\")",
@@ -922,12 +989,12 @@ def format_portfolio_revenue_truth_table(report: Dict[str, Any]) -> str:
         "",
         "1. PORTFOLIO BOTTOM LINE",
         f"   * Gross Realized Revenue:        +${bl.get('gross_realized_revenue_usd', 0.0):.2f}",
-        f"     - pseofactory (4 domains):     ${bl.get('pseofactory_realized_revenue_usd', 0.0):.2f} (Stripe: $0.00 | Affiliates: $0.00 | $299 Slots: $0.00)",
+        f"     - pseofactory ({prop_count} domains):     ${bl.get('pseofactory_realized_revenue_usd', 0.0):.2f} (Stripe: ${pseo_stripe_rev:.2f} | Affiliates: ${pseo_aff_rev:.2f} | $299 Slots: ${pseo_slot_rev:.2f})",
         f"     - local-marketplace-arbitrage: +${bl.get('local_arbitrage_realized_revenue_usd', 0.0):.2f} (1 physical item sold & settled on OfferUp)",
         f"   * Trading Realized PnL (Solana): {bl.get('solana_trading_realized_pnl_sol', 0.0):+.6f} SOL (~${bl.get('solana_trading_realized_pnl_usd', 0.0):+.2f} @ ${sol.get('sol_price_usd_assumed', 90.0):.0f}/SOL)",
         f"   * NET PORTFOLIO CASHFLOW:        ~${bl.get('net_portfolio_cashflow_usd', 0.0):+.2f}",
         "",
-        "2. ENGINE 1: PSEOFACTORY (PROFITHELM, PREXVO, GAINHELM, LIENBOND)",
+        f"2. ENGINE 1: PSEOFACTORY ({prop_labels})",
         f"   * 28-Day Organic Search (GSC):   {pseo.get('gsc_28d_total_impressions', 0):,} impressions | {pseo.get('gsc_28d_total_organic_clicks', 0):,} organic clicks",
     ]
 
@@ -949,7 +1016,7 @@ def format_portfolio_revenue_truth_table(report: Dict[str, Any]) -> str:
             f"CoinLedger: {(pseo.get('affiliate_networks', {}).get('firstpromoter_coinledger') or pseo.get('affiliate_networks', {}).get('coinledger_firstpromoter') or {}).get('clicks', 0)}, "
             f"Koinly: {(pseo.get('affiliate_networks', {}).get('koinly_native') or pseo.get('affiliate_networks', {}).get('koinly') or {}).get('clicks', 0)}, "
             f"Xendoo: {(pseo.get('affiliate_networks', {}).get('firstpromoter_xendoo') or pseo.get('affiliate_networks', {}).get('xendoo_firstpromoter') or {}).get('clicks', 0)})",
-            f"   * PartnerStack /r/rippling Clicks (Synthetic-Inflated): {pseo.get('partnerstack_rippling_clicks_synthetic_inflated', 0)} ($0.00 commission)",
+            f"   * PartnerStack /r/rippling Clicks (Synthetic-Inflated): {pseo.get('partnerstack_rippling_clicks_synthetic_inflated', 0)} (${ps_rev:.2f} commission)",
             f"   * Lead Capture Breakdown:        {lc.get('external_human_leads', 0)} real external human | "
             f"{lc.get('internal_operator_test_leads', 0)} internal test | {lc.get('synthetic_probe_leads', 0)} synthetic probes | "
             f"{lc.get('stripe_paid_checkouts', 0)} Stripe paid",

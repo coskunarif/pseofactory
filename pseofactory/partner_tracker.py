@@ -2913,6 +2913,10 @@ class PartnerTrackingEngine:
                     portals_state["partnerstack"]["realized_commission_usd"] = float(
                         ps_live.get("total_revenue_usd", 0.0) or 0.0
                     )
+                    if ps_live.get("pending_revenue_usd") is not None:
+                        portals_state["partnerstack"]["pending_commission_usd"] = float(
+                            ps_live.get("pending_revenue_usd", 0.0) or 0.0
+                        )
                     portals_state["partnerstack"]["qualified_leads_count"] = int(
                         ps_live.get("actions_count", 0) or 0
                     )
@@ -2924,18 +2928,25 @@ class PartnerTrackingEngine:
                     portals_state["partnerstack"]["last_synced_at"] = datetime.now(timezone.utc).isoformat()
 
             # 2. FirstPromoter V2 REST API (CoinLedger & Xendoo)
-            for p_slot, fp_entry, env_name in (
-                ("firstpromoter_coinledger", cl_fp, "FIRSTPROMOTER_COINLEDGER_SESSION"),
-                ("firstpromoter_xendoo", xn_fp, "FIRSTPROMOTER_XENDOO_SESSION"),
+            for p_slot, fp_entry, env_name, default_host in (
+                ("firstpromoter_coinledger", cl_fp, "FIRSTPROMOTER_COINLEDGER_SESSION", "affiliates.coinledger.io"),
+                ("firstpromoter_xendoo", xn_fp, "FIRSTPROMOTER_XENDOO_SESSION", "xendoo.firstpromoter.com"),
             ):
                 sess_val = str(os.getenv(env_name) or "").strip()
-                host = str(fp_entry.get("company_host") or "").strip()
+                host = str(fp_entry.get("company_host") or default_host).strip()
                 if sess_val and host:
                     fp_hdrs = {
                         "company_host": host,
                         "Origin": f"https://{host}",
                         "Referer": f"https://{host}/",
                     }
+                    if sess_val.lower().startswith("bearer "):
+                        fp_hdrs["Authorization"] = sess_val
+                    elif "=" in sess_val:
+                        fp_hdrs["Cookie"] = sess_val
+                    else:
+                        fp_hdrs["Cookie"] = f"_fprom_session={sess_val}"
+                        fp_hdrs["Authorization"] = f"Bearer {sess_val}"
                     me_resp = _fetch_json_live(
                         "https://api.fprom.io/api/affiliate/v1/me?include_promoter=true",
                         fp_hdrs,
@@ -3074,7 +3085,7 @@ class PartnerTrackingEngine:
                                 portals_state["partnerstack"]["paid_out_usd"] = round(paid_cents / 100.0, 2)
                                 portals_state["partnerstack"]["pending_commission_usd"] = round(unpaid_cents / 100.0, 2)
                                 portals_state["partnerstack"]["realized_commission_usd"] = round(
-                                    (paid_cents + unpaid_cents) / 100.0, 2
+                                    paid_cents / 100.0, 2
                                 )
                                 portals_state["partnerstack"]["live_api_polled_in_current_run"] = True
                                 portals_state["partnerstack"]["uncollected_telemetry_reason"] = None
@@ -3463,6 +3474,9 @@ class PartnerTrackingEngine:
             "crest_capital": "impact",
             "ipx1031": "impact",
             "equipment_macrs": "impact",
+            "simply_business": "impact",
+            "thimble_contractor": "impact",
+            "next_insurance_b2b": "impact",
             "efile": "cj_affiliate",
             "efile_com": "cj_affiliate",
             "eztaxreturn": "cj_affiliate",
@@ -3472,9 +3486,11 @@ class PartnerTrackingEngine:
             "taxslayer": "cj_affiliate",
             "suretybonds_direct": "cj_affiliate",
             "rippling": "partnerstack",
+            "jobber_field_service": "partnerstack",
             "mercury": "mercury_direct",
             "coinledger": "firstpromoter",
             "koinly": "firstpromoter",
+            "levelset_lien_filing": "direct_or_other",
         }
 
         expected_epc_by_partner = {
@@ -3493,6 +3509,10 @@ class PartnerTrackingEngine:
             "taxslayer": 1.10,
             "lawdepot": 1.85,
             "suretybonds_direct": 1.85,
+            "simply_business": 1.85,
+            "thimble_contractor": 1.45,
+            "jobber_field_service": 1.75,
+            "levelset_lien_filing": 1.90,
         }
 
         edge_clicks_by_network: Dict[str, int] = {
@@ -3513,7 +3533,8 @@ class PartnerTrackingEngine:
         }
         properties_summary: Dict[str, Any] = {}
 
-        for prop_id in ("profithelm", "prexvo", "gainhelm"):
+        recon_prop_ids = list(_discover_active_tenant_bases(extra_ids=engagement_by_property.keys()).keys())
+        for prop_id in recon_prop_ids:
             agg = engagement_by_property.get(prop_id) or aggregate_outbound_partner_engagement([], property_id=prop_id)
             by_partner = agg.get("by_partner", {}) or {}
             prop_expected_value = 0.0
@@ -4004,11 +4025,13 @@ class PartnerTrackingEngine:
         bp_amt = float(blueprint_state.get("calculated_amount") or 0.0) if isinstance(blueprint_state, dict) else 0.0
         raw_calc_amt = float(calculated_amount or 0.0) if calculated_amount else bp_amt
 
-        default_eval_slug = (
-            "student-loan-refinance-break-even-calculator"
-            if prop_clean == "prexvo"
-            else ("soc-2-audit-cost-calculator" if prop_clean == "gainhelm" else "section-1031-calculator")
-        )
+        default_eval_slug_by_prop = {
+            "prexvo": "student-loan-refinance-break-even-calculator",
+            "gainhelm": "soc-2-audit-cost-calculator",
+            "lienbond": "contractor-license-bond-cost-calculator-by-credit-score",
+            "profithelm": "section-1031-calculator",
+        }
+        default_eval_slug = default_eval_slug_by_prop.get(prop_clean, "section-1031-calculator")
         eval_slug = (
             slug_clean
             if (has_gh_explicit_vert or slug_clean not in {"general", "index", "about", "privacy"})
@@ -4021,8 +4044,14 @@ class PartnerTrackingEngine:
             vertical=vert_raw,
         )
         eff_vertical = eval_info["vertical"]
-        eff_partner_key = eval_info["primary_partner_key"] or (
-            "splash_financial" if prop_clean == "prexvo" else ("vanta_security" if prop_clean == "gainhelm" else "turbotax")
+        default_partner_by_prop = {
+            "prexvo": "splash_financial",
+            "gainhelm": "vanta_security",
+            "lienbond": "suretybonds_direct",
+            "profithelm": "turbotax",
+        }
+        eff_partner_key = eval_info["primary_partner_key"] or default_partner_by_prop.get(
+            prop_clean, "turbotax"
         )
         amount_val = max(0.0, float(raw_calc_amt or 0.0))
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -4833,8 +4862,74 @@ class PartnerTrackingEngine:
                 "strategic_decision": "RETAIN_49_STRIPE_GOVERNANCE_KIT_AND_COALITION_FUNNEL",
             },
         ]
+        lienbond_clusters = [
+            {
+                "cluster_id": "surety_bonds_and_miller_act",
+                "cluster_name": "Contractor License Surety Bonds & Federal Miller Act Performance/Payment Bonds",
+                "property_id": "lienbond",
+                "tool_count": 3,
+                "sample_slugs": [
+                    "contractor-license-bond-cost-calculator-by-credit-score",
+                    "miller-act-performance-and-payment-bond-premium-calculator",
+                ],
+                "active_direct_partners": ["suretybonds_direct"],
+                "approved_network_contracts": [
+                    "LienBond First-Party Stripe Checkout ($49 Surety Bond Underwriting Kit / $79 Statutory Packet)",
+                    "SuretyBondsDirect.com Direct Underwriting Desk (pending approval)",
+                ],
+                "first_party_stripe_sku": "lb_surety_bond_underwriting_kit",
+                "first_party_sku_price_usd": 49.0,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_SURETY_FUNNEL",
+                "expected_epc_direct_plus_stripe_usd": 2.90,
+                "expected_epc_unapproved_cpa_chase_usd": 0.40,
+                "strategic_decision": "PRIORITIZE_49_79_STRIPE_SURETY_PACKETS_AND_SURETY_FUNNEL",
+            },
+            {
+                "cluster_id": "workers_comp_emr_and_certified_payroll",
+                "cluster_name": "NCCI Workers Comp EMR Penalty & Davis-Bacon WH-347 Certified Payroll",
+                "property_id": "lienbond",
+                "tool_count": 4,
+                "sample_slugs": [
+                    "experience-modification-rate-emr-workers-comp-penalty-calculator",
+                    "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+                    "workers-compensation-class-code-rate-calculator-by-state",
+                ],
+                "active_direct_partners": ["simply_business", "thimble_contractor"],
+                "approved_network_contracts": [
+                    "LienBond First-Party Stripe Checkout ($49 NCCI EMR Audit Packet / $59 WH-347 Certified Payroll Packet)",
+                    "Simply Business / Thimble Contractor Insurance Funnel",
+                ],
+                "first_party_stripe_sku": "lb_workers_comp_emr_audit_packet",
+                "first_party_sku_price_usd": 49.0,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_49_STRIPE_SKU_PLUS_WC_INSURANCE_FUNNEL",
+                "expected_epc_direct_plus_stripe_usd": 2.75,
+                "expected_epc_unapproved_cpa_chase_usd": 0.35,
+                "strategic_decision": "RETAIN_49_59_STRIPE_WC_PACKETS_AND_CONTRACTOR_INSURANCE_FUNNEL",
+            },
+            {
+                "cluster_id": "mechanics_lien_preliminary_notice_and_retainage",
+                "cluster_name": "50-State Preliminary Notice Deadlines, Mechanics Lien Waivers & Retainage Cashflow",
+                "property_id": "lienbond",
+                "tool_count": 3,
+                "sample_slugs": [
+                    "california-texas-florida-preliminary-notice-deadline-calculator",
+                    "contractor-overhead-and-profit-markup-vs-margin-calculator",
+                ],
+                "active_direct_partners": ["levelset_lien_filing", "jobber_field_service"],
+                "approved_network_contracts": [
+                    "LienBond First-Party Stripe Checkout ($69 Mechanics Lien & Preliminary Notice Waiver Packet)",
+                    "Levelset / Jobber Contractor Operations Referral Funnel",
+                ],
+                "first_party_stripe_sku": "lb_mechanics_lien_waiver_packet",
+                "first_party_sku_price_usd": 69.0,
+                "coverage_status": "DUAL_COVERED_FIRST_PARTY_69_STRIPE_SKU_PLUS_LIEN_OPS_FUNNEL",
+                "expected_epc_direct_plus_stripe_usd": 3.10,
+                "expected_epc_unapproved_cpa_chase_usd": 0.40,
+                "strategic_decision": "RETAIN_69_STRIPE_LIEN_PACKET_AND_LEVELSET_JOBBER_FUNNEL",
+            },
+        ]
         all_commercial = [
-            c for c in (profithelm_clusters + prexvo_clusters + gainhelm_clusters)
+            c for c in (profithelm_clusters + prexvo_clusters + gainhelm_clusters + lienbond_clusters)
             if c["coverage_status"] != "YMYL_STATUTORY_PUBLIC_SERVICE_EXEMPT_ZERO_COMMERCIALIZATION"
         ]
         uncovered = [
@@ -4844,7 +4939,12 @@ class PartnerTrackingEngine:
 
         return {
             "evaluated_at": datetime.now(timezone.utc).isoformat(),
-            "total_clusters_evaluated": len(profithelm_clusters) + len(prexvo_clusters) + len(gainhelm_clusters),
+            "total_clusters_evaluated": (
+                len(profithelm_clusters)
+                + len(prexvo_clusters)
+                + len(gainhelm_clusters)
+                + len(lienbond_clusters)
+            ),
             "commercial_clusters_count": len(all_commercial),
             "ymyl_exempt_clusters_count": 1,
             "uncovered_commercial_clusters_count": len(uncovered),
@@ -4863,6 +4963,11 @@ class PartnerTrackingEngine:
                     "clusters_count": len(gainhelm_clusters),
                     "uncovered_count": 0,
                     "clusters": gainhelm_clusters,
+                },
+                "lienbond": {
+                    "clusters_count": len(lienbond_clusters),
+                    "uncovered_count": 0,
+                    "clusters": lienbond_clusters,
                 },
             },
             "tradeoff_evaluation": {
@@ -8384,11 +8489,7 @@ def compute_scenario_demand_and_conversion_metrics(
     }
 
     if include_live_edge_telemetry:
-        for prop_key, domain in (
-            ("profithelm", "https://profithelm.com"),
-            ("prexvo", "https://prexvo.com"),
-            ("gainhelm", "https://gainhelm.com"),
-        ):
+        for prop_key, domain in _discover_active_tenant_bases().items():
             if property_id and prop_key != property_id.strip().lower():
                 continue
             try:
@@ -8439,6 +8540,24 @@ def compute_scenario_demand_and_conversion_metrics(
                 "scenario_id": "gainhelm_soc2_type2_audit_budgeting",
                 "scenario_label": "SOC 2 Type I/II Audit Scope, Control Count & Trust Center Budgeting",
                 "vertical_family": "soc2_grc_automation",
+            }
+        if prop == "lienbond":
+            if any(k in s or k in v for k in ("surety", "miller-act", "license-bond", "performance-bond", "payment-bond", "bond")):
+                return {
+                    "scenario_id": "lienbond_surety_miller_act_underwriting",
+                    "scenario_label": "Contractor License & Federal Miller Act Surety Bond Underwriting",
+                    "vertical_family": "surety_bond_compliance",
+                }
+            if any(k in s or k in v for k in ("workers-comp", "emr", "ncci", "class-code", "davis-bacon", "wh-347", "prevailing-wage")):
+                return {
+                    "scenario_id": "lienbond_workers_comp_emr_and_certified_payroll",
+                    "scenario_label": "NCCI Workers Comp EMR & Davis-Bacon WH-347 Certified Payroll Audit",
+                    "vertical_family": "workers_comp_labor_burden",
+                }
+            return {
+                "scenario_id": "lienbond_mechanics_lien_and_contractor_cashflow",
+                "scenario_label": "50-State Preliminary Notice, Mechanics Lien & Contractor Retainage Cashflow",
+                "vertical_family": "construction_contractor_finance",
             }
         if prop == "prexvo":
             if any(k in s for k in ("refinance", "break-even")):
@@ -8548,6 +8667,21 @@ def compute_scenario_demand_and_conversion_metrics(
         "px_verified_partner_slot": "student-loan-refinance-break-even-calculator",
         "gh_soc2_cmmc_audit_workpapers": "soc-2-audit-cost-calculator",
         "gh_hipaa_iso27001_governance_kit": "iso-27001-certification-cost-calculator",
+        "lb_instant_lien_bond_worksheet_19": "contractor-license-bond-cost-calculator-by-credit-score",
+        "lb_surety_bond_underwriting_kit": "contractor-license-bond-cost-calculator-by-credit-score",
+        "lb_workers_comp_emr_audit_kit": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "lb_workers_comp_emr_audit_packet": "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "lb_wh347_certified_payroll_packet": "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+        "lb_mechanics_lien_waiver_packet": "california-texas-florida-preliminary-notice-deadline-calculator",
+        "lb_surety_lien_wh347_packet": "miller-act-performance-and-payment-bond-premium-calculator",
+        "lb_verified_partner_slot": "contractor-license-bond-cost-calculator-by-credit-score",
+    }
+
+    default_slug_by_prop = {
+        "profithelm": "s-corp-reasonable-salary-tax-calculator",
+        "prexvo": "student-loan-refinance-break-even-calculator",
+        "gainhelm": "soc-2-audit-cost-calculator",
+        "lienbond": "contractor-license-bond-cost-calculator-by-credit-score",
     }
 
     for rec in leads:
@@ -8562,9 +8696,7 @@ def compute_scenario_demand_and_conversion_metrics(
             rec_sku = str(rec.get("offer_sku") or "").strip()
             slug = sku_to_canonical_calc.get(
                 rec_sku,
-                "s-corp-reasonable-salary-tax-calculator"
-                if prop == "profithelm"
-                else ("student-loan-refinance-break-even-calculator" if prop == "prexvo" else "soc-2-audit-cost-calculator"),
+                default_slug_by_prop.get(prop, "general"),
             )
         if prop == "prexvo" and is_restricted_public_service_slug(slug, slug):
             continue
@@ -8884,6 +9016,16 @@ def resolve_candidate_realized_revenue_signal(
         elif any(k in cand_text for k in ("tax-bracket", "2027-tax", "tcja")):
             scenario_id = "profithelm_tcja_2027_sunset_and_scorp_tax_shield"
             canonical_calc_slug = "irs-2027-tax-brackets-alaska"
+    elif prop_clean == "lienbond":
+        if any(k in cand_text for k in ("surety", "miller-act", "license-bond", "performance-bond", "payment-bond", "bond")):
+            scenario_id = "lienbond_surety_miller_act_underwriting"
+            canonical_calc_slug = "contractor-license-bond-cost-calculator-by-credit-score"
+        elif any(k in cand_text for k in ("workers-comp", "emr", "ncci", "class-code", "davis-bacon", "wh-347", "prevailing-wage")):
+            scenario_id = "lienbond_workers_comp_emr_and_certified_payroll"
+            canonical_calc_slug = "experience-modification-rate-emr-workers-comp-penalty-calculator"
+        elif any(k in cand_text for k in ("lien", "preliminary-notice", "retainage", "markup", "progress-billing", "contractor")):
+            scenario_id = "lienbond_mechanics_lien_and_contractor_cashflow"
+            canonical_calc_slug = "california-texas-florida-preliminary-notice-deadline-calculator"
 
     direct_calc = calc_by_key.get(f"{prop_clean}:{slug_clean}") if scenario_id else None
     canon_calc = calc_by_key.get(f"{prop_clean}:{canonical_calc_slug}") if canonical_calc_slug else None
@@ -9066,10 +9208,11 @@ def rank_revenue_weighted_expansion_queue(
         }
         enriched_items.append(item)
 
+    active_prop_ids = set(_discover_active_tenant_bases().keys())
     actionable_items = [
         x
         for x in enriched_items
-        if x.get("property_id") in ("profithelm", "prexvo", "gainhelm", "lienbond")
+        if x.get("property_id") in active_prop_ids
         and x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE", "MONITOR")
         and float(x.get("before_composite_profit_yield") or 0.0) > 0.0
     ]
@@ -10786,6 +10929,36 @@ def _load_tenant_stripe_webhook_secret(
         except Exception:
             continue
     return ""
+
+
+def _discover_active_tenant_bases(
+    workspace_root: Optional[Union[str, Path]] = None,
+    extra_ids: Optional[Any] = None,
+) -> Dict[str, str]:
+    """
+    Returns an ordered mapping of active property_id -> canonical base URL
+    discovered dynamically via `.pseofactory.json` markers, plus any `extra_ids`.
+    Zero em-dashes. Zero en-dashes.
+    """
+    bases: Dict[str, str] = {}
+    for target in _discover_tenant_webhook_targets(workspace_root=workspace_root):
+        pid = str(target.get("property_id") or "").strip().lower()
+        cbase = str(target.get("canonical_base") or "").strip().rstrip("/")
+        if pid and cbase:
+            bases[pid] = cbase
+    for canon_pid, host in (
+        ("profithelm", "profithelm.com"),
+        ("prexvo", "prexvo.com"),
+        ("gainhelm", "gainhelm.com"),
+        ("lienbond", "lienbond.com"),
+    ):
+        bases.setdefault(canon_pid, f"https://{host}")
+    if extra_ids:
+        for raw_pid in extra_ids:
+            pid = str(raw_pid or "").strip().lower()
+            if pid and pid not in bases:
+                bases[pid] = f"https://{pid}.com"
+    return bases
 
 
 def _discover_tenant_webhook_targets(

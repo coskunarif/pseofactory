@@ -11638,21 +11638,14 @@ def audit_partnership_model_coverage(
     from pathlib import Path
 
     prop_filter = (property_id or "").strip().lower()
-    if prop_filter == "prexvo":
-        target_registries = [("prexvo", PREXVO_AFFILIATES)]
-    elif prop_filter == "gainhelm":
-        target_registries = [("gainhelm", GAINHELM_AFFILIATES)]
-    elif prop_filter == "lienbond":
-        target_registries = [("lienbond", LIENBOND_AFFILIATES)]
-    elif prop_filter in ("profithelm", "exchange1031"):
+    if prop_filter == "all":
+        prop_filter = ""
+    if prop_filter in ("profithelm", "exchange1031"):
         target_registries = [("profithelm", PROFITHELM_AFFILIATES)]
+    elif prop_filter and prop_filter in AFFILIATE_REGISTRY_BY_PROPERTY:
+        target_registries = [(prop_filter, AFFILIATE_REGISTRY_BY_PROPERTY[prop_filter])]
     else:
-        target_registries = [
-            ("profithelm", PROFITHELM_AFFILIATES),
-            ("prexvo", PREXVO_AFFILIATES),
-            ("gainhelm", GAINHELM_AFFILIATES),
-            ("lienbond", LIENBOND_AFFILIATES),
-        ]
+        target_registries = list(AFFILIATE_REGISTRY_BY_PROPERTY.items())
 
     models_to_partners: Dict[str, List[str]] = {m: [] for m in CANONICAL_PARTNERSHIP_MODELS}
     partner_model_map: Dict[str, str] = {}
@@ -11678,6 +11671,12 @@ def audit_partnership_model_coverage(
             v_prop = "prexvo"
         elif v_fam in ("b2b_cyber_compliance", "cyber_compliance_grc") and prop_filter == "gainhelm":
             v_prop = "gainhelm"
+        elif v_fam in (
+            "surety_bond_compliance",
+            "workers_comp_labor_burden",
+            "construction_contractor_finance",
+        ) and prop_filter == "lienbond":
+            v_prop = "lienbond"
         else:
             v_prop = "profithelm"
         if prop_filter and prop_filter != v_prop:

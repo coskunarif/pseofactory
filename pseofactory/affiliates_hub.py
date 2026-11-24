@@ -1862,6 +1862,7 @@ class MonetizationHub:
             "payouts_count": 0,
             "actions_count": 0,
             "total_revenue_usd": 0.0,
+            "pending_revenue_usd": 0.0,
             "api_verified": False,
         }
         sovrn_summary: Dict[str, Any] = {
@@ -1929,12 +1930,18 @@ class MonetizationHub:
                     r_items = (r_resp.get("data") or {}).get("items")
                     if isinstance(r_items, list):
                         ps_summary["rewards_count"] = len(r_items)
-                        total_cents = sum(
+                        realized_cents = sum(
                             float(it.get("amount") or 0.0)
                             for it in r_items
-                            if isinstance(it, dict) and str(it.get("status") or "").lower() in ("approved", "paid", "pending")
+                            if isinstance(it, dict) and str(it.get("status") or "").lower() in ("approved", "paid")
                         )
-                        ps_summary["total_revenue_usd"] = round(total_cents / 100.0, 2)
+                        pending_cents = sum(
+                            float(it.get("amount") or 0.0)
+                            for it in r_items
+                            if isinstance(it, dict) and str(it.get("status") or "").lower() == "pending"
+                        )
+                        ps_summary["total_revenue_usd"] = round(realized_cents / 100.0, 2)
+                        ps_summary["pending_revenue_usd"] = round(pending_cents / 100.0, 2)
 
                 pay_resp = _fetch_json("https://api.partnerstack.com/api/v2/payouts", ps_headers)
                 if isinstance(pay_resp, dict):

@@ -1302,7 +1302,32 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            if msg.mailbox != "Sent" and (
+            _fp_commission_tokens = (
+                "you earned a commission",
+                "commission earned",
+                "new commission",
+                "action locked",
+                "referral bonus credited",
+                "you have earned a reward",
+            )
+            _fp_lead_tokens = (
+                "new qualified lead",
+                "new referral signup",
+                "lead converted",
+                "new sqo",
+            )
+            _fp_payout_tokens = (
+                "payout issued",
+                "payment sent",
+                "withdrawal processed",
+                "funds have been transferred",
+            )
+            is_fp_alert_msg = any(
+                tok in combined_text
+                for tok in (_fp_commission_tokens + _fp_lead_tokens + _fp_payout_tokens)
+            )
+
+            if msg.mailbox != "Sent" and not is_fp_alert_msg and (
                 "promoter@firstpromoter.com" in sender_lower
                 or "welcome to koinly" in subj_lower
             ) and "koinly" in combined_text:
@@ -1329,10 +1354,10 @@ class EmailIngestionEngine:
                 )
                 continue
 
-            if msg.mailbox != "Sent" and (
+            if msg.mailbox != "Sent" and not is_fp_alert_msg and (
                 "promoter@firstpromoter.com" in sender_lower
                 or "welcome to xendoo" in subj_lower
-            ):
+            ) and "xendoo" in combined_text:
                 classifications.append(
                     PartnerEmailClassification(
                         email_id=msg.id,
@@ -1351,6 +1376,33 @@ class EmailIngestionEngine:
                         sender_email=msg.sender_email,
                         date=msg.date,
                         candidate_url="https://www.xendoo.com/?fp_ref=arif-4ac24e",
+                        network="FirstPromoter",
+                    )
+                )
+                continue
+
+            if msg.mailbox != "Sent" and not is_fp_alert_msg and (
+                "promoter@firstpromoter.com" in sender_lower
+                or "welcome to coinledger" in subj_lower
+            ) and "coinledger" in combined_text:
+                classifications.append(
+                    PartnerEmailClassification(
+                        email_id=msg.id,
+                        account=msg.account,
+                        property_id="profithelm",
+                        partner_key="coinledger",
+                        partner_name="CoinLedger Crypto Tax",
+                        category="DIGITAL_ASSETS",
+                        classification_type="APPLICATION_APPROVED",
+                        requires_operator_decision=False,
+                        summary="CoinLedger Affiliate Program approved and active on FirstPromoter (fpr=arif-554004, 25% recurring commission).",
+                        urgency="LOW",
+                        deadline=None,
+                        missing_requirements=[],
+                        raw_subject=msg.subject,
+                        sender_email=msg.sender_email,
+                        date=msg.date,
+                        candidate_url=cand_url or "https://coinledger.io/?fpr=arif-554004",
                         network="FirstPromoter",
                     )
                 )
@@ -1606,35 +1658,9 @@ class EmailIngestionEngine:
 
             # Automated Conversion, Lead, and Payout Alert Ingestion
             if msg.mailbox != "Sent":
-                is_commission_alert = any(
-                    tok in combined_text
-                    for tok in (
-                        "you earned a commission",
-                        "commission earned",
-                        "new commission",
-                        "action locked",
-                        "referral bonus credited",
-                        "you have earned a reward",
-                    )
-                )
-                is_lead_alert = any(
-                    tok in combined_text
-                    for tok in (
-                        "new qualified lead",
-                        "new referral signup",
-                        "lead converted",
-                        "new sqo",
-                    )
-                )
-                is_payout_alert = any(
-                    tok in combined_text
-                    for tok in (
-                        "payout issued",
-                        "payment sent",
-                        "withdrawal processed",
-                        "funds have been transferred",
-                    )
-                )
+                is_commission_alert = any(tok in combined_text for tok in _fp_commission_tokens)
+                is_lead_alert = any(tok in combined_text for tok in _fp_lead_tokens)
+                is_payout_alert = any(tok in combined_text for tok in _fp_payout_tokens)
                 if is_commission_alert or is_lead_alert or is_payout_alert:
                     alert_partner_map = (
                         ("rippling", "profithelm", "rippling", "Rippling Unified Workforce Platform", "PAYROLL_HR", "PartnerStack"),
