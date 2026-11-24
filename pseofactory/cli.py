@@ -298,7 +298,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
             _print_browser_audit_report(args.property or "dist", report)
         return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
 
-    reg = TenantRegistry.default()
+    ws_root_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    reg = TenantRegistry.default(workspace_root=ws_root_arg)
     if args.dist_dir:
         dist_path = Path(args.dist_dir).resolve()
         property_id = args.property or "custom"
@@ -343,11 +344,13 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     if property_id == "all":
         from concurrent.futures import ThreadPoolExecutor
+        from pseofactory.impact_planner import discover_active_tenants
         from pseofactory.verifier import audit_estate_seo_fix_checklist
 
         all_passed = True
         reports_dict: Dict[str, Any] = {}
-        all_tenant_ids = list(dict.fromkeys(list(CANONICAL_TENANT_IDS) + ["lienbond"]))
+        discovered_ids = [pid for pid, _ in discover_active_tenants(ws_root_arg)]
+        all_tenant_ids = list(dict.fromkeys(discovered_ids)) if discovered_ids else list(CANONICAL_TENANT_IDS)
         explicit_cdp_port = getattr(args, "cdp_port", None)
         use_parallel = (
             explicit_cdp_port is None
@@ -792,11 +795,11 @@ def cmd_reflect(args: argparse.Namespace) -> int:
                                 record_engine_hash(
                                     eh_cand,
                                     hash_value=cur_hash,
-                                    aligned=True,
-                                    alignment_reasons=[],
                                 )
-                except Exception:
-                    pass
+                except Exception as latch_exc:
+                    res["latch_error"] = str(latch_exc)
+                    if not getattr(args, "json", False):
+                        print(f"Warning: Failed to latch engine hash after reflect: {latch_exc}", file=sys.stderr)
     finally:
         if lock_fd is not None:
             try:
@@ -906,11 +909,26 @@ def cmd_drift(args: argparse.Namespace) -> int:
     if getattr(args, "allow_tenant_scoped_hash", False):
         allow_scoped = True
     also_state_files = list(getattr(args, "also_state_file", None) or [])
+    ws_root = getattr(args, "workspace_root", None)
+    if ws_root is None and args.state_file:
+        s_res = Path(args.state_file).resolve()
+        if s_res.name == "engine_hash.json" and s_res.parent.name == ".agy":
+            cand = s_res.parent.parent
+            if cand.name == "pseofactory" and (cand.parent / ".agy").is_dir():
+                ws_root = cand.parent
+            elif not (cand / ".pseofactory.json").is_file() and not (cand / "substrate_lock.json").is_file():
+                if (cand / "pseofactory").is_dir() or (
+                    cand.is_dir() and any((ch / ".pseofactory.json").is_file() for ch in cand.iterdir() if ch.is_dir())
+                ):
+                    ws_root = cand
+    if ws_root is None:
+        ws_root = os.environ.get("WORKSPACE_ROOT")
     drift_res = detect_engine_drift(
         state_file=state_file,
         auto_record=args.record,
         allow_tenant_scoped_hash=allow_scoped,
         also_state_files=also_state_files or None,
+        workspace_root=ws_root,
     )
     if args.json:
         print(json.dumps(drift_res, indent=2))
@@ -1662,13 +1680,11 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                     persist=not args.dry_run and not is_pytest,
                 )
                 edge_sync: dict = {}
+                ws_root_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+                from pseofactory.impact_planner import discover_active_tenants
+                active_tenants = discover_active_tenants(ws_root_arg)
                 if not args.dry_run and not is_pytest:
-                    for prop_id, repo_p in (
-                        ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform")),
-                        ("prexvo", Path("/home/ubuntuadmin/projects/prexvo")),
-                        ("gainhelm", Path("/home/ubuntuadmin/projects/gainhelm")),
-                        ("lienbond", Path("/home/ubuntuadmin/projects/lienbond")),
-                    ):
+                    for prop_id, repo_p in active_tenants:
                         if repo_p.is_dir():
                             try:
                                 edge_sync[prop_id] = sync_tenant_edge_redirect_function(
@@ -1686,7 +1702,8 @@ def cmd_sync_monetization(args: argparse.Namespace) -> int:
                 if args.json:
                     print(json.dumps(auto_report, indent=2))
                 else:
-                    print("Autonomous Monetization Sync Complete [profithelm, prexvo, gainhelm, lienbond]")
+                    tenant_labels = ", ".join(p for p, _ in active_tenants)
+                    print(f"Autonomous Monetization Sync Complete [{tenant_labels}]")
                     print(f"  Status:           {lifecycle_rep.get('status')}")
                     print(f"  Messages Polled:  {lifecycle_rep.get('ingested_messages_count')}")
                     print(f"  Classifications:  {lifecycle_rep.get('classifications_count')}")
@@ -2517,6 +2534,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_drift.add_argument("--record", action="store_true", help="Persist current engine hash into state file")
     p_drift.add_argument("--allow-tenant-scoped-hash", action="store_true", help="Accept matching per-tenant tenant_substrate_hash for unaffected tenants")
+    p_drift.add_argument("--workspace-root", type=str, default=None, help="Workspace root directory containing tenant repositories")
     p_drift.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # plan

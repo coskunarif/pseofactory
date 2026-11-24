@@ -1455,9 +1455,19 @@ def execute_autonomous_daily_trend_page_build(
     from pseofactory.qualification import check_search_intent_cannibalization
     from pseofactory.supervisor import AtomicStateLedger
 
+    if property_ids:
+        raw_props = property_ids
+    elif registry is not None:
+        raw_props = list(registry.list_adapters().keys())
+    else:
+        from pseofactory.impact_planner import discover_active_tenants
+
+        ws_root = os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        raw_props = [pid for pid, _ in discover_active_tenants(ws_root)]
+
     target_props = [
         str(p).strip().lower()
-        for p in (property_ids or ["profithelm", "prexvo", "gainhelm", "lienbond"])
+        for p in raw_props
         if str(p).strip()
     ]
     date_str = str(date_key or datetime.now(timezone.utc).strftime("%Y-%m-%d")).strip()

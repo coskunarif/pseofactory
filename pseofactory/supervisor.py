@@ -32,7 +32,7 @@ class SupervisorTimeoutError(Exception):
 
 MAX_CONSECUTIVE_FAILURES: int = 5
 DEFAULT_TICK_BUDGET: float = float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0"))
-DEFAULT_TENANT_BUDGET: float = 300.0
+DEFAULT_TENANT_BUDGET: float = 1800.0
 DEFAULT_CONCURRENCY_CEILING: int = 2
 HEARTBEAT_PATH: str = ".agy/supervisor_heartbeat.json"
 
@@ -185,10 +185,23 @@ from pseofactory.drift import (  # noqa: E402
     record_engine_hash,
 )
 from pseofactory.tenant_facts import (  # noqa: E402
+    CANONICAL_PRODUCTION_PROPERTIES,
     CANONICAL_TENANT_IDS,
     TENANT_SMOKE_PROBES,
     list_canonical_repo_dir_names,
 )
+
+
+def _discover_known_tenant_ids(workspace_root: Optional[Union[str, Path]] = None) -> Tuple[str, ...]:
+    """Discovers active .pseofactory.json tenant IDs unioned with CANONICAL_TENANT_IDS."""
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws = Path(workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+    ids: List[str] = [pid for pid in CANONICAL_TENANT_IDS if pid and pid != "pseofactory"]
+    for pid, _ in discover_active_tenants(ws):
+        if pid and pid != "pseofactory" and pid not in ids:
+            ids.append(pid)
+    return tuple(ids)
 
 
 class HeartbeatTracker:
@@ -666,13 +679,15 @@ class DepartmentHandoffChainVerifier:
         heal_markers: bool = False,
         strict_current_engine_hash: bool = False,
     ):
+        from pseofactory.impact_planner import discover_active_tenants
+
         self.workspace_root = Path(
             workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
         ).resolve()
         self.target_tenants: Tuple[str, ...] = tuple(
             [p.strip().lower() for p in property_ids if str(p).strip()]
             if property_ids
-            else list(CANONICAL_TENANT_IDS)
+            else [pid for pid, _ in discover_active_tenants(self.workspace_root)]
         )
         self.heal_markers = bool(heal_markers)
         self.strict_current_engine_hash = bool(strict_current_engine_hash)
@@ -1085,11 +1100,14 @@ class DepartmentHandoffChainVerifier:
         fact_store = TenantFactStore.get_instance()
 
         AsyncFleetCoordinator._enforce_subprocess_memory_firewall()
+        known_tenant_ids = set(_discover_known_tenant_ids(ctx.get("workspace_root"))) | {
+            t for t in discovered_tenants if t and t != "pseofactory"
+        }
+        known_prefixes = tuple(f"{tid}." for tid in known_tenant_ids)
         leaked_mods = [
             m
             for m in sys.modules
-            if m in ("profithelm", "prexvo", "gainhelm", "lienbond")
-            or m.startswith(("profithelm.", "prexvo.", "gainhelm.", "lienbond."))
+            if m in known_tenant_ids or m.startswith(known_prefixes)
         ]
         if leaked_mods:
             failures.append(f"ENGINEERING[fleet]: tenant modules leaked into host sys.modules: {leaked_mods}")
@@ -1687,7 +1705,10 @@ class DepartmentHandoffChainVerifier:
 
             is_prod_canonical = (
                 repo_path.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
-                and repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
+                and (
+                    (repo_path / ".pseofactory.json").is_file()
+                    or repo_path.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
+                )
             )
             in_flight_build = False
             if (
@@ -1881,7 +1902,12 @@ class DepartmentHandoffChainVerifier:
                 "certified_fresh": fresh_ok,
             }
 
-            sq = ShipperQueue(property_id=pid)
+            ws_queues_dir = (
+                None
+                if ("PYTEST_CURRENT_TEST" in os.environ and str(self.workspace_root) == "/home/ubuntuadmin/projects")
+                else (self.workspace_root / ".agy" / "queues")
+            )
+            sq = ShipperQueue(property_id=pid, queues_dir=ws_queues_dir)
             dlq_items = sq.list_dlq(property_id=pid)
             if dlq_items:
                 t_errs.append(f"ShipperQueue has {len(dlq_items)} unresolved DLQ records for '{pid}'")
@@ -2071,8 +2097,21 @@ class DepartmentHandoffChainVerifier:
             overall_status="PASS" if overall_ok else "FAIL",
             trigger_mode="VERIFIED_HANDOFF_CHAIN",
             engine_hash=current_engine_hash,
-            persist=persist and overall_ok,
+            persist=persist,
         )
+        if persist and not overall_ok:
+            hb_path = self.workspace_root / ".agy" / "supervisor_heartbeat.json"
+            hb_tracker = HeartbeatTracker(heartbeat_path=hb_path)
+            prev_hb = hb_tracker.read()
+            prev_failures = int(prev_hb.get("consecutive_failures", 0) or 0) if isinstance(prev_hb, dict) else 0
+            hb_tracker.emit(
+                status="FAILED",
+                cycle_id=run_cycle_id,
+                current_tenant=None,
+                engine_hash=current_engine_hash,
+                consecutive_failures=prev_failures + 1,
+                extra={"department_pipeline": pipeline_state, "failures": all_failures[:10]},
+            )
 
         tenant_matrix: Dict[str, Dict[str, str]] = {pid: {} for pid in self.target_tenants}
         stages_map: Dict[str, Dict[str, Any]] = {}
@@ -2371,7 +2410,10 @@ class AsyncFleetCoordinator:
         self.tenant_budgets: Dict[str, float] = (
             dict(tenant_budgets)
             if tenant_budgets is not None
-            else {"profithelm": 3600.0, "prexvo": 1800.0, "gainhelm": 1800.0, "lienbond": 1800.0}
+            else {
+                pid: (3600.0 if pid == "profithelm" else 1800.0)
+                for pid in _discover_known_tenant_ids()
+            }
         )
 
     def get_tenant_budget(self, tenant_id: str) -> float:
@@ -2608,8 +2650,10 @@ class AsyncFleetCoordinator:
         Zero em-dashes. Zero en-dashes.
         """
         import sys
+        known_tids = set(_discover_known_tenant_ids())
+        known_prefixes = tuple(f"{tid}." for tid in known_tids)
         for mod in list(sys.modules.keys()):
-            if mod in ("profithelm", "prexvo", "gainhelm", "lienbond") or mod.startswith(("profithelm.", "prexvo.", "gainhelm.", "lienbond.")):
+            if mod in known_tids or mod.startswith(known_prefixes):
                 sys.modules.pop(mod, None)
 
     async def run_fleet_async(
@@ -2900,9 +2944,10 @@ class AutonomousLifecycleSupervisor:
         if dry_run or not escalations:
             return []
         actions: List[Dict[str, Any]] = []
+        known_heal_tids = set(_discover_known_tenant_ids(self.workspace_root))
         for esc in escalations:
             tid = str(esc.get("tenant_id") or "").strip().lower()
-            if tid not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            if tid not in known_heal_tids:
                 continue
             rec: Dict[str, Any] = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -3029,8 +3074,9 @@ class AutonomousLifecycleSupervisor:
             try:
                 from pseofactory.gitops import TenantFactoryLockGuard
                 from pseofactory.tenant_facts import TruthReconciliationEngine
+                from pseofactory.impact_planner import discover_active_tenants
                 reg = self.registry
-                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm", "lienbond"]
+                target_ids = property_ids or [pid for pid, _ in discover_active_tenants(self.workspace_root)]
                 for pid in target_ids:
                     try:
                         adp = reg.get_adapter(pid)
@@ -3193,6 +3239,7 @@ class AutonomousLifecycleSupervisor:
         )
 
         if not force and not drift_detected:
+            from pseofactory.drift import compute_tenant_substrate_hash
             from pseofactory.maintenance import (
                 AssetIntegrityEvaluator,
                 RefactorCascadeEngine,
@@ -3201,22 +3248,28 @@ class AutonomousLifecycleSupervisor:
             evaluator = AssetIntegrityEvaluator()
             cascade_engine = RefactorCascadeEngine(evaluator=evaluator)
             any_drift = bool(monetization_requires_rebuild)
+            locked_tenants: List[str] = []
             already_retro_verified = set(drift_report.get("tenants_retro_verified") or [])
+            known_fastpath_tids = set(_discover_known_tenant_ids(self.workspace_root))
+            lock_dir = Path(os.environ.get("PSEUFACTORY_LOCK_DIR", "/tmp"))
             for pid, a in adapters.items():
-                if (
-                    not dry_run
-                    and "PYTEST_CURRENT_TEST" not in os.environ
-                    and getattr(a, "repo_path", None)
-                    and pid in ("profithelm", "prexvo", "gainhelm", "lienbond")
-                    and str(Path(a.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
-                ):
-                    fl_path = Path(f"/tmp/{pid}_factory.lock")
+                is_prod_or_test_lock = (
+                    (
+                        getattr(a, "repo_path", None)
+                        and str(Path(a.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
+                        and "PYTEST_CURRENT_TEST" not in os.environ
+                    )
+                    or "PSEUFACTORY_LOCK_DIR" in os.environ
+                )
+                if not dry_run and pid in known_fastpath_tids and is_prod_or_test_lock:
+                    fl_path = lock_dir / f"{pid}_factory.lock"
                     fl_fd = None
                     try:
                         fl_fd = open(fl_path, "a+", encoding="utf-8")
                         fcntl.flock(fl_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                         fcntl.flock(fl_fd.fileno(), fcntl.LOCK_UN)
                     except OSError:
+                        locked_tenants.append(pid)
                         continue
                     finally:
                         if fl_fd is not None:
@@ -3249,17 +3302,24 @@ class AutonomousLifecycleSupervisor:
                     t_repo = Path(a.repo_path)
                     if (
                         str(t_repo.resolve()).startswith("/home/ubuntuadmin/projects/")
-                        and t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
+                        and (
+                            (t_repo / ".pseofactory.json").is_file()
+                            or t_repo.name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond")
+                        )
                         and (t_repo / ".git").exists()
                     ):
                         lock_f = t_repo / "substrate_lock.json"
                         if lock_f.is_file():
                             try:
                                 l_data = json.loads(lock_f.read_text(encoding="utf-8"))
-                                if (
-                                    l_data.get("engine_hash") != current_engine_hash
-                                    or l_data.get("substrate_hash") != current_engine_hash
-                                ):
+                                l_eh = str(l_data.get("engine_hash") or "")
+                                l_sh = str(l_data.get("substrate_hash") or l_eh)
+                                hash_ok = (l_eh == current_engine_hash and l_sh == current_engine_hash)
+                                if not hash_ok:
+                                    l_tsh = str(l_data.get("tenant_substrate_hash") or "").strip()
+                                    if l_tsh and l_tsh == compute_tenant_substrate_hash(pid):
+                                        hash_ok = True
+                                if not hash_ok:
                                     any_drift = True
                                     break
                             except Exception:
@@ -3277,7 +3337,7 @@ class AutonomousLifecycleSupervisor:
                             break
                 if not dry_run:
                     cascade_engine.replay_quarantine(property_id=pid)
-            if not any_drift:
+            if not any_drift and not locked_tenants:
                 if not dry_run and not property_ids:
                     cascade_engine.replay_quarantine()
                 for stg in ("ENGINEERING", "VERIFICATION", "SYNDICATION", "DEPLOYMENT"):
@@ -3410,6 +3470,112 @@ class AutonomousLifecycleSupervisor:
                 all_passed = False
 
             if all_passed:
+                latch_blocked = False
+                latch_reasons: List[str] = []
+                if not dry_run and not any_deferred:
+                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
+
+                    all_tenants_ok, latch_reasons = verify_all_tenants_aligned_for_latch(
+                        workspace_root=self.workspace_root,
+                        expected_hash=current_engine_hash,
+                        require_git_clean_and_pushed=bool(enable_gitops),
+                        allow_tenant_scoped_hash=True,
+                    )
+                    if not all_tenants_ok:
+                        latch_blocked = True
+
+                if latch_blocked:
+                    self.consecutive_failures += 1
+                    cycle_status = (
+                        "DEGRADED"
+                        if self.consecutive_failures >= self.max_consecutive_failures
+                        else "FAILED"
+                    )
+                    property_dicts = {k: v.to_dict() for k, v in fleet_results.items()}
+                    escalations = self._record_failure_streak(
+                        False, property_dicts, cycle_id, dry_run, scoped=bool(property_ids)
+                    )
+                    self_heal_actions = self._execute_self_healing_recovery(escalations, cycle_id, dry_run)
+                    for stg, stg_status, stg_summary in (
+                        (
+                            "ENGINEERING",
+                            "COMPLETED",
+                            {
+                                "tenants_processed": list(fleet_results.keys()),
+                                "assets_refactored": sum(int(getattr(r, "assets_refactored", 0)) for r in fleet_results.values()),
+                            },
+                        ),
+                        (
+                            "VERIFICATION",
+                            "COMPLETED",
+                            {
+                                "all_passed": True,
+                                "syn_ph_gate_available": os.path.isfile("/home/ubuntuadmin/projects/arif-cli/harness/syn-ph-gate"),
+                            },
+                        ),
+                        (
+                            "SYNDICATION",
+                            "COMPLETED",
+                            {
+                                "distribution_enabled": bool(enable_distribution if enable_distribution is not None else not dry_run),
+                                "tenants_syndicated": list(fleet_results.keys()),
+                            },
+                        ),
+                        (
+                            "DEPLOYMENT",
+                            "FAILED",
+                            {
+                                "gitops_enabled": bool(enable_gitops and not dry_run),
+                                "tenant_statuses": {k: v.status for k, v in fleet_results.items()},
+                                "latch_blocked": True,
+                                "latch_reasons": latch_reasons,
+                            },
+                        ),
+                    ):
+                        pipeline_sm.record_stage(
+                            stage=stg,
+                            status=stg_status,
+                            trigger_mode="IMMEDIATE_DELTA",
+                            delta_detected=True,
+                            upstream_fingerprint=current_engine_hash,
+                            summary=stg_summary,
+                        )
+                    pipeline_state = pipeline_sm.finalize_and_persist(
+                        cycle_id=cycle_id,
+                        overall_status="FAIL",
+                        trigger_mode="IMMEDIATE_DELTA",
+                        engine_hash=current_engine_hash,
+                        persist=not dry_run,
+                    )
+                    self.heartbeat_tracker.emit(
+                        status=cycle_status,
+                        cycle_id=cycle_id,
+                        current_tenant=None,
+                        engine_hash=current_engine_hash,
+                        consecutive_failures=self.consecutive_failures,
+                        last_cycle_duration_seconds=duration,
+                        extra={
+                            "department_pipeline": pipeline_state,
+                            "latch_blocked": True,
+                            "latch_reasons": latch_reasons,
+                        },
+                    )
+                    return {
+                        "status": cycle_status,
+                        "cycle_id": cycle_id,
+                        "drift_detected": drift_detected,
+                        "properties": property_dicts,
+                        "engine_hash": None,
+                        "latch_blocked": True,
+                        "latch_reasons": latch_reasons,
+                        "duration_seconds": duration,
+                        "consecutive_failures": self.consecutive_failures,
+                        "escalations": escalations,
+                        "self_healing_actions": self_heal_actions,
+                        "department_pipeline": pipeline_state,
+                        "daily_trend_page_build": daily_trend_build_summary,
+                    }
+
                 if not any_deferred:
                     self.consecutive_failures = 0
                     self._record_failure_streak(
@@ -3463,30 +3629,22 @@ class AutonomousLifecycleSupervisor:
                                     asset_hashes=t_hashes,
                                     engine_hash=current_engine_hash,
                                 )
-                    from pseofactory.drift import verify_all_tenants_aligned_for_latch
-                    all_tenants_ok, _ = verify_all_tenants_aligned_for_latch(
-                        workspace_root=self.workspace_root,
-                        expected_hash=current_engine_hash,
-                        require_git_clean_and_pushed=bool(enable_gitops),
-                        allow_tenant_scoped_hash=True,
+                    record_engine_hash(self.state_file, hash_value=current_engine_hash)
+                    record_asset_ledger(
+                        self.ledger_file,
+                        asset_hashes=all_asset_hashes,
+                        engine_hash=current_engine_hash,
                     )
-                    if all_tenants_ok:
-                        record_engine_hash(self.state_file, hash_value=current_engine_hash)
+                    if str(self.workspace_root) == "/home/ubuntuadmin/projects":
+                        record_engine_hash(
+                            self.workspace_root / "pseofactory" / ".agy" / "engine_hash.json",
+                            hash_value=current_engine_hash,
+                        )
                         record_asset_ledger(
-                            self.ledger_file,
+                            self.workspace_root / "pseofactory" / ".agy" / "asset_ledger.json",
                             asset_hashes=all_asset_hashes,
                             engine_hash=current_engine_hash,
                         )
-                        if str(self.workspace_root) == "/home/ubuntuadmin/projects":
-                            record_engine_hash(
-                                self.workspace_root / "pseofactory" / ".agy" / "engine_hash.json",
-                                hash_value=current_engine_hash,
-                            )
-                            record_asset_ledger(
-                                self.workspace_root / "pseofactory" / ".agy" / "asset_ledger.json",
-                                asset_hashes=all_asset_hashes,
-                                engine_hash=current_engine_hash,
-                            )
 
                 for stg, stg_summary in (
                     (
@@ -3708,10 +3866,12 @@ class SupervisorDaemon:
         """Executes a single autonomous supervisor cycle across tenants fail-closed."""
         if not dry_run:
             try:
+                from pseofactory.impact_planner import discover_active_tenants
                 from pseofactory.maintenance import TenantRegistry
                 from pseofactory.tenant_facts import TruthReconciliationEngine
-                reg = TenantRegistry.default()
-                target_ids = property_ids or ["gainhelm", "prexvo", "profithelm", "lienbond"]
+                ws_eff = Path(workspace_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+                reg = TenantRegistry.default(workspace_root=ws_eff)
+                target_ids = property_ids or [pid for pid, _ in discover_active_tenants(ws_eff)]
                 for pid in target_ids:
                     try:
                         adp = reg.get_adapter(pid)

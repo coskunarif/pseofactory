@@ -443,6 +443,7 @@ class ShipperQueue:
         self.queue_file = self.queues_dir / f"{self.property_id}_release_queue.jsonl"
         self.dlq_file = self.queues_dir / f"{self.property_id}_dlq.jsonl"
         self.lock_file = self.queues_dir / f".{self.property_id}_release_queue.lock"
+        self.dlq_lock_file = self.queues_dir / f".{self.property_id}_dlq.lock"
 
     def enqueue(self, payload: Dict[str, Any], event_id: Optional[str] = None) -> Dict[str, Any]:
         eid = event_id or f"evt_{hashlib.sha256(str(payload).encode('utf-8')).hexdigest()[:16]}"
@@ -647,27 +648,41 @@ class ShipperQueue:
         dlq_record["quarantined_at"] = datetime.now(timezone.utc).isoformat()
         dlq_record["error"] = error or "Max release retry attempts exceeded"
         line = json.dumps(dlq_record) + "\n"
-        with open(self.dlq_file, "a", encoding="utf-8") as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+        self.dlq_lock_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.dlq_lock_file, "a+", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                with open(self.dlq_file, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                    os.fsync(f.fileno())
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
     def list_dlq(self, property_id: Optional[str] = None) -> List[Dict[str, Any]]:
         if not self.dlq_file.exists():
             return []
         items: List[Dict[str, Any]] = []
         try:
-            for line in self.dlq_file.read_text(encoding="utf-8").splitlines():
-                s = line.strip()
-                if not s:
-                    continue
+            self.dlq_lock_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.dlq_lock_file, "a+", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_SH)
                 try:
-                    rec = json.loads(s)
-                    if property_id and rec.get("property_id") != _normalize_property_id(property_id):
-                        continue
-                    items.append(rec)
-                except Exception:
-                    continue
+                    if not self.dlq_file.exists():
+                        return []
+                    for line in self.dlq_file.read_text(encoding="utf-8").splitlines():
+                        s = line.strip()
+                        if not s:
+                            continue
+                        try:
+                            rec = json.loads(s)
+                            if property_id and rec.get("property_id") != _normalize_property_id(property_id):
+                                continue
+                            items.append(rec)
+                        except Exception:
+                            continue
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         except Exception:
             return []
         return items
@@ -924,15 +939,22 @@ class TenantFactoryLockGuard:
         self._fd: Optional[Any] = None
         self.acquired = False
         self._clean_dist_on_entry = False
+        self._set_lock_envs = False
+        self._prev_tenant_lock_env: Optional[str] = None
+        self._prev_supervisor_lock_env: Optional[str] = None
 
     def __enter__(self) -> "TenantFactoryLockGuard":
         is_prod_repo = (
             self.repo_path is not None
             and str(self.repo_path).startswith("/home/ubuntuadmin/projects/")
         )
+        is_known_tenant = (
+            self.property_id in CANONICAL_PRODUCTION_PROPERTIES
+            or (self.repo_path is not None and (self.repo_path / ".pseofactory.json").is_file())
+        )
         should_lock = (
             not self.dry_run
-            and self.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
+            and is_known_tenant
             and (
                 (is_prod_repo and "PYTEST_CURRENT_TEST" not in os.environ)
                 or "PSEUFACTORY_LOCK_DIR" in os.environ
@@ -975,8 +997,12 @@ class TenantFactoryLockGuard:
                 self._clean_dist_on_entry = False
 
         if self.acquired:
-            os.environ[f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK"] = "1"
+            tenant_env_key = f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK"
+            self._prev_tenant_lock_env = os.environ.get(tenant_env_key)
+            self._prev_supervisor_lock_env = os.environ.get("PSEUFACTORY_HOLDS_SUPERVISOR_LOCK")
+            os.environ[tenant_env_key] = "1"
             os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = "1"
+            self._set_lock_envs = True
         if self.acquired and self.repo_path is not None and (self.repo_path / ".git").exists():
             reconcile_repo_with_origin_main(self.repo_path, branch="main")
         return self
@@ -1005,7 +1031,17 @@ class TenantFactoryLockGuard:
                 )
             except Exception:
                 pass
-        os.environ.pop(f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK", None)
+        if self._set_lock_envs:
+            tenant_env_key = f"PSEUFACTORY_HOLDS_{self.property_id.upper()}_LOCK"
+            if self._prev_tenant_lock_env is None:
+                os.environ.pop(tenant_env_key, None)
+            else:
+                os.environ[tenant_env_key] = self._prev_tenant_lock_env
+            if self._prev_supervisor_lock_env is None:
+                os.environ.pop("PSEUFACTORY_HOLDS_SUPERVISOR_LOCK", None)
+            else:
+                os.environ["PSEUFACTORY_HOLDS_SUPERVISOR_LOCK"] = self._prev_supervisor_lock_env
+            self._set_lock_envs = False
         if self._fd is not None:
             try:
                 if self.acquired:
@@ -5199,7 +5235,7 @@ def sync_tenant_test_isolation_guards(
                 "    exit 75\n"
                 "fi\n\n"
                 "echo \"$$\" > \"$PID_FILE\"\n"
-                "if [ \"${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}\" != \"1\" ] && [ \"${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}\" != \"1\" ] && { [ \"$LOCK_FILE\" = \"/tmp/profithelm_factory.lock\" ] || [ \"$LOCK_FILE\" = \"/tmp/prexvo_factory.lock\" ] || [ \"$LOCK_FILE\" = \"/tmp/gainhelm_factory.lock\" ]; }; then\n"
+                "if [ \"${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}\" != \"1\" ] && [ \"${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}\" != \"1\" ] && { [ \"$LOCK_FILE\" = \"/tmp/profithelm_factory.lock\" ] || [ \"$LOCK_FILE\" = \"/tmp/prexvo_factory.lock\" ] || [ \"$LOCK_FILE\" = \"/tmp/gainhelm_factory.lock\" ] || [ \"$LOCK_FILE\" = \"/tmp/lienbond_factory.lock\" ] || { [ \"${LOCK_FILE#/tmp/}\" != \"$LOCK_FILE\" ] && [ \"${LOCK_FILE%_factory.lock}\" != \"$LOCK_FILE\" ]; }; }; then\n"
                 "    exec 201>\"/tmp/pseofactory_supervisor.lock\"\n"
                 "    if ! flock -w \"${LOCK_WAIT_TIMEOUT:-60}\" 201; then\n"
                 "        echo \"Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL).\" >&2\n"
@@ -5333,7 +5369,7 @@ def sync_tenant_test_isolation_guards(
             old_pid_echo = 'echo "$$" > "$PID_FILE"'
             new_pid_echo = (
                 'echo "$$" > "$PID_FILE"\n'
-                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ]; }; then\n'
+                'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/lienbond_factory.lock" ] || { [ "${LOCK_FILE#/tmp/}" != "$LOCK_FILE" ] && [ "${LOCK_FILE%_factory.lock}" != "$LOCK_FILE" ]; }; }; then\n'
                 '    exec 201>"/tmp/pseofactory_supervisor.lock"\n'
                 '    if ! flock -w "${LOCK_WAIT_TIMEOUT:-60}" 201; then\n'
                 '        echo "Central pseofactory supervisor lock (/tmp/pseofactory_supervisor.lock) active after ${LOCK_WAIT_TIMEOUT:-60}s. Exiting with 75 (EX_TEMPFAIL)." >&2\n'
@@ -5348,11 +5384,14 @@ def sync_tenant_test_isolation_guards(
 
             old_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
             old_lock_cond_v2 = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ]; }; then'
-            new_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ]; }; then'
+            old_lock_cond_v3 = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ]; }; then'
+            new_lock_cond = 'if [ "${PSEUFACTORY_HOLDS_SUPERVISOR_LOCK:-0}" != "1" ] && [ "${PSEUFACTORY_SUPERVISOR_LOCK_HELD:-0}" != "1" ] && { [ "$LOCK_FILE" = "/tmp/profithelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/prexvo_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/gainhelm_factory.lock" ] || [ "$LOCK_FILE" = "/tmp/lienbond_factory.lock" ] || { [ "${LOCK_FILE#/tmp/}" != "$LOCK_FILE" ] && [ "${LOCK_FILE%_factory.lock}" != "$LOCK_FILE" ]; }; }; then'
             if old_lock_cond in rf_new:
                 rf_new = rf_new.replace(old_lock_cond, new_lock_cond, 1)
             elif old_lock_cond_v2 in rf_new:
                 rf_new = rf_new.replace(old_lock_cond_v2, new_lock_cond, 1)
+            elif old_lock_cond_v3 in rf_new:
+                rf_new = rf_new.replace(old_lock_cond_v3, new_lock_cond, 1)
 
             # Never unlock FD 201 early; hold /tmp/pseofactory_supervisor.lock for the entire script execution
             rf_new = re.sub(
@@ -7125,9 +7164,18 @@ def reconcile_workspace_tracking_state(
     ws = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
     if runs_dir is not None:
         rd_cand = Path(runs_dir).resolve()
-        if (rd_cand / ".agy" / "runs").is_dir() or any(
-            (rd_cand / rn / ".git").exists()
-            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
+        has_marker_child = rd_cand.is_dir() and any(
+            (ch / ".pseofactory.json").is_file()
+            for ch in rd_cand.iterdir()
+            if ch.is_dir() and not ch.name.startswith(".")
+        )
+        if (
+            (rd_cand / ".agy" / "runs").is_dir()
+            or has_marker_child
+            or any(
+                (rd_cand / rn / ".git").exists()
+                for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
+            )
         ):
             ws = rd_cand
             runs_dir = rd_cand / ".agy" / "runs"
@@ -7136,19 +7184,31 @@ def reconcile_workspace_tracking_state(
             if ledger_path is None:
                 ledger_path = rd_cand / ".agy" / "gitops_idempotency_ledger.json"
             if tenant_repos is None:
-                tenant_repos = [
-                    rd_cand / rn
-                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
-                    if (rd_cand / rn).is_dir()
-                ]
+                from pseofactory.impact_planner import discover_active_tenants
+
+                disc_list = [rp for _, rp in discover_active_tenants(rd_cand) if rp.is_dir()]
+                pseo_dir = rd_cand / "pseofactory"
+                if pseo_dir.is_dir() and pseo_dir not in disc_list:
+                    disc_list.insert(0, pseo_dir)
+                tenant_repos = disc_list
         elif rd_cand.name == "runs" and rd_cand.parent.name == ".agy":
             ws = rd_cand.parent.parent
             if tenant_repos is None and ws != Path("/home/ubuntuadmin/projects").resolve():
-                tenant_repos = [
-                    ws / rn
-                    for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
-                    if (ws / rn).is_dir()
-                ]
+                from pseofactory.impact_planner import discover_active_tenants
+
+                disc_list = [rp for _, rp in discover_active_tenants(ws) if rp.is_dir()]
+                pseo_dir = ws / "pseofactory"
+                if pseo_dir.is_dir() and pseo_dir not in disc_list:
+                    disc_list.insert(0, pseo_dir)
+                tenant_repos = disc_list
+    elif queues_dir is not None:
+        qd_cand = Path(queues_dir).resolve()
+        if qd_cand.name == "queues" and qd_cand.parent.name == ".agy":
+            ws = qd_cand.parent.parent
+    elif ledger_path is not None:
+        lp_cand = Path(ledger_path).resolve()
+        if lp_cand.parent.name == ".agy":
+            ws = lp_cand.parent.parent
     is_explicit = (
         runs_dir is not None
         or queues_dir is not None
@@ -7185,7 +7245,32 @@ def reconcile_workspace_tracking_state(
         )
     )
 
-    canonical_queue_Owner_ids = {"profithelm", "prexvo", "gainhelm", "lienbond", "pseofactory", "factory", "default"}
+    from pseofactory.impact_planner import discover_active_tenants
+
+    discovered_pairs = discover_active_tenants(ws)
+    discovered_map: Dict[str, Path] = {pid: rp for pid, rp in discovered_pairs}
+    discovered_pids: Set[str] = set(discovered_map.keys())
+    discovered_slugs: Set[str] = {rp.name for rp in discovered_map.values()}
+    if tenant_repos:
+        for tr in tenant_repos:
+            tr_p = Path(tr)
+            discovered_slugs.add(tr_p.name)
+            marker_p = tr_p / ".pseofactory.json"
+            if marker_p.is_file():
+                try:
+                    m_data = json.loads(marker_p.read_text(encoding="utf-8"))
+                    if isinstance(m_data, dict) and m_data.get("property_id"):
+                        m_pid = str(m_data["property_id"]).strip().lower()
+                        discovered_pids.add(m_pid)
+                        discovered_map.setdefault(m_pid, tr_p)
+                except Exception:
+                    pass
+                discovered_pids.add(_normalize_property_id(tr_p.name))
+            elif tr_p.name.lower() in REPO_DIR_TO_PROPERTY_ID:
+                discovered_pids.add(_normalize_property_id(tr_p.name))
+
+    allowed_production_props: Set[str] = set(CANONICAL_PRODUCTION_PROPERTIES) | discovered_pids | discovered_slugs
+    canonical_queue_Owner_ids = set(CANONICAL_PRODUCTION_PROPERTIES) | discovered_pids | {"pseofactory", "factory", "default"}
     pruned_queue_files = 0
     reconciled_wal_events = 0
     pruned_ledger_tokens = 0
@@ -7238,7 +7323,7 @@ def reconcile_workspace_tracking_state(
             "ai-field-service-dispatcher",
             "x-likes-explorer",
             "social",
-        }
+        } | discovered_slugs | discovered_pids
         for sq_file in list(eff_staging_queue_dir.glob("*_queue.json")):
             slug = sq_file.name[: -len("_queue.json")]
             if slug not in canonical_staging_slugs:
@@ -7252,7 +7337,7 @@ def reconcile_workspace_tracking_state(
                 sq_data = json.loads(sq_file.read_text(encoding="utf-8"))
                 if not isinstance(sq_data, dict) or not isinstance(sq_data.get("items"), list):
                     continue
-                repo_p_str = str(sq_data.get("repo_path") or (Path("/home/ubuntuadmin/projects") / slug))
+                repo_p_str = str(sq_data.get("repo_path") or (ws / slug))
                 repo_p = Path(repo_p_str)
                 sq_modified = False
                 now_ts = datetime.now(timezone.utc).isoformat()
@@ -7300,7 +7385,7 @@ def reconcile_workspace_tracking_state(
                 pid in KNOWN_TEST_PROPERTY_IDS
                 or pid.startswith("test_")
                 or pid.endswith("_test")
-                or (pid and pid not in CANONICAL_PRODUCTION_PROPERTIES)
+                or (pid and pid not in allowed_production_props)
             ):
                 pruned_ledger_tokens += 1
                 continue
@@ -7308,14 +7393,14 @@ def reconcile_workspace_tracking_state(
         if pruned_ledger_tokens > 0:
             ledger._write_records(clean_records)
 
-    # 3. Discover current HEAD SHAs for canonical production repositories
+    # 3. Discover current HEAD SHAs for canonical and dynamically discovered production repositories
     heads: Dict[str, str] = dict(repo_heads or {})
     if not heads:
         cand_repos_for_heads = (
             [Path(tr) for tr in tenant_repos]
             if tenant_repos
             else (
-                [ws / rn for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")]
+                list(dict.fromkeys([ws / "pseofactory", *[rp for _, rp in discovered_pairs]]))
                 if not in_test
                 else []
             )
@@ -7346,8 +7431,8 @@ def reconcile_workspace_tracking_state(
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
     elif not in_test and not is_explicit:
-        for repo_name in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond"):
-            tr_runs = Path("/home/ubuntuadmin/projects") / repo_name / ".agy" / "runs"
+        for rp_cand in dict.fromkeys([ws / "pseofactory", *[rp for _, rp in discovered_pairs]]):
+            tr_runs = rp_cand / ".agy" / "runs"
             if tr_runs not in runs_dirs_to_scan:
                 runs_dirs_to_scan.append(tr_runs)
 
@@ -7411,7 +7496,7 @@ def reconcile_workspace_tracking_state(
                                 if (
                                     proj_str.startswith("/tmp/")
                                     or "/pytest-" in proj_str
-                                    or (pid_str and pid_str not in CANONICAL_PRODUCTION_PROPERTIES)
+                                    or (pid_str and pid_str not in allowed_production_props)
                                 ):
                                     is_test_leak = True
                                     break
@@ -7444,14 +7529,16 @@ def reconcile_workspace_tracking_state(
                         )
                         if dr_objs:
                             p_id = _normalize_property_id(dr_objs[-1].get("property_id"))
-                            if p_id == "prexvo":
-                                synth_proj = "/home/ubuntuadmin/projects/prexvo"
+                            if p_id in discovered_map:
+                                synth_proj = str(discovered_map[p_id])
+                            elif p_id == "prexvo":
+                                synth_proj = str(ws / "prexvo")
                             elif p_id == "gainhelm":
-                                synth_proj = "/home/ubuntuadmin/projects/gainhelm"
+                                synth_proj = str(ws / "gainhelm")
                             elif p_id == "lienbond":
-                                synth_proj = "/home/ubuntuadmin/projects/lienbond"
+                                synth_proj = str(ws / "lienbond")
                             elif p_id == "profithelm" and run_dir.name.isdigit():
-                                synth_proj = "/home/ubuntuadmin/projects/profithelm-platform"
+                                synth_proj = str(ws / "profithelm-platform")
                     cur_h = heads.get(synth_proj) or heads.get(Path(synth_proj).name) or ""
                     synthesized = {
                         "run_id": run_dir.name,
@@ -7561,10 +7648,7 @@ def reconcile_workspace_tracking_state(
     if tenant_repos is not None:
         target_repo_paths = [Path(tr) for tr in tenant_repos]
     elif not in_test and not is_explicit:
-        target_repo_paths = [
-            Path("/home/ubuntuadmin/projects") / rn
-            for rn in ("pseofactory", "profithelm-platform", "prexvo", "gainhelm", "lienbond")
-        ]
+        target_repo_paths = list(dict.fromkeys([ws / "pseofactory", *[rp for _, rp in discovered_pairs]]))
 
     if not in_test and not is_explicit:
         for stray_dir_name in ("dist", "machine_endpoints"):
@@ -7624,21 +7708,32 @@ def reconcile_workspace_tracking_state(
                     )
                     healed_tenant_trees += 1
 
-            if repo_name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond") or tenant_repos is not None:
-                lock_name = (
-                    "profithelm_factory.lock"
-                    if "profithelm" in repo_name
-                    else (
-                        "gainhelm_factory.lock"
-                        if "gainhelm" in repo_name
-                        else ("lienbond_factory.lock" if "lienbond" in repo_name else "prexvo_factory.lock")
-                    )
-                )
-                lock_path = (
-                    (rp / f".{lock_name}")
-                    if (tenant_repos is not None or ws != Path("/home/ubuntuadmin/projects"))
-                    else (Path("/tmp") / lock_name)
-                )
+            resolved_tenant_pid: Optional[str] = None
+            if repo_name != "pseofactory":
+                marker_file = rp / ".pseofactory.json"
+                if marker_file.is_file():
+                    try:
+                        m_data = json.loads(marker_file.read_text(encoding="utf-8"))
+                        if isinstance(m_data, dict) and m_data.get("property_id"):
+                            resolved_tenant_pid = str(m_data["property_id"]).strip().lower()
+                    except Exception:
+                        resolved_tenant_pid = None
+                if not resolved_tenant_pid and repo_name.lower() in REPO_DIR_TO_PROPERTY_ID:
+                    resolved_tenant_pid = REPO_DIR_TO_PROPERTY_ID[repo_name.lower()]
+                elif not resolved_tenant_pid and repo_name in ("profithelm-platform", "prexvo", "gainhelm", "lienbond"):
+                    resolved_tenant_pid = _normalize_property_id(repo_name)
+                elif not resolved_tenant_pid and (rp / "substrate_lock.json").is_file():
+                    try:
+                        sl_meta = json.loads((rp / "substrate_lock.json").read_text(encoding="utf-8"))
+                        if isinstance(sl_meta, dict) and (sl_meta.get("property_id") or sl_meta.get("property")):
+                            resolved_tenant_pid = str(sl_meta.get("property_id") or sl_meta.get("property")).strip().lower()
+                    except Exception:
+                        resolved_tenant_pid = None
+
+            if resolved_tenant_pid is not None:
+                lock_name = f"{resolved_tenant_pid}_factory.lock"
+                lock_dir = Path(os.environ.get("PSEUFACTORY_LOCK_DIR", "/tmp"))
+                lock_path = lock_dir / lock_name
                 lock_fd = None
                 lock_acquired = False
                 try:
@@ -7896,8 +7991,6 @@ def reconcile_workspace_tracking_state(
                             if lock_fd is not None:
                                 fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
                                 lock_fd.close()
-                            if (tenant_repos is not None or ws != Path("/home/ubuntuadmin/projects")) and lock_path.exists():
-                                lock_path.unlink(missing_ok=True)
                         except OSError:
                             pass
                 elif lock_fd is not None:

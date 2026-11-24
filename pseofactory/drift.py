@@ -529,7 +529,33 @@ def write_substrate_lock(
         if eh_file.is_file():
             record_engine_hash(eh_file, hash_value=eh, synced_substrate_hash=synced_sub_hash)
         if al_file.is_file():
-            record_asset_ledger(al_file, asset_hashes=dist_asset_hashes, engine_hash=eh)
+            full_asset_hashes: Dict[str, str] = dict(dist_asset_hashes)
+            try:
+                from pseofactory.maintenance import ConfigurablePropertyAdapter
+
+                ledger_adapter = ConfigurablePropertyAdapter(
+                    property_id=pid,
+                    brand_name=pid.capitalize(),
+                    domain=f"{pid}.com",
+                    canonical_base=f"https://{pid}.com",
+                    dist_dir=eff_dist,
+                    repo_path=r_root,
+                )
+                for asset_path in ledger_adapter.list_assets():
+                    rel_asset = (
+                        asset_path.relative_to(eff_dist).as_posix()
+                        if asset_path.is_relative_to(eff_dist)
+                        else (
+                            asset_path.relative_to(r_root).as_posix()
+                            if asset_path.is_relative_to(r_root)
+                            else asset_path.name
+                        )
+                    )
+                    if rel_asset not in full_asset_hashes:
+                        full_asset_hashes[rel_asset] = compute_asset_fingerprint(asset_path)
+            except Exception:
+                pass
+            record_asset_ledger(al_file, asset_hashes=full_asset_hashes, engine_hash=eh)
     return payload
 
 
