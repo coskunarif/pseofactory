@@ -583,6 +583,22 @@
       ],
       "allowed_slug_patterns": [],
       "forbidden_slug_patterns": []
+    },
+    "nist_ai_rmf_15usc278h1": {
+      "canonical": "15 U.S.C. 278h-1 (NIST AI Risk Management Framework)",
+      "patterns": [
+        "15\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?278h-1\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "hitech_pl116_321": {
+      "canonical": "P.L. 116-321 (HITECH Recognized Security Practices Safe Harbor)",
+      "patterns": [
+        "(?:P\\.?L\\.?|Pub\\.?\\s*L\\.?)\\s*116-321\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
     }
   },
   "disclosures": [

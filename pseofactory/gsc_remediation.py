@@ -5918,28 +5918,28 @@ def _build_autonomous_citation_assertions_and_matrix(
             assertions = [
                 f"In 2026, {heading_label} evaluates external CPA attestation fees ($28,000.00 base plus $4,500.00 per extra Trust Services Criterion), GRC automation ($15,000.00), penetration testing ($11,500.00), and internal engineering labor at $121.67/hr under BLS SOC 15-1212 wage benchmarks.",
                 "Under AICPA SSAE 18 (AT-C Section 205) and TSP Section 100, a 75-employee SaaS company completing a SOC 2 Type II audit across Security plus 2 additional criteria incurs $78,100.40 in total first-year compliance cost ($37,000.00 CPA fee + $15,000.00 GRC + $11,500.00 pentest + $14,600.40 labor).",
-                "Deploying continuous GRC evidence collection reduces manual engineering preparation by 55% ($8,030.22 in verified annual labor savings at $121.67/hr across a 6-to-12 month Type II observation window).",
+                "Under AICPA SSAE 18 (AT-C Section 205), continuous GRC evidence collection streamlines multi-criterion evidence mapping across Security, Availability, and Confidentiality while pricing internal engineering remediation at the BLS SOC 15-1212 loaded benchmark ($121.67/hr).",
             ]
             matrix = [
                 {
                     "profile": "Series B B2B SaaS (75 Employees, Security + 2 Extra TSC)",
                     "statutory_threshold": "AICPA SSAE 18 AT-C Section 205 & TSP Section 100 (SOC 2 Type II)",
                     "optimal_path": "Automated GRC Platform ($15,000) + Peer-Reviewed CPA Firm ($37,000) + Pentest ($11,500)",
-                    "net_dollar_impact": "$78,100.40 Total Year-1 Cost (With $8,030.22 Automation Labor Savings)",
+                    "net_dollar_impact": "$78,100.40 Total Year-1 Cost ($14,600.40 Internal Engineering Labor)",
                     "next_action": "Compare Automated vs Manual SOC 2 Total Cost",
                 },
                 {
                     "profile": "DoD Defense Contractor Handling CUI (75 Employees)",
                     "statutory_threshold": "32 CFR Part 170 Level 2 C3PAO & 88-Point SPRS Floor",
                     "optimal_path": "Remediate 5-Point NIST 800-171 Controls + CUI Enclave Scoping",
-                    "net_dollar_impact": "$132,000.00 Total CMMC Level 2 Program ($48,500 C3PAO + $26,400 Enclave)",
+                    "net_dollar_impact": "$134,534.60 Total CMMC Level 2 Program ($48,500 C3PAO + $26,400 Enclave)",
                     "next_action": "Calculate Weighted SPRS Score & POA&M Eligibility",
                 },
                 {
                     "profile": "Global Enterprise SaaS (75 Employees, EU & US Customers)",
                     "statutory_threshold": "ISO/IEC 27006-1:2024 (11.0 Auditor Days) + SOC 2 Cross-Mapping",
-                    "optimal_path": "Unified GRC Control Framework (82% SOC 2 / ISO 27001 Overlap)",
-                    "net_dollar_impact": "$67,000.40 ISO 27001 Year-1 Cost With Shared Evidence Collection",
+                    "optimal_path": "Unified GRC Control Framework (Shared SOC 2 / ISO 27001 Evidence)",
+                    "net_dollar_impact": "$66,350.60 ISO 27001 Year-1 Cost With Shared Evidence Collection",
                     "next_action": "Model Combined ISO 27001 & SOC 2 Surveillance TCO",
                 },
             ]
@@ -10902,11 +10902,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     )
     if ov_tenant == "gainhelm":
         from pseofactory.estate_common import strip_cross_framework_leaks_from_overlay
+        from pseofactory.gainhelm_estate import _sanitize_gainhelm_overlay_strings
 
         eff_ov_slug = ov_slug_early
         if not eff_ov_slug and "/tools/" in canon_url_early:
             eff_ov_slug = canon_url_early.split("/tools/", 1)[1].strip("/").split("/")[0]
         overlay_data = strip_cross_framework_leaks_from_overlay(overlay_data, eff_ov_slug)
+        overlay_data = _sanitize_gainhelm_overlay_strings(overlay_data)
     ov_brand = (
         "Prexvo"
         if ov_tenant == "prexvo"

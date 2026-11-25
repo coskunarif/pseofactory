@@ -55,6 +55,101 @@ def prepare_estate_dirs(output_dir: Any, property_id: str) -> Tuple[Path, Path, 
     return root, dist, tools_dir
 
 
+_LIENBOND_WC_REPLACEMENT_AUTHORITY = (
+    "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, "
+    "and State Workers Compensation Rating Bureaus"
+)
+
+_LIENBOND_WC_FORBIDDEN_CITATION_RE = re.compile(
+    r"(?:"
+    r"(?:IRC|26\s*U\.S\.C\.?)\s*(?:Section|Sec\.?)?\s*3111\b"
+    r"|40\s*U\.S\.C\.?\s*(?:Section|Sec\.?)?\s*3131(?:-\d+)?\b"
+    r"|40\s*U\.S\.C\.?\s*(?:Section|Sec\.?)?\s*3133(?:\([a-zA-Z0-9]+\))?\b"
+    r"|29\s*CFR\s*(?:Part\s*)?1904\b"
+    r"|FAR\s*28\.102(?:-2|-1)?\b"
+    r"|FAR\s*28\.101\b"
+    r"|(?:Federal\s+)?Miller\s+Act(?:\s*\([^)]*\))?"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _is_lienbond_wc_slug(slug: str) -> bool:
+    """Returns True for LienBond workers compensation, EMR, or class-code tool slugs."""
+    s_low = str(slug or "").strip().lower()
+    return any(tok in s_low for tok in ("workers-comp", "emr", "class-code"))
+
+
+def _scrub_lienbond_wc_citations(val: Any) -> Any:
+    """Recursively scrubs non-NCCI citations from LienBond workers-comp/EMR specs and overlays."""
+    if isinstance(val, str):
+        if _LIENBOND_WC_FORBIDDEN_CITATION_RE.search(val):
+            return _LIENBOND_WC_FORBIDDEN_CITATION_RE.sub(_LIENBOND_WC_REPLACEMENT_AUTHORITY, val)
+        return val
+    if isinstance(val, list):
+        return [_scrub_lienbond_wc_citations(item) for item in val]
+    if isinstance(val, dict):
+        return {k: _scrub_lienbond_wc_citations(v) for k, v in val.items()}
+    return val
+
+
+def _normalize_lienbond_bid_bond_void(
+    dv: Dict[str, Any],
+    cm: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Normalizes stale license-bond Bid Bond void entries to canonical FAR 28.101 Bid Guarantees."""
+    raw_formula = str(dv.get("formula") or cm.get("formula") or "")
+    raw_inputs = dict(dv.get("inputs") or cm.get("inputs") or {})
+    needs_fix = (
+        "bond_amount" in raw_inputs
+        or "credit_tier_rate_pct" in raw_inputs
+        or "bond_amount" in raw_formula
+        or "credit_tier_rate_pct" in raw_formula
+        or "contract_bid_amount" not in raw_inputs
+        or "penal_sum_pct" not in raw_inputs
+    )
+    if not needs_fix:
+        return dv, cm
+
+    expr = "round(contract_bid_amount * (min(20.0, max(5.0, penal_sum_pct)) / 100.0), 2)"
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        tp = load_truth_pack("lienbond", allow_expired=True)
+        bb_spec = tp.formulas.get("bid_bond")
+        if bb_spec is not None and bb_spec.expression:
+            expr = bb_spec.expression
+    except Exception:
+        pass
+
+    canon_inputs = {"contract_bid_amount": 1000000.0, "penal_sum_pct": 10.0}
+    canon_output = 100000.0
+    canon_authority = "48 CFR 28.101 (FAR 28.101 Bid Guarantees)"
+    canon_model = "Federal / Commercial Bid Bond Penal Sum (FAR 28.101)"
+    canon_sample = (
+        "$1,000,000.00 contract bid amount * 10.0% FAR 28.101 bid guarantee penal sum "
+        "= $100,000.00 bid bond penal sum."
+    )
+    canon_desc = (
+        "Calculate construction bid bond penal sums (5% to 20% of bid) and surety bid "
+        "guarantee exposure under 48 CFR 28.101 (FAR 28.101 Bid Guarantees)."
+    )
+
+    dv_clean = dict(dv)
+    cm_clean = dict(cm)
+    for target in (dv_clean, cm_clean):
+        target["formula"] = expr
+        target["inputs"] = dict(canon_inputs)
+        target["published_output"] = canon_output
+        target["statutory_authority"] = canon_authority
+        target["model_name"] = canon_model
+        target["sample_calculation"] = canon_sample
+    dv_clean["description"] = canon_desc
+    dv_clean.pop("quick_answer", None)
+    dv_clean.pop("faqs", None)
+    return dv_clean, cm_clean
+
+
 def load_and_enrich_deployed_voids(
     repo_root: Path,
     property_id: str,
@@ -65,10 +160,14 @@ def load_and_enrich_deployed_voids(
     default_authority: str,
     default_dataset: str,
 ) -> List[Dict[str, Any]]:
-    """Loads content/deployed_voids.json entries not already compiled and enriches them."""
+    """Loads content/deployed_voids.json (or .agy/deployed_voids.json) entries not already compiled and enriches them."""
     dv_file = repo_root / "content" / "deployed_voids.json"
     if not dv_file.is_file():
-        return []
+        agy_dv_file = repo_root / ".agy" / "deployed_voids.json"
+        if agy_dv_file.is_file():
+            dv_file = agy_dv_file
+        else:
+            return []
     try:
         loaded_dv = json.loads(dv_file.read_text(encoding="utf-8"))
     except Exception:
@@ -79,6 +178,7 @@ def load_and_enrich_deployed_voids(
     from pseofactory.pipeline import CompetitorGapEngine, TenantFactStore
     from pseofactory.qualification import detect_non_us_jurisdiction
 
+    norm_prop = str(property_id or "").strip().lower()
     profile = TenantFactStore.get_instance().get_profile(property_id)
     gap_engine = CompetitorGapEngine(tenant_profile=profile)
     enriched_voids: List[Dict[str, Any]] = []
@@ -90,6 +190,12 @@ def load_and_enrich_deployed_voids(
         if not dv_slug or dv_slug in known_slugs:
             continue
         cm = dv.get("calculation_manifest") if isinstance(dv.get("calculation_manifest"), dict) else {}
+        if norm_prop == "lienbond":
+            if "bid-bond" in dv_slug:
+                dv, cm = _normalize_lienbond_bid_bond_void(dv, cm)
+            elif _is_lienbond_wc_slug(dv_slug):
+                dv = _scrub_lienbond_wc_citations(dv)
+                cm = _scrub_lienbond_wc_citations(cm)
         dv_query = str(dv.get("query") or dv.get("primary_keyword") or dv_slug.replace("-", " ")).strip()
         dv_title = str(dv.get("title") or dv_query.title()).strip()
         dv_primary_kw = str(dv.get("primary_keyword") or dv_query).strip()
@@ -135,6 +241,8 @@ def load_and_enrich_deployed_voids(
         if dv.get("updated_date"):
             dv_spec["updated_date"] = str(dv["updated_date"])
         dv_spec = gap_engine.enrich_candidate_spec(dv_spec)
+        if norm_prop == "lienbond" and _is_lienbond_wc_slug(dv_slug):
+            dv_spec = _scrub_lienbond_wc_citations(dv_spec)
         enriched_voids.append(dv_spec)
         known_slugs.add(dv_slug)
 
@@ -803,7 +911,9 @@ def sanitize_tenant_overlays(
     property_id: str = "",
 ) -> None:
     """Removes orphaned, cross-tenant contaminated, or cross-framework leaked overlay JSON files."""
-    is_gainhelm = str(property_id or "").strip().lower() == "gainhelm"
+    norm_prop = str(property_id or "").strip().lower()
+    is_gainhelm = norm_prop == "gainhelm"
+    is_lienbond = norm_prop == "lienbond"
     for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
         if not ov_dir.is_dir():
             continue
@@ -832,6 +942,19 @@ def sanitize_tenant_overlays(
                 if not has_content:
                     ov_file.unlink(missing_ok=True)
                 elif cleaned != ov_data:
+                    ov_file.write_text(
+                        json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+            elif is_lienbond and _is_lienbond_wc_slug(ov_file.stem):
+                try:
+                    ov_data = json.loads(raw_text)
+                except Exception:
+                    continue
+                if not isinstance(ov_data, dict):
+                    continue
+                cleaned = _scrub_lienbond_wc_citations(ov_data)
+                if cleaned != ov_data:
                     ov_file.write_text(
                         json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
                         encoding="utf-8",

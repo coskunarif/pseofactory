@@ -429,32 +429,11 @@ def compute_gainhelm_framework_benchmarks(
     compromised_records: int = 1500,
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Computes multi-framework compliance benchmarks dynamically using the tenant's
-    `gainhelm/engine/compliance_formulas.py` when present, or TruthPack-backed stdlib math.
+    Computes multi-framework compliance benchmarks deterministically from
+    TruthPack-backed constants (`load_truth_pack("gainhelm")`).
     """
+    _ = repo_root
     truth_c = _gainhelm_truth_constants()
-    if repo_root is not None:
-        formulas_py = Path(repo_root) / "gainhelm" / "engine" / "compliance_formulas.py"
-        if formulas_py.is_file():
-            try:
-                spec = importlib.util.spec_from_file_location("_gh_formulas_dynamic", formulas_py)
-                if spec is not None and spec.loader is not None:
-                    mod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(mod)
-                    fn = getattr(mod, "compare_all_compliance_frameworks", None)
-                    if callable(fn):
-                        return dict(
-                            fn(
-                                headcount=headcount,
-                                extra_criteria_count=extra_criteria_count,
-                                unimplemented_5pt=unimplemented_5pt,
-                                unimplemented_3pt=unimplemented_3pt,
-                                unimplemented_1pt=unimplemented_1pt,
-                                compromised_records=compromised_records,
-                            )
-                        )
-            except Exception:
-                pass
 
     eng_rate = float(truth_c["eng_hourly_rate"])
     hipaa_cap = float(truth_c["hipaa_tier4_cap"])
@@ -1494,7 +1473,7 @@ _TOOL_COMMENTARY_BY_SLUG: Dict[str, Tuple[str, List[str]]] = {
         [
             "Service Organization Control (SOC) 2 engagements are governed by the American Institute of Certified Public Accountants (AICPA) Statement on Standards for Attestation Engagements No. 18 (SSAE 18), codified at AT-C Section 205. Unlike self-attestation questionnaires, a valid SOC 2 report can only be issued by an independent licensed CPA firm registered for peer-reviewed attestation practice.",
             "A SOC 2 Type I report evaluates the suitability of control design at a single point in time. In contrast, a SOC 2 Type II report tests the operating effectiveness of controls across an observation window of 3 to 12 consecutive months. Enterprise procurement teams overwhelmingly mandate Type II reports covering Security (Common Criteria) alongside Availability and Confidentiality under TSP Section 100.",
-            "Deploying continuous GRC automation platforms reduces engineering evidence-collection overhead by 55 to 70 percent, allowing security engineers (benchmarked at $121.67 per hour loaded wage under BLS SOC 15-1212) to focus on remediation rather than manual screenshot harvesting.",
+            "Deploying continuous GRC automation platforms streamlines evidence-collection workflows and control monitoring, allowing security engineers (benchmarked at $121.67 per hour loaded wage under BLS SOC 15-1212) to focus on remediation rather than manual screenshot harvesting.",
         ],
     ),
     "cmmc-2-0-compliance-cost-calculator": (
@@ -2012,6 +1991,26 @@ def _calculator_schemas(
     ]
 
 
+def _sanitize_gainhelm_overlay_strings(val: Any) -> Any:
+    """Rewrites stale cached overlay strings (ungrounded stats or superseded figures) deterministically."""
+    if isinstance(val, str):
+        out = val.replace(
+            "Deploying continuous GRC evidence collection reduces manual engineering preparation by 55% ($8,030.22 in verified annual labor savings at $121.67/hr across a 6-to-12 month Type II observation window).",
+            "Under AICPA SSAE 18 (AT-C Section 205), continuous GRC evidence collection streamlines multi-criterion evidence mapping across Security, Availability, and Confidentiality while pricing internal engineering remediation at the BLS SOC 15-1212 loaded benchmark ($121.67/hr).",
+        )
+        out = out.replace("(With $8,030.22 Automation Labor Savings)", "($14,600.40 Internal Engineering Labor)")
+        out = out.replace("(82% SOC 2 / ISO 27001 Overlap)", "(Shared SOC 2 / ISO 27001 Evidence)")
+        out = out.replace("$132,000.00 Total CMMC Level 2 Program", "$134,534.60 Total CMMC Level 2 Program")
+        out = out.replace("$67,000.40 ISO 27001 Year-1 Cost", "$66,350.60 ISO 27001 Year-1 Cost")
+        out = out.replace("$2,067,813", "$2,190,294").replace("$2,455,313", "$2,577,794")
+        return out
+    if isinstance(val, list):
+        return [_sanitize_gainhelm_overlay_strings(item) for item in val]
+    if isinstance(val, dict):
+        return {k: _sanitize_gainhelm_overlay_strings(v) for k, v in val.items()}
+    return val
+
+
 def _apply_overlay_if_present(rendered_html: str, slug: str, repo_root: Optional[Path]) -> str:
     if repo_root is None:
         return rendered_html
@@ -2028,6 +2027,7 @@ def _apply_overlay_if_present(rendered_html: str, slug: str, repo_root: Optional
         ov_data = json.loads(overlay_path.read_text(encoding="utf-8"))
         if isinstance(ov_data, dict):
             ov_data = strip_cross_framework_leaks_from_overlay(ov_data, slug)
+            ov_data = _sanitize_gainhelm_overlay_strings(ov_data)
             return inject_overlay_into_html(rendered_html, ov_data)
     except Exception:
         pass

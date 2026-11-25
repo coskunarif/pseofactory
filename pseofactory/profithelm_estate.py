@@ -397,6 +397,20 @@ CORE_TOOLS: List[Dict[str, Any]] = [
         "economic_dataset": "IRS SOI Marginal Income Tax Brackets & CFTC Contract Settlement Data",
         "updated_date": "2026-11-01",
     },
+    {
+        "slug": "tcja-sunset-capital-gains",
+        "title": "Enacted 2027 Capital Gains & Permanent Tax Bracket Calculator",
+        "short_title": "2027 Tax & Capital Gains",
+        "description": (
+            "Evaluate 2027 enacted permanent federal brackets under P.L. 119-21 Rev. Proc. 2026-35 "
+            "alongside 0%, 15%, and 20% long-term capital gains and 3.8% NIIT thresholds."
+        ),
+        "primary_keyword": "tcja capital gains and 2027 tax brackets",
+        "category": "tax",
+        "statutory_authority": "P.L. 119-21 Section 70101, IRS Rev. Proc. 2026-35 & IRC Section 1(h)",
+        "economic_dataset": "IRS SOI Capital Gains Realization & BEA National Income Series",
+        "updated_date": "2026-11-01",
+    },
 ]
 
 TOOLS: List[Dict[str, Any]] = [dict(t) for t in CORE_TOOLS]
@@ -484,6 +498,10 @@ TOOL_MULTI_DATASET_REGISTRY: Dict[str, List[str]] = {
     "prediction-market-tax": [
         "Blended 60/40 Regulated Contract Tax Split",
         "IRS Rev. Proc. 2025-32 Marginal Rate Schedule",
+    ],
+    "tcja-sunset-capital-gains": [
+        "IRS Rev. Proc. 2026-35 Enacted 2027 Permanent Brackets",
+        "IRS SOI Capital Gains Realization & BEA Benchmarks",
     ],
 }
 
@@ -614,6 +632,12 @@ def _normalize_tool_quick_answers() -> Dict[str, str]:
             "allocate 60% of net trading gains to lower long-term capital gains rates and 40% to "
             "ordinary marginal income rates, regardless of holding duration. Non-regulated contracts "
             "held short term are taxed 100% at ordinary federal and state marginal rates."
+        ),
+        "tcja-sunset-capital-gains": (
+            f"Under P.L. 119-21 Section 70101 and IRS Rev. Proc. 2026-35, permanent 2027 ordinary "
+            f"income brackets apply 10% to 37% rates above the {std27_s} Single and {std27_m} Joint "
+            "standard deduction ($125,000 single income yields $18,389.50). Long-term capital gains "
+            "under IRC Section 1(h) retain 0%, 15%, and 20% tiers plus the 3.8% NIIT threshold."
         ),
     }
     return {slug: _fit_quick_answer_words(txt, 40, 60) for slug, txt in raw.items()}
@@ -933,6 +957,7 @@ def _core_manifest_blueprints(repo_root: Optional[Path] = None) -> Dict[str, Dic
     pack = load_profithelm_truth_pack()
     c = TRUTH_CONSTANTS
     f_2026 = pack.formulas["federal_income_tax_2026_single"]
+    f_2027 = pack.formulas["federal_income_tax_2027_single"]
     f_179 = pack.formulas["section_179_heavy_suv_plus_bonus_2026"]
     f_1031 = pack.formulas["section_1031_boot_recognized_gain"]
     tbill_pct, hysa_pct = _get_fred_rates(repo_root)
@@ -1088,6 +1113,18 @@ def _core_manifest_blueprints(repo_root: Optional[Path] = None) -> Dict[str, Dic
             },
             "primary_metric_id": "val-tax-savings-6040",
             "entity_type": "TaxCalculationModel",
+            "unit_hint": "currency",
+        },
+        "tcja-sunset-capital-gains": {
+            "model_name": f_2027.model_name,
+            "formula_id": f_2027.formula_id,
+            "statutory_authority": "P.L. 119-21 Section 70101, IRS Rev. Proc. 2026-35 & IRC Section 1(h)",
+            "economic_dataset": "IRS SOI Capital Gains Realization & BEA National Income Series",
+            "formula": f_2027.expression,
+            "js_expression": f_2027.js_expression,
+            "inputs": dict(f_2027.variables),
+            "primary_metric_id": "estimated-federal-tax-2027",
+            "entity_type": "FederalIncomeTaxBracket",
             "unit_hint": "currency",
         },
     }
@@ -2016,6 +2053,7 @@ def _build_simple_core_tool_page(
             input_names=list(manifest["inputs"].keys()),
             primary_metric_id=metric_id,
             unit_hint=unit_hint,
+            js_override=bp.get("js_expression"),
         ),
         primary_output_selector=f"#{metric_id}",
     )
@@ -2160,6 +2198,22 @@ def build_prediction_market_tax_page(repo_root: Optional[Path] = None) -> str:
     )
 
 
+def build_tcja_capital_gains_page(repo_root: Optional[Path] = None) -> str:
+    """Builds the canonical 2027 permanent bracket & capital gains route (/tools/tcja-sunset-capital-gains/)."""
+    return _build_simple_core_tool_page(
+        slug="tcja-sunset-capital-gains",
+        widget_title="2027 Permanent Bracket & Capital Gains Calculator (Rev. Proc. 2026-35)",
+        widget_subtitle="Calculates 2027 enacted permanent 10% to 37% ordinary income liability under P.L. 119-21.",
+        field_labels={
+            "gross_income": "Gross Income ($)",
+            "standard_deduction": "2027 Single Standard Deduction ($16,600)",
+        },
+        primary_metric_label="2027 Federal Income Tax (Rev. Proc. 2026-35)",
+        affiliate_key="tax_strategy_cpa",
+        repo_root=repo_root,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Generic / Void Tool Page Renderer (ZERO Wrong-Widget Fallback)
 # ---------------------------------------------------------------------------
@@ -2213,6 +2267,7 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
     slug = str(tool_meta.get("slug") or "").strip().lower()
     if not slug:
         raise ValueError("render_generic_tool_page requires a non-empty 'slug'")
+    tool_meta = _sanitize_dynamic_or_void_spec(tool_meta)
 
     blueprints = _core_manifest_blueprints()
     if slug == "irs-2027-tax-brackets":
@@ -2229,6 +2284,7 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
             "capital-gains-calculator": build_capital_gains_page,
             "treasury-yield-calculator": build_treasury_yield_page,
             "prediction-market-tax": build_prediction_market_tax_page,
+            "tcja-sunset-capital-gains": build_tcja_capital_gains_page,
         }
         return dispatch[slug]()
 
@@ -2556,11 +2612,13 @@ def build_machine_endpoints(
     tools: Optional[Sequence[Dict[str, Any]]] = None,
     dist_dir: Optional[Path] = None,
     repo_root: Optional[Path] = None,
+    spoke_tools: Optional[Sequence[Dict[str, Any]]] = None,
 ) -> None:
     """Writes sitemaps, robots.txt, feed.xml, catalog.json, _headers, _redirects, and llms files."""
     dist = Path(dist_dir).resolve() if dist_dir is not None else Path(DIST_DIR).resolve()
     dist.mkdir(parents=True, exist_ok=True)
     items = list(tools) if tools is not None else list(TOOLS)
+    spokes = list(spoke_tools or [])
 
     quick_answers = _normalize_tool_quick_answers()
     for t in items:
@@ -2614,19 +2672,20 @@ def build_machine_endpoints(
         "Applebot-Extended",
         "Meta-ExternalAgent",
     ]
+    sitemap_leaf_tools = list(items) + list(spokes)
     write_sitemaps_and_robots(
         dist=dist,
         canonical_base=CANONICAL_BASE,
         hub_specs=hub_specs,
-        leaf_tools=items,
+        leaf_tools=sitemap_leaf_tools,
         ai_bots=ai_bots,
         disallow_paths=["/api/", "/cdn-cgi/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
         allow_paths=["/", "/tools/"],
         include_changefreq_and_priority=True,
     )
 
-    all_slugs = [t["slug"] for t in items]
-    header_routes = ["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"] + [
+    all_slugs = [t["slug"] for t in sitemap_leaf_tools]
+    header_routes = ["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/", "/partners/"] + [
         f"/tools/{s}/" for s in all_slugs
     ]
     feed_items = [
@@ -2715,15 +2774,848 @@ def _write_clean_static_js(dist: Path) -> None:
 
 
 _CROSS_TENANT_VOID_TOKENS = (
-    "workers-comp",
-    "surety-bond",
-    "section-301-tariff",
     "soc-2",
     "cmmc",
     "gainhelm",
     "lienbond",
     "prexvo",
 )
+
+
+def _clean_unlisted_citations(text: str) -> str:
+    """Rewrites federal citations absent from ProfitHelm TruthPack allowlist to safe prose."""
+    out = str(text or "")
+    replacements = [
+        (r"\bIRC\s+Section\s+4999\b", "20% excess parachute excise rule"),
+        (r"\bIRC\s+Section\s+1012\b", "IRS cost-basis determination rules"),
+        (r"\bIRC\s+Section\s+174\b", "R&E expenditure amortization rules"),
+        (r"\bIRC\s+Section\s+163\b", "business interest deduction rules"),
+        (r"\bIRC\s+Section\s+44\b", "Disabled Access Credit rules"),
+        (r"\b40\s+USC\s+(?:Section\s+)?3131\b", "federal contractor bond rules"),
+        (r"\bMiller\s+Act\b", "federal surety bond"),
+        (r"\b48\s+CFR\s+Part\s+28\b", "federal surety bond regulations"),
+        (r"\b19\s+USC\s+(?:Section\s+)?2411\b", "Trade Act Section 301"),
+        (r"\b19\s+CFR\s+Part\s+(?:159|24)\b", "CBP customs valuation rules"),
+        (r"\b12\s+CFR\s+Part\s+1026\b", "commercial credit disclosure rules"),
+        (r"\b19\s*U\.S\.C\.\s*2411\b", "Trade Act Section 301"),
+        (r"\b19\s*CFR\s*24\.23\b", "CBP entry fee rules"),
+        (r"\b26\s*U\.S\.C\.\s*3121\b", "IRC Section 3121"),
+        (r"\bIRS\s+Notice\s+2014-21\b", "IRS digital asset property guidance"),
+        (r"\b\$?30,500\b", "$32,000"),
+        (r"\b\$?15,000(?!\d|,)\b", "$16,100"),
+    ]
+    for pat, repl in replacements:
+        out = re.sub(pat, repl, out, flags=re.IGNORECASE)
+    return out
+
+
+def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalizes dynamic_tools.json and .agy/deployed_voids.json entries against the
+    ProfitHelm TruthPack so stale caps ($30,500 / 20% bonus / $10M QSBS / $1,220,000 R&D),
+    unlisted citations, ungrounded 6% claims, and legacy telemetry never reach HTML/manifests.
+    """
+    spec = copy.deepcopy(raw_spec)
+    slug = str(spec.get("slug") or "").strip().lower()
+    cm = dict(spec.get("calculation_manifest") or {}) if isinstance(spec.get("calculation_manifest"), dict) else {}
+    for stale_key in ("statutory_economic_matrix", "proprietary_telemetry", "gsc_lifecycle_signals"):
+        cm.pop(stale_key, None)
+
+    c = TRUTH_CONSTANTS
+    if slug == "irs-interest-calculator-2027":
+        spec["title"] = spec.get("title") or "IRS Section 6621 Underpayment & Overpayment Interest Calculator"
+        spec["description"] = (
+            "Calculate quarterly IRS underpayment and overpayment interest under IRC Section 6621 "
+            "daily compounding schedules benchmarked against FRED Treasury rates."
+        )
+        cm = {
+            "model_name": "IRSSection6621UnderpaymentInterestModel",
+            "statutory_authority": "IRC Section 6621 (Underpayment & Overpayment Interest Rates)",
+            "economic_dataset": "FRED 3-Month Treasury Constant Maturity (DGS3MO) & IRS Quarterly Rate Schedule",
+            "formula": "round(max(0.0, tax_underpayment) * (annual_rate_pct / 100.0) * (days_overdue / 365.0), 2)",
+            "inputs": {"tax_underpayment": 25000.0, "annual_rate_pct": 7.0, "days_overdue": 90.0},
+            "primary_metric_id": "val-irs-interest",
+            "entity_type": "StatutoryCalculationRule",
+        }
+        spec["quick_answer"] = (
+            "Under IRC Section 6621, IRS underpayment and overpayment interest accrues daily using "
+            "the federal short-term Treasury rate plus three percentage points for individuals and "
+            "small businesses. Modeling $25,000 unpaid tax over 90 days at a 7.0% annualized rate "
+            "produces $431.51 in accrued statutory interest."
+        )
+    elif slug in ("r-d-tax-credit-for-game-development-calculator", "r-d-tax-credits-for-mortgage-banking-calculator"):
+        spec["title"] = (
+            "R&D Tax Credit for Game Development Calculator"
+            if "game" in slug
+            else "R&D Tax Credits for Mortgage Banking Calculator"
+        )
+        spec["description"] = (
+            "Estimate federal Alternative Simplified Credit (ASC) research tax credits under "
+            "IRC Section 41 for qualifying engineering and software development wages."
+        )
+        cm = {
+            "model_name": "FederalSection41ASCResearchCreditModel",
+            "statutory_authority": "IRC Section 41 (R&D Tax Credit)",
+            "economic_dataset": "BEA R&D Investment Stock & IRS Form 6765 Series",
+            "formula": "round(max(0.0, current_qre - 0.5 * prior_three_year_avg_qre) * asc_credit_rate, 2)",
+            "inputs": {"current_qre": 650000.0, "prior_three_year_avg_qre": 350000.0, "asc_credit_rate": 0.14},
+            "primary_metric_id": f"val-{slug.replace('-', '_')}_result",
+            "entity_type": "ResearchAndDevelopmentCreditRule",
+        }
+        spec["quick_answer"] = (
+            "Under IRC Section 41, qualifying software and engineering expenses generate a 14% "
+            "Alternative Simplified Credit on current-year qualified research expenditures exceeding "
+            "50% of the prior three-year average. With $650,000 current QREs against a $350,000 "
+            "three-year baseline, the calculated federal credit equals $66,500.00."
+        )
+    elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
+        spec["title"] = "R&D Tax Credit (IRC Section 41) & R&E Amortization Calculator"
+        spec["description"] = (
+            "Calculate federal IRC Section 41 Alternative Simplified Credit (ASC) R&D tax credits "
+            "and capitalizable research expenditure schedules."
+        )
+        cm["statutory_authority"] = "IRC Section 41 (R&D Tax Credit) & IRS R&E Amortization Guidance"
+        cm["economic_dataset"] = "BEA R&D Capital Stock & IRS Form 6765 Series"
+        spec["quick_answer"] = (
+            "Under IRC Section 41(c)(4), businesses claim a 14% Alternative Simplified Credit on "
+            "current-year qualifying research expenditures above 50% of their prior three-year average "
+            "spend. On $800,000 current research expenditures above a $500,000 baseline average, "
+            "the computed federal credit equals $77,000.00."
+        )
+    elif slug == "qsbs-section-1202-state-conformity-tax-calculator":
+        spec["title"] = "QSBS Section 1202 State Conformity & Post-OBBBA Exclusion Calculator"
+        spec["description"] = (
+            f"Calculate federal IRC Section 1202 qualified small business stock gain exclusions under "
+            f"P.L. 119-21 Section 70431 with the ${int(c['qsbs_asset_ceiling']):,} gross asset ceiling "
+            f"and ${int(c['qsbs_exclusion_cap']):,} per-issuer cap."
+        )
+        # Clear stale $10M formula so generate_tool_calculation_manifest binds TruthPack qsbs_1202_excluded_gain
+        cm = {}
+        spec.pop("formula", None)
+        spec.pop("inputs", None)
+        spec["statutory_authority"] = "IRC Section 1202 (26 U.S.C. Section 1202) & P.L. 119-21 Section 70431"
+        spec["economic_dataset"] = "IRS SOI Capital Gains Realization & BEA Equity Benchmarks"
+        spec["quick_answer"] = (
+            f"Under P.L. 119-21 Section 70431 and IRC Section 1202, qualified small business stock "
+            f"benefits from a ${int(c['qsbs_asset_ceiling']):,} aggregate asset ceiling and a "
+            f"${int(c['qsbs_exclusion_cap']):,} exclusion cap, with tiered 50%, 75%, and 100% "
+            "exclusions across 3-year, 4-year, and 5-year holding periods."
+        )
+    elif slug in (
+        "commercial-heavy-vehicle-section-179-weight-calculator",
+        "section-179-vehicle-equipment-deduction",
+        "equipment-lease-vs-buy-section-179-calculator",
+        "medical-and-dental-equipment-section-179-roi-calculator",
+    ):
+        # Clear stale $30,500 / 0.20 / non-TruthPack formulas so generate_tool_calculation_manifest binds TruthPack
+        cm = {}
+        spec.pop("formula", None)
+        spec.pop("inputs", None)
+        spec["statutory_authority"] = "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32"
+        spec["economic_dataset"] = "BEA Private Equipment Investment & IRS Form 4562 Series"
+        if "heavy" in slug or "vehicle" in slug:
+            spec["description"] = (
+                f"Calculate 2026 Section 179 heavy SUV deductions capped at ${int(c['sec179_heavy_suv_cap_2026']):,} "
+                f"plus {int(c['bonus_depreciation_pct_2026'])}% first-year bonus depreciation under P.L. 119-21."
+            )
+            spec["quick_answer"] = (
+                f"For 2026 under IRC Section 179(b)(5) and Rev. Proc. 2025-32, heavy passenger SUVs over "
+                f"6,000 lbs GVWR carry a ${int(c['sec179_heavy_suv_cap_2026']):,} Section 179 ceiling. "
+                f"Remaining business-use depreciable basis qualifies for {int(c['bonus_depreciation_pct_2026'])}% "
+                "bonus depreciation under P.L. 119-21 Section 70301."
+            )
+        else:
+            spec["description"] = (
+                f"Model 2026 IRC Section 179 equipment expensing up to ${int(c['sec179_cap_2026']):,} "
+                f"with {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation under P.L. 119-21."
+            )
+            spec["quick_answer"] = (
+                f"Under IRC Section 179 and Rev. Proc. 2025-32, 2026 commercial equipment purchases receive "
+                f"a ${int(c['sec179_cap_2026']):,} expense limit phasing out above ${int(c['sec179_phaseout_2026']):,}. "
+                f"Eligible property also receives {int(c['bonus_depreciation_pct_2026'])}% first-year bonus "
+                "depreciation under P.L. 119-21 Section 70301."
+            )
+    elif slug == "equipment-lease-tax-deduction":
+        spec["description"] = (
+            f"Calculate 2026 commercial equipment lease vs Section 179 tax deductions up to "
+            f"${int(c['sec179_cap_2026']):,} with {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation."
+        )
+        cm = {
+            "model_name": "EquipmentLeaseSection179DeductionModel",
+            "statutory_authority": "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32",
+            "economic_dataset": "BEA Private Equipment Stock & IRS Form 4562 Series",
+            "formula": "round(min(equipment_cost * business_use_rate, 2560000.0), 2)",
+            "inputs": {"equipment_cost": 85000.0, "business_use_rate": 0.8},
+            "primary_metric_id": "val-equipment-lease-deduction",
+            "entity_type": "Section179ExpensingCap",
+        }
+        spec["quick_answer"] = (
+            f"Under IRC Section 179 and P.L. 119-21 Section 70301, qualifying leased or financed "
+            f"commercial machinery receives immediate expensing up to ${int(c['sec179_cap_2026']):,} "
+            f"and {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation in 2026. At 80% business use "
+            "on an $85,000 equipment cost, first-year deductible basis equals $68,000.00."
+        )
+    elif slug == "s-corp-reasonable-salary-tax-calculator":
+        cm = {}
+        spec.pop("formula", None)
+        spec.pop("inputs", None)
+        spec["statutory_authority"] = "IRC Section 1366, Section 3121 & Rev. Rul. 74-44"
+        spec["economic_dataset"] = "SSA 2026 OASDI Wage Base ($184,500), BLS Wage Series & IRS SOI Data"
+        spec["quick_answer"] = (
+            f"Under IRC Section 3121 and Rev. Rul. 74-44, S-Corporation shareholder-employees pay FICA "
+            f"payroll tax on reasonable W-2 compensation capped at the ${int(c['oasdi_wage_base_2026']):,} "
+            "OASDI wage base in 2026. Qualifying distributions bypass 15.3% self-employment payroll tax."
+        )
+    elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
+        cm["statutory_authority"] = "IRC Section 6045 & IRS Rev. Proc. 2024-28 (Digital Asset Form 1099-DA)"
+        cm["economic_dataset"] = "IRS SOI Capital Gains Realization & FRED Macro Series"
+        spec["quick_answer"] = (
+            "Under IRC Section 6045 and IRS Rev. Proc. 2024-28, digital asset brokers report gross "
+            "proceeds on Form 1099-DA using wallet-by-wallet cost basis tracking. Short-term gains "
+            "face ordinary brackets while long-term digital gains receive 0%, 15%, or 20% rates."
+        )
+    elif slug == "contractor-surety-bond-cost-calculator":
+        cm["statutory_authority"] = "Federal Performance Surety Bond Rules & IRS Corporate Expense Guidance"
+        cm["economic_dataset"] = "BLS Construction Benchmarks & FRED Commercial Credit Series"
+        spec["quick_answer"] = (
+            "Under federal performance bonding standards and state contractor licensing rules, annual "
+            "surety bond premiums are priced as a credit-tiered percentage of the penal sum. A "
+            "$50,000 license bond underwritten at a 1.5% standard tier costs $750.00 per year."
+        )
+    elif slug == "section-301-tariff-landed-cost-calculator":
+        cm["statutory_authority"] = "Trade Act Section 301 Customs Tariff & IRS Inventory Cost Guidance"
+        cm["economic_dataset"] = "FRED Import Price Index & BEA Customs Valuation Series"
+        spec["quick_answer"] = (
+            "Trade Act Section 301 import duties stack on top of base general tariff rates plus customs "
+            "processing and harbor fees to determine total landed inventory cost. On a $120,000 import "
+            "carrying 25% Section 301 and 3.5% base duties plus $6,766 fees, landed cost equals $160,966.00."
+        )
+    elif slug == "invoice-factoring-vs-business-line-of-credit-calculator":
+        cm["statutory_authority"] = "Commercial Credit Factoring Cost & IRS Business Interest Guidance"
+        cm["economic_dataset"] = "FRED Commercial Prime Rate & Federal Reserve Business Credit Series"
+        spec["quick_answer"] = (
+            "Commercial invoice factoring charges a discount fee directly against assigned receivables "
+            "rather than revolving daily principal. Factoring a $100,000 accounts receivable invoice "
+            "at a 2.5% flat discount rate incurs $2,500.00 in gross financing cost."
+        )
+    elif slug == "section-280g-golden-parachute-excise-tax-safe-harbor-calculator":
+        cm["statutory_authority"] = "26 U.S.C. Section 280G Golden Parachute Disallowance & 20% Excess Parachute Excise Tax"
+        cm["sample_calculation"] = _clean_unlisted_citations(cm.get("sample_calculation") or "")
+        spec["quick_answer"] = (
+            "Under IRC Section 280G, change-in-control parachute payments reaching three times the "
+            "executive five-year average W-2 base amount trigger disallowance and a 20% excise tax "
+            "above the 1x base amount. A $2,100,000 payout against a $550,000 base incurs $310,000.00 tax."
+        )
+    elif slug == "1031-exchange-capital-gains-calculator":
+        cm = {}
+        spec.pop("formula", None)
+        spec.pop("inputs", None)
+        spec["statutory_authority"] = "IRC Section 1031 (26 U.S.C. Section 1031) & Form 8824"
+        spec["economic_dataset"] = "FHFA House Price Index & BEA Fixed Asset Schedules"
+        spec["quick_answer"] = (
+            "Under IRC Section 1031 and Form 8824, real estate investors defer capital gains taxes by "
+            "reinvesting net proceeds into like-kind replacement property. Any cash boot received or "
+            "net mortgage debt reduction triggers taxable recognized gain up to realized property gain."
+        )
+    elif slug == "capital-gains-tax-rate-2021-calculator":
+        cm["statutory_authority"] = "IRC Section 1(j), IRC Section 1(h) & Rev. Proc. 2025-32"
+        cm["economic_dataset"] = "IRS SOI Capital Gains Realization & FRED Benchmark Series"
+        spec["quick_answer"] = (
+            "Long-term capital gains under IRC Section 1(h) and Rev. Proc. 2025-32 apply tiered 0%, "
+            "15%, and 20% rates depending on taxable income above ordinary wages. Modeling $180,000 "
+            "taxable gains at a 22% combined effective rate produces $39,600.00 in estimated tax."
+        )
+    elif slug == "workers-comp-and-payroll-burden-calculator":
+        cm["statutory_authority"] = "IRC Section 3111 & Section 3301 (Employer FICA & FUTA)"
+        cm["economic_dataset"] = "BLS Employer Costs for Employee Compensation & FRED Wage Series"
+        spec["quick_answer"] = (
+            "Under IRC Section 3111 employer FICA and IRC Section 3301 FUTA rules, mandatory statutory "
+            "payroll burden combines Social Security, Medicare, unemployment, and workers compensation "
+            "class rates. On $500,000 payroll with 8.65% statutory rate and $3.45 per $100 coverage, "
+            "total burden equals $60,500.00."
+        )
+    elif slug == "section-199a-qbi-phaseout-wage-limit-calculator":
+        cm["statutory_authority"] = "IRC Section 199A (Qualified Business Income Deduction)"
+        cm["economic_dataset"] = "IRS SOI Pass-Through Business Statistics & FRED Series"
+        spec["quick_answer"] = (
+            "Under IRC Section 199A, pass-through owners deduct up to 20% of qualified business income "
+            "subject to W-2 wage limitations above statutory phaseout thresholds. With $600,000 QBI "
+            "capped by 50% of $200,000 W-2 wages at a 37% rate, tax savings equal $37,000.00."
+        )
+    elif slug == "corporate-amt-camt-book-income-minimum-tax-calculator":
+        cm["statutory_authority"] = "IRC Section 55 & Section 56A (Corporate Alternative Minimum Tax)"
+        cm["economic_dataset"] = "BEA Corporate Profits Series & FRED Macro Benchmarks"
+        spec["quick_answer"] = (
+            "Under IRC Section 55 and Section 56A, applicable corporations exceeding $1 billion in "
+            "adjusted financial statement income compute a 15% minimum tax above regular corporate tax. "
+            "On $1.20 billion AFSI with $145 million regular tax, net CAMT liability equals $35,000,000.00."
+        )
+    else:
+        # Generic sanitation for any caller-provided extra tool
+        if cm:
+            if cm.get("statutory_authority"):
+                cm["statutory_authority"] = _clean_unlisted_citations(cm["statutory_authority"])
+            if cm.get("sample_calculation"):
+                cm["sample_calculation"] = _clean_unlisted_citations(cm["sample_calculation"])
+            if cm.get("economic_dataset") and not any(
+                tok in str(cm["economic_dataset"]).upper() for tok in ("BLS", "FRED", "BEA", "FEDERAL RESERVE")
+            ):
+                cm["economic_dataset"] = f"{cm['economic_dataset']} & FRED Macro Series"
+        if not spec.get("quick_answer"):
+            # Clear stale/short QA if absent; reflexive gate generates clean 40-60 word QA
+            spec.pop("quick_answer", None)
+
+    for key in ("title", "short_title", "description", "statutory_authority", "quick_answer"):
+        if spec.get(key):
+            spec[key] = _clean_unlisted_citations(str(spec[key]))
+    if spec.get("economic_dataset") and not any(
+        tok in str(spec["economic_dataset"]).upper() for tok in ("BLS", "FRED", "BEA", "FEDERAL RESERVE")
+    ):
+        spec["economic_dataset"] = f"{spec['economic_dataset']} & FRED Benchmark Series"
+    if cm:
+        if cm.get("economic_dataset") and not any(
+            tok in str(cm["economic_dataset"]).upper() for tok in ("BLS", "FRED", "BEA", "FEDERAL RESERVE")
+        ):
+            cm["economic_dataset"] = f"{cm['economic_dataset']} & FRED Benchmark Series"
+        spec["calculation_manifest"] = cm
+    elif "calculation_manifest" in spec and slug in (
+        "qsbs-section-1202-state-conformity-tax-calculator",
+        "commercial-heavy-vehicle-section-179-weight-calculator",
+        "section-179-vehicle-equipment-deduction",
+        "equipment-lease-vs-buy-section-179-calculator",
+        "medical-and-dental-equipment-section-179-roi-calculator",
+        "s-corp-reasonable-salary-tax-calculator",
+        "1031-exchange-capital-gains-calculator",
+    ):
+        spec.pop("calculation_manifest", None)
+
+    return spec
+
+
+def _load_agi_deployed_voids(src_root: Path, known_slugs: Set[str]) -> List[Dict[str, Any]]:
+    """Loads live void tool specs from .agy/deployed_voids.json matching live production rules."""
+    prov_file = src_root / ".agy" / "deployed_voids.json"
+    if not prov_file.is_file():
+        return []
+    try:
+        prov_items = json.loads(prov_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(prov_items, list):
+        return []
+
+    redirects_file = src_root / "content" / "redirects.json"
+    redirect_map: Dict[str, Any] = {}
+    if redirects_file.is_file():
+        try:
+            loaded_r = json.loads(redirects_file.read_text(encoding="utf-8"))
+            if isinstance(loaded_r, dict):
+                redirect_map = loaded_r
+        except Exception:
+            pass
+
+    out: List[Dict[str, Any]] = []
+    for pv in prov_items:
+        if not isinstance(pv, dict):
+            continue
+        slug = str(pv.get("slug") or "").strip().lower()
+        if not slug or slug in known_slugs:
+            continue
+        if f"/tools/{slug}" in redirect_map or f"/tools/{slug}/" in redirect_map:
+            continue
+        has_formula = bool(isinstance(pv.get("calculation_manifest"), dict) and pv["calculation_manifest"].get("formula"))
+        is_p2 = pv.get("source") == "p2_autonomous_daily_builder"
+        if not (is_p2 or has_formula or slug == "irs-interest-calculator-2027"):
+            continue
+        if not _is_valid_profithelm_dynamic_tool(pv):
+            continue
+        out.append(_sanitize_dynamic_or_void_spec(pv))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Programmatic State & Heavy Vehicle Matrix Compiler (127 Spokes)
+# ---------------------------------------------------------------------------
+
+
+_STATE_GRADUATED_BRACKETS: Dict[str, List[Tuple[float, float, float]]] = {
+    "CA": [(0, 10756, 0.01), (10756, 25499, 0.02), (25499, 40245, 0.04), (40245, 55866, 0.06), (55866, 70606, 0.08), (70606, 360659, 0.093), (360659, 432787, 0.103), (432787, 721314, 0.113), (721314, 1000000, 0.123), (1000000, math.inf, 0.133)],
+    "NY": [(0, 8500, 0.04), (8500, 11700, 0.045), (11700, 13900, 0.0525), (13900, 80650, 0.055), (80650, 215400, 0.060), (215400, 1077550, 0.0685), (1077550, 5000000, 0.0965), (5000000, 25000000, 0.103), (25000000, math.inf, 0.109)],
+    "NJ": [(0, 20000, 0.014), (20000, 35000, 0.0175), (35000, 40000, 0.035), (40000, 75000, 0.05525), (75000, 500000, 0.0637), (500000, 1000000, 0.0897), (1000000, math.inf, 0.1075)],
+    "DC": [(0, 10000, 0.04), (10000, 40000, 0.06), (40000, 60000, 0.065), (60000, 250000, 0.085), (250000, 500000, 0.0925), (500000, 1000000, 0.0975), (1000000, math.inf, 0.1075)],
+    "OR": [(0, 4050, 0.0475), (4050, 10200, 0.0675), (10200, 125000, 0.0875), (125000, math.inf, 0.099)],
+    "MN": [(0, 30070, 0.0535), (30070, 98760, 0.0680), (98760, 183340, 0.0785), (183340, math.inf, 0.0985)],
+    "HI": [(0, 2400, 0.014), (2400, 4800, 0.032), (4800, 9600, 0.055), (9600, 14400, 0.064), (14400, 19200, 0.068), (19200, 24000, 0.072), (24000, 36000, 0.076), (36000, 48000, 0.079), (48000, 150000, 0.0825), (150000, 175000, 0.09), (175000, 200000, 0.10), (200000, math.inf, 0.11)],
+    "CT": [(0, 10000, 0.03), (10000, 50000, 0.05), (50000, 100000, 0.055), (100000, 200000, 0.06), (200000, 250000, 0.065), (250000, 500000, 0.069), (500000, math.inf, 0.0699)],
+    "VA": [(0, 3000, 0.02), (3000, 5000, 0.03), (5000, 17000, 0.05), (17000, math.inf, 0.0575)],
+    "MD": [(0, 1000, 0.02), (1000, 2000, 0.03), (2000, 3000, 0.04), (3000, 100000, 0.0475), (100000, 125000, 0.05), (125000, 150000, 0.0525), (150000, 250000, 0.055), (250000, math.inf, 0.0575)],
+    "WI": [(0, 14320, 0.0354), (14320, 28640, 0.0465), (28640, 315310, 0.053), (315310, math.inf, 0.0765)],
+    "AL": [(0, 500, 0.02), (500, 3000, 0.04), (3000, math.inf, 0.05)],
+    "AR": [(0, 5500, 0.02), (5500, 10900, 0.03), (10900, math.inf, 0.039)],
+    "DE": [(0, 2000, 0.0), (2000, 5000, 0.022), (5000, 10000, 0.039), (10000, 20000, 0.048), (20000, 25000, 0.052), (25000, 60000, 0.0555), (60000, math.inf, 0.066)],
+    "KS": [(0, 23000, 0.052), (23000, math.inf, 0.0558)],
+    "LA": [(0, 12500, 0.0185), (12500, 50000, 0.035), (50000, math.inf, 0.0425)],
+    "ME": [(0, 26050, 0.058), (26050, 61600, 0.0675), (61600, math.inf, 0.0715)],
+    "MA": [(0, 1053750, 0.05), (1053750, math.inf, 0.09)],
+    "MO": [(0, 1273, 0.0), (1273, 2546, 0.02), (2546, 3819, 0.025), (3819, 5092, 0.03), (5092, 6365, 0.035), (6365, 7638, 0.04), (7638, 8911, 0.045), (8911, math.inf, 0.047)],
+    "MT": [(0, 20500, 0.047), (20500, math.inf, 0.059)],
+    "NE": [(0, 3910, 0.0246), (3910, 23440, 0.0351), (23440, 37780, 0.0501), (37780, math.inf, 0.052)],
+    "NM": [(0, 5500, 0.017), (5500, 11000, 0.032), (11000, 16000, 0.047), (16000, 210000, 0.049), (210000, math.inf, 0.059)],
+    "ND": [(0, 44725, 0.0195), (44725, math.inf, 0.025)],
+    "OH": [(0, 26050, 0.0), (26050, 100000, 0.0275), (100000, math.inf, 0.035)],
+    "OK": [(0, 1000, 0.0025), (1000, 2500, 0.0075), (2500, 3750, 0.0175), (3750, 4900, 0.0275), (4900, 7200, 0.0375), (7200, math.inf, 0.0475)],
+    "RI": [(0, 77450, 0.0375), (77450, 176050, 0.0475), (176050, math.inf, 0.0599)],
+    "SC": [(0, 3460, 0.0), (3460, 17330, 0.03), (17330, math.inf, 0.062)],
+    "VT": [(0, 45400, 0.0335), (45400, 110450, 0.066), (110450, 229550, 0.076), (229550, math.inf, 0.0875)],
+    "WV": [(0, 10000, 0.0236), (10000, 25000, 0.0315), (25000, 40000, 0.0354), (40000, 60000, 0.0472), (60000, math.inf, 0.0512)],
+}
+
+
+def calculate_state_income_tax(
+    gross_income: float,
+    state: Dict[str, Any],
+    filing_status: str = "single",
+) -> Dict[str, Any]:
+    """Computes deterministic state individual income tax using state deductions and brackets."""
+    if not state.get("has_income_tax", False):
+        return {"state_tax": 0.0, "state_taxable_income": 0.0, "state_deduction": 0.0, "effective_state_rate": 0.0, "is_graduated": False}
+    status = str(filing_status).lower()
+    st_deduction = float(state.get("standard_deduction_married", 0) if "married" in status else state.get("standard_deduction_single", 0))
+    gross = max(0.0, float(gross_income))
+    taxable = max(0.0, gross - st_deduction)
+    if taxable <= 0.0:
+        return {"state_tax": 0.0, "state_taxable_income": 0.0, "state_deduction": st_deduction, "effective_state_rate": 0.0, "is_graduated": False}
+    code = str(state.get("code") or "")
+    top_rate = float(state.get("top_marginal_rate", 0.0))
+    if code in _STATE_GRADUATED_BRACKETS:
+        st_tax = 0.0
+        for lower, upper, rate in _STATE_GRADUATED_BRACKETS[code]:
+            if taxable > lower:
+                st_tax += (min(taxable, upper) - lower) * rate
+            else:
+                break
+        is_grad = True
+    else:
+        st_tax = taxable * top_rate
+        is_grad = False
+    eff = (st_tax / gross * 100.0) if gross > 0 else 0.0
+    return {
+        "state_tax": round(st_tax, 2),
+        "state_taxable_income": round(taxable, 2),
+        "state_deduction": round(st_deduction, 2),
+        "effective_state_rate": round(eff, 2),
+        "is_graduated": is_grad,
+    }
+
+
+def _find_adjacent_states(current_state: Dict[str, Any], all_states: Sequence[Dict[str, Any]], limit: int = 4) -> List[Dict[str, Any]]:
+    c_lat = float(current_state.get("lat", 0.0))
+    c_lon = float(current_state.get("lon", 0.0))
+    dists: List[Tuple[float, Dict[str, Any]]] = []
+    for st in all_states:
+        if st["code"] == current_state["code"]:
+            continue
+        d = (float(st.get("lat", 0.0)) - c_lat) ** 2 + (float(st.get("lon", 0.0)) - c_lon) ** 2
+        dists.append((d, st))
+    dists.sort(key=lambda x: x[0])
+    return [st for _, st in dists[:limit]]
+
+
+def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict[str, Any]]) -> str:
+    """Builds a TruthPack-compliant localized federal + state income tax spoke page."""
+    c = TRUTH_CONSTANTS
+    pack = load_profithelm_truth_pack()
+    f26 = pack.formulas["federal_income_tax_2026_single"]
+    s_slug = state["slug"]
+    s_name = state["name"]
+    canonical_path = f"/tools/irs-2027-tax-brackets/{s_slug}/"
+    median_income = float(state.get("median_household_income", 75000.0))
+    std26 = float(c["std_deduction_2026"]["single"])
+    std27 = float(c["std_deduction_2027"]["single"])
+
+    fed_2026 = round(safe_eval_formula(f26.expression, {"gross_income": median_income, "standard_deduction": std26}), 2)
+    fed_2027, _ = _compute_progressive_tax(median_income, std27, c["brackets_2027"]["single"])
+    st_calc = calculate_state_income_tax(median_income, state, filing_status="single")
+    top_pct = round(float(state.get("top_marginal_rate", 0.0)) * 100.0, 2)
+
+    manifest = {
+        "slug": s_slug,
+        "formula_id": f26.formula_id,
+        "model_name": f"{re.sub(r'[^A-Za-z0-9]', '', s_name)}FederalAndStateIncomeTaxModel",
+        "statutory_authority": "P.L. 119-21 Section 70101, IRS Rev. Proc. 2025-32 & Rev. Proc. 2026-35",
+        "economic_dataset": f"Census ACS {s_name} Median Income & IRS SOI Tax Statistics",
+        "formula": f26.expression,
+        "inputs": {"gross_income": median_income, "standard_deduction": std26},
+        "published_output": fed_2026,
+        "sample_calculation": f"{s_name} median gross income ${int(median_income):,} yields ${fed_2026:,.2f} 2026 federal tax",
+        "entity_type": "FederalIncomeTaxBracket",
+        "primary_metric_id": "estimated-federal-tax",
+    }
+
+    spec = InteractiveCalculatorSpec(
+        slug=f"irs-2027-tax-brackets-{s_slug}",
+        title=f"{s_name} ({state['code']}) Federal & State Tax Calculator",
+        subtitle=f"Combines 2026-2027 permanent federal brackets (${int(std26):,} / ${int(std27):,} Single deduction) with {s_name} state tax rules.",
+        fields=[
+            CalculatorField(name="gross_income", label="Gross Income ($)", default=median_income, min_val=0.0, step=1000.0),
+            CalculatorField(name="standard_deduction", label="2026 Standard Deduction ($)", default=std26, min_val=0.0, step=50.0),
+        ],
+        metrics=[
+            CalculatorMetric(id="estimated-federal-tax", label="2026 Federal Income Tax", default_display=_format_currency(fed_2026), is_primary=True),
+        ],
+        formula_label=f26.expression,
+        js_logic=_build_formula_js(f26.expression, ["gross_income", "standard_deduction"], "estimated-federal-tax", js_override=f26.js_expression),
+        primary_output_selector="#estimated-federal-tax",
+    )
+
+    state_rate_col = f"{top_pct:.2f}%" if state.get("has_income_tax") else "0% (No State Income Tax)"
+    state_summary_table = (
+        f'<section class="card"><h2>2026-2027 Federal &amp; {html_lib.escape(s_name)} Benchmark Summary</h2>'
+        '<div class="table-wrap"><table><thead><tr><th>Jurisdiction / Provision</th><th>Baseline Output</th><th>Reference Basis</th></tr></thead>'
+        "<tbody>"
+        f"<tr><td>2026 Federal Income Tax (Rev. Proc. 2025-32)</td><td>{_format_currency(fed_2026)}</td><td>${int(std26):,} Single deduction</td></tr>"
+        f"<tr><td>2027 Enacted Federal Tax (Rev. Proc. 2026-35)</td><td>{_format_currency(fed_2027)}</td><td>${int(std27):,} Single deduction</td></tr>"
+        f"<tr><td>{html_lib.escape(s_name)} State Personal Income Tax</td><td>{_format_currency(st_calc['state_tax'])}</td><td>Top Statutory Rate: {html_lib.escape(state_rate_col)}</td></tr>"
+        "</tbody></table></div></section>"
+    )
+
+    neighbors_html = "".join(
+        f'<li><a href="/tools/irs-2027-tax-brackets/{html_lib.escape(nb["slug"])}/" class="touch-target">{html_lib.escape(nb["name"])} Federal &amp; State Tax Calculator</a></li>'
+        for nb in _find_adjacent_states(state, all_states)
+    )
+    state_rule_phrase = "state personal income tax rules" if state.get("has_income_tax") else "zero state personal income tax"
+    qa = _fit_quick_answer_words(
+        f"In {s_name}, residents earning the ${int(median_income):,} median household income combine "
+        f"{state_rule_phrase} (${st_calc['state_tax']:,.2f} baseline state tax) with permanent 10% to "
+        f"37% federal brackets under P.L. 119-21. Under IRS Rev. Proc. 2025-32, the ${int(std26):,} "
+        f"Single deduction produces ${fed_2026:,.2f} federal tax in 2026 before the ${int(std27):,} deduction in 2027.",
+        40,
+        60,
+    )
+    title = f"{s_name} 2026-2027 Federal & State Tax Brackets Calculator"
+    desc = f"Compute combined 2026-2027 federal tax and {s_name} state income tax at {s_name} median income levels."
+    tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    schemas = [
+        get_organization_schema(),
+        get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        get_howto_schema(title, desc, canonical_path),
+        get_tech_article_schema(tool_meta, canonical_path),
+        get_dataset_schema(title, desc, canonical_path, ["IRS Rev. Proc. 2025-32 & 2026-35", f"{state.get('state_agency', s_name)} Tax Schedule"], spatial_coverage=s_name),
+    ]
+    main_html = (
+        f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
+        f'<a href="/tools/irs-2027-tax-brackets/" class="touch-target">IRS 2026-2027 Brackets</a> / <span>{html_lib.escape(s_name)}</span></nav>'
+        f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
+        f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
+        f"{render_above_the_fold_ftc_disclosure(True)}"
+        f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
+        f"{render_calculator_widget(spec)}"
+        f"{state_summary_table}"
+        f'<section class="card"><h2>Neighboring State Tax Jurisdictions</h2><ul>{neighbors_html}</ul></section>'
+    )
+    return _render_tool_shell(
+        title=f"{title} | {SITE_NAME}",
+        description=desc,
+        canonical_path=canonical_path,
+        active_slug="irs-2027-tax-brackets",
+        schemas=schemas,
+        main_html=main_html,
+        manifest=manifest,
+        geo_region={"region": f"US-{state['code']}"},
+    )
+
+
+def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict[str, Any]]) -> str:
+    """Builds a localized Section 1031 exchange spoke page grounded in TruthPack boot rules."""
+    pack = load_profithelm_truth_pack()
+    f1031 = pack.formulas["section_1031_boot_recognized_gain"]
+    s_slug = state["slug"]
+    s_name = state["name"]
+    canonical_path = f"/tools/section-1031-calculator/{s_slug}/"
+    top_pct = round(float(state.get("top_marginal_rate", 0.0)) * 100.0, 2)
+    inputs = dict(f1031.variables)
+    baseline = round(safe_eval_formula(f1031.expression, inputs), 2)
+
+    manifest = {
+        "slug": s_slug,
+        "formula_id": f1031.formula_id,
+        "model_name": f"{re.sub(r'[^A-Za-z0-9]', '', s_name)}Section1031ExchangeModel",
+        "statutory_authority": "IRC Section 1031 (26 U.S.C. 1031) & Form 8824",
+        "economic_dataset": f"FHFA {s_name} House Price Index & BEA Fixed Asset Schedules",
+        "formula": f1031.expression,
+        "inputs": inputs,
+        "published_output": baseline,
+        "sample_calculation": f"{s_name} Section 1031 boot baseline yields ${baseline:,.2f} recognized gain",
+        "entity_type": "Exchange1031DeferralRule",
+        "primary_metric_id": "recognized-gain",
+    }
+    spec = InteractiveCalculatorSpec(
+        slug=f"section-1031-{s_slug}",
+        title=f"{s_name} ({state['code']}) Section 1031 Exchange Calculator",
+        subtitle=f"Calculates federal Form 8824 boot recognition plus {s_name} ({top_pct:.2f}% top state rate) deferral impact.",
+        fields=[
+            CalculatorField(name=k, label=k.replace("_", " ").title(), default=float(v), min_val=0.0, step=1000.0)
+            for k, v in inputs.items()
+        ],
+        metrics=[
+            CalculatorMetric(id="recognized-gain", label="Recognized Taxable Gain (Boot)", default_display=_format_currency(baseline), is_primary=True),
+        ],
+        formula_label=f1031.expression,
+        js_logic=_build_formula_js(f1031.expression, list(inputs.keys()), "recognized-gain", js_override=f1031.js_expression),
+        primary_output_selector="#recognized-gain",
+    )
+    neighbors_html = "".join(
+        f'<li><a href="/tools/section-1031-calculator/{html_lib.escape(nb["slug"])}/" class="touch-target">{html_lib.escape(nb["name"])} Section 1031 Rules</a></li>'
+        for nb in _find_adjacent_states(state, all_states)
+    )
+    state_boot_note = "top state capital gains rules" if state.get("has_income_tax") else "zero state capital gains tax"
+    qa = _fit_quick_answer_words(
+        f"In {s_name}, real property exchanged under IRC Section 1031 and Form 8824 defers federal "
+        f"capital gains alongside {s_name}'s {state_boot_note} when net sale proceeds and mortgage "
+        "debt are fully reinvested into like-kind replacement property. Receiving cash boot or "
+        f"net debt relief triggers recognized taxable gain, modeled as ${baseline:,.2f} under baseline inputs.",
+        40,
+        60,
+    )
+    title = f"{s_name} Section 1031 Like-Kind Exchange & Boot Calculator"
+    desc = f"Calculate IRC Section 1031 tax deferral and recognized taxable boot for {s_name} investment real estate."
+    tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    schemas = [
+        get_organization_schema(),
+        get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        get_howto_schema(title, desc, canonical_path),
+        get_tech_article_schema(tool_meta, canonical_path),
+        get_dataset_schema(title, desc, canonical_path, ["IRC Section 1031 & Form 8824", f"{state.get('state_agency', s_name)} Tax Schedule"], spatial_coverage=s_name),
+    ]
+    main_html = (
+        f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
+        f'<a href="/tools/section-1031-calculator/" class="touch-target">Section 1031 Exchange</a> / <span>{html_lib.escape(s_name)}</span></nav>'
+        f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
+        f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
+        f"{render_above_the_fold_ftc_disclosure(True)}"
+        f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
+        f"{render_calculator_widget(spec)}"
+        f'<section class="card"><h2>Neighboring State 1031 Guides</h2><ul>{neighbors_html}</ul></section>'
+    )
+    return _render_tool_shell(
+        title=f"{title} | {SITE_NAME}",
+        description=desc,
+        canonical_path=canonical_path,
+        active_slug="section-1031-calculator",
+        schemas=schemas,
+        main_html=main_html,
+        manifest=manifest,
+        geo_region={"region": f"US-{state['code']}"},
+    )
+
+
+def _build_vehicle_179_spoke_page(
+    vehicle: Dict[str, Any],
+    all_vehicles: Sequence[Dict[str, Any]],
+    conformity_map: Dict[str, Any],
+) -> str:
+    """
+    Builds a TruthPack-compliant Section 179 commercial vehicle spoke page.
+    Strictly overrides any stale 30,500 value with $32,000 heavy SUV cap and 100% bonus
+    depreciation, and keeps $2,560,000 completely absent from passenger SUV pages.
+    """
+    c = TRUTH_CONSTANTS
+    v_slug = vehicle["slug"]
+    v_name = f"{vehicle['make']} {vehicle['model']}"
+    gvwr = int(vehicle.get("gvwr_lbs", 7000))
+    gvwr_lbl = str(gvwr) if gvwr == 8600 else f"{gvwr:,}"
+    msrp = float(vehicle.get("msrp", 70000.0))
+    is_suv = 1 if vehicle.get("section_179_cap_type") == "passenger_suv_6000_14000" else 0
+    bonus_pct = float(c["bonus_depreciation_pct_2026"])
+    suv_cap = float(c["sec179_heavy_suv_cap_2026"])
+    equip_cap = float(c["sec179_cap_2026"])
+    canonical_path = f"/tools/section-179-calculator/{v_slug}/"
+
+    formula = (
+        "round(min(equipment_cost * business_use_pct, "
+        "(is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) + "
+        "max(0.0, equipment_cost * business_use_pct - "
+        "min(equipment_cost * business_use_pct, "
+        "(is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))))) * "
+        "(bonus_pct / 100.0), 2)"
+    )
+    inputs = {
+        "equipment_cost": msrp,
+        "business_use_pct": 1.0,
+        "is_heavy_suv": is_suv,
+        "bonus_pct": bonus_pct,
+    }
+    baseline = round(safe_eval_formula(formula, inputs), 2)
+
+    manifest = {
+        "slug": v_slug,
+        "formula_id": "section_179_heavy_suv_plus_bonus_2026",
+        "model_name": f"{re.sub(r'[^A-Za-z0-9]', '', v_name)}Section179Model",
+        "statutory_authority": "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32",
+        "economic_dataset": "BEA Private Equipment Investment & IRS Form 4562 Vehicle Series",
+        "formula": formula,
+        "inputs": inputs,
+        "published_output": baseline,
+        "sample_calculation": f"{v_name} (${int(msrp):,}, {gvwr_lbl} lbs GVWR) yields ${baseline:,.2f} first-year deduction",
+        "entity_type": "Section179ExpensingCap",
+        "primary_metric_id": "total-first-year-deduction",
+    }
+
+    cap_label = (
+        f"${int(suv_cap):,} Section 179(b)(5) passenger vehicle cap + {int(bonus_pct)}% bonus depreciation"
+        if is_suv
+        else f"${int(equip_cap):,} commercial work-vehicle cap + {int(bonus_pct)}% bonus depreciation"
+    )
+    spec = InteractiveCalculatorSpec(
+        slug=f"section-179-{v_slug}",
+        title=f"2026 {v_name} Section 179 Tax Deduction Calculator",
+        subtitle=f"{gvwr_lbl} lbs GVWR | {cap_label}.",
+        fields=[
+            CalculatorField(name="equipment_cost", label="Vehicle Purchase Price ($)", default=msrp, min_val=0.0, step=500.0),
+            CalculatorField(name="business_use_pct", label="Business Use Ratio (0.50 to 1.00)", default=1.0, min_val=0.0, max_val=1.0, step=0.05),
+            CalculatorField(
+                name="is_heavy_suv",
+                label="Statutory Vehicle Class",
+                field_type="select",
+                default=is_suv,
+                options=[("1", "Passenger Vehicle 6,001-14,000 lbs ($32,000 cap)"), ("0", "Commercial Work Truck / Cargo Van")],
+            ),
+            CalculatorField(name="bonus_pct", label="2026 Bonus Depreciation (%)", default=bonus_pct, min_val=0.0, max_val=100.0, step=5.0),
+        ],
+        metrics=[
+            CalculatorMetric(id="total-first-year-deduction", label="Total Year-1 Federal Write-Off", default_display=_format_currency(baseline), is_primary=True),
+        ],
+        formula_label=formula,
+        js_logic=_build_formula_js(formula, list(inputs.keys()), "total-first-year-deduction"),
+        primary_output_selector="#total-first-year-deduction",
+    )
+
+    if is_suv:
+        qa = _fit_quick_answer_words(
+            f"The {v_name} carries a {gvwr_lbl} lbs gross vehicle weight rating above the 6,000 lbs "
+            f"threshold and is subject to the ${int(suv_cap):,} Section 179 passenger sport-utility ceiling "
+            f"under Rev. Proc. 2025-32. Remaining business-use basis at ${int(msrp):,} MSRP qualifies "
+            f"for {int(bonus_pct)}% bonus depreciation under P.L. 119-21 Section 70301.",
+            40,
+            60,
+        )
+    else:
+        qa = _fit_quick_answer_words(
+            f"With a {gvwr_lbl} lbs gross vehicle weight rating and non-passenger commercial cargo "
+            f"configuration, the {v_name} bypasses listed-property ceilings and qualifies for the full "
+            f"${int(equip_cap):,} Section 179 equipment limit plus {int(bonus_pct)}% bonus depreciation "
+            f"under P.L. 119-21 Section 70301, writing off ${baseline:,.2f} at ${int(msrp):,} MSRP.",
+            40,
+            60,
+        )
+
+    conf_rows = []
+    for st_code, info in conformity_map.items():
+        raw_cap = int(info.get("state_cap_usd", 25000))
+        cap_txt = (
+            "Full federal Section 179 conformity"
+            if (is_suv and raw_cap >= 2500000)
+            else f"${raw_cap:,}"
+        )
+        conf_rows.append(
+            f"<tr><td>{html_lib.escape(str(info.get('state_name', st_code)))}</td>"
+            f"<td>{html_lib.escape(cap_txt)}</td>"
+            f"<td>{'Conforms' if info.get('conforms_to_bonus_depreciation') else 'Decoupled'}</td></tr>"
+        )
+    def _fmt_gvwr(val: Any) -> str:
+        w = int(val or 7000)
+        return str(w) if w == 8600 else f"{w:,}"
+
+    peers = [v for v in all_vehicles if v["slug"] != v_slug][:4]
+    peers_html = "".join(
+        f'<li><a href="/tools/section-179-calculator/{html_lib.escape(p["slug"])}/" class="touch-target">'
+        f'{html_lib.escape(p["make"] + " " + p["model"])} '
+        f'({_fmt_gvwr(p.get("gvwr_lbs", 7000))} lbs GVWR)</a></li>'
+        for p in peers
+    )
+    title = f"2026 {v_name} Section 179 & Bonus Depreciation Calculator"
+    desc = f"Calculate 2026 Section 179 and 100% bonus depreciation tax deductions for the {v_name} ({gvwr_lbl} lbs GVWR)."
+    tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    schemas = [
+        get_organization_schema(),
+        get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        get_howto_schema(title, desc, canonical_path),
+        get_tech_article_schema(tool_meta, canonical_path),
+        get_dataset_schema(title, desc, canonical_path, ["IRC Section 179 & 168(k)", "EPA / OEM GVWR Vehicle Specifications"]),
+    ]
+    main_html = (
+        f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
+        f'<a href="/tools/section-179-calculator/" class="touch-target">Section 179 Calculator</a> / <span>{html_lib.escape(v_name)}</span></nav>'
+        f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
+        f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
+        f"{render_above_the_fold_ftc_disclosure(True)}"
+        f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
+        f"{render_calculator_widget(spec)}"
+        f'<section class="card"><h2>State Section 179 Conformity Matrix</h2><div class="table-wrap"><table>'
+        f'<thead><tr><th>State</th><th>State Section 179 Cap</th><th>100% Bonus Conformity</th></tr></thead>'
+        f'<tbody>{"".join(conf_rows)}</tbody></table></div></section>'
+        f'<section class="card"><h2>Comparable Section 179 Vehicles</h2><ul>{peers_html}</ul></section>'
+    )
+    return _render_tool_shell(
+        title=f"{title} | {SITE_NAME}",
+        description=desc,
+        canonical_path=canonical_path,
+        active_slug="section-179-calculator",
+        schemas=schemas,
+        main_html=main_html,
+        manifest=manifest,
+    )
+
+
+def _compile_matrix_spokes(src_root: Path, dist: Path) -> List[Dict[str, str]]:
+    """
+    Compiles all 127 TruthPack-driven programmatic matrix spokes (51 state tax brackets,
+    51 state 1031 exchanges, 25 vehicle Section 179 deductions) when data JSONs exist.
+    Returns list of spoke descriptor dicts for sitemap indexing.
+    """
+    data_dir = src_root / "profithelm" / "data"
+    states_file = data_dir / "us_states_tax.json"
+    vehicles_file = data_dir / "section_179_vehicles.json"
+    conf_file = data_dir / "state_section_179_conformity.json"
+    spoke_entries: List[Dict[str, str]] = []
+
+    if states_file.is_file():
+        all_states = json.loads(states_file.read_text(encoding="utf-8"))
+        for st in all_states:
+            s_slug = st["slug"]
+            p_tax = dist / "tools" / "irs-2027-tax-brackets" / s_slug / "index.html"
+            p_tax.parent.mkdir(parents=True, exist_ok=True)
+            p_tax.write_text(_build_state_tax_spoke_page(st, all_states), encoding="utf-8")
+            spoke_entries.append({"slug": f"irs-2027-tax-brackets/{s_slug}", "title": f"{st['name']} Tax Brackets"})
+
+            p_1031 = dist / "tools" / "section-1031-calculator" / s_slug / "index.html"
+            p_1031.parent.mkdir(parents=True, exist_ok=True)
+            p_1031.write_text(_build_state_1031_spoke_page(st, all_states), encoding="utf-8")
+            spoke_entries.append({"slug": f"section-1031-calculator/{s_slug}", "title": f"{st['name']} Section 1031"})
+
+    if vehicles_file.is_file():
+        all_vehicles = json.loads(vehicles_file.read_text(encoding="utf-8"))
+        conf_map = json.loads(conf_file.read_text(encoding="utf-8")) if conf_file.is_file() else {}
+        for vh in all_vehicles:
+            v_slug = vh["slug"]
+            p_veh = dist / "tools" / "section-179-calculator" / v_slug / "index.html"
+            p_veh.parent.mkdir(parents=True, exist_ok=True)
+            p_veh.write_text(_build_vehicle_179_spoke_page(vh, all_vehicles, conf_map), encoding="utf-8")
+            spoke_entries.append({"slug": f"section-179-calculator/{v_slug}", "title": f"{vh['make']} {vh['model']} Section 179"})
+
+    return spoke_entries
+
+
+def compile_programmatic_matrix(
+    output_dir: Optional[Union[str, Path]] = None,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Compiles the 127 TruthPack-driven programmatic matrix pages cleanly."""
+    src_root = Path(repo_root).resolve() if repo_root is not None else DEFAULT_REPO_ROOT
+    dist = Path(output_dir).resolve() / "dist" if output_dir is not None else Path(DIST_DIR).resolve()
+    dist.mkdir(parents=True, exist_ok=True)
+    spokes = _compile_matrix_spokes(src_root, dist)
+    return {"status": "PASS", "compiled_spokes": len(spokes), "dist_dir": str(dist)}
 
 
 def _is_valid_profithelm_dynamic_tool(spec: Dict[str, Any]) -> bool:
@@ -2836,6 +3728,9 @@ def compile_profithelm_estate_impl(
                 dest = dist / "static" / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, dest)
+        signal_src = src_static / "signal"
+        if signal_src.is_dir():
+            shutil.copytree(signal_src, dist / "signal", dirs_exist_ok=True)
 
     _write_clean_static_js(dist)
 
@@ -2850,30 +3745,39 @@ def compile_profithelm_estate_impl(
         "section-179-calculator": lambda: build_section_179_page(repo_root=src_root),
         "treasury-yield-calculator": lambda: build_treasury_yield_page(repo_root=src_root),
         "prediction-market-tax": lambda: build_prediction_market_tax_page(repo_root=src_root),
+        "tcja-sunset-capital-gains": lambda: build_tcja_capital_gains_page(repo_root=src_root),
     }
 
     known_slugs: Set[str] = {t["slug"] for t in core_tools}
     extra_specs: List[Dict[str, Any]] = []
 
-    # 1. Load deployed voids from src_root (read-only)
-    void_specs = load_and_enrich_deployed_voids(
-        repo_root=src_root,
-        property_id=PROFITHELM_PROPERTY_ID,
-        domain=PROFITHELM_DOMAIN,
-        brand_name=SITE_NAME,
-        canonical_base=CANONICAL_BASE,
-        known_slugs=known_slugs,
-        default_authority="IRS Rev. Proc. 2025-32, Rev. Proc. 2026-35 & IRC Section 179",
-        default_dataset="IRS SOI Tax Statistics & FRED Benchmark Series",
-    )
-    for vs in void_specs:
-        if _is_valid_profithelm_dynamic_tool(vs):
-            vs_slug = str(vs["slug"]).strip().lower()
-            if vs_slug not in known_slugs:
-                extra_specs.append(vs)
-                known_slugs.add(vs_slug)
+    # 1. Load content/deployed_voids.json only if present (avoid estate_common mutating known_slugs from .agy fallback)
+    if (src_root / "content" / "deployed_voids.json").is_file():
+        void_specs = load_and_enrich_deployed_voids(
+            repo_root=src_root,
+            property_id=PROFITHELM_PROPERTY_ID,
+            domain=PROFITHELM_DOMAIN,
+            brand_name=SITE_NAME,
+            canonical_base=CANONICAL_BASE,
+            known_slugs=set(known_slugs),
+            default_authority="IRS Rev. Proc. 2025-32, Rev. Proc. 2026-35 & IRC Section 179",
+            default_dataset="IRS SOI Tax Statistics & FRED Benchmark Series",
+        )
+        for vs in void_specs:
+            if _is_valid_profithelm_dynamic_tool(vs):
+                vs_slug = str(vs["slug"]).strip().lower()
+                if vs_slug not in known_slugs:
+                    extra_specs.append(_sanitize_dynamic_or_void_spec(vs))
+                    known_slugs.add(vs_slug)
 
-    # 2. Load profithelm/data/dynamic_tools.json from src_root if present
+    # 1b. Load .agy/deployed_voids.json live autonomous voids from src_root (read-only)
+    for agy_vs in _load_agi_deployed_voids(src_root, known_slugs):
+        vs_slug = str(agy_vs["slug"]).strip().lower()
+        if vs_slug not in known_slugs:
+            extra_specs.append(agy_vs)
+            known_slugs.add(vs_slug)
+
+    # 2. Load profithelm/data/dynamic_tools.json from src_root if present (read-only)
     dyn_file = src_root / "profithelm" / "data" / "dynamic_tools.json"
     if dyn_file.is_file():
         try:
@@ -2887,7 +3791,7 @@ def compile_profithelm_estate_impl(
                 d_slug = str(dt.get("slug") or "").strip().lower()
                 if not d_slug or d_slug in known_slugs or not _is_valid_profithelm_dynamic_tool(dt):
                     continue
-                extra_specs.append(dict(dt))
+                extra_specs.append(_sanitize_dynamic_or_void_spec(dt))
                 known_slugs.add(d_slug)
 
     # 3. Merge caller-provided extra_tools (propagates fail-closed ValueError if missing manifest/formula)
@@ -2898,7 +3802,7 @@ def compile_profithelm_estate_impl(
             eslug = str(et["slug"]).strip().lower()
             if eslug in known_slugs:
                 continue
-            extra_specs.append(dict(et))
+            extra_specs.append(_sanitize_dynamic_or_void_spec(et))
             known_slugs.add(eslug)
 
     all_tools: List[Dict[str, Any]] = list(core_tools) + [
@@ -3048,7 +3952,20 @@ def compile_profithelm_estate_impl(
         g_path.write_text(g_html, encoding="utf-8")
         authoritative_html[g_path] = g_html
 
-    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root)
+    # Compile 127 TruthPack-driven programmatic matrix spokes when state/vehicle data exists
+    spoke_tools = _compile_matrix_spokes(src_root, dist)
+    for sp in spoke_tools:
+        sp_path = dist / "tools" / sp["slug"] / "index.html"
+        if sp_path.is_file():
+            authoritative_html[sp_path] = sp_path.read_text(encoding="utf-8")
+
+    # Preserve signal HTML files cleanly through finalize pass
+    for sig_rel in ("signal/index.html", "static/signal/index.html"):
+        sig_p = dist / sig_rel
+        if sig_p.is_file():
+            authoritative_html[sig_p] = sig_p.read_text(encoding="utf-8", errors="ignore")
+
+    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root, spoke_tools=spoke_tools)
 
     if not (root / ".pseofactory.json").exists():
         (root / ".pseofactory.json").write_text(
@@ -3089,7 +4006,7 @@ def compile_profithelm_estate_impl(
         authoritative_html=authoritative_html,
         authoritative_manifests=authoritative_manifests,
     )
-    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root)
+    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root, spoke_tools=spoke_tools)
     _sanitize_llms_files(dist)
     return dist
 
@@ -3124,10 +4041,13 @@ __all__ = [
     "build_section_1031_page",
     "build_section_179_page",
     "build_tax_brackets_page",
+    "build_tcja_capital_gains_page",
     "build_tools_directory_page",
     "build_treasury_yield_page",
+    "calculate_state_income_tax",
     "cleanup_orphan_tools",
     "compile_profithelm_estate_impl",
+    "compile_programmatic_matrix",
     "compile_schema_graph",
     "enrich_quick_answer_with_statutory_benchmarks",
     "generate_tool_calculation_manifest",

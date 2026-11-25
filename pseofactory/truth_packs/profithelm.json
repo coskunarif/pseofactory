@@ -1291,8 +1291,8 @@
     "irc_section_1221_1h": {
       "canonical": "IRC Section 1221 & Section 1(h) (Capital Gains & Holding Periods)",
       "patterns": [
-        "IRC\\s*(?:Section|Sec\\.?)?\\s*(?:1221|1\\(h\\))\\b",
-        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?(?:1221|1\\(h\\))\\b"
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:1221|1\\(h\\))(?![0-9A-Za-z])",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:1221|1\\(h\\))(?![0-9A-Za-z])"
       ],
       "allowed_slug_patterns": [
         ".*"
@@ -1336,12 +1336,131 @@
     "irc_section_408_401k_223": {
       "canonical": "IRC Section 408, Section 401(k) & Section 223 (Retirement & HSA Limits)",
       "patterns": [
-        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:408|401(?:\\(k\\))?|223)\\b",
-        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:408|401(?:\\(k\\))?|223)\\b"
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:408|401(?:\\(k\\))?|223)(?![0-9A-Za-z])",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:408|401(?:\\(k\\))?|223)(?![0-9A-Za-z])"
       ],
       "allowed_slug_patterns": [
         ".*"
       ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1411": {
+      "canonical": "IRC Section 1411 (3.8% Net Investment Income Tax)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*1411\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?1411\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1001_1012": {
+      "canonical": "IRC Section 1001 & Section 1012 (Realization & Cost Basis)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:1001|1012)\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:1001|1012)\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1211_1212_1222": {
+      "canonical": "IRC Section 1211, Section 1212 & Section 1222 (Capital Loss Limits & Definitions)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:1211|1212|1222)(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:1211|1212|1222)(?:\\([a-zA-Z0-9]+\\))*"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1250": {
+      "canonical": "IRC Section 1250 (Unrecaptured Real Property Depreciation)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*1250(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?1250(?:\\([a-zA-Z0-9]+\\))*"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": [
+        ".*crypto.*",
+        ".*runway.*",
+        ".*s-corp.*"
+      ]
+    },
+    "irc_section_1256_cftc": {
+      "canonical": "IRC Section 1256, 7 U.S.C. 1a & 17 CFR Part 40 (Regulated Contracts & Prediction Markets)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*1256(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?1256(?:\\([a-zA-Z0-9]+\\))*",
+        "7\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?1a(?:\\(\\d+\\))?",
+        "17\\s*CFR\\s*(?:Part\\s*)?40(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": [
+        ".*1031.*",
+        ".*section-179.*"
+      ]
+    },
+    "irc_section_162_163_164_165_167": {
+      "canonical": "IRC Sections 162, 163, 164, 165 & 167 (Business, Interest, SALT, Loss & Depreciation Deductions)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:162|163|164|165|167)(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:162|163|164|165|167)(?:\\([a-zA-Z0-9]+\\))*"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_172_174_263a_280c": {
+      "canonical": "IRC Sections 172, 174, 263A & 280C (NOL, R&E Amortization & UNICAP)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:172|174|263A|280C)(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:172|174|263A|280C)(?:\\([a-zA-Z0-9]+\\))*"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_44_61_453_3406_4999": {
+      "canonical": "IRC Sections 44, 61, 453, 3406 & 4999 (Credits, Income, Installment Sales, Withholding & Excise)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:44|61|453|3406|4999)(?![0-9A-Za-z])",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:44|61|453|3406|4999)(?![0-9A-Za-z])"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_penalties_interest": {
+      "canonical": "IRC Sections 6404, 6603, 6622, 6651, 6654, 6656 & 6662 (Estimated Tax, Interest & Penalties)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:6404|6603|6622|6651|6654|6656|6662)(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:6404|6603|6622|6651|6654|6656|6662)(?:\\([a-zA-Z0-9]+\\))*"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "irs_rp_2024_34": {
+      "canonical": "IRS Rev. Proc. 2024-34",
+      "patterns": [
+        "Rev\\.?\\s*Proc\\.?\\s*2024-34\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "trade_section_301_cbp": {
+      "canonical": "19 U.S.C. 2411, 19 CFR Part 24 / 113 / 152 / 159 / 177, 26 U.S.C. 4461 & 31 U.S.C. 3102 / 9304 (Trade Tariffs & Customs)",
+      "patterns": [
+        "19\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?(?:2411|1401a|1592|1313)(?:\\([a-zA-Z0-9]+\\))*",
+        "19\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*)?(?:24\\.23|24|113|152|159|177)(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?4461\\b",
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?(?:3102|9304)\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "dot_49cfr565_tila_dol": {
+      "canonical": "49 CFR Part 565 (Vehicle GVWR), 12 CFR Part 1026 (TILA) & 29 CFR Part 795 (DOL)",
+      "patterns": [
+        "49\\s*CFR\\s*(?:Part\\s*)?565\\b",
+        "12\\s*CFR\\s*(?:Part\\s*)?1026\\b",
+        "29\\s*CFR\\s*(?:Part\\s*)?795\\b"
+      ],
+      "allowed_slug_patterns": [],
       "forbidden_slug_patterns": []
     }
   },

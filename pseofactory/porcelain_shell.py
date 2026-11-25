@@ -7811,7 +7811,9 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         b_src = builder_path.read_text(encoding="utf-8")
         b_orig = b_src
 
-        if pkg_name in ("lienbond", "gainhelm"):
+        from pseofactory import compiler as _pseo_compiler
+
+        if callable(getattr(_pseo_compiler, f"compile_{pkg_name}_estate", None)):
             from pseofactory.estate_common import build_thin_estate_builder_source
 
             b_src = build_thin_estate_builder_source(pkg_name)

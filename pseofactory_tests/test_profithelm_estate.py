@@ -273,3 +273,32 @@ def test_unified_truth_gate_js_parity_and_runtime(tmp_path: Path) -> None:
     assert report.status == "PASS", f"Expected PASS, got {report.status}: {report.violations}"
     assert report.passed is True
     assert len(report.violations) == 0, f"Unexpected TruthGate violations: {report.violations}"
+
+
+def test_live_profithelm_route_parity_and_zero_truthgate_violations(tmp_path: Path) -> None:
+    live_root = Path("/home/ubuntuadmin/projects/profithelm-platform")
+    live_dist = live_root / "dist"
+    if not (live_root / "profithelm" / "data" / "us_states_tax.json").is_file() or not live_dist.is_dir():
+        pytest.skip("profithelm-platform source/dist not mounted on disk")
+
+    dist = pe.compile_profithelm_estate_impl(tmp_path, run_retrofit=True, repo_root=live_root)
+    live_htmls = {p.relative_to(live_dist).as_posix() for p in live_dist.rglob("*.html")}
+    built_htmls = {p.relative_to(dist).as_posix() for p in dist.rglob("*.html")}
+    missing = sorted(live_htmls - built_htmls)
+    assert not missing, f"Missing live HTML routes ({len(missing)}): {missing}"
+
+    # Spot-check matrix spokes use TruthPack $32,000 SUV cap & 100% bonus and zero legacy $30,500 / 20% bonus
+    suv_html = (dist / "tools" / "section-179-calculator" / "cadillac-escalade-esv" / "index.html").read_text(encoding="utf-8")
+    assert "$32,000" in suv_html
+    assert "100%" in suv_html
+    assert "$30,500" not in suv_html
+    assert "$2,560,000" not in suv_html
+
+    report = UnifiedTruthGate().audit_estate(
+        dist,
+        property_id="profithelm",
+        run_js_parity=True,
+    )
+    assert report.status == "PASS", f"Expected PASS, got {report.status}: {report.violations}"
+    assert report.passed is True
+    assert len(report.violations) == 0, f"Unexpected TruthGate violations: {report.violations}"
