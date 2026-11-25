@@ -70,7 +70,7 @@ def test_evaluator_cache_fingerprint_includes_facts_and_audit():
 
 
 def test_html_statutory_drift_detection_and_reconciliation(temp_estate):
-    """Proves wrong statutory SUV claim in HTML is detected and healed to $30,500."""
+    """Proves wrong statutory SUV claim in HTML is detected and healed to $32,000."""
     dist = temp_estate["dist"]
     tool_dir = dist / "tools" / "section-179-calculator"
     tool_dir.mkdir(parents=True)
@@ -83,7 +83,7 @@ def test_html_statutory_drift_detection_and_reconciliation(temp_estate):
 <body>
   <header><h1>Section 179 Calculator</h1></header>
   <div class="quick-answer">Under IRC Section 179, heavy SUVs capped at $2,560,000 for equipment.</div>
-  <div class="result-box"><strong class="output-value">$30,500</strong></div>
+  <div class="result-box"><strong class="output-value">$32,000</strong></div>
 </body>
 </html>"""
     html_file.write_text(bad_html, encoding="utf-8")
@@ -101,7 +101,7 @@ def test_html_statutory_drift_detection_and_reconciliation(temp_estate):
     assert str(html_file) in repaired or len(repaired) > 0
 
     healed_html = html_file.read_text(encoding="utf-8")
-    assert "$30,500" in healed_html
+    assert "$32,000" in healed_html
     assert "heavy SUVs capped at $2,560,000" not in healed_html
 
 
@@ -144,7 +144,7 @@ def test_ai_benchmark_and_llms_txt_reconciliation(temp_estate):
         property_id="profithelm",
         repo_root=temp_estate["root"],
     )
-    assert "heavy SUVs capped at $30,500" in hub_json.read_text(encoding="utf-8")
+    assert "heavy SUVs capped at $32,000" in hub_json.read_text(encoding="utf-8")
     assert "IRC Section 179" in ref_md.read_text(encoding="utf-8")
 
     # Run auto-reconciliation for Prexvo
@@ -256,7 +256,7 @@ def test_gainhelm_reconcile_estate_assets_handles_none_and_str_repo_root(tmp_pat
     )
     assert str(hipaa_file) in repaired_none
     healed_txt = hipaa_file.read_text(encoding="utf-8")
-    assert "$2,455,313 total HIPAA breach exposure" in healed_txt
+    assert "$2,577,794 total HIPAA breach exposure" in healed_txt
     assert "1,500 ePHI records" in healed_txt
 
     # 2. repo_root=str(tmp_path) must convert str to Path without AttributeError or TypeError
@@ -270,7 +270,7 @@ def test_gainhelm_reconcile_estate_assets_handles_none_and_str_repo_root(tmp_pat
         repo_root=str(tmp_path),
     )
     assert str(hipaa_file) in repaired_str
-    assert "$2,455,313 total HIPAA breach exposure" in hipaa_file.read_text(encoding="utf-8")
+    assert "$2,577,794 total HIPAA breach exposure" in hipaa_file.read_text(encoding="utf-8")
 
 
 @pytest.mark.host_estate

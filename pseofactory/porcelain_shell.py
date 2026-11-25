@@ -311,11 +311,12 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
       </section>"""
     elif prop == "lienbond":
         compliance_text = (
-            "Statutory & FTC Disclosure (16 CFR Part 255): Surety premium, NCCI workers compensation EMR, and "
-            "statutory mechanics lien deadline outputs are for educational and informational underwriting estimates "
-            "only and do not constitute legal advice or a binding surety commitment. LienBond may earn referral "
-            "compensation from verified partner links (such as Simply Business, SuretyBondsDirect.com, Thimble, "
-            "Jobber, or Levelset) at no additional cost to you."
+            "Statutory & FTC Disclosure (16 CFR Part 255): LienBond is not a licensed attorney, law firm, "
+            "admitted surety underwriter, or licensed insurance producer. Surety premium, NCCI workers compensation "
+            "EMR, and statutory mechanics lien deadline outputs are informational underwriting estimates only and do "
+            "not constitute legal advice or a binding surety commitment. LienBond may earn referral compensation from "
+            "verified partner links (such as Simply Business, SuretyBondsDirect.com, Thimble, Jobber, or Levelset) "
+            "at no additional cost to you."
         )
         restricted_compliance_text = compliance_text
         partner_list_summary = "Simply Business, SuretyBondsDirect.com, Thimble, Jobber, and Levelset"
@@ -384,6 +385,40 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         "lienbond": "LienBond Statutory Surety & Construction Compliance Research",
     }
 
+    footer_disclosure_entries: List[Tuple[str, Tuple[str, ...], Tuple[str, ...]]] = []
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        _tp = load_truth_pack(prop, allow_expired=True)
+        for _d in (getattr(_tp, "disclosures", None) or []):
+            _ctext = str(getattr(_d, "canonical_text", "") or "").strip()
+            if not _ctext:
+                continue
+            _req_pats = tuple(
+                str(p) for p in (getattr(_d, "required_text_patterns", None) or []) if str(p or "").strip()
+            )
+            _slug_pats = tuple(
+                str(p) for p in (getattr(_d, "applies_to_slug_patterns", None) or []) if str(p or "").strip()
+            )
+            footer_disclosure_entries.append((_ctext, _req_pats, _slug_pats))
+    except Exception:
+        pass
+    if not footer_disclosure_entries and prop == "lienbond":
+        footer_disclosure_entries.append(
+            (
+                "Underwriting & Statutory Notice: LienBond is not a licensed attorney, law firm, admitted surety "
+                "underwriter, or licensed insurance producer. Bond premiums, EMR impacts, and statutory lien "
+                "calculations are informational underwriting estimates only; consult qualified legal counsel "
+                "and a licensed surety broker before binding coverage or recording liens.",
+                (
+                    r"not\s+(?:a\s+)?(?:licensed\s+)?(?:attorney|law\s+firm|surety\s+underwriter|insurance\s+producer)",
+                    r"(?:underwriting\s+)?(?:estimates?|informational)",
+                ),
+                (r".*",),
+            )
+        )
+    footer_disclosure_text = " ".join(e[0] for e in footer_disclosure_entries)
+
     return {
         "property_id": prop,
         "package_name": package_name,
@@ -406,6 +441,8 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         "contact_email": contact_email,
         "compliance_text": compliance_text,
         "restricted_compliance_text": restricted_compliance_text,
+        "footer_disclosure_text": footer_disclosure_text,
+        "footer_disclosure_entries": footer_disclosure_entries,
         "partner_list_summary": partner_list_summary,
         "disclaimers_sections_html": disclaimers_sections_html,
         "default_tools": default_tools[:8],
@@ -3933,9 +3970,11 @@ def render_porcelain_footer(
     page_slug: str = "homepage",
     has_main_lead_form: bool = False,
     has_quote_intake_step: bool = False,
+    existing_html: str = "",
+    rel_path: str = "",
 ) -> str:
     """Renders canonical <footer class='site-footer footer'> with 4 governance/navigation columns and /partners/ link."""
-    _ = (page_slug, has_main_lead_form, has_quote_intake_step)
+    _ = (has_main_lead_form, has_quote_intake_step)
     brand = html_lib.escape(profile["brand_name"])
     legal_entity = html_lib.escape(profile["legal_entity"])
     research_entity = html_lib.escape(profile["research_entity"])
@@ -3960,6 +3999,40 @@ def render_porcelain_footer(
         )
 
     year_str = "2026"
+    existing_plain = (
+        re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", existing_html)).strip()
+        if existing_html
+        else ""
+    )
+    target_slug = f"{page_slug} {rel_path}".strip()
+    footer_entries = list(profile.get("footer_disclosure_entries") or [])
+    missing_footer_discs: List[str] = []
+    if footer_entries:
+        for canon_text, req_pats, slug_pats in footer_entries:
+            canon_clean = str(canon_text or "").strip()
+            if not canon_clean:
+                continue
+            if slug_pats and target_slug:
+                if not any(re.search(sp, target_slug, re.IGNORECASE) for sp in slug_pats):
+                    continue
+            already_present = False
+            if existing_plain:
+                if req_pats:
+                    already_present = all(re.search(rp, existing_plain, re.IGNORECASE) for rp in req_pats)
+                else:
+                    already_present = canon_clean.lower() in existing_plain.lower()
+            if not already_present:
+                missing_footer_discs.append(canon_clean)
+    else:
+        footer_disc = str(profile.get("footer_disclosure_text") or "").strip()
+        if footer_disc and (not existing_plain or footer_disc.lower() not in existing_plain.lower()):
+            missing_footer_discs.append(footer_disc)
+    footer_disc_joined = " ".join(missing_footer_discs)
+    footer_disc_span = (
+        f'\n        <span>{html_lib.escape(footer_disc_joined)}</span>'
+        if footer_disc_joined
+        else ""
+    )
     return f"""  <footer class="site-footer footer" role="contentinfo">
     <div class="container">
       <div class="footer-grid">
@@ -4001,7 +4074,7 @@ def render_porcelain_footer(
       </div>
       <div class="footer-bottom">
         <span>&copy; {year_str} {legal_entity}. All statutory models verified for educational decision support.</span>
-        <span>Independent statutory calculation publisher. Zero personalized legal or tax advice.</span>
+        <span>Independent statutory calculation publisher. Zero personalized legal or tax advice.</span>{footer_disc_span}
       </div>
     </div>
   </footer>"""
@@ -5492,9 +5565,10 @@ def normalize_html_to_porcelain_shell(
         else:
             filtered_trailing_scripts.append(ts)
     trailing_scripts = filtered_trailing_scripts
+    rt_prop_id = str(profile.get("property_id") or "").strip().lower() or None
     had_runtime_sync = bool(extracted_runtime_sync_tags)
     had_external_runtime_sync = (
-        has_current_external_runtime_sync_tag(body_no_style)
+        has_current_external_runtime_sync_tag(body_no_style, property_id=rt_prop_id)
         or any(
             bool(
                 re.search(
@@ -5632,6 +5706,8 @@ def normalize_html_to_porcelain_shell(
         page_slug=page_slug,
         has_main_lead_form=has_main_lead_form,
         has_quote_intake_step=has_quote_intake_step,
+        existing_html=inner_main,
+        rel_path=rel_path,
     )
     cleaned_scripts = [
         s.strip().replace("'#16a34a'", "'var(--status-positive)'").replace('"#16a34a"', '"var(--status-positive)"')
@@ -5642,16 +5718,10 @@ def normalize_html_to_porcelain_shell(
     if had_runtime_sync:
         if dist_dir is not None or had_external_runtime_sync:
             if dist_dir is not None:
-                write_runtime_synchronizer_asset(Path(dist_dir))
-            cleaned_scripts.append(render_external_runtime_synchronizer_tag().strip())
-        elif extracted_runtime_sync_tags:
-            cleaned_scripts.append(
-                extracted_runtime_sync_tags[-1]
-                .replace("'#16a34a'", "'var(--status-positive)'")
-                .replace('"#16a34a"', '"var(--status-positive)"')
-            )
+                write_runtime_synchronizer_asset(Path(dist_dir), property_id=rt_prop_id)
+            cleaned_scripts.append(render_external_runtime_synchronizer_tag(property_id=rt_prop_id).strip())
         else:
-            cleaned_scripts.append(render_runtime_synchronizer_script_stripped())
+            cleaned_scripts.append(render_runtime_synchronizer_script_stripped(property_id=rt_prop_id))
     scripts_tail = ("\n  " + "\n  ".join(cleaned_scripts)) if cleaned_scripts else ""
 
     assembled = (
@@ -7040,7 +7110,7 @@ def compile_tenant_porcelain_estate_with_profile(
 
     from pseofactory.visual_primitives import write_runtime_synchronizer_asset
 
-    rt_js_path, rt_js_changed = write_runtime_synchronizer_asset(target_dist)
+    rt_js_path, rt_js_changed = write_runtime_synchronizer_asset(target_dist, property_id=prop_id)
     if rt_js_changed:
         rt_js_rel = rt_js_path.relative_to(target_dist).as_posix()
         if rt_js_rel not in mutated_paths:
@@ -7323,7 +7393,37 @@ def _sync_tenant_pseo_substrate(
             existing_py.unlink()
             updated.append(str(existing_py.relative_to(repo)))
 
+    src_tp_dir = src_pkg_dir / "truth_packs"
+    dst_tp_dir = dst_pkg_dir / "truth_packs"
+    expected_tp_rels: Set[str] = set()
+    if src_tp_dir.is_dir():
+        dst_tp_dir.mkdir(parents=True, exist_ok=True)
+        for tp_src in sorted(src_tp_dir.rglob("*.json")):
+            rel_tp = tp_src.relative_to(src_pkg_dir).as_posix()
+            expected_tp_rels.add(rel_tp)
+            tp_dst = dst_pkg_dir / rel_tp
+            tp_dst.parent.mkdir(parents=True, exist_ok=True)
+            tp_txt = tp_src.read_text(encoding="utf-8")
+            if not tp_dst.is_file() or tp_dst.read_text(encoding="utf-8") != tp_txt:
+                tp_dst.write_text(tp_txt, encoding="utf-8")
+                updated.append(str(tp_dst.relative_to(repo)))
+
+    if dst_tp_dir.is_dir():
+        for existing_tp in sorted(dst_tp_dir.rglob("*.json")):
+            rel_ex_tp = existing_tp.relative_to(dst_pkg_dir).as_posix()
+            if rel_ex_tp not in expected_tp_rels:
+                existing_tp.unlink()
+                updated.append(str(existing_tp.relative_to(repo)))
+
     return updated
+
+
+def _is_thin_estate_builder_wrapper(builder_src: str) -> bool:
+    """Returns True when <pkg>/builder.py is already a thin wrapper delegating to pseofactory.compiler."""
+    return (
+        "from pseofactory.compiler import" in builder_src
+        or "from pseofactory." in builder_src
+    ) and bool(re.search(r"\bcompile_[a-z0-9_]+_estate(?:_impl)?\b", builder_src))
 
 
 def _generate_tenant_porcelain_module_source(property_id: str) -> str:
@@ -7492,37 +7592,38 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
     b_file = repo / pkg_name / "builder.py"
     if b_file.is_file():
         b_src = b_file.read_text(encoding="utf-8")
-        b_new = b_src
-        if pkg_name in ("prexvo", "gainhelm"):
-            b_new = re.sub(
-                r'node\["author"\]\s*=\s*\{\s*"@type"\s*:\s*"Person"[\s\S]*?\}',
-                (
-                    'node["author"] = {\n'
-                    '                "@type": "Organization",\n'
-                    '                "@id": org_id,\n'
-                    '                "name": SITE_NAME,\n'
-                    '                "url": CANONICAL_BASE,\n'
-                    "            }"
-                ),
-                b_new,
+        if not _is_thin_estate_builder_wrapper(b_src):
+            b_new = b_src
+            if pkg_name in ("prexvo", "gainhelm"):
+                b_new = re.sub(
+                    r'node\["author"\]\s*=\s*\{\s*"@type"\s*:\s*"Person"[\s\S]*?\}',
+                    (
+                        'node["author"] = {\n'
+                        '                "@type": "Organization",\n'
+                        '                "@id": org_id,\n'
+                        '                "name": SITE_NAME,\n'
+                        '                "url": CANONICAL_BASE,\n'
+                        "            }"
+                    ),
+                    b_new,
+                )
+                if _PERSONAL_MAKER_NAME_RE.search(b_new):
+                    b_new = _PERSONAL_MAKER_NAME_RE.sub(profile["legal_entity"], b_new)
+            wikidata_builder_map = {
+                "lienbond": "https://www.wikidata.org/wiki/Q192161",
+                "prexvo": "https://www.wikidata.org/wiki/Q633315",
+                "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+                "profithelm": "https://www.wikidata.org/wiki/Q8161",
+            }
+            target_wikidata = wikidata_builder_map.get(
+                str(profile.get("property_id") or "").strip().lower(),
+                str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
             )
-            if _PERSONAL_MAKER_NAME_RE.search(b_new):
-                b_new = _PERSONAL_MAKER_NAME_RE.sub(profile["legal_entity"], b_new)
-        wikidata_builder_map = {
-            "lienbond": "https://www.wikidata.org/wiki/Q192161",
-            "prexvo": "https://www.wikidata.org/wiki/Q633315",
-            "gainhelm": "https://www.wikidata.org/wiki/Q166142",
-            "profithelm": "https://www.wikidata.org/wiki/Q8161",
-        }
-        target_wikidata = wikidata_builder_map.get(
-            str(profile.get("property_id") or "").strip().lower(),
-            str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
-        )
-        if "https://www.wikidata.org/wiki/Q499388" in b_new:
-            b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", target_wikidata)
-        if b_new != b_src:
-            b_file.write_text(b_new, encoding="utf-8")
-            updated.append(f"{pkg_name}/builder.py")
+            if "https://www.wikidata.org/wiki/Q499388" in b_new:
+                b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", target_wikidata)
+            if b_new != b_src:
+                b_file.write_text(b_new, encoding="utf-8")
+                updated.append(f"{pkg_name}/builder.py")
 
     fac_file = repo / pkg_name / "factory.py"
     if fac_file.is_file():
@@ -7714,7 +7815,7 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
             from pseofactory.estate_common import build_thin_estate_builder_source
 
             b_src = build_thin_estate_builder_source(pkg_name)
-        else:
+        elif not _is_thin_estate_builder_wrapper(b_src):
             for legal_301 in (
                 '        "/about /methodology/ 301\\n"\n',
                 '        "/about/ /methodology/ 301\\n"\n',

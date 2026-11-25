@@ -1001,9 +1001,6 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
             tool_dict.setdefault("category", default_category)
             tool_dict.setdefault("affiliates", default_affiliates)
-            for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
-                if isinstance(tool_dict.get(_k), str):
-                    tool_dict[_k] = tool_dict[_k].replace("$31,300", "$30,500")
             return tool_dict
 
         title = str(tool_or_slug.get("title", "") or "").strip()
@@ -1041,9 +1038,6 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
         c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
         res["title"] = c_title
         res["short_title"] = c_short
-        for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
-            if isinstance(res.get(_k), str):
-                res[_k] = res[_k].replace("$31,300", "$30,500")
         return res
 
     try:
@@ -1056,9 +1050,6 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             c_title = re.sub(r"\s+\(202[4-9]\)\s*$", "", c_title).strip()
             res["title"] = c_title
             res["short_title"] = c_short
-            for _k in ("description", "quick_answer", "geo_summary", "direct_answer_summary"):
-                if isinstance(res.get(_k), str):
-                    res[_k] = res[_k].replace("$31,300", "$30,500")
             return res
     except Exception:
         pass
@@ -1085,7 +1076,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
 def _sanitize_distribution_text(text: Any) -> Any:
     if not isinstance(text, str):
         return text
-    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-").replace("$31,300", "$30,500")
+    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-")
     from pseofactory.contracts import PROMPT_LEAKAGE_TERMS
     for term in PROMPT_LEAKAGE_TERMS:
         if term in sanitized.lower():
@@ -1100,7 +1091,7 @@ def _sanitize_youtube_text(text: Any) -> Any:
     """Sanitizes text for YouTube Data API v3 and ProfitHelm anti-slop standards (HWL-1202)."""
     if not isinstance(text, str):
         return text
-    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-").replace("$31,300", "$30,500")
+    sanitized = text.replace("\u2014", " - ").replace("\u2013", "-")
     sanitized = sanitized.replace("<", "less than ").replace(">", "greater than ")
     while "  " in sanitized:
         sanitized = sanitized.replace("  ", " ")
@@ -1233,12 +1224,12 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "qsbs-section-1202-tax-calculator": {
         "formula": "round(qsbs_excluded_gain * combined_ltcg_niit_rate, 0)",
-        "inputs": {"qsbs_excluded_gain": 10000000.0, "combined_ltcg_niit_rate": 0.238},
-        "published_output": 2380000.0,
-        "sample_calculation": "$10,000,000 Section 1202 QSBS gain exclusion * 23.8% combined federal LTCG and NIIT rate = $2,380,000 federal tax saved",
-        "statutory_claim_key": "qsbs_exclusion_cap",
-        "statutory_claim_value": 10000000,
-        "query_params": {"gain": 10000000, "basis": 500000, "years": 5},
+        "inputs": {"qsbs_excluded_gain": 15000000.0, "combined_ltcg_niit_rate": 0.238},
+        "published_output": 3570000.0,
+        "sample_calculation": "$15,000,000 Section 1202 QSBS post-OBBBA gain exclusion ($10,000,000 pre-July 5, 2025) * 23.8% combined federal LTCG and NIIT rate = $3,570,000 federal tax saved",
+        "statutory_claim_key": "qsbs_exclusion_cap_post_obbba",
+        "statutory_claim_value": 15000000,
+        "query_params": {"gain": 15000000, "basis": 500000, "years": 5},
     },
     "equipment-lease-tax-deduction": {
         "formula": "round(lease_annual_payment * business_use_pct, 2)",
@@ -1341,18 +1332,18 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "student-loan-repayment-calculator": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
-        "published_output": 248.23,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived",
+        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 82.58},
+        "published_output": 242.42,
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month unpaid interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "rap-vs-ibr-calculator": {
         "formula": "round(((agi - fpl_225) * 0.10) / 12 + base_adjustment, 2)",
-        "inputs": {"agi": 95000.0, "fpl_225": 47587.5, "base_adjustment": 103.13},
-        "published_output": 498.23,
-        "sample_calculation": "At $95,000 AGI on $60,000 debt (6.5%), uncapped RAP charges $498.23/month ($119,575 total) while IBR caps at $78,617 total",
+        "inputs": {"agi": 95000.0, "fpl_225": 48690.0, "base_adjustment": 103.13},
+        "published_output": 489.05,
+        "sample_calculation": "At $95,000 AGI on $60,000 debt (6.5%), uncapped RAP charges $489.05/month ($176,058 over 360 months / 30 years) while IBR caps at $78,617 total",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 60000, "agi": 95000, "rate": 6.5, "deps": 1},
@@ -1386,18 +1377,18 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "save-plan-transition-to-rap-repayment-calculator": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
-        "published_output": 223.23,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 66.75},
+        "published_output": 217.42,
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $217.42/month with $66.75/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
     },
     "save-plan-litigation-transition": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 60.94},
-        "published_output": 223.23,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $223.23/month with $60.94/month interest waived",
+        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 66.75},
+        "published_output": 217.42,
+        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $217.42/month with $66.75/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
@@ -1422,27 +1413,27 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "pslf-qualifying-payment-simulator": {
         "formula": "round(monthly_rap_savings * 120, 0)",
-        "inputs": {"monthly_rap_savings": 97.808333},
-        "published_output": 11737.0,
-        "sample_calculation": "$97.81/month RAP vs IBR savings * 120 qualifying PSLF payments = $11,737 saved with tax-free IRC Section 108(f) discharge",
+        "inputs": {"monthly_rap_savings": 99.75},
+        "published_output": 11970.0,
+        "sample_calculation": "$99.75/month RAP vs IBR savings * 120 qualifying PSLF payments = $11,970 saved with tax-free IRC Section 108(f) discharge",
         "statutory_claim_key": "pslf_qualifying_payments",
         "statutory_claim_value": 120,
         "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
     },
     "parent-plus-double-consolidation-repayment-calculator": {
         "formula": "round(icr_monthly_payment - monthly_savings, 2)",
-        "inputs": {"icr_monthly_payment": 1196.67, "monthly_savings": 766.25},
-        "published_output": 430.42,
-        "sample_calculation": "$1,196.67 single-consolidated ICR payment minus $766.25 two-step consolidation savings = $430.42/month under 10% RAP",
+        "inputs": {"icr_monthly_payment": 1200.67, "monthly_savings": 766.59},
+        "published_output": 434.08,
+        "sample_calculation": "$1,200.67 single-consolidated ICR payment minus $766.59 two-step consolidation savings = $434.08/month under 10% RAP",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
     },
     "parent-plus-double-consolidation": {
         "formula": "round(icr_monthly_payment - monthly_savings, 2)",
-        "inputs": {"icr_monthly_payment": 1196.67, "monthly_savings": 766.25},
-        "published_output": 430.42,
-        "sample_calculation": "$1,196.67 single-consolidated ICR payment minus $766.25 two-step consolidation savings = $430.42/month under 10% RAP",
+        "inputs": {"icr_monthly_payment": 1200.67, "monthly_savings": 766.59},
+        "published_output": 434.08,
+        "sample_calculation": "$1,200.67 single-consolidated ICR payment minus $766.59 two-step consolidation savings = $434.08/month under 10% RAP",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
@@ -1458,9 +1449,9 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "rap-payment-calculator": {
         "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 76.77},
-        "published_output": 248.23,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), 2026 RAP sets payment at $248.23/month with $76.77/month interest waived",
+        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 82.58},
+        "published_output": 242.42,
+        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month interest waived",
         "statutory_claim_key": "rap_fpl_multiplier",
         "statutory_claim_value": 2.25,
         "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
@@ -1496,16 +1487,16 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
         "inputs": {"cpa_base_fee": 28000.0, "extra_tsc_count": 2.0, "fee_per_extra_tsc": 4500.0, "grc_platform_annual": 15000.0, "pentest_fee": 11500.0, "remediation_hours": 120.0, "engineering_hourly_rate": 121.67},
         "published_output": 78100.4,
-        "sample_calculation": "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $11,500 pentest = $78,100.40 total Year-1 SOC 2 Type II audit cost",
+        "sample_calculation": "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 benchmark estimate) + $11,500 pentest = $78,100.40 estimated Year-1 SOC 2 Type II audit cost",
         "statutory_claim_key": "sprs_max_score",
         "statutory_claim_value": 110,
         "query_params": {"headcount": 75, "grc_tier": 1, "audit_type": 2},
     },
     "cmmc-2-0-compliance-cost-calculator": {
         "formula": "round(c3pao_fee + enclave_cost + (remediation_hours * hourly_rate), 2)",
-        "inputs": {"c3pao_fee": 48000.0, "enclave_cost": 36000.0, "remediation_hours": 320.0, "hourly_rate": 150.0},
-        "published_output": 132000.0,
-        "sample_calculation": "$48,000 C3PAO Level 2 assessment fee + $36,000 CUI enclave boundary + (320 hrs * $150/hr specialist rate) = $132,000 total CMMC 2.0 Level 2 budget",
+        "inputs": {"c3pao_fee": 48000.0, "enclave_cost": 36000.0, "remediation_hours": 320.0, "hourly_rate": 121.67},
+        "published_output": 122934.4,
+        "sample_calculation": "$48,000 C3PAO Level 2 assessment fee + $36,000 CUI enclave boundary + (320 hrs * $121.67/hr BLS SOC 15-1212 benchmark estimate) = $122,934.40 estimated CMMC 2.0 Level 2 budget",
         "statutory_claim_key": "cmmc_conditional_min_sprs",
         "statutory_claim_value": 88,
         "query_params": {"cui_users": 35, "level": 2, "enclave": 1},
@@ -1521,9 +1512,9 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
     },
     "iso-27001-certification-cost-calculator": {
         "formula": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * engineering_hourly_rate), 2)",
-        "inputs": {"auditor_days": 11.0, "daily_auditor_rate": 1950.0, "isms_platform_cost": 14500.0, "internal_audit_fee": 8500.0, "remediation_hours": 180.0, "engineering_hourly_rate": 125.28},
-        "published_output": 67000.4,
-        "sample_calculation": "(11.0 Stage 1 and Stage 2 registrar days under ISO/IEC 27006-1:2024 * $1,950/day = $21,450) + $14,500 ISMS platform + $8,500 Clause 9.2 internal audit + (180 hrs * $125.28/hr = $22,550.40) = $67,000.40 Year-1 ISO 27001:2022 TCO",
+        "inputs": {"auditor_days": 11.0, "daily_auditor_rate": 1950.0, "isms_platform_cost": 14500.0, "internal_audit_fee": 8500.0, "remediation_hours": 180.0, "engineering_hourly_rate": 121.67},
+        "published_output": 66350.6,
+        "sample_calculation": "(11.0 Stage 1 and Stage 2 registrar days under ISO/IEC 27006-1:2024 * $1,950/day = $21,450) + $14,500 ISMS platform + $8,500 Clause 9.2 internal audit + (180 hrs * $121.67/hr BLS SOC 15-1212 benchmark estimate = $21,900.60) = $66,350.60 estimated Year-1 ISO 27001:2022 TCO",
         "statutory_claim_key": "sprs_max_score",
         "statutory_claim_value": 110,
         "query_params": {"employees": 85, "sites": 1, "cycle_years": 3},
@@ -1533,12 +1524,12 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "inputs": {
             "compromised_records": 1500.0,
             "tier_penalty_per_record": 13795.0,
-            "statutory_annual_cap": 2067813.0,
+            "statutory_annual_cap": 2190294.0,
             "forensic_legal_retainer": 95000.0,
             "notification_cost_per_record": 195.0,
         },
-        "published_output": 2455313.0,
-        "sample_calculation": "For a 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) + $95,000 forensic/legal retainer + (1,500 records * $195 notification cost = $292,500) = $2,455,313.00 total HIPAA breach exposure",
+        "published_output": 2577794.0,
+        "sample_calculation": "For a 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,190,294.00 annual penalty cap) + $95,000 forensic/legal retainer + (1,500 records * $195 notification cost = $292,500) = $2,577,794.00 total HIPAA breach exposure",
         "statutory_claim_key": "hipaa_ocr_breach_portal_threshold_records",
         "statutory_claim_value": 500,
         "query_params": {"records": 1500, "tier": 3, "encrypted": 0},
@@ -1638,6 +1629,32 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
     except Exception:
         ext_spec = {}
 
+    if not ext_spec or not (ext_spec.get("formula") and isinstance(ext_spec.get("inputs"), dict)):
+        try:
+            from pseofactory.maintenance import RetroReflectionEngine
+            _fb_maps = {
+                "lienbond": getattr(RetroReflectionEngine, "LIENBOND_FALLBACK_MANIFESTS", {}),
+                "gainhelm": getattr(RetroReflectionEngine, "GAINHELM_FALLBACK_MANIFESTS", {}),
+                "prexvo": getattr(RetroReflectionEngine, "PREXVO_FALLBACK_MANIFESTS", {}),
+                "profithelm": getattr(RetroReflectionEngine, "PROFITHELM_FALLBACK_MANIFESTS", {}),
+            }
+            _req_prop = str(property_id or "").strip().lower()
+            _fb_order = ([_req_prop] if _req_prop in _fb_maps else []) + [
+                _k for _k in ("lienbond", "gainhelm", "prexvo", "profithelm") if _k != _req_prop
+            ]
+            for _m_name in _fb_order:
+                _fb = _fb_maps.get(_m_name, {}).get(slug)
+                if isinstance(_fb, dict) and _fb.get("formula") and isinstance(_fb.get("inputs"), dict):
+                    ext_spec = _fb
+                    if _m_name in ("lienbond", "gainhelm"):
+                        if _m_name == "lienbond":
+                            lienbond_slugs.add(slug)
+                        else:
+                            gainhelm_slugs.add(slug)
+                    break
+        except Exception:
+            pass
+
     norm_prop = (
         "prexvo"
         if ("prexvo" in str(property_id).lower() or slug in PREXVO_TOOL_SCENARIOS)
@@ -1675,16 +1692,32 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         inputs = {str(k): float(v) for k, v in tool["inputs"].items()}
         published_output = float(tool["published_output"])
         sample_calc = str(tool.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
-        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else ("sprs_max_score" if norm_prop == "gainhelm" else "section_179_limit_2026")
-        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else 2560000)
+        claim_key = (
+            "rap_fpl_multiplier"
+            if norm_prop == "prexvo"
+            else (
+                "sprs_max_score"
+                if norm_prop == "gainhelm"
+                else ("ncci_emr_unity_baseline" if norm_prop == "lienbond" else "section_179_limit_2026")
+            )
+        )
+        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
         q_params = dict(inputs)
     elif ext_spec.get("formula") and isinstance(ext_spec.get("inputs"), dict) and ext_spec.get("published_output") is not None:
         formula = str(ext_spec["formula"])
         inputs = {str(k): float(v) for k, v in ext_spec["inputs"].items()}
         published_output = float(ext_spec["published_output"])
         sample_calc = str(ext_spec.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
-        claim_key = "rap_fpl_multiplier" if norm_prop == "prexvo" else ("sprs_max_score" if norm_prop == "gainhelm" else "section_179_limit_2026")
-        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else 2560000)
+        claim_key = (
+            "rap_fpl_multiplier"
+            if norm_prop == "prexvo"
+            else (
+                "sprs_max_score"
+                if norm_prop == "gainhelm"
+                else ("ncci_emr_unity_baseline" if norm_prop == "lienbond" else "section_179_limit_2026")
+            )
+        )
+        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
         q_params = dict(inputs)
     elif norm_prop == "prexvo" and "refinance" in slug:
         crefin = CURATED_TOOL_CALCULATION_PROOFS["student-loan-refinance-break-even-calculator"]
@@ -1697,28 +1730,53 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         q_params = dict(crefin["query_params"])
     elif norm_prop == "prexvo":
         formula = "round(monthly_interest - interest_subsidy, 2)"
-        inputs = {"monthly_interest": 325.0, "interest_subsidy": 76.77}
-        published_output = 248.23
-        sample_calc = "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI, 2026 RAP sets payment at $248.23/month with $76.77/month unpaid interest waived"
+        inputs = {"monthly_interest": 325.0, "interest_subsidy": 82.58}
+        published_output = 242.42
+        sample_calc = "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month unpaid interest waived"
         claim_key = "rap_fpl_multiplier"
         claim_val = 2.25
-        q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 1}
+        q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0}
     elif norm_prop == "gainhelm":
         formula = "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)"
         inputs = {"cpa_base_fee": 28000.0, "extra_tsc_count": 2.0, "fee_per_extra_tsc": 4500.0, "grc_platform_annual": 15000.0, "pentest_fee": 11500.0, "remediation_hours": 120.0, "engineering_hourly_rate": 121.67}
         published_output = 78100.4
-        sample_calc = "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 rate) + $11,500 pentest = $78,100.40 total Year-1 audit cost"
+        sample_calc = "$37,000 CPA attestation fee ($28,000 base + 2 extra TSC at $4,500) + $15,000 GRC automation + (120 hrs * $121.67/hr BLS SOC 15-1212 benchmark estimate) + $11,500 pentest = $78,100.40 estimated Year-1 audit cost"
         claim_key = "sprs_max_score"
         claim_val = 110
         q_params = {"headcount": 75, "grc_tier": 1, "audit_type": 2}
     elif norm_prop == "lienbond":
-        formula = "round((payroll / 100.0) * class_rate * emr_factor, 2)"
-        inputs = {"payroll": 500000.0, "class_rate": 8.42, "emr_factor": 0.95}
-        published_output = 39995.0
-        sample_calc = "($500,000 payroll / 100) * $8.42 NCCI Class 5403 rate * 0.95 EMR = $39,995.00 annual workers compensation premium"
-        claim_key = "ncci_emr_unity_baseline"
-        claim_val = 1.0
-        q_params = {"payroll": 500000, "class_rate": 8.42, "emr": 0.95}
+        if "miller" in slug or ("performance" in slug and "bond" in slug):
+            formula = "round(min(contract_price, 100000.0) * 0.025 + max(0.0, min(contract_price - 100000.0, 400000.0)) * 0.015 + max(0.0, contract_price - 500000.0) * (sliding_tier_rate_pct / 100.0), 2)"
+            inputs = {"contract_price": 1200000.0, "sliding_tier_rate_pct": 1.0}
+            published_output = 15500.0
+            sample_calc = "Public works contract of $1,200,000 under SFAA Class B sliding-scale rates ($2,500 on first $100k + $6,000 on next $400k + $7,000 on remaining $700k) produces a $15,500.00 combined AIA A312 performance and payment bond premium estimate"
+            claim_key = "miller_act_threshold_usd"
+            claim_val = 150000
+            q_params = {"contract_price": 1200000, "sliding_tier_rate_pct": 1.0}
+        elif "bond" in slug or "surety" in slug:
+            formula = "round(bond_penalty_amount * (underwriting_rate_pct / 100.0), 2)"
+            inputs = {"bond_penalty_amount": 25000.0, "underwriting_rate_pct": 1.5}
+            published_output = 375.0
+            sample_calc = "Statutory $25,000 surety bond underwritten at a 1.50% preferred credit tier rate yields a $375.00 annual bond premium estimate"
+            claim_key = "miller_act_threshold_usd"
+            claim_val = 150000
+            q_params = {"bond_penalty_amount": 25000, "underwriting_rate_pct": 1.5}
+        elif "lien" in slug or "retainage" in slug:
+            formula = "round(unpaid_contract_draw + change_order_balance, 2)"
+            inputs = {"unpaid_contract_draw": 85000.0, "change_order_balance": 12500.0}
+            published_output = 97500.0
+            sample_calc = "Unpaid progress draw of $85,000 plus $12,500 in executed change orders preserves $97,500.00 in secured statutory mechanics lien principal"
+            claim_key = "miller_act_notice_days"
+            claim_val = 90
+            q_params = {"unpaid_contract_draw": 85000, "change_order_balance": 12500}
+        else:
+            formula = "round((payroll / 100.0) * class_rate * emr_factor, 2)"
+            inputs = {"payroll": 500000.0, "class_rate": 8.42, "emr_factor": 0.95}
+            published_output = 39995.0
+            sample_calc = "($500,000 payroll / 100) * $8.42 NCCI Class 5403 rate * 0.95 EMR = $39,995.00 annual workers compensation premium estimate"
+            claim_key = "ncci_emr_unity_baseline"
+            claim_val = 1.0
+            q_params = {"payroll": 500000, "class_rate": 8.42, "emr": 0.95}
     else:
         domain = _classify_tool_domain(slug)
         if "1031" in slug or "like-kind" in slug:
@@ -2058,8 +2116,8 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"Under P.L. 119-21 and IRS Rev. Proc. 2025-32, Congress permanently extended the 10%, 12%, 22%, 24%, 32%, 35%, and 37% individual brackets alongside the enhanced standard deduction and 20% Section 199A QBI deduction.\n\n"
             f"Key findings from our quantitative modeling engine:\n"
             f"• Projected 2027 federal liability is $18,734 (14.99% effective tax rate) for a $125k W-2 earner under IRC Section 1(j).\n"
-            f"• Standard deductions reach $16,100 Single / $32,200 MFJ in 2026 and $16,500 Single / $33,000 MFJ in 2027.\n"
-            f"• The 22% marginal bracket applies up to $105,700 taxable income ($122,200 gross Single), preventing the repealed 25%/28% rate jump.\n\n"
+            f"• Standard deductions reach $16,100 Single / $32,200 MFJ in 2026 and $16,600 Single / $33,200 MFJ in 2027.\n"
+            f"• The 22% marginal bracket applies up to $105,700 taxable income in 2026 ($109,125 in 2027), locking permanent rate stability under P.L. 119-21.\n\n"
             f"Model your exact bracket thresholds and effective tax rate across all 50 states:\n"
             f"{url}\n\n"
             f"#TaxPlanning #OBBBA #WealthManagement #QuantitativeFinance #FinancialPlanning"
@@ -2072,7 +2130,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"Key statutory rules applied in our modeling engine:\n"
             f"• Modeling $15k short-term, $45k long-term, and $5k staking yields $15,000 in total tax (23.08% effective rate, $50,000 net proceeds).\n"
             f"• Long-term digital assets (>365 days) qualify for preferential 0%, 15%, or 20% rates plus 3.8% Section 1411 NIIT.\n"
-            f"• Short-term trades and DeFi staking yield are treated as ordinary income up to 39.6% post-TCJA.\n\n"
+            f"• Short-term trades and DeFi staking yield are treated as ordinary income at progressive rates up to 37% under P.L. 119-21.\n\n"
             f"Calculate your exact federal, state, and staking tax liabilities under Form 1099-DA:\n"
             f"{url}\n\n"
             f"#CryptoTax #DigitalAssets #Bitcoin #TaxPlanning #DeFi #Form1099DA"
@@ -2107,25 +2165,25 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     elif slug == "tcja-sunset-capital-gains":
         url = f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=linkedin&utm_medium=social&utm_campaign=tcja-sunset-capital-gains&utm_content=company_post"
         text = (
-            f"Realizing $250,000 in capital gains triggers a combined 34.0% effective tax rate in CA as ordinary brackets expand around unindexed NIIT.\n\n"
-            f"On December 31, 2025, the statutory provisions of P.L. 115-97 expire. While statutory long-term capital gains rates remain 0%, 15%, and 20% under IRC Section 1(h), compressed deductions lower the threshold where the 3.8% NIIT surtax bites.\n\n"
+            f"Realizing $250,000 in capital gains triggers a combined 34.0% effective tax rate in CA as ordinary brackets interact with unindexed NIIT.\n\n"
+            f"Under OBBBA (P.L. 119-21), the permanent 10% to 37% individual brackets remain in force. While statutory long-term capital gains rates remain 0%, 15%, and 20% under IRC Section 1(h), high ordinary salary still pushes gains into higher tiers and triggers the 3.8% NIIT surtax.\n\n"
             f"Key findings from our quantitative modeling:\n"
             f"• Single filers with $150k salary and $100k capital gains face a combined 30.20% effective tax rate in CA ($30,200 total tax, $1,900 NIIT).\n"
             f"• Section 1411 NIIT applies a 3.8% surtax on MAGI exceeding $200k, unindexed for inflation since 2013.\n"
-            f"• Short-term capital gains face ordinary progressive rates reverting to 10% to 39.6%.\n\n"
-            f"Project your multi-tier capital gains and NIIT exposure post-sunset:\n"
+            f"• Short-term capital gains face ordinary progressive rates from 10% to 37%.\n\n"
+            f"Project your multi-tier capital gains and NIIT exposure under 2026 rules:\n"
             f"{url}\n\n"
-            f"#CapitalGains #TaxPlanning #WealthManagement #QuantitativeFinance #Investments #TCJA"
+            f"#CapitalGains #TaxPlanning #WealthManagement #QuantitativeFinance #Investments #OBBBA"
         )
     elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
         url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&use=100&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
         text = (
             f"Deploying $500,000 into qualifying capital assets delivers an immediate $105,000 first-year cash tax reduction under IRC Section 179.\n\n"
-            f"Under IRC Section 179 and Section 168(k), first-year asset expensing faces major statutory phase-downs before bonus depreciation expires in 2027.\n\n"
+            f"Under P.L. 119-21 (OBBBA) Section 70301 and IRC Section 179, qualifying capital asset acquisitions retain 100% first-year bonus depreciation alongside expanded statutory expensing.\n\n"
             f"Key findings from our equipment depreciation modeling:\n"
             f"• 2026 Section 179 maximum expensing reaches $2,560,000 with a $4,090,000 phase-out cap.\n"
             f"• A $125,000 equipment acquisition delivers an immediate $43,750 net cash tax reduction in the 35% tax bracket.\n"
-            f"• Bonus depreciation drops to 20% in 2026 and completely phases out (0%) on January 1, 2027.\n\n"
+            f"• P.L. 119-21 Section 70301 restored permanent 100% bonus depreciation under IRC Section 168(k) for qualifying property acquired after January 19, 2025.\n\n"
             f"Calculate your first-year equipment depreciation write-off and tax savings:\n"
             f"{url}\n\n"
             f"#Section179 #TaxPlanning #CFO #EquipmentFinancing #Accounting #BonusDepreciation"
@@ -2170,12 +2228,12 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"#PredictionMarkets #TaxStrategy #Section1256 #Kalshi #EventContracts #QuantitativeTrading"
         )
     elif slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=linkedin&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator&utm_content=company_post"
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=15000000&basis=500000&years=5&utm_source=linkedin&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator&utm_content=company_post"
         text = (
-            f"Qualified C-corporation founders holding stock over 5 years exclude $10,000,000 in exit gains ($2,380,000 federal tax saved).\n\n"
-            f"Under IRC Section 1202, original-issue domestic C-corp shares issued below the $50,000,000 gross asset threshold qualify for a 100% federal capital gains and Section 1411 NIIT exclusion.\n\n"
+            f"Qualified C-corporation founders with post-OBBBA shares exclude up to $15,000,000 in exit gains ($3,570,000 federal tax saved).\n\n"
+            f"Under IRC Section 1202 as amended by P.L. 119-21 Section 70431, original-issue domestic C-corp shares issued below the $75,000,000 gross asset threshold qualify for a 100% federal capital gains and Section 1411 NIIT exclusion.\n\n"
             f"Key findings from our statutory QSBS model:\n"
-            f"• Excludes the greater of $10,000,000 or 10x adjusted basis ($2,380,000 federal LTCG + 3.8% NIIT saved on a $10M exit).\n"
+            f"• Post-OBBBA issuances exclude the greater of $15,000,000 ($10,000,000 pre-July 5, 2025) or 10x adjusted basis.\n"
             f"• Non-conforming states like California disallow Section 1202, requiring separate state tax reserve modeling.\n"
             f"• Shareholder-level trust stacking and IRC Section 1045 rollovers preserve eligibility across early exits.\n\n"
             f"Model your exact Section 1202 exclusion cap and state tax exposure:\n"
@@ -2186,7 +2244,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
         url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
         text = (
             f"Deducting $24,000 in commercial equipment lease payments at 85% business use shields $20,400 of ordinary income under IRC Section 162.\n\n"
-            f"With federal bonus depreciation stepping down to 20% in 2026 under IRC Section 168(k), operators must compare IRC Section 162(a)(3) operating lease write-offs against Section 179 expensing caps.\n\n"
+            f"With federal 100% bonus depreciation restored under P.L. 119-21 Section 70301, operators compare IRC Section 162(a)(3) operating lease write-offs against Section 179 expensing caps ($2,560,000 in 2026) and state non-conformity.\n\n"
             f"Key findings from our commercial equipment tax model:\n"
             f"• A $24,000 annual lease commitment at 85% business use yields a $20,400 direct ordinary income deduction.\n"
             f"• Operating leases bypass state-level Section 179 non-conformity caps (such as California's $25,000 deduction ceiling).\n"
@@ -2202,7 +2260,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"Under IRC Section 179(b)(5) and Section 280F, Gross Vehicle Weight Rating (GVWR) determines whether a commercial vehicle qualifies for full first-year expensing or hits luxury auto caps.\n\n"
             f"Key statutory findings from our heavy vehicle model:\n"
             f"• A $95,000 work truck over 6,000 lbs GVWR at 90% business use ($85,500 depreciable basis) saves $29,925 in the 35% bracket.\n"
-            f"• Heavy SUVs (6,001 to 14,000 lbs GVWR) face a $30,500 Section 179 cap plus 20% bonus depreciation in 2026.\n"
+            f"• Heavy SUVs (6,001 to 14,000 lbs GVWR) face a $32,000 Section 179 cap in 2026 under IRS Rev. Proc. 2025-32, followed by 100% bonus depreciation under P.L. 119-21 Section 70301.\n"
             f"• Dropping below 50% business use triggers mandatory MACRS depreciation recapture on Form 4797.\n\n"
             f"Calculate your exact GVWR classification and Year-1 vehicle tax write-off:\n"
             f"{url}\n\n"
@@ -2431,7 +2489,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
         url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&utm_source=x"
         text = (
-            f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
+            f"P.L. 119-21 restores 100% bonus depreciation, and IRC 179 saves $43,750 tax on $125k gear.\n\n"
             f"calculate your write-off:\n{url}"
         )
     elif slug == "treasury-yield-calculator":
@@ -2441,15 +2499,15 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
             f"compare after-tax yield:\n{url}"
         )
     elif slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=x"
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=15000000&basis=500000&years=5&utm_source=x"
         text = (
-            f"IRC Section 1202 lets C-corp founders exclude $10M ($2,380,000 federal tax saved).\n\n"
+            f"post-OBBBA Section 1202 lets C-corp founders exclude up to $15M ($3,570,000 federal tax saved).\n\n"
             f"check your QSBS cap:\n{url}"
         )
     elif slug == "equipment-lease-tax-deduction":
         url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=x"
         text = (
-            f"with 2026 bonus depreciation at 20%, a $24k lease at 85% use deducts $20,400/yr.\n\n"
+            f"even with 100% bonus depreciation, a $24k lease at 85% use deducts $20,400/yr under IRC 162.\n\n"
             f"compare lease vs buy:\n{url}"
         )
     elif slug == "section-1031-calculator":
@@ -2589,8 +2647,8 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
         url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&use=100&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
         text = (
-            f"Federal bonus depreciation dropped to 20% for 2026 and hits 0% in 2027, which means equipment and heavy commercial vehicle buyers have to rely on IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out threshold) to capture full first-year write-offs.\n\n"
-            f"On a $125,000 equipment purchase in the 35% bracket, Section 179 still saves $43,750 in first-year cash taxes. Check your federal and state conformity numbers here: {url}"
+            f"Under P.L. 119-21 Section 70301, 100% federal bonus depreciation is permanently restored alongside IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out threshold for 2026).\n\n"
+            f"On a $125,000 equipment purchase in the 35% bracket, Section 179 saves $43,750 in first-year cash taxes. Check your federal and state conformity numbers here: {url}"
         )
     elif slug == "treasury-yield-calculator":
         url = f"{POST_URL_BASE}/tools/treasury-yield-calculator/?principal=250000&tbill=4.80&hysa=4.25&state=CA&fed=35&niit=true&utm_source=facebook&utm_medium=social&utm_campaign=treasury-yield-calculator"
@@ -2599,15 +2657,15 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
             f"On $250,000 in treasury cash, that state tax exemption saves $3,212 a year compared to a 4.25% commercial bank HYSA. Compare your state's tax-equivalent yield here: {url}"
         )
     elif slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=facebook&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=15000000&basis=500000&years=5&utm_source=facebook&utm_medium=social&utm_campaign=qsbs-section-1202-tax-calculator"
         text = (
-            f"Under IRC Section 1202, qualified C-corporation stock held for 5 years excludes the greater of $10,000,000 or 10x adjusted basis from federal capital gains tax ($2,380,000 in federal LTCG and NIIT saved), though non-conforming states like California still tax the exit.\n\n"
+            f"Under IRC Section 1202 and P.L. 119-21 Section 70431, qualified C-corporation stock acquired post-OBBBA below the $75,000,000 gross asset limit excludes up to $15,000,000 ($10,000,000 pre-July 5, 2025) or 10x adjusted basis from federal capital gains tax, though non-conforming states like California still tax the exit.\n\n"
             f"Check your QSBS exclusion cap and state tax exposure here: {url}"
         )
     elif slug == "equipment-lease-tax-deduction":
         url = f"{POST_URL_BASE}/tools/{slug}/?lease_annual_payment=24000&business_use_pct=0.85&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
         text = (
-            f"With federal bonus depreciation down to 20% in 2026, deducting $20,400 on a $24,000 operating lease (85% business use) under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
+            f"Even with 100% federal bonus depreciation restored under P.L. 119-21 Section 70301, deducting $20,400 on a $24,000 operating lease (85% business use) under IRC Section 162 can beat a financed purchase when state Section 179 caps (like California's $25,000 limit) block upfront write-offs.\n\n"
             f"Run a side-by-side after-tax NPV comparison for your equipment acquisition here: {url}"
         )
     elif slug == "section-1031-calculator":
@@ -2625,7 +2683,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "commercial-heavy-vehicle-section-179-weight-calculator":
         url = f"{POST_URL_BASE}/tools/commercial-heavy-vehicle-section-179-weight-calculator/?vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35&utm_source=facebook&utm_medium=social&utm_campaign=commercial-heavy-vehicle-section-179-weight-calculator"
         text = (
-            f"Placing a $95,000 commercial truck or cargo van over 6,000 lbs GVWR in service at 90% business use unlocks $29,925 in immediate Year-1 federal tax savings under IRC Section 179(b)(5), whereas heavy SUVs cap at $30,500 plus 20% bonus depreciation.\n\n"
+            f"Placing a $95,000 commercial truck or cargo van over 6,000 lbs GVWR in service at 90% business use unlocks $29,925 in immediate Year-1 federal tax savings under IRC Section 179(b)(5), whereas heavy SUVs cap at $32,000 Section 179 in 2026 plus 100% bonus depreciation.\n\n"
             f"Check your exact vehicle weight class and Year-1 depreciation deduction here: {url}"
         )
     elif slug == "contractor-surety-bond-cost-calculator":
@@ -2702,21 +2760,47 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     }
 
 
-def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
+def _resolve_google_sites_disclosures(property_id: str, brand_name: str = "") -> List[str]:
+    """Resolves canonical mandatory disclosures from TruthPack for Google Sites HTML (50+ sites)."""
+    norm_prop = _normalize_property_id(property_id or "profithelm")
+    disclosures: List[str] = []
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        pack = load_truth_pack(norm_prop, allow_expired=True)
+        for item in (getattr(pack, "disclosures", None) or []):
+            txt = _sanitize_distribution_text(str(getattr(item, "canonical_text", "") or "").strip())
+            if txt and txt not in disclosures:
+                disclosures.append(txt)
+    except Exception:
+        pass
+    if not disclosures:
+        eff_brand = brand_name or norm_prop.capitalize()
+        disclosures.append(
+            f"Regulatory Notice: {eff_brand} calculators provide deterministic statutory modeling and planning estimates for educational purposes only and do not constitute individualized legal, tax, accounting, or underwriting advice."
+        )
+    return disclosures
+
+
+def generate_parasite_google_sites_html(tool_or_slug: Any, property_id: Optional[str] = None) -> str:
     """
     Builds Google Sites DR 97 compliant HTML with high-contrast Obsidian dark theme,
     interactive touch targets >= 44x44px, Schema.org FAQPage & SoftwareApplication JSON-LD,
-    and canonical anchor pointing to https://profithelm.com/tools/{slug}/.
+    canonical mandatory TruthPack disclosure, and canonical anchor pointing to the tenant URL.
     Zero em-dashes and zero en-dashes.
     """
     tool = _resolve_tool(tool_or_slug)
     slug = tool["slug"]
+    eff_prop = _normalize_property_id(property_id or tool.get("property_id") or "profithelm")
+    tenant_cfg = resolve_tenant_distribution_config(eff_prop)
+    eff_brand = _sanitize_distribution_text(str(tenant_cfg.get("brand_name") or ("ProfitHelm" if eff_prop == "profithelm" else eff_prop.capitalize())))
+    eff_base = str(tenant_cfg.get("canonical_base") or POST_URL_BASE).rstrip("/")
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     _, clean_short = _clean_tool_title_and_short(title, slug, tool.get("short_title", ""))
     short_title = _sanitize_distribution_text(clean_short)
     desc = _sanitize_distribution_text(tool.get("description", f"Quantitative model and planning calculator for {title}."))
     qa = _sanitize_distribution_text(tool.get("quick_answer", f"The {title} model provides deterministic projections and statutory analysis."))
-    url = f"{POST_URL_BASE}/tools/{slug}/"
+    url = f"{eff_base}/tools/{slug}/"
 
     citations = get_dual_dataset_citations(slug)
     stat_cite = _sanitize_distribution_text(citations.get("statutory_source", "Internal Revenue Code Section 1"))
@@ -2761,8 +2845,8 @@ def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
         ctrl_label_2 = "Statutory Expensing Horizon"
         ctrl_input_2 = (
             '<select id="tax_year">\n'
-            '          <option value="2026" selected>Tax Year 2026 (Section 179 + 20% Bonus)</option>\n'
-            '          <option value="2027">Tax Year 2027 (Section 179 Expensing)</option>\n'
+            '          <option value="2026" selected>Tax Year 2026 (Section 179 + 100% Bonus)</option>\n'
+            '          <option value="2027">Tax Year 2027 (Section 179 + 100% Bonus)</option>\n'
             '        </select>'
         )
         metric_1_label = "First-Year Expensing Write-Off"
@@ -3073,7 +3157,7 @@ def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
   </style>
 </head>
 <body>
-  <div class="badge">ProfitHelm Quantitative Model - DR 97 Entity Buffer</div>
+  <div class="badge">{html.escape(eff_brand, quote=True)} Quantitative Model - DR 97 Entity Buffer</div>
   <h1>{escaped_title}</h1>
   <p class="lead-text">{escaped_desc}</p>
 
@@ -3111,7 +3195,7 @@ def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
         <h3>Need Granular Scenario Modeling?</h3>
         <p>Access our unrestricted multi-bracket calculation engine with zero registration.</p>
       </div>
-      <a class="cta-btn" href="{url}">Open Interactive Tool at ProfitHelm</a>
+      <a class="cta-btn" href="{url}">Open Interactive Tool at {html.escape(eff_brand, quote=True)}</a>
     </div>
   </section>
 
@@ -3127,9 +3211,13 @@ def generate_parasite_google_sites_html(tool_or_slug: Any) -> str:
     </details>
   </section>
 
+  <aside class="regulatory-disclosure" style="margin-top:24px;padding:14px 18px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,0.55);font-size:0.88rem;color:var(--text);">
+    {"".join(f"<p style='margin:0 0 6px 0;'>{html.escape(d_txt, quote=True)}</p>" for d_txt in _resolve_google_sites_disclosures(eff_prop, eff_brand))}
+  </aside>
+
   <footer>
     <p>Official Canonical Model: <a href="/tools/{slug}/">{url}</a></p>
-    <p>ProfitHelm Research - Grounded in {stat_cite} and {econ_cite}.</p>
+    <p>{html.escape(eff_brand, quote=True)} Research - Grounded in {stat_cite} and {econ_cite}.</p>
   </footer>
 </body>
 </html>"""
@@ -3220,8 +3308,8 @@ def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
         body = (
             f"# {title}: Capital Expensing and Depreciation Schedule Optimization\n\n"
             f"As corporate fiscal planning approaches, commercial operators and corporate treasurers must address equipment acquisition structuring "
-            f"and tax depreciation phase-downs. Conventional heuristics routinely fail to capture the compounding interaction between Section 179 expensing caps, "
-            f"MACRS schedules, and bonus depreciation phase-down.\n\n"
+            f"and statutory depreciation timing. Conventional heuristics routinely fail to capture the compounding interaction between Section 179 expensing caps, "
+            f"MACRS schedules, and 100% Section 168(k) bonus depreciation.\n\n"
             f"### Executive Overview and Core Findings\n\n"
             f"{qa}\n\n"
             f"{proof_callout}\n\n"
@@ -3432,8 +3520,8 @@ def generate_headless_brand_article_from_transcript(
             ]
         else:
             defaults = [
-                "Statutory rate schedules revert upon sunset to pre-2018 marginal brackets.",
-                "Standard deduction contractions accelerate bracket creep for professional earners.",
+                "Under P.L. 119-21 (OBBBA), federal 10% to 37% individual brackets and enhanced standard deductions are permanently enacted.",
+                "Standard deductions reach $16,100 Single / $32,200 MFJ in 2026 and $16,600 Single / $33,200 MFJ in 2027.",
                 "Deterministic modeling isolates non-linear tax liabilities across state conformity rules.",
             ]
         for d in defaults:
@@ -3443,7 +3531,7 @@ def generate_headless_brand_article_from_transcript(
     hashtags = (
         "#StudentLoans #TitleIV #HigherEducation #FinancialPlanning #StudentDebt #PublicPolicy"
         if prop_id == "prexvo"
-        else "#TaxPlanning #TCJASunset #WealthManagement #QuantitativeFinance #FinancialPlanning"
+        else "#TaxPlanning #OBBBA #WealthManagement #QuantitativeFinance #FinancialPlanning"
     )
 
     article_md = (
@@ -3726,7 +3814,7 @@ This tool provides instant, zero-login calculations, full schedule exports, and 
     elif domain == "capex":
         content = f"""# {title}: The Definitive Mathematical Teardown and Strategic Playbook
 
-For corporate treasurers, commercial fleet operators, and equipment finance managers, optimizing capital expenditures requires transitioning from heuristic estimation to rigorous deterministic modeling. The complex interplay of Section 179 expensing caps, MACRS recovery periods, and bonus depreciation phase-down schedules creates significant planning risks.
+For corporate treasurers, commercial fleet operators, and equipment finance managers, optimizing capital expenditures requires transitioning from heuristic estimation to rigorous deterministic modeling. The complex interplay of Section 179 expensing caps, MACRS recovery periods, and 100% Section 168(k) bonus depreciation creates significant planning opportunities.
 
 In this deep-dive teardown, we deconstruct the statutory architecture of {short_title}, formulate its underlying mathematical mechanics, evaluate multi-scenario sensitivity across real-world commercial cohorts, and outline actionable tax-shield optimization strategies.
 
@@ -3753,7 +3841,7 @@ To model {short_title} deterministically, we express the total allowable first-y
 - Let A represent total qualifying equipment acquisition cost.
 - Let L_179 represent the statutory Section 179 expensing cap ($2,560,000 for 2026).
 - Let P_179 represent the phase-out beginning threshold ($4,090,000 for 2026).
-- Let beta denote the applicable bonus depreciation percentage (20% in 2026, phasing down to 0% in 2027).
+- Let beta denote the applicable IRC Section 168(k) bonus depreciation percentage (100% permanently restored under P.L. 119-21 Section 70301).
 - Let tau_m denote the corporate or business marginal income tax rate.
 
 ### Core Calculation Engine Formulation
@@ -3831,7 +3919,7 @@ This tool provides instant, zero-login calculations, full schedule exports, and 
     else:
         content = f"""# {title}: The Definitive Mathematical Teardown and Strategic Playbook
 
-For corporate treasury officers, tax counsel, and quantitative capital allocators, navigating federal statutory resets requires transitioning from heuristic estimation to rigorous deterministic modeling. The complex interplay of sunsetting legislative provisions, inflation adjustments, and graduated tax rate schedules creates significant planning risks for unprepared enterprises.
+For corporate treasury officers, tax counsel, and quantitative capital allocators, navigating permanent P.L. 119-21 (OBBBA) statutory tax rules requires transitioning from heuristic estimation to rigorous deterministic modeling. The complex interplay of enacted 10% to 37% brackets, inflation adjustments, and graduated state tax schedules creates significant planning considerations for enterprises.
 
 In this deep-dive teardown, we deconstruct the statutory architecture of {short_title}, formulate its underlying mathematical mechanics, evaluate multi-scenario sensitivity across real-world enterprise cohorts, and outline actionable risk-mitigation strategies.
 
@@ -3843,7 +3931,7 @@ In this deep-dive teardown, we deconstruct the statutory architecture of {short_
 
 Most financial planning software treats regulatory thresholds as static lookup variables. In reality, these statutory schedules represent dynamic non-linear functions that interact with ordinary income, capital gains classifications, and state tax conformity rules.
 
-Under governing federal legislation ({stat_cite}), multi-year transitional rules dictate how deductions, rate brackets, and capital deferrals phase in or sunset across the 2025 to 2027 fiscal calendar. Concurrently, empirical economic benchmarks from {econ_cite} indicate that regional cost pressures and wage trends magnify effective liability differentials across distinct operating jurisdictions.
+Under governing federal legislation ({stat_cite}), enacted statutory rules dictate how deductions, rate brackets, and capital deferrals operate across the 2026 and 2027 fiscal calendar. Concurrently, empirical economic benchmarks from {econ_cite} indicate that regional cost pressures and wage trends magnify effective liability differentials across distinct operating jurisdictions.
 
 To analyze your entity specific position with exact figures, access the live model at:
 [{url}]({url})
@@ -3858,7 +3946,7 @@ To model {short_title} deterministically, we express the total liability and def
 - Let B represent the baseline taxable income or total acquisition cost basis.
 - Let S_i represent the statutory threshold defining bracket tier i, where i is in (1, 2, ..., n).
 - Let tau_i denote the nominal statutory marginal tax rate applicable to tier i.
-- Let delta_TCJA denote the statutory differential adjustment factor reflecting sunset provisions.
+- Let delta_idx denote the statutory inflation-indexing and state-conformity adjustment factor.
 - Let Phi denote allowable statutory expensing, depreciation, or deferral credits under federal safe harbor rules.
 
 ### Core Calculation Engine Formulation
@@ -3870,7 +3958,7 @@ Where m is the unique bracket index satisfying:
 
 S_m-1 <= B < S_m
 
-When accounting for statutory sunset reversions and phase-down percentages alpha in [0, 1], the post-sunset adjusted liability T_adj(B) incorporates the scheduled rate adjustments:
+When accounting for statutory inflation indexing and state-conformity adjustments, the adjusted liability T_adj(B) incorporates the applicable schedule shifts:
 
 T_adj(B) = Sum(k=1 to m-1) [(tau_k + Delta_tau_k) * (S_k - S_k-1)] + (tau_m + Delta_tau_m) * (B - S_m-1)
 
@@ -3888,7 +3976,7 @@ Here, r represents the enterprise weighted average cost of capital (WACC) and t 
 
 ## 3. Scenario Comparison Matrix
 
-To demonstrate the empirical variance across common capital allocations, we evaluate four discrete operating profiles under post-sunset statutory schedules.
+To demonstrate the empirical variance across common capital allocations, we evaluate four discrete operating profiles under enacted 2026-2027 statutory schedules.
 
 | Scenario Cohort | Input Parameters | Baseline Unadjusted ($) | Optimized Planning ($) | Net Differential ($) | Effective Delta (%) | Statutory Basis |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -3969,7 +4057,7 @@ def generate_reddit_community_teardown(tool_slug: str) -> Dict[str, Any]:
             f"- 32% bracket: $201,775 to $256,225\n"
             f"- 35% bracket: $256,225 to $640,600\n"
             f"- 37% bracket: Above $640,600\n\n"
-            f"Standard deductions are $16,100 single / $32,200 MFJ in 2026 and $16,500 single / $33,000 MFJ in 2027.\n\n"
+            f"Standard deductions are $16,100 single / $32,200 MFJ in 2026 and $16,600 single / $33,200 MFJ in 2027.\n\n"
             f"Execution Steps and Takeaways:\n"
             f"1. Model your baseline taxable income under 2026 and 2027 statutory bracket thresholds.\n"
             f"2. Coordinate capital gains realization with the 22% and 24% ordinary bracket ceilings.\n"
@@ -3980,7 +4068,7 @@ def generate_reddit_community_teardown(tool_slug: str) -> Dict[str, Any]:
         post_title = "Reference guide: IRS Form 1099-DA rules and 2027 capital gains rates"
         content = (
             f"Quick breakdown of crypto tax requirements under the new broker reporting framework:\n\n"
-            f"1. Short-term gains (<365 days) and staking rewards are taxed as ordinary federal income (10% to 39.6%).\n"
+            f"1. Short-term gains (<365 days) and staking rewards are taxed as ordinary federal income (10% to 37% under P.L. 119-21).\n"
             f"2. Long-term gains (>365 days) qualify for preferential rates (0%, 15%, or 20%).\n"
             f"3. 3.8% NIIT applies if MAGI exceeds $200k single / $250k married.\n"
             f"4. Every trade is a taxable event requiring Form 8949 cost-basis reporting.\n\n"
@@ -4014,14 +4102,14 @@ def generate_reddit_community_teardown(tool_slug: str) -> Dict[str, Any]:
         )
     elif tool_slug == "tcja-sunset-capital-gains":
         subreddit = "r/investing"
-        post_title = "Capital gains tax after the 2025 TCJA sunset: How income stacking and 3.8% NIIT affect long-term gains"
+        post_title = "Capital gains tax under OBBBA P.L. 119-21: How income stacking and 3.8% NIIT affect long-term gains"
         content = (
-            f"Compiled the statutory changes affecting capital gains after December 31, 2025. "
-            f"While LTCG rates remain 0%, 15%, and 20%, ordinary income bracket shifts change how gains stack.\n\n"
+            f"Compiled the statutory rules affecting capital gains in 2026 and 2027 under OBBBA (P.L. 119-21). "
+            f"While LTCG rates remain 0%, 15%, and 20%, ordinary income bracket thresholds govern how gains stack.\n\n"
             f"Key rules:\n"
             f"1. LTCG sits on top of ordinary salary. If your salary uses up the 15% tier, gains are taxed at 20%.\n"
             f"2. The 3.8% NIIT under Section 1411 still applies over $200k Single / $250k MFJ (not indexed for inflation).\n"
-            f"3. Short-term gains revert to pre-TCJA ordinary brackets (up to 39.6%).\n"
+            f"3. Short-term gains follow permanent 10% to 37% ordinary income brackets under P.L. 119-21.\n"
             f"4. States like CA and NY tax gains as ordinary income with zero preferential discount.\n\n"
             f"Execution Steps and Takeaways:\n"
             f"1. Map out long-term capital gains stacking on top of projected ordinary salary.\n"
@@ -4059,7 +4147,7 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
         target_topic = "Personal Finance & Income Tax Law"
         question_thread = "How do the permanent OBBBA (P.L. 119-21) 2026-2027 federal tax brackets and standard deductions affect middle-class and high-income taxpayers?"
         extractable_steps = [
-            "Model baseline taxable income under 2026 ($16,100 Single / $32,200 MFJ) and 2027 ($16,500 Single / $33,000 MFJ) standard deductions.",
+            "Model baseline taxable income under 2026 ($16,100 Single / $32,200 MFJ) and 2027 ($16,600 Single / $33,200 MFJ) standard deductions.",
             "Coordinate discretionary income and capital asset liquidations with the 22% and 24% statutory bracket thresholds.",
             "Maximize pretax retirement plan contributions ($24,500 401k limit, 403b, HSA) to compress adjusted gross income.",
             "Compare itemized deductions against the enhanced Rev. Proc. 2025-32 standard deduction ($16,100 Single / $32,200 MFJ).",
@@ -4067,17 +4155,17 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
         steps_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(extractable_steps))
         answer_markdown = (
             f"Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 2025-32, Congress permanently extended the "
-            f"10% to 37% individual income tax brackets and enhanced standard deductions for tax years 2026 and 2027, preventing the repealed pre-OBBBA sunset.\n\n"
-            f"### Statutory Rate Schedule (2027 Single Filers)\n"
-            f"The enacted statutory rate tiers for single filers include:\n"
+            f"10% to 37% individual income tax brackets and enhanced standard deductions for tax years 2026 and 2027.\n\n"
+            f"### Statutory Rate Schedule (2026 Single Filers)\n"
+            f"The enacted 2026 statutory rate tiers for single filers include:\n"
             f"- 10% bracket covers $0 to $12,400.\n"
-            f"- 12% bracket covers $12,400 to $50,400 (preventing the repealed 15% sunset rate).\n"
-            f"- 22% bracket covers $50,400 to $105,700 (preventing the repealed 25% sunset rate).\n"
-            f"- 24% bracket covers $105,700 to $201,775 (preventing the repealed 28% sunset rate).\n"
+            f"- 12% bracket covers $12,400 to $50,400.\n"
+            f"- 22% bracket covers $50,400 to $105,700.\n"
+            f"- 24% bracket covers $105,700 to $201,775.\n"
             f"- 32% bracket covers $201,775 to $256,225.\n"
             f"- 35% bracket covers $256,225 to $640,600.\n"
-            f"- 37% top bracket applies above $640,600 (preventing the repealed 39.6% rate).\n\n"
-            f"In addition to permanent 10%-37% marginal rates, the standard deduction is indexed to $16,100 for Single filers and $32,200 for Married Filing Jointly in 2026 ($16,500 Single and $33,000 MFJ in 2027), alongside the permanent 20% Section 199A QBI deduction.\n\n"
+            f"- 37% permanent top bracket applies above $640,600 under P.L. 119-21.\n\n"
+            f"In addition to permanent 10%-37% marginal rates, the standard deduction is indexed to $16,100 for Single filers and $32,200 for Married Filing Jointly in 2026 ($16,600 Single and $33,200 MFJ in 2027), alongside the permanent 20% Section 199A QBI deduction.\n\n"
             f"### Actionable Tax Planning Steps\n"
             f"{steps_md}\n\n"
             f"### Primary Sources and Authorities\n"
@@ -4098,7 +4186,7 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
             f"The IRS classifies digital assets as property under Notice 2014-21 and subsequent Treasury regulations. "
             f"Every disposition of cryptocurrency (selling for fiat, trading for another token, or purchasing goods) constitutes a taxable realization event.\n\n"
             f"### Core Taxation Rules\n"
-            f"1. Short-Term Capital Gains: Assets held for 365 days or fewer are taxed at ordinary income rates ranging from 10% to 39.6%.\n"
+            f"1. Short-Term Capital Gains: Assets held for 365 days or fewer are taxed at ordinary income rates ranging from 10% to 37% under P.L. 119-21.\n"
             f"2. Long-Term Capital Gains: Assets held for more than one year qualify for preferential 0%, 15%, or 20% rates depending on taxable income.\n"
             f"3. Net Investment Income Tax (NIIT): A 3.8% surtax applies to net investment income if Modified Adjusted Gross Income exceeds $200k single or $250k married.\n"
             f"4. Broker Reporting (Form 1099-DA): Digital asset brokers are mandated to report gross proceeds and adjusted cost basis directly to the IRS.\n\n"
@@ -4158,21 +4246,21 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
         )
     elif tool_slug == "tcja-sunset-capital-gains":
         target_topic = "Investment Strategy & Capital Gains Taxation"
-        question_thread = "Will long-term capital gains tax rates increase after the 2025 TCJA sunset?"
+        question_thread = "How do permanent 2026-2027 P.L. 119-21 ordinary brackets affect long-term capital gains stacking and NIIT?"
         extractable_steps = [
             "Stack long-term capital gains on top of ordinary income to determine which rate bracket applies.",
             "Monitor modified adjusted gross income against the statutory 3.8% NIIT threshold ($200k Single / $250k MFJ).",
-            "Consider harvesting gains before December 31, 2025 if ordinary income brackets push capital gains into higher tiers.",
+            "Coordinate multi-year gain realizations under permanent 10% to 37% ordinary brackets and 0%/15%/20% LTCG thresholds.",
             "Account for state-specific capital gains taxes, which offer no preferential rate discount in states like California.",
         ]
         steps_md = "\n".join(f"{i+1}. {step}" for i, step in enumerate(extractable_steps))
         answer_markdown = (
-            f"The headline preferential long-term capital gains tax rates (0%, 15%, and 20%) are permanent under the Internal Revenue Code "
-            f"and do not directly sunset. However, the income thresholds at which those brackets begin will shift when the individual TCJA provisions expire.\n\n"
+            f"The headline preferential long-term capital gains tax rates (0%, 15%, and 20%) under IRC Section 1(h) are paired with permanent "
+            f"10% to 37% ordinary income brackets under OBBBA (P.L. 119-21) for 2026 and 2027.\n\n"
             f"### Income Stacking and Bracket Interaction\n"
             f"Under federal tax law, long-term capital gains are stacked on top of ordinary income:\n"
             f"1. Ordinary income fills lower tax brackets first.\n"
-            f"2. Long-term capital gains sit on top, meaning that as ordinary tax brackets shift downward, more capital gains may be pushed into the 15% or 20% brackets.\n"
+            f"2. Long-term capital gains sit on top, meaning that as ordinary income increases, more capital gains are pushed into the 15% or 20% tiers.\n"
             f"3. The 3.8% Net Investment Income Tax (IRC Section 1411) remains unindexed for inflation, impacting single filers over $200,000 and married filers over $250,000.\n\n"
             f"### Execution Strategy\n"
             f"{steps_md}\n\n"
@@ -4407,12 +4495,12 @@ def generate_regulatory_lead_magnet_copy(tool_slug: str) -> Dict[str, Any]:
         cta = "Get Arbitrage Strategy Sheet"
     elif slug == "tcja-sunset-capital-gains":
         badge = "1st-Party Wealth Advisory Intelligence"
-        headline = "Get 2027 Capital Gains Reversion and Section 1411 NIIT Alerts"
+        headline = "Get 2026-2027 Capital Gains Stacking and Section 1411 NIIT Alerts"
         description = (
-            "Join 11,200+ private equity investors and asset managers receiving statutory updates on post-TCJA long-term capital gains brackets, "
+            "Join 11,200+ private equity investors and asset managers receiving statutory updates on OBBBA (P.L. 119-21) long-term capital gains brackets, "
             "state tax conformity, and Net Investment Income Tax surtax thresholds. Zero ads. Verified tax mathematics."
         )
-        cta = "Get Capital Gains Sunset Sheet"
+        cta = "Get Capital Gains Stacking Sheet"
     elif slug == "section-179-calculator":
         badge = "1st-Party Commercial Tax Intelligence"
         headline = "Get Section 179 Vehicle Deduction and Bonus Depreciation Alerts"
@@ -4798,7 +4886,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     elif slug in ("section-179-calculator", "section-179-vehicle-equipment-deduction"):
         url = f"{POST_URL_BASE}/tools/{slug}/?cost=125000&year=2026&bracket=35&utm_source=x"
         text = (
-            f"2026 bonus depreciation drops to 20%, but IRC 179 saves $43,750 tax on $125k gear.\n\n"
+            f"P.L. 119-21 restores 100% bonus depreciation, and IRC 179 saves $43,750 tax on $125k gear.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -4824,9 +4912,9 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
             f"{url}"
         )
     elif slug == "qsbs-section-1202-tax-calculator":
-        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=10000000&basis=500000&years=5&utm_source=x"
+        url = f"{POST_URL_BASE}/tools/qsbs-section-1202-tax-calculator/?gain=15000000&basis=500000&years=5&utm_source=x"
         text = (
-            f"IRC 1202 lets C-corp founders exclude $10M ($2,380,000 federal exit tax saved).\n\n"
+            f"post-OBBBA IRC 1202 lets C-corp founders exclude up to $15M ($3,570,000 federal exit tax saved).\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -5073,23 +5161,23 @@ TOOL_YOUTUBE_METADATA = {
         "title": "2027 Capital Gains Tax Simulator [NIIT 3.8% Surtax]",
         "preset_query": "cggain=100000&ordinary=150000&period=long_term&status=single&state=CA",
         "chapters": [
-            "IRC Section 1(h) Capital Gains Brackets Post-TCJA",
+            "IRC Section 1(h) Capital Gains Brackets Under OBBBA P.L. 119-21",
             "Unindexed Section 1411 3.8% NIIT Surtax Stacking",
             "State Capital Gains Additions & Combined Rates",
-            "Interactive Capital Gains Sunset Walkthrough",
+            "Interactive Capital Gains Stacking Walkthrough",
         ],
         "pinned_comment": (
-            "📌 PROJECT YOUR CAPITAL GAINS REVERSION:\n"
+            "📌 PROJECT YOUR CAPITAL GAINS STACKING:\n"
             "Realizing $100k in long-term capital gains on $150k salary triggers $30,200 in combined tax (30.2% effective tax burden in CA including $1,900 Section 1411 NIIT).\n\n"
-            "👉 Project your post-TCJA federal, state, and NIIT liabilities:\n"
+            "👉 Project your 2026-2027 federal, state, and NIIT liabilities:\n"
             f"{POST_URL_BASE}/tools/tcja-sunset-capital-gains/?cggain=100000&ordinary=150000&period=long_term&status=single&state=CA&utm_source=youtube&utm_medium=video&utm_campaign=tcja-sunset-capital-gains-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under IRC Section 1(h) and Section 1411 Net Investment Income Tax regulations."
+            "Statutory Basis: Computed under IRC Section 1(h), P.L. 119-21, and Section 1411 Net Investment Income Tax regulations."
         ),
         "tags": [
-            "tcja sunset capital gains rates",
+            "obbba capital gains rates",
             "2027 capital gains tax calculator",
             "niit 3.8 tax threshold 2027",
-            "post tcja capital gains brackets",
+            "2026 2027 capital gains brackets",
             "section 1411 net investment income tax",
             "long term capital gains 2027",
             "profithelm",
@@ -5101,22 +5189,22 @@ TOOL_YOUTUBE_METADATA = {
         "preset_query": "cost=125000&year=2026&bracket=35&use=100",
         "chapters": [
             "IRC Section 179 Statutory Deduction Caps & Phase-Outs",
-            "Section 168(k) Bonus Depreciation Schedule Integration",
+            "Section 168(k) 100% Bonus Depreciation Integration (P.L. 119-21)",
             "First-Year Cash Tax Savings vs MACRS Recovery",
             "Interactive Section 179 Deduction Walkthrough",
         ],
         "pinned_comment": (
             "📌 CALCULATE YOUR SECTION 179 WRITE-OFF:\n"
-            "Acquiring $500k in business equipment in 2026 captures an immediate $105,000 cash tax reduction before bonus depreciation expires in 2027.\n\n"
+            "Acquiring $500k in business equipment in 2026 captures an immediate $105,000 cash tax reduction under expanded IRC Section 179 and 100% bonus depreciation.\n\n"
             "👉 Calculate your exact first-year deduction and net cash outlay:\n"
             f"{POST_URL_BASE}/tools/section-179-calculator/?cost=125000&year=2026&bracket=35&use=100&utm_source=youtube&utm_medium=video&utm_campaign=section-179-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under IRC Section 179 and Section 168(k) phase-down schedules."
+            "Statutory Basis: Computed under IRC Section 179 and P.L. 119-21 Section 70301 (100% Section 168(k) bonus depreciation)."
         ),
         "tags": [
             "section 179 deduction 2026",
             "section 179 calculator",
             "equipment depreciation calculator",
-            "bonus depreciation 2026 phase out",
+            "100 percent bonus depreciation 2026",
             "section 179 vehicle write off",
             "small business tax deductions",
             "profithelm",
@@ -5210,8 +5298,8 @@ TOOL_YOUTUBE_METADATA = {
         "preset_query": "vehicle_cost=95000&business_use_fraction=0.9&marginal_tax_rate=0.35",
         "chapters": [
             "IRC Section 179(b)(5) & 6,000 lb GVWR Thresholds",
-            "Heavy SUV $30,500 Cap vs Cargo Work Truck Full Write-Off",
-            "20% Bonus Depreciation & 50% Business-Use Recapture",
+            "Heavy SUV $32,000 Cap vs Cargo Work Truck Full Write-Off",
+            "100% Bonus Depreciation & 50% Business-Use Recapture",
             "Interactive Heavy Vehicle Section 179 Walkthrough",
         ],
         "pinned_comment": (
@@ -5521,7 +5609,7 @@ TOOL_YOUTUBE_METADATA = {
     # Prexvo Title IV Student Loan Calculators (13)
     "student-loan-repayment-calculator": {
         "title": "Federal Student Loan Repayment Calculator [2026 Title IV Rules]",
-        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=1",
+        "preset_query": "balance=60000&agi=65000&rate=6.5&deps=0",
         "chapters": [
             "Title IV 34 CFR Part 685 Repayment Plan Architecture",
             "225% Poverty Line Exemption & Discretionary Income",
@@ -5530,9 +5618,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR 2026 STUDENT LOAN REPAYMENT:\n"
-            "On $60,000 in federal student debt at $65,000 AGI (family of 2), the 2026 RAP plan cuts payments to $248.23/mo and subsidizes $76.77/mo in unpaid interest.\n\n"
+            "On $60,000 in federal student debt at $65,000 AGI (single filer, $35,910.00 225% FPL exemption), the 2026 RAP plan cuts payments to $242.42/mo and subsidizes $82.58/mo in unpaid interest.\n\n"
             "Run your exact loan balance and AGI in sub-100ms on Prexvo (free, zero login):\n"
-            "https://prexvo.com/tools/student-loan-repayment-calculator/?balance=60000&agi=65000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-repayment-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://prexvo.com/tools/student-loan-repayment-calculator/?balance=60000&agi=65000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-repayment-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines."
         ),
         "tags": [
@@ -5556,7 +5644,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "COMPARE 2026 RAP VS IBR MONTHLY PAYMENTS:\n"
-            "At $95,000 AGI on $60,000 debt, uncapped RAP climbs to $498.23/mo ($119,575 total) while IBR caps payments at the 10-year Standard ceiling ($78,617 total).\n\n"
+            "At $95,000 AGI on $60,000 debt (family of 2, $48,690.00 225% FPL), uncapped RAP climbs to $489.05/mo ($176,058 over 360 months / 30 years) while IBR caps payments at the 10-year Standard ceiling ($78,617 total).\n\n"
             "Find your exact AGI crossover point live on Prexvo (free, zero login):\n"
             "https://prexvo.com/tools/rap-vs-ibr-calculator/?balance=60000&agi=95000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=rap-vs-ibr-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under HEA Section 493C, 34 CFR Part 685, and HHS Poverty Guidelines."
@@ -5764,7 +5852,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR 2026 RAP PAYMENT & INTEREST SUBSIDY:\n"
-            "Under the 2026 Repayment Assistance Plan, a single borrower at $65,000 AGI deducts $35,212.50 (225% FPL) and pays $248.23/mo with 100% unpaid interest waived ($76.77/mo subsidy on $60k at 6.5%).\n\n"
+            "Under the 2026 Repayment Assistance Plan, a single borrower at $65,000 AGI deducts $35,910.00 (225% FPL) and pays $242.42/mo with 100% unpaid interest waived ($82.58/mo subsidy on $60k at 6.5%).\n\n"
             "Calculate your exact 2026 RAP obligation live on Prexvo:\n"
             "https://prexvo.com/tools/rap-payment-calculator/?balance=60000&agi=65000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=rap-payment-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under Title IV 34 CFR Part 685 and 2026 HHS Poverty Guidelines."
@@ -5868,10 +5956,10 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR SOC 2 TYPE II TOTAL COST OF OWNERSHIP:\n"
-            "A 75-person B2B SaaS team faces a $78,100.40 Year-1 SOC 2 Type II audit budget ($37,000 CPA attestation fee [$28,000 base + 2 extra TSC] + $15,000 GRC automation + 120 engineering hours at $121.67/hr + $11,500 pentest).\n\n"
+            "A 75-person B2B SaaS team faces an estimated $78,100.40 Year-1 SOC 2 Type II audit budget ($37,000 CPA attestation fee [$28,000 base + 2 extra TSC] + $15,000 GRC automation + 120 engineering hours at the $121.67/hr BLS SOC 15-1212 benchmark estimate + $11,500 pentest).\n\n"
             "Model your exact SOC 2 CPA fees and GRC automation ROI live on GainHelm:\n"
             "https://gainhelm.com/tools/soc-2-audit-cost-calculator/?cpa_audit_fee=28000&grc_platform_annual=15000&remediation_hours=120&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=soc-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 ($121.67/hr)."
+            "Statutory Basis: Computed under AICPA SSAE 18 (AT-C Section 205) and BLS OEWS SOC 15-1212 market benchmark estimate ($121.67/hr)."
         ),
         "tags": [
             "soc 2 audit cost calculator",
@@ -5885,7 +5973,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "cmmc-level-2-audit-cost-calculator": {
         "title": "CMMC 2.0 Level 2 C3PAO Audit Cost Calculator [32 CFR Part 170]",
-        "preset_query": "c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=150",
+        "preset_query": "c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=121.67",
         "chapters": [
             "DoD 32 CFR Part 170 & DFARS 252.204-7021 CMMC Level 2 Mandate",
             "Accredited C3PAO Assessment Fees Across 110 NIST 800-171 Controls",
@@ -5894,9 +5982,9 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
-            "Defense contractors handling CUI face an average $132,000 certification budget ($48,000 C3PAO assessment + $36,000 FedRAMP enclave + 320 engineering hours at $150/hr).\n\n"
+            "Defense contractors handling CUI face an estimated $122,934.40 certification budget ($48,000 C3PAO assessment + $36,000 FedRAMP enclave + 320 engineering hours at the $121.67/hr BLS SOC 15-1212 benchmark estimate).\n\n"
             "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
-            "https://gainhelm.com/tools/cmmc-level-2-audit-cost-calculator/?c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=150&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-level-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
+            "https://gainhelm.com/tools/cmmc-level-2-audit-cost-calculator/?c3pao_assessment_fee=48000&cui_enclave_annual=36000&remediation_hours=320&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-level-2-audit-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
         ),
         "tags": [
@@ -5946,7 +6034,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR 3-YEAR ISO/IEC 27001:2022 CERTIFICATION TCO:\n"
-            "Across Stage 1/2 certification ($24,000), two annual surveillance audits ($16,000), ISMS tooling ($12,400), and 120 internal hours at $121.67/hr, 3-year ISO 27001 TCO totals $67,000.40.\n\n"
+            "Across Stage 1/2 certification ($24,000), two annual surveillance audits ($16,000), ISMS tooling ($12,400), and 120 internal hours at the $121.67/hr BLS benchmark estimate, 3-year ISO 27001 TCO totals an estimated $67,000.40.\n\n"
             "Model your ISO/IEC 27006-1 auditor-day schedule and 3-year TCO live on GainHelm:\n"
             "https://gainhelm.com/tools/iso-27001-certification-cost-calculator/?stage1_stage2_audit_fee=24000&surveillance_audits_2yr=16000&isms_tooling_3yr=12400&internal_hours=120&hourly_rate=121.67&utm_source=youtube&utm_medium=video&utm_campaign=iso-27001-certification-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under ISO/IEC 27001:2022 and ISO/IEC 27006-1:2024."
@@ -5972,7 +6060,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
-            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,455,313.00 in total financial exposure.\n\n"
+            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,190,294.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,577,794.00 in total financial exposure.\n\n"
             "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
             "https://gainhelm.com/tools/hipaa-violation-penalty-and-breach-cost-calculator/?records=1500&tier=3&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-and-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
@@ -6024,10 +6112,10 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR GRC AUTOMATION NET ANNUAL SAVINGS:\n"
-            "Cutting manual audit prep from 520 hours to 115 hours at the $121.67/hr BLS SOC 15-1212 rate saves $49,276.35 in engineering labor, yielding $37,000 net Year-1 savings after a $15,000 GRC subscription and $2,723.65 auditor efficiency credit.\n\n"
+            "Cutting manual audit prep from 520 hours to 115 hours at the $121.67/hr BLS SOC 15-1212 benchmark estimate saves an estimated $49,276.35 in engineering labor, yielding $37,000 net Year-1 savings after a $15,000 GRC subscription and $2,723.65 auditor efficiency credit.\n\n"
             "Run your team's multi-framework GRC ROI math live on GainHelm:\n"
             "https://gainhelm.com/tools/grc-automation-roi-calculator/?manual_audit_hours=520&automated_audit_hours=115&hourly_rate=121.67&grc_subscription_cost=15000&utm_source=youtube&utm_medium=video&utm_campaign=grc-automation-roi-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under NIST SP 800-53A Rev 5 and BLS OEWS SOC 15-1212 ($121.67/hr)."
+            "Statutory Basis: Computed under NIST SP 800-53A Rev 5 and BLS OEWS SOC 15-1212 market benchmark estimate ($121.67/hr)."
         ),
         "tags": [
             "grc automation roi calculator",
@@ -6128,7 +6216,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR CMMC 2.0 LEVEL 2 CERTIFICATION BUDGET:\n"
-            "Defense contractors handling CUI face an average $132,000 certification budget ($48,000 C3PAO assessment + $36,000 CUI enclave boundary + 320 engineering hours at $150/hr).\n\n"
+            "Defense contractors handling CUI face an estimated $122,934.40 certification budget ($48,000 C3PAO assessment + $36,000 CUI enclave boundary + 320 engineering hours at the $121.67/hr BLS SOC 15-1212 benchmark estimate).\n\n"
             "Scope your C3PAO audit and CUI enclave boundary live on GainHelm:\n"
             "https://gainhelm.com/tools/cmmc-2-0-compliance-cost-calculator/?cui_users=35&level=2&enclave=1&utm_source=youtube&utm_medium=video&utm_campaign=cmmc-2-0-compliance-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under DoD 32 CFR Part 170, DFARS 252.204-7021, and NIST SP 800-171 Rev 2."
@@ -6154,7 +6242,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR HIPAA BREACH & HHS OCR PENALTY EXPOSURE:\n"
-            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,067,813.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,455,313.00 in total HIPAA breach exposure.\n\n"
+            "A 1,500-record ePHI breach under 45 CFR 160.404 Tier 3 ($2,190,294.00 annual penalty cap) plus $95,000 forensic/legal retainer and $292,500 notification cost ($195/record) reaches $2,577,794.00 in total HIPAA breach exposure.\n\n"
             "Model your 45 CFR 160.404 penalty tier and ePHI breach liability live on GainHelm:\n"
             "https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/?records=1500&tier=3&encrypted=0&utm_source=youtube&utm_medium=video&utm_campaign=hipaa-violation-penalty-breach-cost-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under 45 CFR 160.404, 42 U.S.C. 1320d-5, and 45 CFR Part 164."
@@ -6412,7 +6500,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on Prexvo"
         if slug in ("ibr-hardship-cap-calculator", "paye-sunset-calculator"):
             seg1_script = (
-                f"Under HEA Section 493C and 34 CFR 685.209, Income-Based Repayment and Pay As You Earn protect 150% of the HHS Federal Poverty Guideline ($23,475 single in 2026). "
+                f"Under HEA Section 493C and 34 CFR 685.209, Income-Based Repayment and Pay As You Earn protect 150% of the HHS Federal Poverty Guideline ($23,940 single in 2026). "
                 f"Statutory partial financial hardship rules cap monthly payments at the 10-year Standard ceiling for a {out_fmt} benchmark. "
                 f"Prexvo calculates your exact 150% poverty deduction and monthly obligations across household sizes."
             )
@@ -6423,7 +6511,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
             )
         elif slug in ("icr-repayment-calculator", "parent-plus-double-consolidation", "parent-plus-double-consolidation-repayment-calculator"):
             seg1_script = (
-                f"Under 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of the HHS Federal Poverty Guideline ($15,650 single in 2026) and assesses 20% of discretionary income. "
+                f"Under 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of the HHS Federal Poverty Guideline ($15,960 single in 2026) and assesses 20% of discretionary income. "
                 f"Comparing single consolidation ICR against two-step Direct Consolidation verifies a {out_fmt} benchmark across Parent PLUS portfolios. "
                 f"Prexvo calculates your exact 100% poverty threshold and monthly obligations across household sizes."
             )
@@ -7404,7 +7492,7 @@ Under 34 CFR Part 685 and Higher Education Act Section 493C, federal student loa
 | Unpaid Interest | 100% monthly subsidy | Subsidized 3 years only | Capitalizes on exit | 34 CFR 685.209(b) |
 | Payment Cap | Uncapped by standard | 10-year Standard cap | 10-year Standard cap | 34 CFR 685.221 |
 
-On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer, $35,212.50 225% FPL exemption), RAP yields a $248.23 monthly payment with a $76.77 monthly unpaid interest subsidy, compared to $346.04 under new IBR."""
+On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), RAP yields a $242.42 monthly payment with an $82.58 monthly unpaid interest subsidy, compared to $342.17 under new IBR."""
 
         rap_ibr_json = {
             "topic": "Title IV RAP vs IBR Student Loan Repayment",
@@ -7413,9 +7501,9 @@ On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer,
             "rap_poverty_multiplier": 2.25,
             "ibr_poverty_multiplier": 1.50,
             "benchmarks": [
-                {"plan": "rap_2026", "poverty_exemption_pct": 225, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 248.23, "monthly_interest_subsidy_usd": 76.77},
-                {"plan": "new_ibr", "poverty_exemption_pct": 150, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 346.04, "monthly_interest_subsidy_usd": 0.0},
-                {"plan": "old_ibr", "poverty_exemption_pct": 150, "rate_pct": 15.0, "sample_60k_65k_agi_payment_usd": 519.06, "monthly_interest_subsidy_usd": 0.0},
+                {"plan": "rap_2026", "poverty_exemption_pct": 225, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 242.42, "monthly_interest_subsidy_usd": 82.58},
+                {"plan": "new_ibr", "poverty_exemption_pct": 150, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 342.17, "monthly_interest_subsidy_usd": 0.0},
+                {"plan": "old_ibr", "poverty_exemption_pct": 150, "rate_pct": 15.0, "sample_60k_65k_agi_payment_usd": 513.25, "monthly_interest_subsidy_usd": 0.0},
             ],
         }
 
@@ -7519,14 +7607,14 @@ All calculations are 100% deterministic, grounded in federal Title IV regulation
         gainhelm_base = "https://gainhelm.com"
         soc2_cmmc_md = """# SOC 2 Type II, CMMC 2.0 & ISO 27001 Cyber Compliance Audit Benchmarks
 
-Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024, enterprise software and defense contractors evaluate external attestation fees, continuous GRC automation licensing, and internal security engineering labor valued at the BLS SOC 15-1212 fully burdened rate ($121.67/hr).
+Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1:2024, enterprise software and defense contractors evaluate external attestation fee estimates, continuous GRC automation licensing, and internal security engineering labor valued at the BLS SOC 15-1212 loaded benchmark estimate ($121.67/hr).
 
 | Compliance Framework | Primary Statutory / Standard Authority | Baseline Audit Fee Range | Key Threshold / Rule |
 | :--- | :--- | :--- | :--- |
 | SOC 2 Type II | AICPA SSAE 18 (AT-C Sec. 205) | $24,000 to $65,000 | 6 to 12 month observation period |
 | CMMC 2.0 Level 2 | DoD 32 CFR Part 170 & DFARS 252.204-7021 | $38,000 to $85,000 | 110 NIST SP 800-171 controls (88 SPRS floor) |
 | ISO/IEC 27001:2022 | ISO/IEC 27006-1:2024 Auditor-Day Tables | $22,000 to $58,000 | Stage 1 + Stage 2 + 2 surveillance audits |
-| HIPAA / HITECH | 45 CFR 160.404 & 42 U.S.C. 1320d-5 | $141 to $2,067,813 | 4 culpability tiers + 500-record breach rule |
+| HIPAA / HITECH | 45 CFR 160.404 & 42 U.S.C. 1320d-5 | $141 to $2,190,294 | 4 culpability tiers + 500-record breach rule |
 """
         soc2_cmmc_json = {
             "topic": "SOC 2 Type II, CMMC 2.0 and ISO 27001 Audit Cost Benchmarks",
@@ -7538,7 +7626,8 @@ Under AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and ISO/IEC 27006-1
                 "ISO/IEC 27006-1:2024",
                 "45 CFR 160.404",
             ],
-            "bls_soc_15_1212_hourly_rate_usd": 121.67,
+            "bls_soc_15_1212_hourly_benchmark_estimate_usd": 121.67,
+            "hourly_rate_benchmark_qualifier": "BLS OEWS SOC 15-1212 loaded market benchmark estimate",
             "sprs_score_range": [-203, 110],
             "sprs_conditional_poam_floor": 88,
         }
@@ -7548,8 +7637,8 @@ Under 45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), and 45 CFR Part 164 Subpar
 
 | Regulatory / Certification Tier | Governing Authority | Statutory Penalty or Assessment Range | Key Compliance Requirement |
 | :--- | :--- | :--- | :--- |
-| HIPAA Tier 1 (Lack of Knowledge) | 45 CFR 160.404(b)(1) | $141 to $71,162 per violation | Annual calendar cap up to $2,067,813 |
-| HIPAA Tier 4 (Willful Neglect) | 45 CFR 160.404(b)(4) | $71,162 to $2,067,813 per violation | Mandatory OCR investigation + corrective plan |
+| HIPAA Tier 1 (Lack of Knowledge) | 45 CFR 160.404(b)(1) | $141 to $71,162 per violation | Annual calendar cap up to $2,190,294 |
+| HIPAA Tier 4 (Willful Neglect) | 45 CFR 160.404(b)(4) | $71,162 to $2,190,294 per violation | Mandatory OCR investigation + corrective plan |
 | HITRUST CSF e1 (Essentials) | HITRUST CSF v11.x (44 Controls) | $18,000 to $32,000 total assessment | 1-year validated cyber hygiene baseline |
 | HITRUST CSF i1 / r2 | HITRUST CSF v11.x (182 to 350+ Controls) | $55,000 to $145,000 total assessment | 1-year (i1) or 2-year (r2) risk-based validation |
 """
@@ -7564,7 +7653,7 @@ Under 45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), and 45 CFR Part 164 Subpar
             ],
             "breach_media_notification_threshold_records": 500,
             "forensic_and_notification_cost_per_record_usd": 165.0,
-            "annual_calendar_cap_per_provision_usd": 2067813,
+            "annual_calendar_cap_per_provision_usd": 2190294,
         }
         pci_fedramp_md = """# PCI DSS v4.0.1 QSA Scoping & FedRAMP 20x / Moderate ATO Benchmarks
 
@@ -7644,12 +7733,12 @@ This directory contains deterministic benchmark matrices and cyber compliance st
 
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
-IRC Section 179 allows business taxpayers to expense up to $2,560,000 of qualifying commercial property placed in service during tax year 2026 (with phase-out beginning at $4,090,000). Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $30,500 statutory cap under IRC Section 280F.
+IRC Section 179 allows business taxpayers to expense up to $2,560,000 of qualifying commercial property placed in service during tax year 2026 (with phase-out beginning at $4,090,000 under IRS Rev. Proc. 2025-32). Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $32,000 Section 179 statutory cap followed by 100% bonus depreciation under P.L. 119-21 Section 70301.
 
 | Vehicle Category | GVWR Limit | 2026 Cap | First-Year Bonus | Statutory Authority |
 | :--- | :--- | :--- | :--- | :--- |
-| Heavy SUV | 6,001 to 14,000 lbs | $30,500 | 20% basis | IRC Section 280F(d)(7) |
-| Cargo Truck | Over 6,000 lbs | $2,560,000 | 20% basis | IRC Section 179(b)(1) |
+| Heavy SUV | 6,001 to 14,000 lbs | $32,000 | 100% basis | IRC Section 179(b)(5)(A) & 168(k) |
+| Cargo Truck | Over 6,000 lbs | $2,560,000 | 100% basis | IRC Section 179(b)(1) & 168(k) |
 | Passenger Car | Under 6,000 lbs | $20,400 | Included | IRC Section 280F(a) |
 
 Compliance requires business use exceeding 50% across the statutory recovery period. Deductions face recapture if business use declines."""
@@ -7657,15 +7746,15 @@ Compliance requires business use exceeding 50% across the statutory recovery per
     sec179_json = {
         "topic": "Section 179 Vehicle Depreciation",
         "tax_year": 2026,
-        "statutory_authority": ["IRC Section 179", "IRC Section 280F", "IRS Form 4562"],
-        "heavy_suv_cap_usd": 30500,
+        "statutory_authority": ["IRC Section 179", "IRC Section 280F", "P.L. 119-21 Section 70301", "IRS Rev. Proc. 2025-32", "IRS Form 4562"],
+        "heavy_suv_cap_usd": 32000,
         "section_179_cap_usd": 2560000,
         "phaseout_threshold_usd": 4090000,
-        "bonus_depreciation_pct": 20,
+        "bonus_depreciation_pct": 100,
         "business_use_minimum_pct": 50,
         "benchmarks": [
-            {"category": "heavy_suv", "gvwr_lbs_min": 6001, "cap_usd": 30500, "bonus_pct": 20, "example_85k_deduction": 50120},
-            {"category": "commercial_truck", "gvwr_lbs_min": 6001, "cap_usd": 2560000, "bonus_pct": 20, "example_85k_deduction": 85000},
+            {"category": "heavy_suv", "gvwr_lbs_min": 6001, "cap_usd": 32000, "bonus_pct": 100, "example_85k_deduction": 85000},
+            {"category": "commercial_truck", "gvwr_lbs_min": 6001, "cap_usd": 2560000, "bonus_pct": 100, "example_85k_deduction": 85000},
             {"category": "passenger_car", "gvwr_lbs_min": 0, "cap_usd": 20400, "bonus_pct": 0, "example_85k_deduction": 20400},
         ],
     }
@@ -7718,23 +7807,25 @@ Early stage startups may use insider valuation safe harbors during their initial
 
     sec1202_md = """# Section 1202 Qualified Small Business Stock Exclusion
 
-Under IRC Section 1202, non-corporate shareholders holding Qualified Small Business Stock for more than five years exclude up to 100% of eligible capital gains. The statutory exclusion ceiling is capped at the greater of $10,000,000 or ten times the adjusted aggregate tax basis of the issued shares.
+Under IRC Section 1202 as amended by P.L. 119-21 Section 70431, non-corporate shareholders holding Qualified Small Business Stock for more than five years exclude up to 100% of eligible capital gains. For post-OBBBA stock acquired after July 4, 2025, the statutory exclusion ceiling is the greater of $15,000,000 ($10,000,000 for stock acquired on or before July 4, 2025) or ten times the adjusted aggregate tax basis of the issued shares, and the gross asset threshold is $75,000,000 ($50,000,000 pre-July 5, 2025).
 
 | QSBS Criterion | Statutory Limit | Verification Rule | Statutory Anchor |
 | :--- | :--- | :--- | :--- |
-| Asset Ceiling | $50,000,000 | Gross assets at issue | IRC Section 1202(d)(1) |
-| Holding Period | Exceeding 5 years | Measured from issue | IRC Section 1202(a)(1) |
-| Exclusion Cap | $10M or 10x basis | Lifetime per taxpayer | IRC Section 1202(b)(1) |
+| Asset Ceiling (Post-OBBBA) | $75,000,000 | Gross assets at issue ($50,000,000 pre-July 5, 2025) | IRC Section 1202(d)(1) |
+| Holding Period | Exceeding 5 years | Measured from issue (tiered 50%/75% at 3/4 yrs post-OBBBA) | IRC Section 1202(a)(1) |
+| Exclusion Cap (Post-OBBBA) | $15M or 10x basis | Lifetime per taxpayer ($10M pre-July 5, 2025) | IRC Section 1202(b)(1) |
 | Active Business | 80% deployment | Qualifying trade | IRC Section 1202(e)(1) |
 
 Exclusions require original stock issuance from a domestic C-corporation in qualifying technology or manufacturing fields."""
 
     sec1202_json = {
         "topic": "Section 1202 QSBS Gain Exclusion",
-        "statutory_authority": ["IRC Section 1202"],
-        "max_asset_issuance_usd": 50000000,
+        "statutory_authority": ["IRC Section 1202", "P.L. 119-21 Section 70431"],
+        "max_asset_issuance_usd": 75000000,
+        "legacy_pre_obbba_asset_issuance_usd": 50000000,
         "holding_period_years": 5,
-        "gain_exclusion_cap_usd": 10000000,
+        "gain_exclusion_cap_usd": 15000000,
+        "legacy_pre_obbba_gain_exclusion_cap_usd": 10000000,
     }
 
     tax_brackets_md = f"""# IRS 2026-2027 Marginal Tax Bracket Benchmarks (OBBBA P.L. 119-21)
@@ -7744,16 +7835,16 @@ Reference URL: {CANONICAL_BASE}/tools/irs-2027-tax-brackets/
 
 | Tax Bracket Tier | Enacted 2026 Rate | Enacted 2027 Rate (OBBBA P.L. 119-21) | Single Filer Income Threshold (2026) | Married Filing Jointly Threshold (2026) |
 | :--- | :--- | :--- | :--- | :--- |
-| Tier 1 | 10.0% | 10.0% | Up to $12,050 | Up to $24,100 |
-| Tier 2 | 12.0% | 12.0% | $12,051 - $48,900 | $24,101 - $97,800 |
-| Tier 3 | 22.0% | 22.0% | $48,901 - $104,400 | $97,801 - $208,800 |
-| Tier 4 | 24.0% | 24.0% | $104,401 - $199,300 | $208,801 - $398,600 |
-| Tier 5 | 32.0% | 32.0% | $199,301 - $253,150 | $398,601 - $506,300 |
-| Tier 6 | 35.0% | 35.0% | $253,151 - $633,100 | $506,301 - $759,600 |
-| Top Tier | 37.0% | 37.0% | Over $633,100 | Over $759,600 |
+| Tier 1 | 10.0% | 10.0% | Up to $12,400 | Up to $24,800 |
+| Tier 2 | 12.0% | 12.0% | $12,401 - $50,400 | $24,801 - $100,800 |
+| Tier 3 | 22.0% | 22.0% | $50,401 - $105,700 | $100,801 - $211,400 |
+| Tier 4 | 24.0% | 24.0% | $105,701 - $201,775 | $211,401 - $403,550 |
+| Tier 5 | 32.0% | 32.0% | $201,776 - $256,225 | $403,551 - $512,450 |
+| Tier 6 | 35.0% | 35.0% | $256,226 - $640,600 | $512,451 - $768,700 |
+| Top Tier | 37.0% | 37.0% | Over $640,600 | Over $768,700 |
 
 ## Statutory Permanence Summary
-Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 2025-32, Congress permanently extended the 10% to 37% individual marginal tax brackets, the 20% Section 199A QBI deduction, and the enhanced standard deduction ($16,100 Single / $32,200 MFJ in 2026; $16,500 Single / $33,000 MFJ in 2027).
+Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 2025-32, Congress permanently extended the 10% to 37% individual marginal tax brackets, the 20% Section 199A QBI deduction, and the enhanced standard deduction ($16,100 Single / $32,200 MFJ in 2026; $16,600 Single / $33,200 MFJ in 2027).
 """
 
     tax_brackets_json = {
@@ -7761,14 +7852,14 @@ Under the One Big Beautiful Bill Act (OBBBA, P.L. 119-21) and IRS Rev. Proc. 202
         "tax_years": ["2026", "2027"],
         "statutory_authority": ["IRC Section 1(j)", "Public Law 119-21", "IRS Rev. Proc. 2025-32"],
         "standard_deduction_2026": {"single": 16100, "mfj": 32200, "hoh": 24150},
-        "standard_deduction_2027": {"single": 16500, "mfj": 33000, "hoh": 24750},
+        "standard_deduction_2027": {"single": 16600, "mfj": 33200, "hoh": 24925},
         "brackets": [
-            {"rate_2026": 10.0, "rate_2027": 10.0, "single_max_2026": 12050, "mfj_max_2026": 24100, "single_max_2027": 12400, "mfj_max_2027": 24800},
-            {"rate_2026": 12.0, "rate_2027": 12.0, "single_max_2026": 48900, "mfj_max_2026": 97800, "single_max_2027": 50400, "mfj_max_2027": 100800},
-            {"rate_2026": 22.0, "rate_2027": 22.0, "single_max_2026": 104400, "mfj_max_2026": 208800, "single_max_2027": 105700, "mfj_max_2027": 211400},
-            {"rate_2026": 24.0, "rate_2027": 24.0, "single_max_2026": 199300, "mfj_max_2026": 398600, "single_max_2027": 201775, "mfj_max_2027": 403550},
-            {"rate_2026": 32.0, "rate_2027": 32.0, "single_max_2026": 253150, "mfj_max_2026": 506300, "single_max_2027": 256225, "mfj_max_2027": 512450},
-            {"rate_2026": 35.0, "rate_2027": 35.0, "single_max_2026": 633100, "mfj_max_2026": 759600, "single_max_2027": 640600, "mfj_max_2027": 768700},
+            {"rate_2026": 10.0, "rate_2027": 10.0, "single_max_2026": 12400, "mfj_max_2026": 24800, "single_max_2027": 12800, "mfj_max_2027": 25600},
+            {"rate_2026": 12.0, "rate_2027": 12.0, "single_max_2026": 50400, "mfj_max_2026": 100800, "single_max_2027": 52025, "mfj_max_2027": 104050},
+            {"rate_2026": 22.0, "rate_2027": 22.0, "single_max_2026": 105700, "mfj_max_2026": 211400, "single_max_2027": 109125, "mfj_max_2027": 218250},
+            {"rate_2026": 24.0, "rate_2027": 24.0, "single_max_2026": 201775, "mfj_max_2026": 403550, "single_max_2027": 208325, "mfj_max_2027": 416650},
+            {"rate_2026": 32.0, "rate_2027": 32.0, "single_max_2026": 256225, "mfj_max_2026": 512450, "single_max_2027": 264550, "mfj_max_2027": 529100},
+            {"rate_2026": 35.0, "rate_2027": 35.0, "single_max_2026": 640600, "mfj_max_2026": 768700, "single_max_2027": 661375, "mfj_max_2027": 793650},
             {"rate_2026": 37.0, "rate_2027": 37.0, "single_max_2026": 999999999, "mfj_max_2026": 999999999, "single_max_2027": 999999999, "mfj_max_2027": 999999999},
         ],
     }
@@ -7879,7 +7970,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
         citables = [
             {
                 "id": "stat-rap-vs-ibr-65k",
-                "headline_stat": "In 2026, a borrower with $60,000 in federal Direct Loans and $65,000 AGI pays $248.23 per month under the Repayment Assistance Plan (RAP) compared to $346.04 under new IBR, while receiving a $76.77 monthly unpaid interest subsidy under 34 CFR 685.209.",
+                "headline_stat": "In 2026, a borrower with $60,000 in federal Direct Loans and $65,000 AGI pays $242.42 per month under the Repayment Assistance Plan (RAP) compared to $342.17 under new IBR, while receiving an $82.58 monthly unpaid interest subsidy under 34 CFR 685.209.",
                 "statutory_authority": "34 CFR 685.209, HEA Section 493C",
                 "canonical_calculator_url": f"{base_url}/tools/rap-vs-ibr-calculator/",
             },
@@ -7914,7 +8005,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
             },
             {
                 "id": "stat-hipaa-ephi-breach-exposure",
-                "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected triggers mandatory HHS OCR media notification and $2,455,313.00 in combined statutory civil monetary penalty ($2,067,813.00 annual cap), forensic/legal retainer ($95,000), and patient notification ($195/record = $292,500) exposure.",
+                "headline_stat": "Under 45 CFR 160.404 and 45 CFR 164.404, a 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected triggers mandatory HHS OCR media notification and $2,577,794.00 in combined statutory civil monetary penalty ($2,190,294.00 annual cap), forensic/legal retainer ($95,000), and patient notification ($195/record = $292,500) exposure.",
                 "statutory_authority": "45 CFR 160.404, 45 CFR 164.404, 42 U.S.C. 1320d-5",
                 "canonical_calculator_url": f"{base_url}/tools/hipaa-violation-penalty-breach-cost-calculator/",
             },
@@ -7954,7 +8045,7 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
             },
             {
                 "id": "stat-sec179-equipment-cap",
-                "headline_stat": "For tax year 2026, businesses can immediately expense up to $2,560,000 in qualifying equipment under IRC Section 179(b)(1), with dollar-for-dollar phase-out beginning at $4,090,000 and heavy SUVs capped at $30,500 under IRC Section 280F(d)(7).",
+                "headline_stat": "For tax year 2026, businesses can immediately expense up to $2,560,000 in qualifying equipment under IRC Section 179(b)(1), with dollar-for-dollar phase-out beginning at $4,090,000 and heavy SUVs capped at $32,000 under IRC Section 179(b)(5)(A) plus 100% bonus depreciation under P.L. 119-21 Section 70301.",
                 "statutory_authority": "IRC Section 179(b)(1), IRC Section 280F(d)(7), IRS Form 4562",
                 "canonical_calculator_url": f"{base_url}/tools/section-179-calculator/",
             },
@@ -8048,7 +8139,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Cloud Security Alliance & Regional CPA IT Audit Resource Directories",
                 ],
                 "replacement_url": "https://gainhelm.com/tools/soc-2-audit-cost-calculator/",
-                "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 ($121.67/hr) GRC automation ROI.",
+                "statutory_upgrade_angle": "Models AICPA SSAE 18 (AT-C 205), ISO/IEC 27001:2022 (93 Annex A controls), and BLS SOC 15-1212 loaded benchmark estimate ($121.67/hr) for GRC automation ROI.",
             },
         ]
     elif norm_tenant == "lienbond":
@@ -8078,13 +8169,13 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
         briefs = [
             {
                 "campaign_id": "reclaim-ph-sec179-2026-limits",
-                "outdated_target_pattern": "Outdated 2022/2023 Section 179 Calculators Using Old $1,080,000 Cap & 100% Bonus Depreciation",
+                "outdated_target_pattern": "Outdated Pre-OBBBA Section 179 Calculators Using Obsolete Equipment Caps, Heavy SUV Limits, or Phased-Down Bonus Schedules",
                 "target_resource_segments": [
                     "Commercial Equipment Leasing & Fleet Dealership Financing Pages",
                     "Regional CPA Firm Client Tax Planning Resource Directories",
                 ],
                 "replacement_url": "https://profithelm.com/tools/section-179-calculator/",
-                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) and IRC Section 280F(d)(7) $30,500 SUV limits.",
+                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out), $32,000 heavy SUV cap under IRS Rev. Proc. 2025-32, and 100% bonus depreciation under P.L. 119-21 Section 70301.",
             },
             {
                 "campaign_id": "reclaim-ph-1031-boot-form8824",
@@ -8107,32 +8198,32 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
 PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     "student-loan-repayment-calculator": {
         "query": "balance=60000&agi=65000&rate=6.5&deps=0",
-        "x_hook": "on $60k student debt at $65k AGI (single), 2026 RAP cuts payments to $248.23/mo (+$76.77 interest subsidy) vs $346.04 on IBR.",
-        "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the 2026 RAP formula cuts monthly payments to $248.23 while subsidizing $76.77/month in unpaid interest.",
+        "x_hook": "on $60k student debt at $65k AGI (single), 2026 RAP cuts payments to $242.42/mo (+$82.58 interest subsidy) vs $342.17 on IBR.",
+        "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the 2026 RAP formula cuts monthly payments to $242.42 while subsidizing $82.58/month in unpaid interest.",
         "li_body": (
             "Borrowers comparing Title IV repayment options under 34 CFR Part 685 face two distinct statutory formulas:\n\n"
-            "• 225% Poverty Exemption (RAP): Protects $35,212.50 of income for a single borrower ($47,587.50 for a 2-person household), assessing 10% on remaining discretionary income ($248.23/month at $65k single AGI).\n"
-            "• 100% Unpaid Interest Subsidy: When $248.23 falls short of the $325.00 monthly interest accrual at 6.5%, the Department of Education waives the $76.77 difference every month.\n"
-            "• IBR Standard Ceiling: Under HEA Section 493C, IBR charges $346.04/month at $65k AGI but caps payments at the 10-year Standard schedule if income rises above $115,000."
+            "• 225% Poverty Exemption (RAP): Protects $35,910.00 of income for a single borrower ($48,690.00 for a 2-person household), assessing 10% on remaining discretionary income ($242.42/month at $65k single AGI).\n"
+            "• 100% Unpaid Interest Subsidy: When $242.42 falls short of the $325.00 monthly interest accrual at 6.5%, the Department of Education waives the $82.58 difference every month.\n"
+            "• IBR Standard Ceiling: Under HEA Section 493C, IBR charges $342.17/month at $65k AGI but caps payments at the 10-year Standard schedule if income rises above $115,000."
         ),
         "fb_body": (
-            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (single filer, $35,212.50 225% FPL exemption), the 2026 Repayment Assistance Plan (RAP) calculates a $248.23 monthly payment compared to $346.04 under new IBR.\n\n"
-            "Because $60,000 at 6.5% accrues $325.00 in interest each month, RAP's 100% unpaid interest subsidy waives the remaining $76.77 every month so your principal never grows. Grounded in statutory Title IV 34 CFR Part 685 rules and HHS Poverty Guidelines."
+            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (single filer, $35,910.00 225% FPL exemption), the 2026 Repayment Assistance Plan (RAP) calculates a $242.42 monthly payment compared to $342.17 under new IBR.\n\n"
+            "Because $60,000 at 6.5% accrues $325.00 in interest each month, RAP's 100% unpaid interest subsidy waives the remaining $82.58 every month so your principal never grows. Grounded in statutory Title IV 34 CFR Part 685 rules and HHS Poverty Guidelines."
         ),
     },
     "rap-vs-ibr-calculator": {
         "query": "balance=60000&agi=95000&rate=6.5&deps=1",
-        "x_hook": "at $95k AGI on $60k debt, uncapped RAP charges $498.23/mo ($119,575 total) while IBR caps at $78,617 total.",
-        "li_hook": "Crossing $95,000 AGI flips the Title IV math: RAP charges $498.23/month ($119,575 total) with no payment cap, while IBR locks a $40,957 lower lifetime cost.",
+        "x_hook": "at $95k AGI on $60k debt (family of 2), uncapped RAP climbs to $489.05/mo across 360 months (30 years) while IBR caps at $78,617 total.",
+        "li_hook": "Crossing $95,000 AGI flips the Title IV math: RAP charges $489.05/month across 360 months (30 years) with no payment cap, while IBR locks a lower lifetime cost.",
         "li_body": (
             "While the 2026 Repayment Assistance Plan (RAP) lowers monthly bills for moderate earners via the 225% HHS Poverty floor, high-income borrowers hit a structural trap:\n\n"
-            "• Uncapped RAP Escalation: At $95,000 AGI ($60k balance, 6.5% rate), RAP payments climb to $498.23/month across 240 months ($119,575.20 cumulative repayment).\n"
+            "• Uncapped RAP Escalation: At $95,000 AGI ($60k balance, 6.5% rate, 2-person $48,690.00 225% FPL), RAP charges $489.05/month across a 360-month (30-year) forgiveness horizon under P.L. 119-21 Section 82001.\n"
             "• Statutory IBR Ceiling: Under HEA Section 493C, Income-Based Repayment strictly caps monthly bills at the 10-year Standard amount, retiring the loan in 158 months for $78,617.64.\n"
             "• Crossover Point: Once AGI exceeds 1.4x your principal balance, IBR's 10-year ceiling prevents uncapped 10% discretionary assessments."
         ),
         "fb_body": (
-            "Most borrowers assume the new 2026 RAP plan is always cheaper than IBR because RAP uses a 225% poverty exemption instead of 150%. That holds true at $65,000 AGI ($248.23/mo on RAP vs $346.04/mo on IBR).\n\n"
-            "However, RAP has no 10-year Standard payment cap. At $95,000 AGI on a $60,000 loan, RAP climbs to $498.23/mo ($119,575 total over 20 years), while IBR caps your payment and pays off the balance in 158 months for $78,617. Grounded in statutory HEA Section 493C and 34 CFR Part 685."
+            "Most borrowers assume the new 2026 RAP plan is always cheaper than IBR because RAP uses a 225% poverty exemption instead of 150%. That holds true at $65,000 single AGI ($242.42/mo on RAP vs $342.17/mo on IBR).\n\n"
+            "However, RAP has no 10-year Standard payment cap and requires 360 months (30 years) for forgiveness. At $95,000 AGI on a $60,000 loan, IBR caps your payment and pays off the balance in 158 months for $78,617. Grounded in statutory HEA Section 493C and 34 CFR Part 685."
         ),
     },
     "tiered-standard-calculator": {
@@ -8171,43 +8262,43 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         "li_hook": "For consolidated Parent PLUS borrowers, ICR's dual formula (20% discretionary income vs 12-year income-adjusted fixed factor) often triggers the 12-year cap first.",
         "li_body": (
             "Income-Contingent Repayment (ICR) under 34 CFR 685.209(b) is the sole income-driven plan accessible to single-consolidated Parent PLUS loans, and its math differs sharply from RAP and IBR:\n\n"
-            "• 100% FPL Exemption Floor: ICR shields only 100% of the HHS Federal Poverty Guideline ($15,650 single in 2026) and assesses 20% of remaining income.\n"
+            "• 100% FPL Exemption Floor: ICR shields only 100% of the HHS Federal Poverty Guideline ($15,960 single in 2026) and assesses 20% of remaining income.\n"
             "• 12-Year Income Factor Alternative: When 20% of discretionary income exceeds a 12-year fixed amortization multiplied by the Department of Education income percentage factor, the lower 12-year figure applies.\n"
             "• PSLF Eligibility: Consolidating Parent PLUS loans into a Direct Consolidation Loan under ICR unlocks the 120-payment PSLF track for public-sector parents."
         ),
         "fb_body": (
             "Because single-consolidated Parent PLUS loans are excluded from IBR and PAYE, Income-Contingent Repayment (ICR) is the primary path to qualify for 120-payment Public Service Loan Forgiveness.\n\n"
-            "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line ($15,650 single in 2026), OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
+            "Unlike RAP or IBR, ICR calculates your bill two ways every year: 20% of discretionary income above 100% of the federal poverty line ($15,960 single in 2026), OR a 12-year fixed amortization adjusted by an income multiplier, charging whichever is lower. Grounded in statutory 34 CFR 685.209(b) rules."
         ),
     },
     "save-plan-transition-to-rap-repayment-calculator": {
         "query": "balance=55000&agi=62000&rate=6.2&deps=0",
-        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $217.42/mo with 100% interest subsidy.",
         "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
         "li_body": (
             "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
             "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,212.50 225% FPL exemption) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,910.00 225% FPL exemption) pays $217.42/month and receives a $66.75/month federal interest subsidy.\n"
             "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
             "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,212.50 225% FPL exemption), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,910.00 225% FPL exemption), RAP sets the monthly payment at $217.42 and waives the remaining $66.75 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
         ),
     },
     "save-plan-litigation-transition": {
         "query": "balance=55000&agi=62000&rate=6.2&deps=0",
-        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $223.23/mo with 100% interest subsidy.",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $217.42/mo with 100% interest subsidy.",
         "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
         "li_body": (
             "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
             "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,212.50 225% FPL exemption) pays $223.23/month and receives a $60.94/month federal interest subsidy.\n"
+            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,910.00 225% FPL exemption) pays $217.42/month and receives a $66.75/month federal interest subsidy.\n"
             "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
             "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,212.50 225% FPL exemption), RAP sets the monthly payment at $223.23 and waives the remaining $60.94 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,910.00 225% FPL exemption), RAP sets the monthly payment at $217.42 and waives the remaining $66.75 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
         ),
     },
     "pslf-qualifying-payment-and-buyback-calculator": {
@@ -8302,17 +8393,17 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "rap-payment-calculator": {
         "query": "balance=60000&agi=65000&rate=6.5&deps=0",
-        "x_hook": "under 2026 RAP (225% FPL), a single borrower at $65k AGI on $60k debt pays $248.23/mo with $76.77/mo interest waived.",
-        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a single borrower at $65,000 AGI deducts $35,212.50 (225% FPL) and receives a 100% unpaid interest waiver.",
+        "x_hook": "under 2026 RAP (225% FPL), a single borrower at $65k AGI on $60k debt pays $242.42/mo with $82.58/mo interest waived.",
+        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a single borrower at $65,000 AGI deducts $35,910.00 (225% FPL) and receives a 100% unpaid interest waiver.",
         "li_body": (
             "The 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685 restructures Title IV discretionary income math around three core rules:\n\n"
-            "• 225% HHS Poverty Exemption: Shields $35,212.50 for a single filer and $47,587.50 for a 2-person household before assessing discretionary income.\n"
-            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($248.23/mo for a single borrower at $65k AGI) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $76.77/mo is waived.\n"
-            "• Principal Balance Protection: Zero negative amortization ensures your loan balance never increases while making on-time RAP payments."
+            "• 225% HHS Poverty Exemption: Shields $35,910.00 for a single filer and $48,690.00 for a 2-person household before assessing discretionary income.\n"
+            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($242.42/mo for a single borrower at $65k AGI) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $82.58/mo is waived.\n"
+            "• Principal Balance Protection: Zero negative amortization and a 360-month (30-year) forgiveness horizon under P.L. 119-21 Section 82001."
         ),
         "fb_body": (
-            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($35,212.50 for a single filer) before calculating your monthly student loan bill.\n\n"
-            "On a $60,000 balance at 6.5% interest and $65,000 single AGI, RAP sets your monthly payment at $248.23 and waives the remaining $76.77 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
+            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($35,910.00 for a single filer) before calculating your monthly student loan bill.\n\n"
+            "On a $60,000 balance at 6.5% interest and $65,000 single AGI, RAP sets your monthly payment at $242.42 and waives the remaining $82.58 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
         ),
     },
     "grad-plus-borrowing-cap-calculator": {
@@ -8508,12 +8599,12 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     deep_url = f"{url}{sep}{scen['query']}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
     if slug in ("ibr-hardship-cap-calculator", "paye-sunset-calculator"):
         statutory_footer = (
-            "Under Title IV HEA Section 493C and 34 CFR 685.209, IBR and PAYE shield income up to 150% of HHS Poverty Guidelines ($23,475 single) "
+            "Under Title IV HEA Section 493C and 34 CFR 685.209, IBR and PAYE shield income up to 150% of HHS Poverty Guidelines ($23,940 single) "
             "and cap monthly payments at the 10-year Standard repayment ceiling. "
         )
     elif slug in ("icr-repayment-calculator", "parent-plus-double-consolidation", "parent-plus-double-consolidation-repayment-calculator"):
         statutory_footer = (
-            "Under Title IV 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of HHS Poverty Guidelines ($15,650 single) "
+            "Under Title IV 34 CFR 685.209(b) and 34 CFR 685.220, Income-Contingent Repayment shields 100% of HHS Poverty Guidelines ($15,960 single) "
             "and assesses the lesser of 20% of discretionary income or a 12-year income-adjusted fixed schedule. "
         )
     elif slug == "tiered-standard-calculator":
@@ -8538,7 +8629,7 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         )
     else:
         statutory_footer = (
-            "Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines ($35,212.50 single / $47,587.50 family of 2) "
+            "Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines ($35,910.00 single / $48,690.00 family of 2) "
             "and provides a 100% unpaid monthly interest subsidy. "
         )
     text = (
@@ -8784,6 +8875,10 @@ def _build_tenant_google_sites_entity_buffer_html(
     </details>
   </section>
 
+  <aside class="regulatory-disclosure" style="margin-top:24px;padding:14px 18px;border:1px solid var(--border);border-radius:10px;background:rgba(15,23,42,0.55);font-size:0.88rem;color:var(--text);">
+    {"".join(f"<p style='margin:0 0 6px 0;'>{html.escape(d_txt, quote=True)}</p>" for d_txt in _resolve_google_sites_disclosures(property_id, brand_name))}
+  </aside>
+
   <footer>
     <p>Official Canonical Model: <a href="/tools/{slug}/">{deep_url}</a></p>
     <p>{brand_name} Research - Grounded in {stat_cite} and {econ_cite}.</p>
@@ -8824,12 +8919,12 @@ def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str,
         f"## Statutory Framework Breakdown\n\n"
         f"{scen['li_body']}\n\n"
         f"### 1. Repayment Assistance Plan (RAP)\n"
-        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($35,212.50 single / $47,587.50 family of 2)\n"
+        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($35,910.00 single / $48,690.00 family of 2)\n"
         f"- Discretionary Income Assessment Rate: 10%\n"
         f"- Interest Subsidy: 100% of unpaid monthly interest waived by the Department of Education\n"
-        f"- Standard Payment Cap: None\n\n"
+        f"- Standard Payment Cap: None (360-month forgiveness horizon under P.L. 119-21 Section 82001)\n\n"
         f"### 2. Income-Based Repayment (IBR)\n"
-        f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level ($23,475 single / $31,725 family of 2)\n"
+        f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level ($23,940 single / $32,460 family of 2)\n"
         f"- Assessment Rate: 10% for new borrowers, 15% for legacy borrowers\n"
         f"- Payment Cap: Strictly capped at the 10-year Standard Repayment Plan baseline under HEA Section 493C\n\n"
         f"## Quantitative Modeling and Tool Access\n\n"
@@ -8950,14 +9045,14 @@ def _generate_gainhelm_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
     short_title = tool.get("short_title") or tool.get("title", slug)
-    x_hook = f"on {short_title}, verified compliance math sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
-    raw_post = f"{x_hook}\n\nGrounded in AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212.\n{deep_url}"
+    x_hook = f"on {short_title}, compliance benchmark estimate sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
+    raw_post = f"{x_hook}\n\nGrounded in AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 benchmark.\n{deep_url}"
     clean_post = _sanitize_distribution_text(raw_post)
     if len(clean_post) > 280:
-        clean_post = _sanitize_distribution_text(f"{short_title} verified baseline: {out_fmt}.\n{deep_url}")
+        clean_post = _sanitize_distribution_text(f"{short_title} verified benchmark estimate: {out_fmt}.\n{deep_url}")
     if len(clean_post) > 280:
         short_url = f"{url}{sep}{qs}&utm_source=x"
-        clean_post = _sanitize_distribution_text(f"{short_title}: {out_fmt}.\n{short_url}")
+        clean_post = _sanitize_distribution_text(f"{short_title} estimate: {out_fmt}.\n{short_url}")
     fc_url = _with_first_comment_utm(deep_url)
     first_comment = f"model your exact numbers on GainHelm:\n{fc_url}"
     teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="GainHelm")
@@ -9733,7 +9828,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "youtube": social_pack["youtube"],
             "ghost": social_pack["ghost"],
             "github_gist": social_pack["github_gist"],
-            "google_sites": _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t),
+            "google_sites": _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t, property_id=eff_prop_norm),
             "linkedin_pulse": _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t),
             "substack_teardown": _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t),
             "quora": _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(slug),
@@ -10902,7 +10997,7 @@ Calculations and statutory rules derived from:
                 f"| **SOC 2 Type II** | AICPA SSAE 18 (AT-C 205) | Licensed CPA Firm | $24,000 - $65,000 | 6 - 12 Month Window |\n"
                 f"| **CMMC 2.0 Level 2** | 32 CFR Part 170 / NIST 800-171 | Accredited C3PAO (110 Controls) | $38,000 - $85,000 | Triennial (3 Years) |\n"
                 f"| **ISO/IEC 27001:2022** | ISO/IEC 27006-1:2024 | Accredited Registrar (Stage 1+2) | $22,000 - $58,000 | 3-Yr Cycle + Annual Surveillance |\n"
-                f"| **HIPAA / HITECH** | 45 CFR 160.404 | HHS OCR 4-Tier Penalty Schedule | $141 - $2,067,813 Cap | Continuous ePHI Safeguards |\n\n"
+                f"| **HIPAA / HITECH** | 45 CFR 160.404 | HHS OCR 4-Tier Penalty Schedule | $141 - $2,190,294 Cap | Continuous ePHI Safeguards |\n\n"
                 f"## Verification & Deterministic Execution\n"
                 f"All figures and compliance scoping calculations are verified at https://gainhelm.com/tools/{s_val}/.\n"
             )
@@ -10913,6 +11008,34 @@ Calculations and statutory rules derived from:
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+
+    # Fail-closed UnifiedTruthGate audit across ALL exported syndication surfaces
+    from pseofactory.truth_gate import UnifiedTruthGate
+
+    _synd_gate = UnifiedTruthGate()
+    _synd_tg_violations = []
+    for _sf in sorted(output_dir.rglob("*")):
+        if not _sf.is_file() or _sf.name.startswith("."):
+            continue
+        _suf = _sf.suffix.lower()
+        if _suf == ".html":
+            _sf_rep = _synd_gate.audit_html_file(
+                _sf,
+                property_id,
+                run_js_parity=False,
+                is_tool_page=False,
+            )
+        elif _suf in (".md", ".txt", ".json", ".xml", ".vtt", ".js"):
+            _sf_rep = _synd_gate.audit_non_html_file(_sf, property_id)
+        else:
+            continue
+        if not _sf_rep.passed:
+            _synd_tg_violations.extend(_sf_rep.violations)
+    if _synd_tg_violations:
+        raise ValueError(
+            f"UnifiedTruthGate syndication surface audit failed for {property_id}: "
+            + "; ".join(f"{v.gate}:{v.code}@{Path(v.file_path).name}: {v.message}" for v in _synd_tg_violations[:5])
+        )
 
     # Sync central pseofactory/syndication/<property_id> mirror when exporting to a real tenant repo
     if not dry_run and not _is_test_context(output_dir, property_id):
@@ -11760,9 +11883,9 @@ def dispatch_to_distribution_lead(
         # Phase 3: Mechanical Voice DNA verification
         first_pack = next(iter(all_assets.values())) if all_assets else None
         if property_id == "prexvo":
-            sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $248.23: https://prexvo.com/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $242.42: https://prexvo.com/"
         elif property_id == "gainhelm":
-            sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO hits $78,100.40 ($37k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS rate + $11.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO estimate hits $78,100.40 ($37k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS benchmark + $11.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
         elif property_id == "lienbond":
             sample_draft = first_pack["x"]["content"] if first_pack else "on $500k contractor payroll in class 5403 at $8.42 NCCI rate and 0.95 EMR, annual workers comp premium is $39,995.00: https://lienbond.com/tools/workers-compensation-class-code-rate-calculator-by-state/"
         else:
@@ -11892,12 +12015,29 @@ def dispatch_to_distribution_lead(
                 privacy=video_privacy,
             )
         except Exception as vf_exc:
-            video_telemetry = {
-                "status": "ERROR",
-                "property_id": norm_prop_eff,
-                "error": str(vf_exc),
-                "per_slug_dispatch_status": {},
-            }
+            raise ValueError(
+                f"Video pipeline truth/execution failed for {norm_prop_eff}: {vf_exc}"
+            ) from vf_exc
+
+        if (
+            str(video_telemetry.get("status") or "").upper() in ("ERROR", "TRUTH_GATE_FAILED")
+            or bool(video_telemetry.get("truth_violations"))
+        ):
+            raise ValueError(
+                f"Video truth verification failed for {norm_prop_eff}: "
+                f"status={video_telemetry.get('status')} violations={video_telemetry.get('truth_violations')}"
+            )
+
+        if eff_dist_path and (eff_dist_path / "videos").is_dir():
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            _vid_gate = UnifiedTruthGate()
+            for _vtt in sorted((eff_dist_path / "videos").glob("*.vtt")):
+                _vtt_rep = _vid_gate.audit_non_html_file(_vtt, norm_prop_eff, dist_dir=eff_dist_path)
+                if not _vtt_rep.passed:
+                    raise ValueError(
+                        f"Video VTT truth verification failed for {norm_prop_eff}: {_vtt_rep.summary()}"
+                    )
 
         yt_status_by_slug: Dict[str, str] = dict(
             video_telemetry.get("per_slug_dispatch_status") or {}

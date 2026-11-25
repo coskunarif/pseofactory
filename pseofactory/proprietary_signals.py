@@ -695,6 +695,24 @@ def compute_5point_nonlinear_sensitivity_rows(
     return rows
 
 
+def _load_truth_pack_entries(property_id: str) -> Dict[str, Any]:
+    """Loads TruthPack entries for property_id when available."""
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        return dict(load_truth_pack(property_id, allow_expired=True).entries)
+    except Exception:
+        return {}
+
+
+def _tp_float(entries: Dict[str, Any], key: str, default: float) -> float:
+    """Extracts a numeric statutory constant from TruthPack entries with verified fallback."""
+    ent = entries.get(key)
+    if ent is not None and isinstance(getattr(ent, "value", None), (int, float)):
+        return float(ent.value)
+    return float(default)
+
+
 def compute_multi_year_longitudinal_trajectory(
     property_id: str,
     slug: str,
@@ -723,13 +741,14 @@ def compute_multi_year_longitudinal_trajectory(
     )
 
     if prop == "prexvo":
+        px_entries = _load_truth_pack_entries("prexvo")
         fpl_pts = db_series.get("hhs_fpl_single_base", {}).get("points", {})
         rate_pts = db_series.get("ed_direct_undergrad_rate", {}).get("points", {})
         f24 = fpl_pts.get("2024", 15060.0)
         f25 = fpl_pts.get("2025", 15650.0)
-        f26 = fpl_pts.get("2026", 16120.0)
-        f27 = fpl_pts.get("2027", 16600.0)
-        f30 = fpl_pts.get("2030", 18140.0)
+        f26 = _tp_float(px_entries, "hhs_poverty_2026_1person", fpl_pts.get("2026", 15960.0))
+        f27 = fpl_pts.get("2027", 16440.0)
+        f30 = fpl_pts.get("2030", 17960.0)
         r24 = rate_pts.get("2024", 5.50)
         r25 = rate_pts.get("2025", 6.53)
         r26 = rate_pts.get("2026", 6.39)
@@ -744,8 +763,8 @@ def compute_multi_year_longitudinal_trajectory(
                 f"after IRC Section 108(a)(1)(B) Form 982 insolvency shielding ($24,650 unshielded). {telemetry_tag}"
             )
             rows = [
-                ("2024 Enacted Baseline", f"IRC 108(f)(5) 100% Tax-Free Discharge (${f24:,.0f} HHS FPL)", "ARPA Statutory Exclusion Active (0% Federal Tax)", "cliff-exposure-2024", "$0 Tax ($85k Shielded)"),
-                ("2025 Pre-Cliff Window", f"Final IRC 108(f)(5) Tax-Free Year (${f25:,.0f} HHS FPL)", "6.53% Title IV Rate / Pre-Sunset Discharge Window", "cliff-exposure-2025", "$0 Tax (Final Window)"),
+                ("2024 Enacted Baseline", f"Prior-year 2024 IRC 108(f)(5) 100% Tax-Free Discharge (${f24:,.0f} HHS FPL).", "ARPA Statutory Exclusion Active (0% Federal Tax)", "cliff-exposure-2024", "$0 Tax ($85k Shielded)"),
+                ("2025 Pre-Cliff Window", f"Prior-year 2025 IRC 108(f)(5) Tax-Free Year (${f25:,.0f} HHS FPL).", "6.53% Title IV Rate / Pre-Sunset Discharge Window", "cliff-exposure-2025", "$0 Tax (Final Window)"),
                 ("2026 Statutory Cliff Year", "IRC 108(f)(5) Sunset (0% Statutory Exemption)", "Form 982 Insolvency Shield ($48k Net Liabilities)", "cliff-exposure-2026", "$10,730 Tax ($24,650 Gross)"),
                 ("2027 Post-Sunset Regime", f"100% Ordinary Income Inclusion (${f27:,.0f} HHS FPL)", "IRS Form 1099-C + State Conformity Surcharges", "cliff-exposure-2027", "$11,310 Tax Exposure"),
                 ("2028-2030 Forward Projection", f"Compounded Balance Accrual (${f30:,.0f} 2030 FPL)", "PSLF 26 U.S.C. 108(f)(1) Remains 100% Tax-Exempt", "cliff-exposure-2028", "$12,470 Tax Exposure"),
@@ -753,25 +772,25 @@ def compute_multi_year_longitudinal_trajectory(
         elif any(k in s_low for k in ("icr", "parent-plus")):
             summary = (
                 f"2026 Parent PLUS &amp; ICR Cliff: Single-consolidation Parent PLUS borrowers under 34 CFR 685.209(b) "
-                f"face $651.25 monthly ($7,815/yr) at 20% discretionary levy above 100% HHS FPL (${f25:,.0f}), whereas "
+                f"face $651.25 monthly ($7,815/yr) at 20% discretionary levy above 100% HHS FPL (${f26:,.0f}), whereas "
                 f"completed double-consolidation RAP/IBR routing saves $4,836.24/yr. {telemetry_tag}"
             )
             rows = [
-                ("2024 Enacted Baseline", f"34 CFR 685.209(b) 100% FPL (${f24:,.0f} Base)", f"{r24:.2f}% Direct Rate / Double-Consolidation Open", "cliff-exposure-2024", "$7,692 / yr ($641.00 monthly)"),
-                ("2025 Pre-Cliff Window", f"100% HHS FPL (${f25:,.0f}) / 20% Discretionary", f"{r25:.2f}% Direct Rate / Consolidation Cutoff Gate", "cliff-exposure-2025", "$7,815 / yr ($651.25 monthly)"),
+                ("2024 Enacted Baseline", f"Prior-year 2024 34 CFR 685.209(b) 100% FPL (${f24:,.0f} Base).", f"{r24:.2f}% Direct Rate / Double-Consolidation Open", "cliff-exposure-2024", "$7,692 / yr ($641.00 monthly)"),
+                ("2025 Pre-Cliff Window", f"Prior-year 2025 100% HHS FPL (${f25:,.0f}) / 20% Discretionary.", f"{r25:.2f}% Direct Rate / Consolidation Cutoff Gate", "cliff-exposure-2025", "$7,815 / yr ($651.25 monthly)"),
                 ("2026 Statutory Cliff Year", f"Single-Consolidation ICR Lock (${f26:,.0f} Indexed FPL)", "Double-Consolidated RAP Saves $4,836.24/yr", "cliff-exposure-2026", "$7,815 / yr ($651.25 monthly)"),
                 ("2027 Post-Sunset Regime", f"12-Year Income Factor Cap (${f27:,.0f} HHS FPL)", f"{r27:.2f}% Direct Rate / IRC 108(f)(5) Tax Applies", "cliff-exposure-2027", "$7,720 / yr ($643.33 monthly)"),
                 ("2028-2030 Forward Projection", f"CPI-Indexed HHS FPL (${f30:,.0f} by 2030)", f"{r30:.2f}% Direct Rate / 25-Yr ICR Forgiveness Cliff", "cliff-exposure-2028", "$7,540 / yr ($628.33 monthly)"),
             ]
         elif any(k in s_low for k in ("ibr", "paye")):
             summary = (
-                f"2026 IBR &amp; PAYE Hardship Cliff: Under 34 CFR 685.209, the 150% HHS FPL exemption (${f25 * 1.5:,.2f} "
-                f"at ${f25:,.0f} base) and 10% post-2014 levy produce $346.04 monthly ($4,152.48/yr) vs $519.06 monthly ($6,228.72/yr) "
+                f"2026 IBR &amp; PAYE Hardship Cliff: Under 34 CFR 685.209, the 150% HHS FPL exemption (${f26 * 1.5:,.0f} "
+                f"at ${f26:,.0f} base) and 10% post-2014 levy produce $346.04 monthly ($4,152.48/yr) vs $519.06 monthly ($6,228.72/yr) "
                 f"for pre-2014 15% IBR borrowers, capped below the $681.29 monthly 10-Year Standard ceiling. {telemetry_tag}"
             )
             rows = [
-                ("2024 Enacted Baseline", f"150% HHS FPL (${f24 * 1.5:,.0f} Shield at ${f24:,.0f} FPL)", f"{r24:.2f}% Direct Rate / 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$4,241 / yr ($353.42 monthly)"),
-                ("2025 Pre-Cliff Window", f"150% HHS FPL (${f25 * 1.5:,.2f} Shield at ${f25:,.0f} FPL)", f"{r25:.2f}% Direct Rate / PAYE Sunset Transition", "cliff-exposure-2025", "$4,152 / yr ($346.04 monthly)"),
+                ("2024 Enacted Baseline", f"Prior-year 2024 150% HHS FPL (${f24 * 1.5:,.0f} Shield at ${f24:,.0f} FPL).", f"{r24:.2f}% Direct Rate / 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$4,241 / yr ($353.42 monthly)"),
+                ("2025 Pre-Cliff Window", f"Prior-year 2025 150% HHS FPL (${round(f25 * 1.5):,} Shield at ${f25:,.0f} FPL).", f"{r25:.2f}% Direct Rate / PAYE Sunset Transition", "cliff-exposure-2025", "$4,152 / yr ($346.04 monthly)"),
                 ("2026 Statutory Cliff Year", f"Post-2014 10% vs Pre-2014 15% IBR (${f26:,.0f} Indexed FPL)", "IRC 108(f)(5) Forgiveness Tax Cliff Resumes", "cliff-exposure-2026", "$4,152 / yr ($346.04 monthly)"),
                 ("2027 Post-Sunset Regime", f"150% HHS FPL (${f27 * 1.5:,.0f} Shield at ${f27:,.0f} FPL)", f"{r27:.2f}% Direct Rate / $681.29 Standard Cap", "cliff-exposure-2027", "$4,010 / yr ($334.17 monthly)"),
                 ("2028-2030 Forward Projection", f"150% HHS FPL (${f30 * 1.5:,.0f} Shield at ${f30:,.0f} FPL)", f"{r30:.2f}% Direct Rate / 20-Yr vs 25-Yr Term", "cliff-exposure-2028", "$3,779 / yr ($314.92 monthly)"),
@@ -796,21 +815,21 @@ def compute_multi_year_longitudinal_trajectory(
                 f"IRC Section 108(f)(5) expires in 2026. {telemetry_tag}"
             )
             rows = [
-                ("2024 Enacted Baseline", f"34 CFR 685.219(g) Buyback Active (${f24:,.0f} FPL)", "26 U.S.C. 108(f)(1) 100% Tax-Exempt PSLF", "cliff-exposure-2024", "$2,869 (12-Mo Buyback)"),
-                ("2025 Pre-Cliff Window", f"SAVE Forbearance Buyback Window (${f25:,.0f} FPL)", "120 Qualifying Payments / Hold-Harmless Rate", "cliff-exposure-2025", "$2,979 (12-Mo) / $3,475 (14-Mo)"),
-                ("2026 Statutory Cliff Year", "PSLF Permanently Exempt from 2026 Tax Bomb", f"225% FPL (${f25 * 2.25:,.2f}) RAP Buyback Basis", "cliff-exposure-2026", "$2,979 (12-Mo) / $3,475 (14-Mo)"),
+                ("2024 Enacted Baseline", f"Prior-year 2024 34 CFR 685.219(g) Buyback Active (${f24:,.0f} FPL).", "26 U.S.C. 108(f)(1) 100% Tax-Exempt PSLF", "cliff-exposure-2024", "$2,869 (12-Mo Buyback)"),
+                ("2025 Pre-Cliff Window", f"Prior-year 2025 SAVE Forbearance Buyback Window (${f25:,.0f} FPL).", "120 Qualifying Payments / Hold-Harmless Rate", "cliff-exposure-2025", "$2,979 (12-Mo) / $3,475 (14-Mo)"),
+                ("2026 Statutory Cliff Year", "PSLF Permanently Exempt from 2026 Tax Bomb", f"225% FPL (${f26 * 2.25:,.0f}) RAP Buyback Basis", "cliff-exposure-2026", "$2,979 (12-Mo) / $3,475 (14-Mo)"),
                 ("2027 Post-Sunset Regime", f"150% vs 225% FPL Audit Verification (${f27:,.0f} FPL)", "ECF Employer Certification Form W-2 Match", "cliff-exposure-2027", "$2,872 (12-Mo Buyback)"),
                 ("2028-2030 Forward Projection", f"CPI-Indexed HHS FPL (${f30:,.0f} by 2030)", "Zero Federal Tax on Forgiven PSLF Principal", "cliff-exposure-2028", "$2,690 (12-Mo Buyback)"),
             ]
         else:
             summary = (
                 f"2026 RAP vs IDR Statutory Cliff: Under 34 CFR Part 685 and OBBBA Title VIII, the 225% HHS FPL "
-                f"exemption (${f25 * 2.25:,.2f} on ${f25:,.0f} base) yields $248.23 monthly ($2,978.76/yr) on $65,000 AGI "
+                f"exemption (${f26 * 2.25:,.0f} on ${f26:,.0f} base) yields $248.23 monthly ($2,978.76/yr) on $65,000 AGI "
                 f"with 100% unpaid interest subsidy vs $346.04 monthly ($4,152.48/yr) under 150% FPL IBR. {telemetry_tag}"
             )
             rows = [
-                ("2024 Enacted Baseline", f"34 CFR 685.209 225% FPL (${f24 * 2.25:,.2f} Shield)", "IRC 108(f)(5) 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$2,979 / yr ($248.23 monthly)"),
-                ("2025 Pre-Cliff Window", f"225% HHS FPL (${f25 * 2.25:,.2f} Shield at ${f25:,.0f} FPL)", f"{r25:.2f}% Direct Rate / 100% Interest Subsidy", "cliff-exposure-2025", "$2,979 / yr ($248.23 monthly)"),
+                ("2024 Enacted Baseline", f"Prior-year 2024 34 CFR 685.209 225% FPL (${f24 * 2.25:,.0f} Shield).", "IRC 108(f)(5) 100% Tax-Free Forgiveness", "cliff-exposure-2024", "$2,979 / yr ($248.23 monthly)"),
+                ("2025 Pre-Cliff Window", f"Prior-year 2025 225% HHS FPL (${round(f25 * 2.25):,} Shield at ${f25:,.0f} FPL).", f"{r25:.2f}% Direct Rate / 100% Interest Subsidy", "cliff-exposure-2025", "$2,979 / yr ($248.23 monthly)"),
                 ("2026 Statutory Cliff Year", "RAP $248.23 monthly vs Post-2014 IBR $346.04 monthly", "IRC 108(f)(5) Sunset (+$1,173.72/yr IBR Delta)", "cliff-exposure-2026", "$2,979 / yr ($248.23 monthly)"),
                 ("2027 Post-Sunset Regime", f"150% FPL Shift Risk (${f27 * 1.5:,.0f} Shield at ${f27:,.0f} FPL)", f"{r27:.2f}% Direct Rate / Form 982 Insolvency", "cliff-exposure-2027", "$4,010 / yr ($334.17 monthly)"),
                 ("2028-2030 Forward Projection", f"CPI-Indexed HHS FPL (${f30:,.0f} Base by 2030)", "PSLF 26 U.S.C. 108(f)(1) Remains Tax-Exempt", "cliff-exposure-2028", "$3,779 / yr ($314.92 monthly)"),
@@ -838,11 +857,12 @@ def compute_multi_year_longitudinal_trajectory(
         cm26 = cmmc_pts.get("2026", 35.0)
         cm27 = cmmc_pts.get("2027", 65.0)
         cm30 = cmmc_pts.get("2030", 100.0)
+        gh_entries = _load_truth_pack_entries("gainhelm")
         hp24 = hipaa_pts.get("2024", 2003947.0)
-        hp25 = hipaa_pts.get("2025", 2067813.0)
-        hp26 = hipaa_pts.get("2026", 2067813.0)
-        hp27 = hipaa_pts.get("2027", 2129847.0)
-        hp30 = hipaa_pts.get("2030", 2327341.0)
+        hp26 = _tp_float(gh_entries, "hipaa_tier4_annual_cap_2026", hipaa_pts.get("2026", 2190294.0))
+        hp25 = hp26
+        hp27 = hipaa_pts.get("2027", 2256003.0)
+        hp30 = hipaa_pts.get("2030", 2465195.0)
 
         h3_title = f"Multi-Year Statutory Compliance &amp; Enforcement Cliff Visualizer (2024 to 2030): {topic_label}"
         if any(k in s_low for k in ("cmmc", "nist-800-171", "sprs")):
@@ -871,17 +891,18 @@ def compute_multi_year_longitudinal_trajectory(
                 ("2028-2030 Triennial Cycle", "FedRAMP 20x Machine-Readable Authorization Scale", f"OSCAL Automated Telemetry / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$578,000 3PAO Horizon"),
             ]
         elif any(k in s_low for k in ("hipaa", "hitrust")):
+            resp_cost = 387500.0
             summary = (
                 f"2026 Healthcare ePHI &amp; HITRUST Assurance Cliff: Under 45 CFR 160.404 and HITECH 42 U.S.C. 1320d-5, "
                 f"HHS OCR Tier 3/4 annual penalty caps stand at ${hp26:,.0f} (2026) and escalate toward ${hp30:,.0f} (2030) "
                 f"alongside mandatory HITRUST CSF v11 e1/i1/r2 External Assessor validation. {telemetry_tag}"
             )
             rows = [
-                ("2024 Baseline Window", f"45 CFR 160.404 Tier 4 Cap ${hp24:,.0f}", f"HITRUST v11 Transition / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", "$2,391,447 Breach / $98k HITRUST"),
-                ("2025 Enforcement Ramp", f"HHS OCR Tier 4 Cap ${hp25:,.0f} (+3.2% CPI)", f"OCR Right-of-Access &amp; ePHI Audit / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", "$2,455,313 Breach / $106k HITRUST"),
-                ("2026 Statutory Cliff Year", f"HHS OCR Tier 4 Cap ${hp26:,.0f} Active", f"45 CFR 164 MFA &amp; Encryption Rule / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", "$2,455,313 Breach / $115k HITRUST"),
-                ("2027 Full Mandate Phase", f"Projected OCR Tier 4 Cap ${hp27:,.0f}", f"72-Hr Vendor Incident SLA / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", "$2,517,347 Breach / $122k HITRUST"),
-                ("2028-2030 Triennial Cycle", f"Projected OCR Tier 4 Cap ${hp30:,.0f} by 2030", f"Biennial HITRUST r2 Re-Certification / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", "$2,714,841 Breach / $136k HITRUST"),
+                ("2024 Baseline Window", f"45 CFR 160.404 Tier 4 Cap ${hp24:,.0f}", f"HITRUST v11 Transition / ${wg24:.2f}/hr InfoSec Wage", "cliff-exposure-2024", f"${hp24 + resp_cost:,.0f} Breach / $98k HITRUST"),
+                ("2025 Enforcement Ramp", f"HHS OCR Tier 4 Cap ${hp25:,.0f} (45 CFR 160.404)", f"OCR Right-of-Access &amp; ePHI Audit / ${wg25:.2f}/hr Wage", "cliff-exposure-2025", f"${hp25 + resp_cost:,.0f} Breach / $106k HITRUST"),
+                ("2026 Statutory Cliff Year", f"HHS OCR Tier 4 Cap ${hp26:,.0f} Active", f"45 CFR 164 MFA &amp; Encryption Rule / ${wg26:.2f}/hr Wage", "cliff-exposure-2026", f"${hp26 + resp_cost:,.0f} Breach / $115k HITRUST"),
+                ("2027 Full Mandate Phase", f"Projected OCR Tier 4 Cap ${hp27:,.0f}", f"72-Hr Vendor Incident SLA / ${wg27:.2f}/hr Wage", "cliff-exposure-2027", f"${hp27 + resp_cost:,.0f} Breach / $122k HITRUST"),
+                ("2028-2030 Triennial Cycle", f"Projected OCR Tier 4 Cap ${hp30:,.0f} by 2030", f"Biennial HITRUST r2 Re-Certification / ${wg30:.2f}/hr Wage", "cliff-exposure-2028", f"${hp30 + resp_cost:,.0f} Breach / $136k HITRUST"),
             ]
         elif any(k in s_low for k in ("pci-dss", "iso-27001", "penetration", "cyber-liability")):
             summary = (
@@ -1057,18 +1078,22 @@ def compute_multi_year_longitudinal_trajectory(
             ("2028-2030 Forward Projection", f"25.0% Section 301 Duty + ${m30:,.2f} 2030 MPF Cap", "Four-Year USTR Statutory Review &amp; Audit", "cliff-exposure-2028", "$161,480 Landed Cost"),
         ]
     elif any(k in s_low for k in ("179", "equipment", "vehicle", "lease")):
+        ph_entries = _load_truth_pack_entries("profithelm")
+        cap26 = _tp_float(ph_entries, "section_179_cap_2026", 2560000.0)
+        suv26 = _tp_float(ph_entries, "section_179_heavy_suv_cap_2026", 32000.0)
+        bonus26 = _tp_float(ph_entries, "bonus_depreciation_pct_2026", 100.0)
         summary = (
             f"2026 Depreciation Schedule: Under enacted OBBBA (P.L. 119-21), IRC Section 168(k) permanently restores "
-            f"100% first-year bonus depreciation for qualified property acquired and placed in service after Jan 19, 2025 "
-            f"(repealing the pre-OBBBA phase-down) alongside the $2,560,000 Section 179 cap "
-            f"($30,500 Heavy SUV Section 179(b)(5) cap). {telemetry_tag}"
+            f"{bonus26:.0f}% first-year bonus depreciation for qualified property acquired and placed in service after Jan 19, 2025 "
+            f"(repealing the pre-OBBBA phase-down) alongside the ${cap26:,.0f} Section 179 cap "
+            f"(${suv26:,.0f} Heavy SUV Section 179(b)(5) cap). {telemetry_tag}"
         )
         rows = [
-            ("2024 Enacted Baseline", "IRC 179 ($1.22M Cap / $30,500 SUV) + 60% Bonus", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$53,000 SUV / $350k Equip"),
-            ("2025 Enacted Window", "IRC 179 ($2.50M OBBBA Cap / $31,300 SUV) + 100% OBBBA Bonus", f"100% Section 168(k) Post-Jan-19 / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$68,000 SUV / $350k Equip"),
-            ("2026 Statutory Schedule", "IRC 179 ($2.56M Cap / $30,500 SUV) + 100% OBBBA Bonus", f"100% Section 168(k) Permanent / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$68,000 SUV / $350k Equip"),
-            ("2027 Enacted OBBBA Regime", "IRC 179 ($2.62M Cap / $30,500 SUV) + 100% OBBBA Bonus", "Permanent IRC 168(k) 100% Expensing Above Cap", "cliff-exposure-2027", "$68,000 SUV / $350k Equip"),
-            ("2028-2030 Forward Projection", "100% OBBBA Bonus / Inflation-Indexed Section 179 Cap", "Section 179(d)(10) 50% or Less Business-Use Recapture", "cliff-exposure-2028", "$68,000 SUV / 100% Bonus"),
+            ("2024 Enacted Baseline", "Prior-year 2024 cap: IRC 179 ($1,220,000 Cap / $30,500 SUV) + 60% Bonus (2024).", f"20% Section 199A QBI / {c24:.1f}% Core CPI", "cliff-exposure-2024", "$53,000 SUV / $350k Equip"),
+            ("2025 Enacted Window", "Prior-year 2025 cap: IRC 179 ($2,500,000 OBBBA Cap / $31,300 SUV) + 100% OBBBA Bonus (2025).", f"100% Section 168(k) Post-Jan-19 / {y25:.2f}% 10Y Treasury", "cliff-exposure-2025", "$68,000 SUV / $350k Equip"),
+            ("2026 Statutory Schedule", f"IRC 179 (${cap26:,.0f} Cap / ${suv26:,.0f} SUV) + {bonus26:.0f}% OBBBA Bonus", f"{bonus26:.0f}% Section 168(k) Permanent / {c26:.1f}% Core CPI", "cliff-exposure-2026", "$68,000 SUV / $350k Equip"),
+            ("2027 Enacted OBBBA Regime", f"IRC 179 ($2,620,000 Cap / ${suv26:,.0f} SUV) + {bonus26:.0f}% OBBBA Bonus", f"Permanent IRC 168(k) {bonus26:.0f}% Expensing Above Cap", "cliff-exposure-2027", "$68,000 SUV / $350k Equip"),
+            ("2028-2030 Forward Projection", f"{bonus26:.0f}% OBBBA Bonus / Inflation-Indexed Section 179 Cap", "Section 179(d)(10) 50% or Less Business-Use Recapture", "cliff-exposure-2028", f"$68,000 SUV / {bonus26:.0f}% Bonus"),
         ]
     elif any(k in s_low for k in ("tax-bracket", "irs-2027", "ca-tax", "capital-gains")):
         summary = (
@@ -1124,6 +1149,10 @@ def compute_stateful_comparator_defaults(
     s_low = str(slug or "").strip("/").lower()
 
     if prop == "prexvo":
+        px_entries = _load_truth_pack_entries("prexvo")
+        fpl26 = _tp_float(px_entries, "hhs_poverty_2026_1person", 15960.0)
+        rap_shield = round(fpl26 * 2.25)
+        ibr_shield = round(fpl26 * 1.50)
         if any(k in s_low for k in ("tax-bomb", "insolvency", "forgiveness-2026")):
             return {
                 "base_a": "$85,000 Forgiven (Form 982 Shield)",
@@ -1143,9 +1172,9 @@ def compute_stateful_comparator_defaults(
                 "base_a": "$65,000 AGI (Double-Consolidated RAP)",
                 "base_b": "$65,000 AGI (Single-Consolidation ICR)",
                 "base_live": "$65,000 AGI / $60,000 PLUS Balance",
-                "ret_a": "$35,213 (225% HHS FPL Shield)",
-                "ret_b": "$15,650 (100% HHS FPL Shield)",
-                "ret_live": "$15,650 ICR / $35,213 RAP Shield",
+                "ret_a": f"${rap_shield:,.0f} (225% HHS FPL Shield)",
+                "ret_b": f"${fpl26:,.0f} (100% HHS FPL Shield)",
+                "ret_live": f"${fpl26:,.0f} ICR / ${rap_shield:,.0f} RAP Shield",
                 "tax_a": "$2,979 / yr ($248.23 monthly RAP)",
                 "tax_b": "$7,815 / yr ($651.25 monthly ICR)",
                 "tax_live": "$7,815 / yr ($651.25 monthly)",
@@ -1157,9 +1186,9 @@ def compute_stateful_comparator_defaults(
                 "base_a": "$65,000 AGI (Post-2014 10% IBR)",
                 "base_b": "$65,000 AGI (Pre-2014 15% IBR)",
                 "base_live": "$65,000 AGI / $60,000 Direct Loan",
-                "ret_a": "$23,475 (150% HHS FPL Shield)",
-                "ret_b": "$23,475 (150% HHS FPL Shield)",
-                "ret_live": "$23,475 Statutory Exemption",
+                "ret_a": f"${ibr_shield:,.0f} (150% HHS FPL Shield)",
+                "ret_b": f"${ibr_shield:,.0f} (150% HHS FPL Shield)",
+                "ret_live": f"${ibr_shield:,.0f} Statutory Exemption",
                 "tax_a": "$4,152 / yr ($346.04 monthly)",
                 "tax_b": "$6,229 / yr ($519.06 monthly)",
                 "tax_live": "$4,152 / yr ($346.04 monthly)",
@@ -1170,9 +1199,9 @@ def compute_stateful_comparator_defaults(
             "base_a": "$65,000 AGI (225% FPL RAP Plan)",
             "base_b": "$95,000 AGI (150% FPL Post-2014 IBR)",
             "base_live": "$65,000 AGI / $60,000 Direct Loan",
-            "ret_a": "$35,213 (225% FPL + 100% Int. Subsidy)",
-            "ret_b": "$23,475 (150% HHS FPL Exemption)",
-            "ret_live": "$35,213 Statutory Income Shield",
+            "ret_a": f"${rap_shield:,.0f} (225% FPL + 100% Int. Subsidy)",
+            "ret_b": f"${ibr_shield:,.0f} (150% HHS FPL Exemption)",
+            "ret_live": f"${rap_shield:,.0f} Statutory Income Shield",
             "tax_a": "$2,979 / yr ($248.23 monthly)",
             "tax_b": "$7,153 / yr ($596.04 monthly)",
             "tax_live": "$2,979 / yr ($248.23 monthly)",
@@ -1210,18 +1239,21 @@ def compute_stateful_comparator_defaults(
                 "delta_live": "44 U.S.C. 3607 / NIST 800-53 Rev 5",
             }
         if any(k in s_low for k in ("hipaa", "hitrust")):
+            gh_cap = _tp_float(_load_truth_pack_entries("gainhelm"), "hipaa_tier4_annual_cap_2026", 2190294.0)
+            breach_total = gh_cap + 387500.0
+            mitigation = breach_total - 115000.0
             return {
                 "base_a": "$115,000 HITRUST i1 / Recognized Security",
-                "base_b": "$2,455,313 HHS OCR Tier 3 Breach Exposure",
-                "base_live": "$2,455,313 HIPAA Breach / $115k HITRUST",
-                "ret_a": "$2,340,313 HITECH Safe-Harbor Mitigation",
+                "base_b": f"${breach_total:,.0f} HHS OCR Tier 3/4 Breach Exposure",
+                "base_live": f"${breach_total:,.0f} HIPAA Breach / $115k HITRUST",
+                "ret_a": f"${mitigation:,.0f} HITECH Safe-Harbor Mitigation",
                 "ret_b": "$0 Recognized Security Practice Credit",
-                "ret_live": "$2,067,813 OCR CMP + $387,500 Response",
+                "ret_live": f"${gh_cap:,.0f} OCR CMP + $387,500 Response",
                 "tax_a": "$115,000 Validated Assurance Cost",
-                "tax_b": "$2,455,313 Unshielded Breach Liability",
-                "tax_live": "$2,455,313 / $115,000",
-                "delta_b": "+$2,340,313 Breach Penalty Delta",
-                "delta_live": "45 CFR 160.404 Tier 4 Cap $2,067,813",
+                "tax_b": f"${breach_total:,.0f} Unshielded Breach Liability",
+                "tax_live": f"${breach_total:,.0f} / $115,000",
+                "delta_b": f"+${mitigation:,.0f} Breach Penalty Delta",
+                "delta_live": f"45 CFR 160.404 Tier 4 Cap ${gh_cap:,.0f}",
             }
         if any(k in s_low for k in ("pci-dss", "iso-27001")):
             return {
@@ -1380,18 +1412,28 @@ def compute_stateful_comparator_defaults(
             "delta_live": "$14,235 Verified FICA Alpha",
         }
     if any(k in s_low for k in ("179", "equipment", "vehicle", "lease")):
+        ph_entries = _load_truth_pack_entries("profithelm")
+        suv26 = _tp_float(ph_entries, "section_179_heavy_suv_cap_2026", 32000.0)
+        cap26 = _tp_float(ph_entries, "section_179_cap_2026", 2560000.0)
+        bonus26 = _tp_float(ph_entries, "bonus_depreciation_pct_2026", 100.0)
+        suv_basis = 85000.0 * 0.80
+        bonus_amt = max(0.0, suv_basis - suv26) * (bonus26 / 100.0)
+        suv_writeoff = suv26 + bonus_amt
+        tax_a_val = suv_writeoff * 0.35
+        tax_b_val = 350000.0 * 0.35
+        delta_val = tax_b_val - tax_a_val
         return {
             "base_a": "$85,000 Heavy SUV (80% Business Use)",
             "base_b": "$350,000 Commercial Equipment (100% Use)",
             "base_live": "$85,000 SUV / $350,000 CapEx Base",
-            "ret_a": "$30,500 Sec 179(b)(5) + $7,500 20% Bonus",
-            "ret_b": "$350,000 Full IRC 179 Write-Off ($2.56M Cap)",
-            "ret_live": "$38,000 SUV / $350,000 Equip Write-Off",
-            "tax_a": "$13,300 Cash Tax Saved (at 35%)",
-            "tax_b": "$122,500 Cash Tax Saved (at 35%)",
-            "tax_live": "$38,000 / $350,000",
-            "delta_b": "+$109,200 Tax Shield Expansion",
-            "delta_live": "20% Bonus vs 0% 2027 Cliff",
+            "ret_a": f"${suv26:,.0f} Sec 179(b)(5) + ${bonus_amt:,.0f} {bonus26:.0f}% Bonus",
+            "ret_b": f"$350,000 Full IRC 179 Write-Off (${cap26:,.0f} Cap)",
+            "ret_live": f"${suv_writeoff:,.0f} SUV / $350,000 Equip Write-Off",
+            "tax_a": f"${tax_a_val:,.0f} Cash Tax Saved (at 35%)",
+            "tax_b": f"${tax_b_val:,.0f} Cash Tax Saved (at 35%)",
+            "tax_live": f"${suv_writeoff:,.0f} / $350,000",
+            "delta_b": f"+${delta_val:,.0f} Tax Shield Expansion",
+            "delta_live": f"{bonus26:.0f}% OBBBA Bonus (P.L. 119-21)",
         }
     if "1031" in s_low:
         return {

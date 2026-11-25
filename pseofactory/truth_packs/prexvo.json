@@ -1,0 +1,563 @@
+{
+  "schema_version": "2.0",
+  "property_id": "prexvo",
+  "brand_name": "Prexvo",
+  "canonical_domain": "https://prexvo.com",
+  "audience_tier": "consumer",
+  "pricing_tiers": {
+    "free": {
+      "tier_kind": "free",
+      "label": "Free Calculator",
+      "price_usd": 0.0,
+      "price_cents": 0,
+      "currency": "usd",
+      "billing_mode": "free"
+    },
+    "quick": {
+      "tier_kind": "quick",
+      "label": "Quick Worksheet",
+      "price_usd": 9.0,
+      "price_cents": 900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "full": {
+      "tier_kind": "full",
+      "label": "Full Workpaper & Data Pack",
+      "price_usd": 19.0,
+      "price_cents": 1900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "partner_slot": {
+      "tier_kind": "partner_slot",
+      "label": "Verified Calculator Partner Slot",
+      "price_usd": 299.0,
+      "price_cents": 29900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    }
+  },
+  "entries": {
+    "hhs_poverty_2026_1person": {
+      "key": "hhs_poverty_2026_1person",
+      "value": 15960.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "91 FR 1797 (2026 HHS Poverty Guidelines, 48 Contiguous States and D.C.)",
+      "primary_source_url": "https://www.federalregister.gov/d/2026-00690",
+      "publisher": "U.S. Department of Health and Human Services",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-02-15",
+      "verbatim_quote": "For the 48 contiguous states and the District of Columbia in 2026, the federal poverty guideline for a 1-person family/household is $15,960.",
+      "source_quote_sha256": "94181f1b6c947ffbf7d9317707fb2b9d08df9daff3629a04338563dff5654434",
+      "superseded_values": [
+        {
+          "value": 15650.0,
+          "label": "2025 HHS 1-person poverty guideline ($15,650)",
+          "reason": "Superseded for 2026 by 91 FR 1797 ($15,960).",
+          "patterns": [
+            "\\$?15,650"
+          ]
+        },
+        {
+          "value": 16120.0,
+          "label": "Erroneous 2026 poverty guideline figure ($16,120)",
+          "reason": "Incorrect figure; official 2026 HHS 1-person contiguous guideline is $15,960.",
+          "patterns": [
+            "\\$?16,120"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "hhs_poverty_2026_per_additional": {
+      "key": "hhs_poverty_2026_per_additional",
+      "value": 5680.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "91 FR 1797 (2026 HHS Poverty Guidelines, Per Additional Person)",
+      "primary_source_url": "https://www.federalregister.gov/d/2026-00690",
+      "publisher": "U.S. Department of Health and Human Services",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-02-15",
+      "verbatim_quote": "For families/households with more than 1 person in the 48 contiguous states and D.C. in 2026, add $5,680 for each additional person.",
+      "source_quote_sha256": "63b871f06c8e0ecb76f76a069de502d9c8a8ec14aafa0d817540ad0e5b7971fe",
+      "superseded_values": [
+        {
+          "value": 5500.0,
+          "label": "2025 per-additional-person guideline ($5,500)",
+          "reason": "Superseded for 2026 by 91 FR 1797 ($5,680).",
+          "patterns": [
+            "\\$?5,500\\s*(?:per\\s+additional|for\\s+each\\s+additional)"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "rap_forgiveness_months": {
+      "key": "rap_forgiveness_months",
+      "value": 360,
+      "claim_class": "enacted_law",
+      "unit": "months",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 82001 (Repayment Assistance Plan)",
+      "primary_source_url": "https://studentaid.gov/idr/",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under the Repayment Assistance Plan (RAP) enacted in P.L. 119-21 Section 82001, remaining loan balance forgiveness occurs after 360 qualifying monthly payments (30 years).",
+      "source_quote_sha256": "cff8976b6b301e7b768002422909a901a8eee55f5869957b8f4401c443d6419f",
+      "superseded_values": [
+        {
+          "value": 240,
+          "label": "120 to 240 certified monthly payments on RAP pages",
+          "reason": "RAP requires 360 qualifying monthly payments (30 years), not 120 to 240 payments.",
+          "patterns": [
+            "120\\s*to\\s*240\\s*certified\\s*monthly\\s*payments"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "rap-payment-calculator",
+        "rap-vs-ibr-calculator",
+        "save-to-rap-migration-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "rap_unpaid_interest_subsidy_pct": {
+      "key": "rap_unpaid_interest_subsidy_pct",
+      "value": 100.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 82001 (RAP Unpaid Interest Subsidy)",
+      "primary_source_url": "https://studentaid.gov/idr/",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under the Repayment Assistance Plan (RAP), 100 percent of unpaid monthly accrued interest not covered by the borrower's required monthly payment is subsidized so the principal balance does not grow.",
+      "source_quote_sha256": "04d074bfeef0f4a8dcf72e47cec97a1feca7bfe053024eec27ec3486a70e03c1",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "rap_principal_match_monthly_cap": {
+      "key": "rap_principal_match_monthly_cap",
+      "value": 50.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 82001 (RAP Principal Match)",
+      "primary_source_url": "https://studentaid.gov/idr/",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under the Repayment Assistance Plan (RAP), if a borrower's monthly payment reduces principal by less than $50, the Department of Education matches principal reduction up to $50 per month.",
+      "source_quote_sha256": "e51e0733b846633d178195b93bbd5e09c8d3286599758f20b7a0ce70bd5b07b5",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "pslf_qualifying_payments": {
+      "key": "pslf_qualifying_payments",
+      "value": 120,
+      "claim_class": "enacted_law",
+      "unit": "months",
+      "effective_year": 2026,
+      "citation": "34 CFR 685.219 (Public Service Loan Forgiveness)",
+      "primary_source_url": "https://studentaid.gov/manage-loans/forgiveness-cancellation/public-service",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Service Loan Forgiveness under 34 CFR 685.219 requires 120 separate monthly qualifying payments while employed full-time by a qualifying public service employer.",
+      "source_quote_sha256": "66fd17eb4486159c707846daa3a754fa12709f13a28445c35c8d3c4a1eb43315",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    }
+  },
+  "formulas": {
+    "rap_monthly_payment": {
+      "formula_id": "rap_monthly_payment",
+      "model_name": "P.L. 119-21 Section 82001 Repayment Assistance Plan (RAP) Monthly Payment",
+      "expression": "round(max(10.0, (agi * (0.01 if agi <= 20000 else (0.02 if agi <= 30000 else (0.03 if agi <= 40000 else (0.04 if agi <= 50000 else (0.05 if agi <= 60000 else (0.06 if agi <= 70000 else (0.07 if agi <= 80000 else (0.08 if agi <= 90000 else (0.09 if agi <= 100000 else 0.10))))))))) / 12.0) - dependents * 50.0) if agi > 10000 else 10.0, 2)",
+      "js_expression": "(Math.round((((agi > 10000) ? Math.max(10.0, (((agi * ((agi <= 20000) ? 0.01 : ((agi <= 30000) ? 0.02 : ((agi <= 40000) ? 0.03 : ((agi <= 50000) ? 0.04 : ((agi <= 60000) ? 0.05 : ((agi <= 70000) ? 0.06 : ((agi <= 80000) ? 0.07 : ((agi <= 90000) ? 0.08 : ((agi <= 100000) ? 0.09 : 0.1)))))))))) / 12.0) - (dependents * 50.0))) : 10.0)) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "agi": 65000.0,
+        "dependents": 0
+      },
+      "expected_baseline_output": 325.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$65k AGI, 0 dependents (6% tier)",
+          "inputs": {
+            "agi": 65000.0,
+            "dependents": 0
+          },
+          "expected": 325.0
+        },
+        {
+          "label": "$65k AGI, 2 dependents ($100 reduction)",
+          "inputs": {
+            "agi": 65000.0,
+            "dependents": 2
+          },
+          "expected": 225.0
+        },
+        {
+          "label": "$9,500 AGI ($10 statutory floor)",
+          "inputs": {
+            "agi": 9500.0,
+            "dependents": 0
+          },
+          "expected": 10.0
+        },
+        {
+          "label": "$115k AGI, 0 dependents (10% top tier)",
+          "inputs": {
+            "agi": 115000.0,
+            "dependents": 0
+          },
+          "expected": 958.33
+        }
+      ],
+      "citation_keys": [
+        "pl_119_21_rap"
+      ],
+      "allowed_slug_patterns": [
+        ".*rap.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#rap-monthly-payment",
+        "[data-output='rap_monthly_payment']"
+      ]
+    },
+    "ibr_monthly_payment": {
+      "formula_id": "ibr_monthly_payment",
+      "model_name": "2026 Income-Based Repayment (IBR) Monthly Payment (91 FR 1797 FPL)",
+      "expression": "round(min(std_10yr_cap, max(0.0, (agi - 1.5 * (15960.0 + 5680.0 * max(0, family_size - 1))) * rate / 12.0)), 2)",
+      "js_expression": "(Math.round((Math.min(std_10yr_cap, Math.max(0.0, (((agi - (1.5 * (15960.0 + (5680.0 * Math.max(0, (family_size - 1)))))) * rate) / 12.0)))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "agi": 65000.0,
+        "family_size": 1,
+        "rate": 0.1,
+        "std_10yr_cap": 681.29
+      },
+      "expected_baseline_output": 342.17,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "New IBR (10%), $65k AGI, 1-person 2026 FPL",
+          "inputs": {
+            "agi": 65000.0,
+            "family_size": 1,
+            "rate": 0.1,
+            "std_10yr_cap": 681.29
+          },
+          "expected": 342.17
+        },
+        {
+          "label": "Legacy IBR (15%), $65k AGI, family of 3",
+          "inputs": {
+            "agi": 65000.0,
+            "family_size": 3,
+            "rate": 0.15,
+            "std_10yr_cap": 681.29
+          },
+          "expected": 300.25
+        },
+        {
+          "label": "High earner capped at 10-year standard",
+          "inputs": {
+            "agi": 160000.0,
+            "family_size": 1,
+            "rate": 0.1,
+            "std_10yr_cap": 681.29
+          },
+          "expected": 681.29
+        }
+      ],
+      "citation_keys": [
+        "hhs_fpl_2026",
+        "cfr_34_685_221_ibr"
+      ],
+      "allowed_slug_patterns": [
+        ".*ibr.*",
+        ".*rap-vs-ibr.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#ibr-monthly-payment",
+        "[data-output='ibr_monthly_payment']"
+      ]
+    },
+    "pslf_total_out_of_pocket_and_forgiveness": {
+      "formula_id": "pslf_total_out_of_pocket_and_forgiveness",
+      "model_name": "PSLF Remaining 120-Payment Forgiveness Estimate (34 CFR 685.219)",
+      "expression": "round(max(0.0, principal * pow(1.0 + annual_rate / 12.0, max(0, 120 - certified_payments)) - monthly_idr_payment * ((pow(1.0 + annual_rate / 12.0, max(0, 120 - certified_payments)) - 1.0) / (annual_rate / 12.0))), 2)",
+      "js_expression": "(Math.round((Math.max(0.0, ((principal * Math.pow((1.0 + (annual_rate / 12.0)), Math.max(0, (120 - certified_payments)))) - (monthly_idr_payment * ((Math.pow((1.0 + (annual_rate / 12.0)), Math.max(0, (120 - certified_payments))) - 1.0) / (annual_rate / 12.0)))))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "principal": 65000.0,
+        "annual_rate": 0.065,
+        "certified_payments": 24,
+        "monthly_idr_payment": 250.0
+      },
+      "expected_baseline_output": 77809.15,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$65k principal, 24 certified payments, $250/mo IDR",
+          "inputs": {
+            "principal": 65000.0,
+            "annual_rate": 0.065,
+            "certified_payments": 24,
+            "monthly_idr_payment": 250.0
+          },
+          "expected": 77809.15
+        },
+        {
+          "label": "120 payments already certified",
+          "inputs": {
+            "principal": 40000.0,
+            "annual_rate": 0.06,
+            "certified_payments": 120,
+            "monthly_idr_payment": 200.0
+          },
+          "expected": 40000.0
+        }
+      ],
+      "citation_keys": [
+        "cfr_34_685_219_pslf"
+      ],
+      "allowed_slug_patterns": [
+        ".*pslf.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#pslf-forgiven-balance",
+        "[data-output='pslf_forgiven_balance']"
+      ]
+    },
+    "refinance_breakeven_months": {
+      "formula_id": "refinance_breakeven_months",
+      "model_name": "Private Student Loan Refinance Break-Even Months",
+      "expression": "round(closing_fees / (current_monthly_payment - new_monthly_payment), 1) if current_monthly_payment > new_monthly_payment else 999.0",
+      "js_expression": "((current_monthly_payment > new_monthly_payment) ? (Math.round(((closing_fees / (current_monthly_payment - new_monthly_payment))) * Math.pow(10, 1)) / Math.pow(10, 1)) : 999.0)",
+      "variables": {
+        "closing_fees": 990.0,
+        "current_monthly_payment": 681.29,
+        "new_monthly_payment": 598.79
+      },
+      "expected_baseline_output": 12.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$990 fee with $82.50/mo savings -> 12.0 months",
+          "inputs": {
+            "closing_fees": 990.0,
+            "current_monthly_payment": 681.29,
+            "new_monthly_payment": 598.79
+          },
+          "expected": 12.0
+        },
+        {
+          "label": "Zero closing fees -> 0.0 months",
+          "inputs": {
+            "closing_fees": 0.0,
+            "current_monthly_payment": 681.29,
+            "new_monthly_payment": 598.79
+          },
+          "expected": 0.0
+        },
+        {
+          "label": "Higher new payment (no break-even)",
+          "inputs": {
+            "closing_fees": 500.0,
+            "current_monthly_payment": 500.0,
+            "new_monthly_payment": 550.0
+          },
+          "expected": 999.0
+        }
+      ],
+      "citation_keys": [
+        "tila_12_cfr_1026"
+      ],
+      "allowed_slug_patterns": [
+        ".*refinance.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#refinance-breakeven-months",
+        "[data-output='breakeven_months']"
+      ]
+    }
+  },
+  "citations_allowlist": {
+    "hhs_fpl_2026": {
+      "canonical": "91 FR 1797 (2026 HHS Poverty Guidelines)",
+      "patterns": [
+        "91\\s*FR\\s*1797",
+        "HHS\\s*Poverty\\s*Guidelines",
+        "42\\s*U\\.S\\.C\\.?\\s*9902"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "pl_119_21_rap": {
+      "canonical": "P.L. 119-21 Section 82001 (Repayment Assistance Plan)",
+      "patterns": [
+        "82001",
+        "P\\.?L\\.?\\s*119-21",
+        "Repayment\\s*Assistance\\s*Plan"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "cfr_34_685_221_ibr": {
+      "canonical": "34 CFR 685.221 (Income-Based Repayment)",
+      "patterns": [
+        "34\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*685\\.221\\b",
+        "34\\s*CFR\\s*(?:Part\\s*)?685\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "cfr_34_685_219_pslf": {
+      "canonical": "34 CFR 685.219 (PSLF)",
+      "patterns": [
+        "34\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*685\\.219\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "cfr_34_685_208": {
+      "canonical": "34 CFR 685.208 (Fixed & Tiered Standard Repayment Plans)",
+      "patterns": [
+        "34\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*685\\.208\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "cfr_34_685_209": {
+      "canonical": "34 CFR 685.209 (PAYE & ICR Repayment Plans)",
+      "patterns": [
+        "34\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*685\\.209\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_108f": {
+      "canonical": "IRC Section 108(f) / 108(f)(1) / 108(f)(5) (Student Loan Forgiveness Tax Exclusion)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*108\\(f\\)(?:\\(\\d+\\))?",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?108\\(f\\)(?:\\(\\d+\\))?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "tila_12_cfr_1026": {
+      "canonical": "12 CFR Part 1026 (Truth in Lending Act) / 20 U.S.C. 1087e",
+      "patterns": [
+        "12\\s*CFR\\s*Part\\s*1026",
+        "Truth\\s*in\\s*Lending",
+        "20\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*)?1087e\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "ftc_16_cfr_255": {
+      "canonical": "16 CFR Part 255 (FTC Endorsement Guides)",
+      "patterns": [
+        "16\\s*CFR\\s*(?:Part\\s*)?255(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    }
+  },
+  "disclosures": [
+    {
+      "disclosure_id": "ymyl_federal_refinance_forfeiture",
+      "required_text_patterns": [
+        "permanently\\s+waives?\\s+federal\\s+(?:loan\\s+)?protections",
+        "(?:PSLF|Public\\s+Service\\s+Loan\\s+Forgiveness)"
+      ],
+      "applies_to_slug_patterns": [
+        ".*"
+      ],
+      "canonical_text": "Important Federal Borrower Notice: Refinancing federal student loans into a private loan permanently waives federal protections including Income-Driven Repayment (IBR), the Repayment Assistance Plan (RAP) interest subsidy, federal forbearance, and Public Service Loan Forgiveness (PSLF)."
+    }
+  ],
+  "banned_claims": [
+    {
+      "pattern": "official\\s+federal\\s+loan\\s+servicer",
+      "reason": "Prohibited impersonation of federal servicer"
+    },
+    {
+      "pattern": "guaranteed\\s+(?:debt|loan)\\s+(?:forgiveness|cancellation)",
+      "reason": "Prohibited forgiveness guarantee"
+    },
+    {
+      "pattern": "120\\s*to\\s*240\\s*certified\\s*monthly\\s*payments\\s*(?:under|for)\\s*RAP",
+      "reason": "RAP forgiveness requires 360 monthly payments"
+    }
+  ],
+  "cross_tenant_brand_tokens": [
+    "profithelm",
+    "profithelm.com",
+    "gainhelm",
+    "gainhelm.com",
+    "lienbond",
+    "lienbond.com",
+    "section 1031",
+    "section 179",
+    "qsbs",
+    "cmmc",
+    "c3pao",
+    "sprs",
+    "miller act",
+    "wh-347",
+    "mercury",
+    "coinledger",
+    "vanta_security"
+  ],
+  "allowed_shared_legal_tokens": [
+    "34 cfr",
+    "title iv",
+    "p.l. 119-21",
+    "hhs",
+    "studentaid.gov",
+    "12 cfr",
+    "16 cfr part 255"
+  ]
+}

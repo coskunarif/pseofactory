@@ -1,0 +1,645 @@
+{
+  "schema_version": "2.0",
+  "property_id": "gainhelm",
+  "brand_name": "GainHelm",
+  "canonical_domain": "https://gainhelm.com",
+  "audience_tier": "business",
+  "pricing_tiers": {
+    "free": {
+      "tier_kind": "free",
+      "label": "Free Calculator",
+      "price_usd": 0.0,
+      "price_cents": 0,
+      "currency": "usd",
+      "billing_mode": "free"
+    },
+    "quick": {
+      "tier_kind": "quick",
+      "label": "Quick Worksheet",
+      "price_usd": 15.0,
+      "price_cents": 1500,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "full": {
+      "tier_kind": "full",
+      "label": "Full Workpaper & Data Pack",
+      "price_usd": 29.0,
+      "price_cents": 2900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "partner_slot": {
+      "tier_kind": "partner_slot",
+      "label": "Verified Calculator Partner Slot",
+      "price_usd": 299.0,
+      "price_cents": 29900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    }
+  },
+  "entries": {
+    "hipaa_tier4_annual_cap_2026": {
+      "key": "hipaa_tier4_annual_cap_2026",
+      "value": 2190294.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "45 CFR 160.404; 91 FR 3665 & 91 FR 66566",
+      "primary_source_url": "https://www.federalregister.gov/",
+      "publisher": "U.S. Department of Health and Human Services",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-02-15",
+      "verbatim_quote": "Under 45 CFR 160.404 as inflation-adjusted in 91 FR 3665 and 91 FR 66566, the Tier 4 HIPAA civil money penalty statutory calendar-year cap for identical uncorrected violations is $2,190,294.",
+      "source_quote_sha256": "33620a3dac36cdce08cfe01b932f6f8975974577fe4772c59227fe57df385906",
+      "superseded_values": [
+        {
+          "value": 2067813.0,
+          "label": "2023 HIPAA Tier 4 annual cap ($2,067,813)",
+          "reason": "2023 cap superseded by 2026 inflation-adjusted cap ($2,190,294).",
+          "patterns": [
+            "\\$?2,067,813"
+          ]
+        },
+        {
+          "value": 2134831.0,
+          "label": "2024 HIPAA Tier 4 annual cap ($2,134,831)",
+          "reason": "2024 cap superseded by 2026 inflation-adjusted cap ($2,190,294).",
+          "patterns": [
+            "\\$?2,134,831"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "sprs_max_score": {
+      "key": "sprs_max_score",
+      "value": 110,
+      "claim_class": "enacted_law",
+      "unit": "points",
+      "effective_year": 2026,
+      "citation": "DoD NIST SP 800-171 Assessment Methodology v1.2.1",
+      "primary_source_url": "https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf",
+      "publisher": "U.S. Department of Defense",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Each NIST SP 800-171 Basic, Derived, and Enhanced Assessment starts with a maximum SPRS summary score of 110 when all 110 security requirements are implemented.",
+      "source_quote_sha256": "36b7d7daddadf7ee40db07b5660e737ce1de84a4fb9b8029327ef5aad2736691",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "sprs_min_score": {
+      "key": "sprs_min_score",
+      "value": -203,
+      "claim_class": "enacted_law",
+      "unit": "points",
+      "effective_year": 2026,
+      "citation": "DoD NIST SP 800-171 Assessment Methodology v1.2.1",
+      "primary_source_url": "https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf",
+      "publisher": "U.S. Department of Defense",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "When zero NIST SP 800-171 security requirements are implemented, subtracting the maximum 313-point deduction from 110 produces the minimum SPRS score of -203.",
+      "source_quote_sha256": "5291ac36d4fbed0b1bbf1ad097cfb877700014b09bceeaa0ced76111267fcab0",
+      "superseded_values": [
+        {
+          "value": -196,
+          "label": "Incorrect SPRS minimum score (-196)",
+          "reason": "Derived from erroneous 42*5 + 14*3 + 54*1 = 306 deduction; official Methodology v1.2.1 has 44 five-point, 14 three-point, 51 one-point, and 1 zero-point control (313 max deduction, -203 min).",
+          "patterns": [
+            "(?<![0-9])-196(?![0-9,.])"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "sprs",
+        "nist-800-171",
+        "cmmc"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "sprs_max_deduction": {
+      "key": "sprs_max_deduction",
+      "value": 313,
+      "claim_class": "enacted_law",
+      "unit": "points",
+      "effective_year": 2026,
+      "citation": "DoD NIST SP 800-171 Assessment Methodology v1.2.1",
+      "primary_source_url": "https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf",
+      "publisher": "U.S. Department of Defense",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under DoD NIST SP 800-171 Assessment Methodology v1.2.1, total possible deductions across 44 five-point, 14 three-point, 51 one-point, and 1 zero-point control equal 313 points.",
+      "source_quote_sha256": "61a71943cc1956bafa81ea36ded1c5ce459ffc5afd2cbeaa6f04eaed6a3db75b",
+      "superseded_values": [
+        {
+          "value": 306,
+          "label": "Incorrect 306-point SPRS deduction",
+          "reason": "Erroneous count 42*5 + 14*3 + 54*1 = 306; true maximum deduction is 313.",
+          "patterns": [
+            "\\b306\\s*(?:points?|max\\s*deduction)"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "sprs_control_counts": {
+      "key": "sprs_control_counts",
+      "value": {
+        "5_pt": 44,
+        "3_pt": 14,
+        "1_pt": 51,
+        "0_pt": 1
+      },
+      "claim_class": "enacted_law",
+      "unit": "control_weights",
+      "effective_year": 2026,
+      "citation": "DoD NIST SP 800-171 Assessment Methodology v1.2.1",
+      "primary_source_url": "https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf",
+      "publisher": "U.S. Department of Defense",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "The 110 NIST SP 800-171 requirements are weighted as 44 five-point controls, 14 three-point controls, 51 one-point controls, and 1 zero-point control (3.12.4 SSP when scored separately).",
+      "source_quote_sha256": "befbadf95fcbc7b14ca688cab98cb456f14d50a2802e54080f63eab69d7eb8e7",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "bls_infosec_hourly_loaded_2026": {
+      "key": "bls_infosec_hourly_loaded_2026",
+      "value": 121.67,
+      "claim_class": "market_benchmark",
+      "unit": "usd_per_hour",
+      "effective_year": 2026,
+      "citation": "BLS OEWS SOC 15-1212 (Information Security Analysts) loaded hourly benchmark",
+      "primary_source_url": "https://www.bls.gov/oes/",
+      "publisher": "U.S. Bureau of Labor Statistics (OEWS) / GainHelm Loaded Cost Benchmark",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "BLS OEWS SOC 15-1212 Information Security Analyst compensation adjusted for employer benefits and overhead yields a typical loaded internal labor benchmark estimate of $121.67 per hour.",
+      "source_quote_sha256": "ae76cb8a31032f0eb567feb0f0a87fc051e69d115b3db692e3652d3d3ed24c14",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|benchmark|loaded|average|typical)\\b"
+      ],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "cmmc_level2_c3pao_cost_range_usd": {
+      "key": "cmmc_level2_c3pao_cost_range_usd",
+      "value": {
+        "min": 35000.0,
+        "max": 85000.0
+      },
+      "claim_class": "market_benchmark",
+      "unit": "usd_range",
+      "effective_year": 2026,
+      "citation": "32 CFR Part 170 Regulatory Impact Analysis & C3PAO Scoping Benchmarks",
+      "primary_source_url": "https://www.federalregister.gov/",
+      "publisher": "DoD 32 CFR Part 170 / Market Assessment Benchmarks",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Typical C3PAO Level 2 certification assessment fees range between $35,000 and $85,000 as a planning estimate depending on enclave size and CUI boundary complexity.",
+      "source_quote_sha256": "4b1817e030da2c56b8e0a4090d2de72b765452d25e09fa918ef29f6b24525fd5",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|benchmark|typical|range|planning)\\b"
+      ],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "soc2_type2_audit_cost_range_usd": {
+      "key": "soc2_type2_audit_cost_range_usd",
+      "value": {
+        "min": 18000.0,
+        "max": 60000.0
+      },
+      "claim_class": "market_benchmark",
+      "unit": "usd_range",
+      "effective_year": 2026,
+      "citation": "AICPA SSAE 18 SOC 2 Type II CPA Firm Fee Benchmarks",
+      "primary_source_url": "https://www.aicpa-cima.com/",
+      "publisher": "GainHelm Enterprise GRC Market Benchmarks",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Independent CPA firm fees for a SOC 2 Type II examination typically range from $18,000 to $60,000 as a scoping estimate based on Trust Services Criteria count and headcount.",
+      "source_quote_sha256": "d240960c33e42a0bcdb486b61d8973e8269f62e006697f1e1c33a78d777e38aa",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|benchmark|typical|range|scoping)\\b"
+      ],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "iso27001_stage1_stage2_cost_range_usd": {
+      "key": "iso27001_stage1_stage2_cost_range_usd",
+      "value": {
+        "min": 15000.0,
+        "max": 50000.0
+      },
+      "claim_class": "market_benchmark",
+      "unit": "usd_range",
+      "effective_year": 2026,
+      "citation": "ISO/IEC 27006-1:2024 Stage 1 & Stage 2 Certification Benchmarks",
+      "primary_source_url": "https://www.iso.org/",
+      "publisher": "GainHelm Enterprise GRC Market Benchmarks",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Accredited registrar Stage 1 and Stage 2 ISO/IEC 27001:2022 certification audit fees typically range from $15,000 to $50,000 as a planning benchmark.",
+      "source_quote_sha256": "aca32999c26e0c6979ac58264bab3198ad4ee5642cc7d35c3233c6f33b66437b",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|benchmark|typical|range|planning)\\b"
+      ],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "pci_dss_v4_qsa_roc_cost_range_usd": {
+      "key": "pci_dss_v4_qsa_roc_cost_range_usd",
+      "value": {
+        "min": 25000.0,
+        "max": 120000.0
+      },
+      "claim_class": "market_benchmark",
+      "unit": "usd_range",
+      "effective_year": 2026,
+      "citation": "PCI DSS v4.0.1 QSA Report on Compliance (ROC) Scoping Benchmarks",
+      "primary_source_url": "https://www.pcisecuritystandards.org/",
+      "publisher": "GainHelm Payment Compliance Benchmarks",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Qualified Security Assessor (QSA) Report on Compliance fees for PCI DSS v4.0.1 Level 1 merchants typically range from $25,000 to $120,000 as a market estimate.",
+      "source_quote_sha256": "d07ec5223e2efaa3a0c8f79f696459ace8ec8eae9b55ec58477fd0bb50b83fb6",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|benchmark|typical|range|market)\\b"
+      ],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    }
+  },
+  "formulas": {
+    "sprs_score_calculation": {
+      "formula_id": "sprs_score_calculation",
+      "model_name": "DoD NIST SP 800-171 v1.2.1 SPRS Summary Score",
+      "expression": "110 - (min(44, max(0, missing_5pt)) * 5 + min(14, max(0, missing_3pt)) * 3 + min(51, max(0, missing_1pt)) * 1)",
+      "js_expression": "(110 - (((Math.min(44, Math.max(0, missing_5pt)) * 5) + (Math.min(14, Math.max(0, missing_3pt)) * 3)) + (Math.min(51, Math.max(0, missing_1pt)) * 1)))",
+      "variables": {
+        "missing_5pt": 0,
+        "missing_3pt": 0,
+        "missing_1pt": 0
+      },
+      "expected_baseline_output": 110.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "Full compliance (110)",
+          "inputs": {
+            "missing_5pt": 0,
+            "missing_3pt": 0,
+            "missing_1pt": 0
+          },
+          "expected": 110.0
+        },
+        {
+          "label": "Zero controls implemented (-203 floor)",
+          "inputs": {
+            "missing_5pt": 44,
+            "missing_3pt": 14,
+            "missing_1pt": 51
+          },
+          "expected": -203.0
+        },
+        {
+          "label": "Conditional POA&M floor (missing 4x5pt + 2x1pt = 88)",
+          "inputs": {
+            "missing_5pt": 4,
+            "missing_3pt": 0,
+            "missing_1pt": 2
+          },
+          "expected": 88.0
+        }
+      ],
+      "citation_keys": [
+        "dod_sprs_v121"
+      ],
+      "allowed_slug_patterns": [
+        ".*sprs.*",
+        ".*800-171.*",
+        ".*cmmc.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#sprs-score",
+        "[data-output='sprs_score']"
+      ]
+    },
+    "hipaa_tier4_exposure": {
+      "formula_id": "hipaa_tier4_exposure",
+      "model_name": "2026 HIPAA Tier 4 Annual Statutory Penalty Cap (45 CFR 160.404)",
+      "expression": "round(min(2190294.0, max(0, violations_count) * per_violation_penalty), 2)",
+      "js_expression": "(Math.round((Math.min(2190294.0, (Math.max(0, violations_count) * per_violation_penalty))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "violations_count": 40,
+        "per_violation_penalty": 71162.0
+      },
+      "expected_baseline_output": 2190294.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "40 uncorrected Tier 4 violations capped at $2,190,294",
+          "inputs": {
+            "violations_count": 40,
+            "per_violation_penalty": 71162.0
+          },
+          "expected": 2190294.0
+        },
+        {
+          "label": "10 Tier 4 violations below annual cap",
+          "inputs": {
+            "violations_count": 10,
+            "per_violation_penalty": 71162.0
+          },
+          "expected": 711620.0
+        }
+      ],
+      "citation_keys": [
+        "hhs_hipaa_45cfr"
+      ],
+      "allowed_slug_patterns": [
+        ".*hipaa.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#hipaa-penalty-exposure",
+        "[data-output='hipaa_exposure']"
+      ]
+    },
+    "soc2_type2_total_budget": {
+      "formula_id": "soc2_type2_total_budget",
+      "model_name": "SOC 2 Type II Total Scoping Budget Estimate (BLS Loaded Rate)",
+      "expression": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * 121.67), 2)",
+      "js_expression": "(Math.round(((((cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc)) + grc_platform_annual) + pentest_fee) + (remediation_hours * 121.67)) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "cpa_base_fee": 28000.0,
+        "extra_tsc_count": 2.0,
+        "fee_per_extra_tsc": 4500.0,
+        "grc_platform_annual": 15000.0,
+        "pentest_fee": 11500.0,
+        "remediation_hours": 120.0
+      },
+      "expected_baseline_output": 78100.4,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "75-employee SaaS 3-TSC baseline estimate (matches gainhelm_estate.py)",
+          "inputs": {
+            "cpa_base_fee": 28000.0,
+            "extra_tsc_count": 2.0,
+            "fee_per_extra_tsc": 4500.0,
+            "grc_platform_annual": 15000.0,
+            "pentest_fee": 11500.0,
+            "remediation_hours": 120.0
+          },
+          "expected": 78100.4
+        },
+        {
+          "label": "Minimal Type I/II startup scope (1 TSC)",
+          "inputs": {
+            "cpa_base_fee": 18000.0,
+            "extra_tsc_count": 0.0,
+            "fee_per_extra_tsc": 4500.0,
+            "grc_platform_annual": 10000.0,
+            "pentest_fee": 8000.0,
+            "remediation_hours": 80.0
+          },
+          "expected": 45733.6
+        }
+      ],
+      "citation_keys": [
+        "bls_oews_15_1212"
+      ],
+      "allowed_slug_patterns": [
+        ".*soc-2.*",
+        ".*iso-27001.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#soc2-total-budget",
+        "[data-output='total_budget']"
+      ]
+    }
+  },
+  "citations_allowlist": {
+    "dod_sprs_v121": {
+      "canonical": "DoD NIST SP 800-171 Assessment Methodology v1.2.1 (32 CFR Part 170)",
+      "patterns": [
+        "NIST\\s*SP\\s*800-171",
+        "32\\s*CFR\\s*(?:Part\\s*)?170\\b",
+        "Assessment\\s*Methodology"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "dfars_252_204_7012": {
+      "canonical": "DFARS 252.204-7012 / 7019 / 7020 / 7021",
+      "patterns": [
+        "DFARS\\s*252\\.204-70(?:12|19|20|21)"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hhs_hipaa_45cfr": {
+      "canonical": "45 CFR 160.404 / 91 FR 3665 & 91 FR 66566",
+      "patterns": [
+        "45\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*160\\.404\\b",
+        "91\\s*FR\\s*(?:3665|66566)"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hhs_45_cfr_102": {
+      "canonical": "45 CFR Part 102 (HHS Civil Monetary Penalty Inflation Adjustments)",
+      "patterns": [
+        "45\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?102\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hhs_45_cfr_164": {
+      "canonical": "45 CFR Part 164 (HIPAA Security & Breach Notification Rule)",
+      "patterns": [
+        "45\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?164(?:\\.\\d+)?\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "sec_17_cfr_229_106": {
+      "canonical": "17 CFR 229.106 (SEC Cybersecurity Risk Management & Form 8-K Item 1.05)",
+      "patterns": [
+        "17\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?229\\.106\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "aicpa_tsp_100": {
+      "canonical": "AICPA SSAE 18 (AT-C Section 205) & Trust Services Criteria (TSP Section 100)",
+      "patterns": [
+        "AICPA\\s*TSP\\s*(?:Section\\s*)?100\\b",
+        "TSP\\s*(?:Section\\s*)?100\\b",
+        "SSAE\\s*18",
+        "AT-C\\s*(?:Section\\s*)?205\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "bls_oews_15_1212": {
+      "canonical": "BLS OEWS SOC 15-1212 Information Security Analysts",
+      "patterns": [
+        "15-1212",
+        "BLS\\s*OEWS"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "ftc_16_cfr_255": {
+      "canonical": "16 CFR Part 255 (FTC Endorsement Guides)",
+      "patterns": [
+        "16\\s*CFR\\s*(?:Part\\s*)?255(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hhs_42usc1320d5": {
+      "canonical": "42 U.S.C. 1320d-5 (HIPAA Civil Monetary Penalties)",
+      "patterns": [
+        "42\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?1320d-5\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "fedramp_44usc3607": {
+      "canonical": "44 U.S.C. 3607 (FedRAMP Authorization Act)",
+      "patterns": [
+        "44\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3607\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "far_52_204_21": {
+      "canonical": "FAR 52.204-21 (Basic Safeguarding of Covered Contractor Information Systems)",
+      "patterns": [
+        "FAR\\s*(?:Part\\s*)?52\\.204-21\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "hitech_42usc17941": {
+      "canonical": "42 U.S.C. 17941 (HITECH Recognized Security Practices Safe Harbor)",
+      "patterns": [
+        "42\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?17941\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "hhs_45_cfr_160": {
+      "canonical": "45 CFR Part 160 (HIPAA Enforcement Rule)",
+      "patterns": [
+        "45\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?160(?:\\.\\d+)?\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "usc_31_3102": {
+      "canonical": "31 U.S.C. 3102 (Federal Surety & Contract Authority)",
+      "patterns": [
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3102\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    }
+  },
+  "disclosures": [
+    {
+      "disclosure_id": "non_c3pao_planning_estimate",
+      "required_text_patterns": [
+        "not\\s+(?:a\\s+)?(?:licensed\\s+)?(?:CPA|C3PAO|QSA|registered\\s+practitioner)",
+        "planning\\s+estimate"
+      ],
+      "applies_to_slug_patterns": [
+        ".*"
+      ],
+      "canonical_text": "Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited C3PAO, or PCI QSA. All audit budgets, SPRS projections, and remediation timelines are planning estimates only and do not constitute formal certification or legal attestation."
+    }
+  ],
+  "banned_claims": [
+    {
+      "pattern": "official\\s+aicpa\\s+licensed\\s+cpa\\s+firm",
+      "reason": "Unauthorized CPA attestation claim"
+    },
+    {
+      "pattern": "accredited\\s+c3pao\\s+certification\\s+body",
+      "reason": "Unauthorized C3PAO accreditation claim"
+    },
+    {
+      "pattern": "SPRS\\s+minimum\\s+score\\s+(?:of|is)\\s+-196",
+      "reason": "Incorrect SPRS floor; true minimum is -203"
+    }
+  ],
+  "cross_tenant_brand_tokens": [
+    "profithelm",
+    "profithelm.com",
+    "prexvo",
+    "prexvo.com",
+    "lienbond",
+    "lienbond.com",
+    "section 1031",
+    "section 179",
+    "qsbs",
+    "title iv",
+    "pslf",
+    "repayment assistance plan",
+    "miller act",
+    "wh-347",
+    "mechanics lien",
+    "splash_financial",
+    "coinledger",
+    "mercury"
+  ],
+  "allowed_shared_legal_tokens": [
+    "32 cfr",
+    "45 cfr",
+    "nist",
+    "bls",
+    "aicpa",
+    "iso",
+    "pci",
+    "16 cfr part 255"
+  ]
+}

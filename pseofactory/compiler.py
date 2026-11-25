@@ -82,7 +82,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "statutory_authority": "IRC Section 3121 FICA Payroll Tax and IRC Section 199A QBI Deduction",
         "economic_dataset": "BLS OEWS Occupational Wage Percentiles and IRS S-Corporation Return Statistics",
         "model_name": "SCorpReasonableSalaryTaxArbitrageModel",
-        "formula": "round((min(net_business_income * 0.9235, 184500.0) - reasonable_salary) * 0.124 + (net_business_income * 0.9235 - reasonable_salary) * 0.029, 0)",
+        "formula": "round((min(net_business_income * 0.9235, 184500.0) - min(reasonable_salary, 184500.0)) * 0.124 + (net_business_income * 0.9235 - reasonable_salary) * 0.029, 0)",
         "inputs": {"net_business_income": 220000.0, "reasonable_salary": 95000.0},
         "published_output": 14235.0,
         "sample_calculation": "S-Corp shareholder distribution at $220,000 net business income with a $95,000 reasonable W-2 salary saves $14,235 in FICA self-employment taxes ($11,098.00 OASDI capped at the $184,500 2026 wage base plus $3,136.93 Medicare on the $203,170 Schedule SE base)",
@@ -149,13 +149,13 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "query": "commercial heavy vehicle section 179 gvwr 6000 lbs deduction calculator",
         "slug": "commercial-heavy-vehicle-section-179-weight-calculator",
         "tenant": "profithelm",
-        "statutory_authority": "IRC Section 179(b)(5) Heavy SUV Cap and IRC Section 280F Listed Property Rules",
+        "statutory_authority": "IRC Section 179(b)(5) ($32,000 Heavy SUV Cap), P.L. 119-21 Section 70301 (100% IRC Section 168(k) Bonus Depreciation), and IRC Section 280F",
         "economic_dataset": "FRED Heavy Truck Sales Series and IRS Revenue Procedure Depreciation Limitations",
         "model_name": "CommercialHeavyVehicleGVWR179Model",
-        "formula": "vehicle_cost * business_use_fraction * marginal_tax_rate",
-        "inputs": {"vehicle_cost": 95000, "business_use_fraction": 0.90, "marginal_tax_rate": 0.35},
+        "formula": "round((min(vehicle_cost * business_use_fraction, 32000.0) + max(0.0, vehicle_cost * business_use_fraction - min(vehicle_cost * business_use_fraction, 32000.0)) * bonus_depreciation_rate) * marginal_tax_rate, 2)",
+        "inputs": {"vehicle_cost": 95000.0, "business_use_fraction": 0.90, "bonus_depreciation_rate": 1.0, "marginal_tax_rate": 0.35},
         "published_output": 29925.0,
-        "sample_calculation": "Work truck over 6,000 lbs GVWR costing $95,000 at 90% business use in the 35% bracket yields $29,925 in Year-1 cash tax savings",
+        "sample_calculation": "Heavy SUV (>6,000 lbs GVWR) costing $95,000 at 90% business use ($85,500 eligible basis) applies the $32,000 2026 IRC Section 179(b)(5) cap plus 100% P.L. 119-21 Section 70301 bonus depreciation on the remaining $53,500 basis ($85,500 total deduction) at a 35% marginal tax rate, yielding $29,925.00 in Year-1 tax savings",
         "canonical_base": "https://profithelm.com",
         "expected_partner": "xendoo",
     },
@@ -253,7 +253,7 @@ LIENBOND_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "domain": "lienbond.com",
         "canonical_base": "https://lienbond.com",
         "entity_type": "FinancialProductOrService",
-        "statutory_authority": "IRC Section 3111 Payroll Burden, 29 CFR Part 1904 OSHA Recordkeeping, and NCCI Basic Manual Class Codes",
+        "statutory_authority": "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State Workers Compensation Rating Bureaus",
         "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC Construction Series) and NCCI Loss Cost Filings",
         "model_name": "NCCIWorkersCompClassCodePremiumModel",
         "formula": "round((field_trade_payroll / 100.0) * class_code_rate_per_100 * emr_modification_factor, 2)",
@@ -343,7 +343,7 @@ LIENBOND_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "domain": "lienbond.com",
         "canonical_base": "https://lienbond.com",
         "entity_type": "FinancialProductOrService",
-        "statutory_authority": "40 U.S.C. Section 3141 Davis-Bacon Act, 29 CFR Section 5.5 Certified Payroll WH-347, and IRC Section 3111",
+        "statutory_authority": "40 U.S.C. Section 3141 Davis-Bacon Act and 29 CFR Section 5.5 Certified Payroll WH-347",
         "economic_dataset": "BLS National Compensation Survey Construction Fringe Benefit Series and DOL Wage Determinations",
         "model_name": "DavisBaconFringeCashInLieuPayrollBurdenModel",
         "formula": "round(annual_prevailing_hours * (base_hourly_wage + (required_fringe_hourly - bona_fide_plan_credit_hourly) * (1.0 + payroll_tax_burden_pct / 100.0) + bona_fide_plan_credit_hourly), 2)",
@@ -397,7 +397,7 @@ LIENBOND_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "domain": "lienbond.com",
         "canonical_base": "https://lienbond.com",
         "entity_type": "FinancialProductOrService",
-        "statutory_authority": "29 CFR Part 1904 Occupational Injury Reporting, IRC Section 162 Insurance Deduction, and NCCI Experience Rating Plan Rule 2-E",
+        "statutory_authority": "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual Rule 2-E, and State Workers Compensation Rating Bureaus",
         "economic_dataset": "BLS Survey of Occupational Injuries and Illnesses (SOII) and NCCI Primary Split-Point Series",
         "model_name": "NCCIExperienceModificationRateSurchargeModel",
         "formula": "round(manual_workers_comp_premium * emr_factor * (1.0 - safety_credit_pct / 100.0), 2)",
@@ -1631,7 +1631,7 @@ def _build_compiled_json_ld_graph(
                 "breadcrumb": {"@id": f"{canonical_base}/tools/{slug}/#breadcrumb"},
             },
             {
-                "@type": ["WebApplication", "SoftwareApplication"],
+                "@type": "SoftwareApplication",
                 "@id": f"{canonical_base}/tools/{slug}/#app",
                 "name": title,
                 "applicationCategory": application_category,
@@ -1664,16 +1664,9 @@ def _build_compiled_json_ld_graph(
                 },
                 "isRelatedTo": [
                     {
-                        "@type": "SoftwareApplication",
+                        "@type": "CollectionPage",
                         "name": f"{brand_org_name} Statutory Tools Directory",
                         "url": f"{canonical_base}/tools/",
-                        "applicationCategory": application_category,
-                        "operatingSystem": "All",
-                        "offers": {
-                            "@type": "Offer",
-                            "price": "0",
-                            "priceCurrency": "USD",
-                        },
                     }
                 ],
             },
@@ -2298,7 +2291,7 @@ def _build_compiled_disclosures_funnel_and_seo(
     elif is_gainhelm:
         compact_disclosure_text = "Readiness cost estimate for planning; not an accredited third-party audit attestation."
     elif is_lienbond:
-        compact_disclosure_text = "Planning estimate only; final bond premiums and deadlines depend on underwriting and state law."
+        compact_disclosure_text = "Informational underwriting estimate only; final bond premiums and deadlines depend on underwriting and state law."
     else:
         compact_disclosure_text = "Deterministic model estimate only; not formal tax, legal, or investment advice."
     compliance_disclosure_inline_html = (
@@ -2590,6 +2583,14 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
             ]
             if clean_gh_siblings:
                 sibling_links = clean_gh_siblings
+    elif is_lienbond and any(t in slug.lower() for t in ("workers-comp", "workers-compensation", "emr", "class-code")):
+        clean_lb_siblings = [
+            (s_slug, s_title)
+            for s_slug, s_title in sibling_links
+            if not any(tok in f"{s_slug} {s_title}".lower() for tok in ("miller-act", "miller act", "3131", "28.102"))
+        ]
+        if clean_lb_siblings:
+            sibling_links = clean_lb_siblings
 
     from pseofactory.competitor import _format_safe_heading_topic
     primary_sibling_slug, primary_sibling_title = sibling_links[0]
@@ -2988,7 +2989,6 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       }}
     }}
   </style>
-  <!-- Schema.org Application Type: "@type": "SoftwareApplication" -->
   <script type="application/ld+json">
   {json_ld_graph_str}
   </script>
@@ -3162,6 +3162,10 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     assert_touch_targets(html_content, context=f"compiled page '{slug}'")
 
     fuzz_res = verify_formula_boundary_fuzzing(formula, clamped_inputs)
+    if not fuzz_res.get("passed", False):
+        raise ValueError(
+            f"Formula boundary fuzzing failed on '{slug}': {fuzz_res.get('issues') or fuzz_res}"
+        )
 
     # 8. Self-verify using verify_html_unique_first_party_information
     audit_res = verify_html_unique_first_party_information(
@@ -3186,7 +3190,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         "commercial_offers_allowed": monetization_block["commercial_offers_allowed"],
         "restricted_public_service": monetization_block["restricted_public_service"],
         "verified": True,
-        "boundary_fuzz_verified": bool(fuzz_res.get("passed", True)),
+        "boundary_fuzz_verified": bool(fuzz_res.get("passed", False)),
     }
 
 
@@ -3370,7 +3374,7 @@ LIENBOND_CANONICAL_SHORT_LINK_REDIRECTS: Tuple[Tuple[str, str], ...] = (
     ("/miller-act", "/tools/miller-act-performance-and-payment-bond-premium-calculator/"),
     ("/performance-bond", "/tools/miller-act-performance-and-payment-bond-premium-calculator/"),
     ("/sdi", "/tools/subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator/"),
-    ("/surety-bond-philippines", "/tools/surety-bond-cost-calculator-philippines/"),
+    ("/surety-bond-philippines", "/tools/contractor-license-bond-cost-calculator-by-credit-score/"),
     ("/texas-chapter-53", "/tools/texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator/"),
     ("/workers-comp", "/tools/workers-compensation-class-code-rate-calculator-by-state/"),
     ("/how-it-works", "/methodology/"),
@@ -4612,4 +4616,46 @@ def compile_gainhelm_estate(
         run_retrofit=run_retrofit,
         extra_tools=extra_tools,
         high_effort_page_fn=compile_high_effort_page,
+    )
+
+
+def compile_profithelm_estate(
+    output_dir: Any,
+    run_retrofit: bool = True,
+    extra_tools: Optional[List[Dict[str, Any]]] = None,
+    repo_root: Optional[Any] = None,
+) -> Any:
+    """
+    Compiles the complete ProfitHelm (profithelm.com) tenant estate into `output_dir`
+    backed by `pseofactory.profithelm_estate`.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.profithelm_estate import compile_profithelm_estate_impl
+
+    return compile_profithelm_estate_impl(
+        output_dir=output_dir,
+        run_retrofit=run_retrofit,
+        extra_tools=extra_tools,
+        repo_root=repo_root,
+    )
+
+
+def compile_prexvo_estate(
+    output_dir: Any,
+    run_retrofit: bool = True,
+    extra_tools: Optional[List[Dict[str, Any]]] = None,
+    repo_root: Optional[Any] = None,
+) -> Any:
+    """
+    Compiles the complete Prexvo (prexvo.com) tenant estate into `output_dir`
+    backed by `pseofactory.prexvo_estate`.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.prexvo_estate import compile_prexvo_estate_impl
+
+    return compile_prexvo_estate_impl(
+        output_dir=output_dir,
+        run_retrofit=run_retrofit,
+        extra_tools=extra_tools,
+        repo_root=repo_root,
     )

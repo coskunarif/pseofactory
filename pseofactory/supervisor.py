@@ -1324,6 +1324,7 @@ class DepartmentHandoffChainVerifier:
         retro_by_tenant: Dict[str, Dict[str, Any]] = {}
         contamination_by_tenant: Dict[str, Dict[str, Any]] = {}
         aeo_by_tenant: Dict[str, Dict[str, Any]] = {}
+        truth_gate_by_tenant: Dict[str, Dict[str, Any]] = {}
         per_tenant_summary: Dict[str, Dict[str, Any]] = {}
 
         from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
@@ -1354,7 +1355,8 @@ class DepartmentHandoffChainVerifier:
             is_prod_canonical_tenant = (
                 repo_path_cand.resolve().as_posix().startswith("/home/ubuntuadmin/projects/")
                 and (
-                    repo_path_cand.name in canonical_dir_names
+                    (repo_path_cand / ".pseofactory.json").is_file()
+                    or repo_path_cand.name in canonical_dir_names
                     or repo_path_cand.name in spawned_dir_names
                 )
             )
@@ -1367,26 +1369,8 @@ class DepartmentHandoffChainVerifier:
             stale_cnt = int(retro_rep.get("stale_count", 0))
             p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
             aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
-            aeo_mutated = False
 
-            if in_flight_build and (
-                rep.status != "PASS" or rep.drifted_assets_count > 0 or stale_cnt > 0 or not aeo_ready
-            ):
-                rep.drifted_assets = [
-                    r for r in rep.drifted_assets if DriftReason.PROPERTY_CONTAMINATION in r.reasons
-                ]
-                rep.drifted_assets_count = len(rep.drifted_assets)
-                if rep.drifted_assets_count == 0:
-                    rep.status = "PASS"
-                stale_cnt = 0
-                retro_rep["status"] = "PASS"
-                retro_rep["stale_count"] = 0
-                aeo_ready = True
-                p_aeo["status"] = "PASS"
-                p_aeo["passed"] = True
-                p_aeo["issues"] = []
-
-            if self.heal_markers and is_prod_canonical_tenant and (
+            if self.heal_markers and is_prod_canonical_tenant and not in_flight_build and (
                 rep.status != "PASS" or rep.drifted_assets_count > 0 or stale_cnt > 0 or not aeo_ready
             ):
                 try:
@@ -1406,132 +1390,24 @@ class DepartmentHandoffChainVerifier:
                     stale_cnt = int(retro_rep.get("stale_count", 0))
                     p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
                     aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
-                except Exception:
-                    pass
+                except Exception as heal_exc:
+                    t_errs.append(f"RetroReflectionEngine heal failed: {type(heal_exc).__name__}: {heal_exc}")
 
-            if (
-                (rep.status != "PASS" or rep.drifted_assets_count > 0)
-                and not self.strict_current_engine_hash
-                and "/.agy/worktrees/" in Path(__file__).resolve().as_posix()
-            ):
-                if self.heal_markers:
-                    RetroReflectionEngine.retrofit_estate(adapter.dist_dir, pid)
-                    aeo_mutated = True
-                    _clear_tenant_eval_cache(evaluator, pid)
-                    rep = evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
-                else:
-                    lock_f = repo_path_cand / "substrate_lock.json"
-                    lock_h = ""
-                    if lock_f.is_file():
-                        try:
-                            lock_h = str(json.loads(lock_f.read_text(encoding="utf-8")).get("engine_hash") or "")
-                        except Exception:
-                            lock_h = ""
-                    if lock_h and lock_h != str(ctx.get("engine_hash") or ""):
-                        from pseofactory.edge import get_expected_edge_functions_map
-                        from pseofactory.tenant_facts import TruthReconciliationEngine
-                        from pseofactory.visual_primitives import normalize_html_visual_primitives
-
-                        exp_fn_map = get_expected_edge_functions_map(pid)
-                        remaining_drifted = []
-                        for d_rec in rep.drifted_assets:
-                            d_path = Path(d_rec.asset_path).resolve()
-                            rel_fn = None
-                            try:
-                                rel_fn = d_path.relative_to(repo_path_cand.resolve()).as_posix()
-                            except Exception:
-                                rel_fn = None
-                            if (
-                                rel_fn
-                                and rel_fn in exp_fn_map
-                                and d_rec.reasons == [DriftReason.PROPERTY_CONTAMINATION]
-                                and not scanner.scan_text(exp_fn_map[rel_fn], pid, context=rel_fn)
-                            ):
-                                continue
-                            if set(d_rec.reasons).issubset({DriftReason.TRUTH_CONTRADICTION, DriftReason.STATUTORY_DRIFT}):
-                                if d_path.is_file() and d_path.suffix == ".html" and "syndication/" not in (rel_fn or ""):
-                                    raw_d_html = d_path.read_text(encoding="utf-8", errors="ignore")
-                                    norm_d_html, _ = normalize_html_visual_primitives(
-                                        raw_d_html,
-                                        is_tenant_porcelain=True,
-                                    )
-                                    recon_d_html, _ = TruthReconciliationEngine.reconcile_html_truth(
-                                        norm_d_html,
-                                        tenant=pid,
-                                        rel_path=rel_fn or d_path.name,
-                                        slug=rel_fn or d_path.stem,
-                                    )
-                                    if not TruthReconciliationEngine.audit_html_truth_reconciliation(
-                                        recon_d_html,
-                                        tenant=pid,
-                                        rel_path=rel_fn or d_path.name,
-                                        slug=rel_fn or d_path.stem,
-                                    ):
-                                        continue
-                                else:
-                                    continue
-                            remaining_drifted.append(d_rec)
-                        rep.drifted_assets = remaining_drifted
-                        rep.drifted_assets_count = len(remaining_drifted)
-                        if not remaining_drifted:
-                            rep.status = "PASS"
             if rep.status != "PASS" or rep.drifted_assets_count > 0:
                 t_errs.append(
                     f"AssetIntegrityEvaluator reported {rep.drifted_assets_count} drifted assets (status={rep.status})"
                 )
             integrity_info = {
-                "status": rep.status,
+                "status": "DEFERRED_IN_FLIGHT_BUILD" if in_flight_build else rep.status,
                 "total_assets_checked": rep.total_assets_checked,
                 "compliant_assets_count": rep.compliant_assets_count,
                 "drifted_assets_count": rep.drifted_assets_count,
             }
 
-            if stale_cnt > 0 and not self.strict_current_engine_hash:
-                lock_f = repo_path_cand / "substrate_lock.json"
-                lock_h = ""
-                if lock_f.is_file():
-                    try:
-                        lock_h = str(json.loads(lock_f.read_text(encoding="utf-8")).get("engine_hash") or "")
-                    except Exception:
-                        lock_h = ""
-                if lock_h and lock_h != str(ctx.get("engine_hash") or ""):
-                    stale_pages_map = retro_rep.get("stale_pages") or {}
-                    tool_rels = [k for k in stale_pages_map if k.startswith("tools/") and k != "tools/index.html"]
-                    sample_rel = tool_rels[0] if tool_rels else next(iter(stale_pages_map.keys()), "")
-                    sample_path = Path(adapter.dist_dir) / sample_rel if sample_rel else None
-                    if sample_path and sample_path.is_file() and sample_path.suffix == ".html":
-                        raw_sample = sample_path.read_text(encoding="utf-8", errors="ignore")
-                        if stale_pages_map.get(sample_rel) == ["deterministic_visual_primitives"]:
-                            from pseofactory.visual_primitives import (
-                                detect_visual_and_ux_contract_issues,
-                                normalize_html_visual_primitives,
-                            )
-                            norm_sample, _ = normalize_html_visual_primitives(
-                                raw_sample,
-                                is_tenant_porcelain=True,
-                            )
-                            if not detect_visual_and_ux_contract_issues(norm_sample, rel_path=sample_rel, require_primitives=True):
-                                stale_cnt = 0
-                                retro_rep["status"] = "PASS"
-                                retro_rep["stale_count"] = 0
-                        else:
-                            sample_slug = (
-                                sample_rel.replace("tools/", "").replace("/index.html", "").strip("/") or "index"
-                            )
-                            repaired_sample, _ = RetroReflectionEngine.retrofit_html(
-                                raw_sample,
-                                property_id=pid,
-                                slug=sample_slug,
-                                dist_dir=Path(adapter.dist_dir),
-                            )
-                            if not RetroReflectionEngine.audit_html_mechanics(repaired_sample):
-                                stale_cnt = 0
-                                retro_rep["status"] = "PASS"
-                                retro_rep["stale_count"] = 0
             if retro_rep.get("status") != "PASS" or stale_cnt > 0:
                 t_errs.append(f"RetroReflectionEngine reported stale_count={stale_cnt}")
             retro_info = {
-                "status": retro_rep.get("status"),
+                "status": "DEFERRED_IN_FLIGHT_BUILD" if in_flight_build else retro_rep.get("status"),
                 "pages_scanned": int(retro_rep.get("pages_scanned", 0)),
                 "stale_count": stale_cnt,
             }
@@ -1566,35 +1442,64 @@ class DepartmentHandoffChainVerifier:
                 "violations_count": len(contam_violations),
             }
 
-            if aeo_mutated:
-                p_aeo = audit_aeo_geo_three_plane_readiness(dist_dir=adapter.dist_dir, property_id=pid)
-                aeo_ready = bool(p_aeo.get("status") == "PASS" and p_aeo.get("passed", True))
-            if in_flight_build and not aeo_ready:
-                aeo_ready = True
-                p_aeo["status"] = "PASS"
-                p_aeo["passed"] = True
-                p_aeo["issues"] = []
             if not aeo_ready:
                 t_errs.append(f"AEO/GEO three-plane readiness check failed: {p_aeo.get('issues')}")
             aeo_info = {
-                "ready": aeo_ready,
-                "status": p_aeo.get("status"),
+                "ready": aeo_ready if not in_flight_build else False,
+                "status": "DEFERRED_IN_FLIGHT_BUILD" if in_flight_build else p_aeo.get("status"),
                 "issues_count": len(p_aeo.get("issues") or []),
             }
+
+            truth_gate_info: Dict[str, Any] = {"status": "FAIL", "passed": False, "violation_count": 0}
+            try:
+                from pseofactory.truth_gate import UnifiedTruthGate
+
+                tg_report = UnifiedTruthGate().audit_estate(
+                    adapter.dist_dir,
+                    pid,
+                    repo_root=repo_path_cand,
+                )
+                truth_gate_info = {
+                    "status": "DEFERRED_IN_FLIGHT_BUILD" if in_flight_build else tg_report.status,
+                    "passed": tg_report.passed if not in_flight_build else False,
+                    "violation_count": len(tg_report.violations),
+                    "gate_counts": tg_report.gate_counts,
+                    "truth_pack_sha256": tg_report.truth_pack_sha256,
+                }
+                if not tg_report.passed:
+                    t_errs.append(f"UnifiedTruthGate failed for '{pid}': {tg_report.summary()}")
+            except Exception as tg_exc:
+                truth_gate_info = {
+                    "status": "FAIL",
+                    "passed": False,
+                    "error": f"{type(tg_exc).__name__}: {tg_exc}",
+                }
+                t_errs.append(f"UnifiedTruthGate error for '{pid}': {type(tg_exc).__name__}: {tg_exc}")
+
+            if in_flight_build:
+                defer_msg = f"Active build lock held for '{pid}'; verification status=DEFERRED_IN_FLIGHT_BUILD"
+                if defer_msg not in t_errs:
+                    t_errs.append(defer_msg)
+                tenant_status = "DEFERRED_IN_FLIGHT_BUILD" if not contam_violations else "FAIL"
+            else:
+                tenant_status = "PASS" if not t_errs else "FAIL"
 
             return {
                 "integrity": integrity_info,
                 "retro": retro_info,
                 "contamination": contamination_info,
                 "aeo": aeo_info,
+                "truth_gate": truth_gate_info,
                 "errors": t_errs,
                 "summary": {
-                    "status": "PASS" if not t_errs else "FAIL",
+                    "status": tenant_status,
+                    "in_flight_build": in_flight_build,
                     "assets_audited": rep.total_assets_checked,
                     "drifted_assets": rep.drifted_assets_count,
                     "retro_stale_count": stale_cnt,
                     "contamination_violations": len(contam_violations),
-                    "aeo_geo_ready": aeo_ready,
+                    "aeo_geo_ready": aeo_ready if not in_flight_build else False,
+                    "truth_gate_passed": truth_gate_info.get("passed", False),
                     "errors": t_errs,
                 },
             }
@@ -1604,6 +1509,7 @@ class DepartmentHandoffChainVerifier:
             retro_by_tenant[pid] = res["retro"]
             contamination_by_tenant[pid] = res["contamination"]
             aeo_by_tenant[pid] = res["aeo"]
+            truth_gate_by_tenant[pid] = res["truth_gate"]
             if res["errors"]:
                 failures.extend(f"VERIFICATION[{pid}]: {e}" for e in res["errors"])
             per_tenant_summary[pid] = res["summary"]
@@ -1613,6 +1519,7 @@ class DepartmentHandoffChainVerifier:
             "retro_reflection_by_tenant": retro_by_tenant,
             "contamination_scan_by_tenant": contamination_by_tenant,
             "aeo_geo_readiness_by_tenant": aeo_by_tenant,
+            "truth_gate_by_tenant": truth_gate_by_tenant,
             "zero_drift_verified": len(failures) == 0,
         }
         summary: Dict[str, Any] = {
@@ -3210,12 +3117,28 @@ class AutonomousLifecycleSupervisor:
         cycle_id = f"cycle_{int(time.time())}_{uuid.uuid4().hex[:6]}"
         start_time = time.time()
 
+        reconcile_failures: Dict[str, str] = {}
         if not dry_run and "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
             try:
                 from pseofactory.gitops import reconcile_workspace_tracking_state
                 reconcile_workspace_tracking_state()
-            except Exception:
-                pass
+            except Exception as exc:
+                err_msg = f"reconcile_workspace_tracking_state failed: {type(exc).__name__}: {exc}"
+                reconcile_failures["workspace"] = err_msg
+                print(f"[SUPERVISOR] {err_msg}")
+                try:
+                    AtomicTelemetryLogger().log(
+                        TelemetryEvent(
+                            event_type="WORKSPACE_RECONCILIATION_ERROR",
+                            tenant_id="workspace",
+                            error_type=type(exc).__name__,
+                            error_message=err_msg,
+                            action_taken="FAILED",
+                            run_id=cycle_id,
+                        )
+                    )
+                except Exception:
+                    pass
             try:
                 from pseofactory.gitops import TenantFactoryLockGuard
                 from pseofactory.tenant_facts import TruthReconciliationEngine
@@ -3240,10 +3163,40 @@ class AutonomousLifecycleSupervisor:
                                     property_id=pid,
                                     repo_root=t_repo,
                                 )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as exc:
+                        err_msg = f"reconcile_estate_assets failed for '{pid}': {type(exc).__name__}: {exc}"
+                        reconcile_failures[pid] = err_msg
+                        print(f"[SUPERVISOR] {err_msg}")
+                        try:
+                            AtomicTelemetryLogger().log(
+                                TelemetryEvent(
+                                    event_type="TRUTH_RECONCILIATION_ERROR",
+                                    tenant_id=pid,
+                                    error_type=type(exc).__name__,
+                                    error_message=err_msg,
+                                    action_taken="FAILED",
+                                    run_id=cycle_id,
+                                )
+                            )
+                        except Exception:
+                            pass
+            except Exception as exc:
+                err_msg = f"reconcile_estate_assets setup failed: {type(exc).__name__}: {exc}"
+                reconcile_failures["fleet"] = err_msg
+                print(f"[SUPERVISOR] {err_msg}")
+                try:
+                    AtomicTelemetryLogger().log(
+                        TelemetryEvent(
+                            event_type="TRUTH_RECONCILIATION_ERROR",
+                            tenant_id="fleet",
+                            error_type=type(exc).__name__,
+                            error_message=err_msg,
+                            action_taken="FAILED",
+                            run_id=cycle_id,
+                        )
+                    )
+                except Exception:
+                    pass
 
         drift_report = detect_engine_drift(state_file=self.state_file, allow_tenant_scoped_hash=True)
         current_engine_hash = drift_report.get("current_hash")
@@ -3482,7 +3435,7 @@ class AutonomousLifecycleSupervisor:
                             break
                 if not dry_run:
                     cascade_engine.replay_quarantine(property_id=pid)
-            if not any_drift and not locked_tenants:
+            if not any_drift and not locked_tenants and not reconcile_failures:
                 if not dry_run and not property_ids:
                     cascade_engine.replay_quarantine()
                 for stg in ("ENGINEERING", "VERIFICATION", "SYNDICATION", "DEPLOYMENT"):
@@ -3604,9 +3557,33 @@ class AutonomousLifecycleSupervisor:
                 for pid, skip_res in breaker_skipped.items():
                     fleet_results[pid] = skip_res
 
-            all_passed = (len(fleet_results) > 0) and all(
-                res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED")
-                for res in fleet_results.values()
+            for r_pid, r_err in reconcile_failures.items():
+                if r_pid in fleet_results:
+                    cur_res = fleet_results[r_pid]
+                    if cur_res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED"):
+                        cur_res.status = "FAILED"
+                        cur_res.assets_failed = max(1, int(getattr(cur_res, "assets_failed", 0) or 0))
+                    recs = list(getattr(cur_res, "failed_records", []) or [])
+                    recs.append({"type": "TruthReconciliationError", "error": r_err})
+                    cur_res.failed_records = recs
+                elif r_pid not in ("fleet", "workspace"):
+                    fleet_results[r_pid] = MaintenanceResult(
+                        property_id=r_pid,
+                        status="FAILED",
+                        assets_audited=0,
+                        assets_drifted=0,
+                        assets_refactored=0,
+                        assets_failed=1,
+                        failed_records=[{"type": "TruthReconciliationError", "error": r_err}],
+                    )
+
+            all_passed = (
+                (len(fleet_results) > 0)
+                and not reconcile_failures
+                and all(
+                    res.status in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED")
+                    for res in fleet_results.values()
+                )
             )
             any_deferred = any(res.status == "DEFERRED" for res in fleet_results.values())
 

@@ -3892,7 +3892,9 @@ class MasterSEOVerifier:
         total_citations = 0
         total_numeric_facts = 0
         total_tables = 0
-        if target.exists():
+        if not target.exists() or not target.is_dir():
+            issues.append(f"EMPTY_OR_MISSING_DIST_DIR: target directory does not exist: {target}")
+        else:
             for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
@@ -3920,9 +3922,11 @@ class MasterSEOVerifier:
                 total_citations += res.get("statutory_citations_count", 0)
                 total_numeric_facts += res.get("numeric_facts_count", 0)
                 total_tables += res.get("tables_count", 0)
+            if pages_checked == 0:
+                issues.append(f"EMPTY_OR_MISSING_DIST_DIR: 0 HTML pages audited under {target}")
 
         return {
-            "status": "PASS" if not issues else "FAIL",
+            "status": "PASS" if (not issues and pages_checked > 0) else "FAIL",
             "gate": "check_citable_specific_facts_gate",
             "pages_checked": pages_checked,
             "statutory_citations_found": total_citations,
@@ -4231,12 +4235,14 @@ class MasterSEOVerifier:
         pages_checked = 0
         total_constants = 0
 
-        if target.exists():
+        if not target.exists() or not target.is_dir():
+            issues.append(f"EMPTY_OR_MISSING_DIST_DIR: target directory does not exist: {target}")
+        else:
             for p in self._iter_html_files(target):
                 if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
                     continue
                 rel = p.relative_to(target).as_posix()
-                if rel in ("index.html", "tools/index.html", "privacy/index.html", "about/index.html", "terms/index.html") and not require_corroboration:
+                if rel in ("privacy/index.html", "about/index.html", "terms/index.html") and not require_corroboration:
                     continue
                 pages_checked += 1
                 content = self._read_cached_html(p)
@@ -4248,9 +4254,11 @@ class MasterSEOVerifier:
                 if res["issues"]:
                     issues.extend(res["issues"])
                 total_constants += res.get("verified_constants_count", 0)
+            if pages_checked == 0:
+                issues.append(f"EMPTY_OR_MISSING_DIST_DIR: 0 HTML pages audited under {target}")
 
         return {
-            "status": "PASS" if not issues else "FAIL",
+            "status": "PASS" if (not issues and pages_checked > 0) else "FAIL",
             "gate": "check_cross_web_consensus_and_corroboration_gate",
             "pages_checked": pages_checked,
             "statutory_constants_verified": total_constants,
@@ -7121,12 +7129,52 @@ def verify_html_unique_first_party_information(
     }
 
 
-_TENANT_DOMAIN_MARKERS: Tuple[Tuple[str, str], ...] = (
-    ("lienbond", "lienbond.com"),
-    ("gainhelm", "gainhelm.com"),
-    ("prexvo", "prexvo.com"),
-    ("profithelm", "profithelm.com"),
-)
+def _get_tenant_domain_markers() -> Tuple[Tuple[str, str], ...]:
+    """Dynamically builds (property_id, domain) markers from all Truth Packs and active tenants (50+ sites)."""
+    markers: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+    try:
+        from pseofactory.truth_pack import load_all_truth_packs
+
+        packs = load_all_truth_packs(allow_expired=True)
+        for pid in sorted(packs.keys()):
+            pack = packs[pid]
+            dom = str(getattr(pack, "canonical_domain", "") or "").strip().lower()
+            dom = re.sub(r"^https?://", "", dom).split("/")[0].split(":")[0].strip()
+            if dom.startswith("www."):
+                dom = dom[4:]
+            if not dom:
+                dom = f"{pid}.com"
+            if pid and pid not in seen:
+                seen.add(pid)
+                markers.append((pid, dom))
+    except Exception:
+        pass
+    try:
+        from pseofactory.impact_planner import discover_active_tenants
+
+        for pid, repo_dir in discover_active_tenants():
+            pid_l = str(pid or "").strip().lower()
+            if not pid_l or pid_l in seen:
+                continue
+            dom = f"{pid_l}.com"
+            marker_f = Path(repo_dir) / ".pseofactory.json"
+            if marker_f.is_file():
+                try:
+                    m_data = json.loads(marker_f.read_text(encoding="utf-8"))
+                    raw_dom = str(m_data.get("domain") or m_data.get("canonical_base") or "").strip().lower()
+                    raw_dom = re.sub(r"^https?://", "", raw_dom).split("/")[0].split(":")[0].strip()
+                    if raw_dom.startswith("www."):
+                        raw_dom = raw_dom[4:]
+                    if raw_dom:
+                        dom = raw_dom
+                except Exception:
+                    pass
+            seen.add(pid_l)
+            markers.append((pid_l, dom))
+    except Exception:
+        pass
+    return tuple(markers)
 
 
 def _extract_html_tag_attr(tag: str, attr: str) -> str:
@@ -7138,14 +7186,15 @@ def _extract_html_tag_attr(tag: str, attr: str) -> str:
 
 
 def _match_tenant_marker(segment: str, *, domain_only: bool = False) -> Optional[str]:
-    """Matches canonical tenant domain markers first, then optional tenant tokens."""
+    """Matches canonical tenant domain markers first, then optional tenant tokens dynamically."""
     if not segment:
         return None
-    for tenant, domain in _TENANT_DOMAIN_MARKERS:
+    markers = _get_tenant_domain_markers()
+    for tenant, domain in markers:
         if domain in segment:
             return tenant
     if not domain_only:
-        for tenant, _ in _TENANT_DOMAIN_MARKERS:
+        for tenant, _ in markers:
             if tenant in segment:
                 return tenant
     return None
@@ -8641,6 +8690,15 @@ def audit_estate_technical_seo_and_cannibalization(
     missing_viewport_meta: List[str] = []
     multiple_titles: List[Tuple[str, int]] = []
 
+    from pseofactory.truth_gate import UnifiedTruthGate
+    from pseofactory.truth_pack import load_all_truth_packs
+
+    try:
+        all_truth_packs = load_all_truth_packs(allow_expired=True)
+    except Exception:
+        all_truth_packs = {}
+    truth_gate = UnifiedTruthGate(all_truth_packs=all_truth_packs)
+
     for rel, entry in snapshot.html_entries.items():
         if rel == "404.html" or entry.name.startswith("."):
             continue
@@ -8658,6 +8716,19 @@ def audit_estate_technical_seo_and_cannibalization(
             ok_claim, f_viol = fact_store.verify_claim(prop, content, context=rel)
             if not ok_claim:
                 cross_tenant_leaks.extend(f"{rel}: {v}" for v in f_viol)
+        tg_rep = truth_gate.audit_html_content(
+            content,
+            property_id=prop,
+            file_path=rel,
+            dist_dir=d_path,
+            all_truth_packs=all_truth_packs,
+            run_js_parity=True,
+        )
+        if not tg_rep.passed:
+            for tv in tg_rep.violations:
+                tv_msg = f"{rel}: [{tv.gate}:{tv.code}] {tv.message}"
+                if tv_msg not in cross_tenant_leaks:
+                    cross_tenant_leaks.append(tv_msg)
 
         no_script = entry.visible_no_script
 

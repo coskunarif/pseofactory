@@ -6308,6 +6308,46 @@ def resolve_lead_monetization_offer(
     }
 
 
+def _resolve_statutory_metadata_from_truth_pack(
+    prop_clean: str,
+    slug_clean: str,
+    offer: Dict[str, Any],
+) -> Tuple[str, str, str, str]:
+    """Reads regulator, controlling statute, effective year, and dataset dynamically from load_truth_pack(prop_clean)."""
+    from pseofactory.truth_pack import load_truth_pack
+
+    tp = load_truth_pack(prop_clean)
+    matching = [
+        entry
+        for entry in tp.entries.values()
+        if (not entry.applies_to_slugs or slug_clean in entry.applies_to_slugs)
+        and slug_clean not in entry.forbidden_on_slugs
+    ]
+    if not matching:
+        matching = list(tp.entries.values())
+
+    enacted = [e for e in matching if e.claim_class == "enacted_law"] or matching
+    publishers = list(dict.fromkeys(e.publisher for e in enacted if e.publisher))
+    citations = list(dict.fromkeys(e.citation for e in enacted if e.citation))
+    years = [int(e.effective_year) for e in matching if e.effective_year]
+
+    regulator_name = ", ".join(publishers[:2]) if publishers else f"{tp.brand_name} Statutory Authority"
+    controlling_statute = (
+        "; ".join(citations[:2])
+        if citations
+        else str(offer.get("statutory_authority") or "").strip()
+    )
+    effective_tax_year = str(max(years) if years else 2026)
+
+    benchmarks = [e for e in matching if e.claim_class == "market_benchmark" and e.citation]
+    if benchmarks:
+        default_econ_ds = "; ".join(list(dict.fromkeys(e.citation for e in benchmarks))[:2])
+    else:
+        default_econ_ds = "FRED 10-Year Treasury (DGS10) and BLS CPI-U Series"
+
+    return regulator_name, controlling_statute, effective_tax_year, default_econ_ds
+
+
 def resolve_post_calculation_upgrade_spec(
     property_id: str,
     tool_slug: str,
@@ -6343,10 +6383,6 @@ def resolve_post_calculation_upgrade_spec(
     except ValueError:
         return None
 
-    regulator_name = "Internal Revenue Service (IRS)"
-    controlling_statute = offer["statutory_authority"]
-    effective_tax_year = "2026"
-    default_econ_ds = "FRED 10-Year Treasury (DGS10) and BLS CPI-U Series"
     gh_jurisdiction = ""
     if prop_clean == "gainhelm":
         from pseofactory.affiliates import get_gainhelm_framework_profile
@@ -6360,23 +6396,12 @@ def resolve_post_calculation_upgrade_spec(
     else:
         gh_fw_prof = None
 
-    try:
-        from pseofactory.tenant_facts import TenantFactStore
-
-        st_truth = TenantFactStore.get_statutory_truth(prop_clean)
-        regulator_name = st_truth.regulator_name
-        controlling_statute = st_truth.controlling_statute
-        effective_tax_year = st_truth.effective_tax_year
-    except Exception:
-        if prop_clean == "prexvo":
-            regulator_name = "U.S. Department of Education (Federal Student Aid)"
-            default_econ_ds = "Federal Reserve G.19 Consumer Credit and Title IV Rate Series"
-        elif prop_clean == "gainhelm" and gh_fw_prof is not None:
-            regulator_name = gh_fw_prof["regulator_name"]
-            default_econ_ds = gh_fw_prof["economic_dataset"]
-        elif prop_clean == "lienbond":
-            regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
-            default_econ_ds = "SFAA Surety Loss Ratios, NCCI Class Rate Filings, and BLS Construction Wage Series"
+    regulator_name, controlling_statute, effective_tax_year, default_econ_ds = (
+        _resolve_statutory_metadata_from_truth_pack(prop_clean, slug_clean, offer)
+    )
+    if prop_clean == "gainhelm" and gh_fw_prof is not None:
+        regulator_name = gh_fw_prof["regulator_name"]
+        default_econ_ds = gh_fw_prof["economic_dataset"]
 
     trend_series = _resolve_trend_statutory_timeseries_for_workpaper(
         property_id=prop_clean,
@@ -7683,21 +7708,9 @@ def synthesize_personalized_audit_workpaper(
         if mode == "paid_toolkit"
         else "PERSONALIZED SCENARIO PLAYBOOK & WORKSHEET"
     )
-    regulator_name = "Internal Revenue Service (IRS)"
-    controlling_statute = offer["statutory_authority"]
-    effective_tax_year = "2026"
-    try:
-        from pseofactory.tenant_facts import TenantFactStore
-
-        st_truth = TenantFactStore.get_statutory_truth(prop_clean)
-        regulator_name = st_truth.regulator_name
-        controlling_statute = st_truth.controlling_statute
-        effective_tax_year = st_truth.effective_tax_year
-    except Exception:
-        if prop_clean == "prexvo":
-            regulator_name = "U.S. Department of Education (Federal Student Aid)"
-        elif prop_clean == "lienbond":
-            regulator_name = "U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards"
+    regulator_name, controlling_statute, effective_tax_year, _ = (
+        _resolve_statutory_metadata_from_truth_pack(prop_clean, slug_clean, offer)
+    )
     if prop_clean == "gainhelm":
         if gh_prof_wp is None:
             from pseofactory.affiliates import get_gainhelm_framework_profile

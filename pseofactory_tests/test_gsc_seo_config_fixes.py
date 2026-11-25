@@ -220,9 +220,54 @@ def test_canonical_gsc_verification_meta_enforced_across_maintenance_and_porcela
     assert fake_prexvo not in norm_env
 
 
+def _setup_temp_truth_pack(tmp_path: Path, monkeypatch, pid: str, canon_domain: str) -> None:
+    import shutil
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+
+    tp_payload = {
+        "schema_version": "2.0",
+        "property_id": pid,
+        "brand_name": pid.capitalize(),
+        "canonical_domain": canon_domain,
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {},
+        "citations_allowlist": {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{pid}.json").write_text(json.dumps(tp_payload, indent=2), encoding="utf-8")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
+
+
 def test_indexnow_key_sync_per_domain_for_all_tenants(tmp_path: Path, monkeypatch) -> None:
     """sync_tenant_publisher_prerequisites writes exact deterministic per-domain IndexNow <key>.txt."""
     monkeypatch.delenv("GAINHELM_INDEXNOW_STEM", raising=False)
+    _setup_temp_truth_pack(tmp_path, monkeypatch, "acmecorp", "https://acmecorp.com")
+
+    # Unregistered synthetic site without a TruthPack must fail closed
+    unreg_d = tmp_path / "unregistered_site" / "dist"
+    unreg_d.mkdir(parents=True, exist_ok=True)
+    (unreg_d / "index.html").write_text("<!doctype html><html><head></head><body>Hi</body></html>", encoding="utf-8")
+    with pytest.raises(KeyError, match="TRUTH_PACK_MISSING"):
+        maintenance.RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+            unreg_d, "unregistered_site", "https://unregistered-site.com"
+        )
+
     cases = [
         ("profithelm", "https://profithelm.com", hashlib.sha256(b"profithelm.com:indexnow:v2").hexdigest()[:32]),
         ("gainhelm", "https://gainhelm.com", "c5430f81d11340a6bda3162725e24a03"),
@@ -344,6 +389,7 @@ def test_indexnow_key_sync_matches_indexer_for_www_and_custom_domains(tmp_path: 
     from pseofactory.indexer import derive_deterministic_indexnow_key
 
     monkeypatch.delenv("GAINHELM_INDEXNOW_STEM", raising=False)
+    _setup_temp_truth_pack(tmp_path, monkeypatch, "newtenant55", "https://www.newtenant55.io")
     for prop_id, canon in (
         ("profithelm", "https://www.profithelm.com"),
         ("gainhelm", "https://www.gainhelm.com"),

@@ -1,0 +1,1415 @@
+{
+  "schema_version": "2.0",
+  "property_id": "profithelm",
+  "brand_name": "ProfitHelm",
+  "canonical_domain": "https://profithelm.com",
+  "audience_tier": "business",
+  "pricing_tiers": {
+    "free": {
+      "tier_kind": "free",
+      "label": "Free Calculator",
+      "price_usd": 0.0,
+      "price_cents": 0,
+      "currency": "usd",
+      "billing_mode": "free"
+    },
+    "quick": {
+      "tier_kind": "quick",
+      "label": "Quick Worksheet",
+      "price_usd": 15.0,
+      "price_cents": 1500,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "full": {
+      "tier_kind": "full",
+      "label": "Full Workpaper & Data Pack",
+      "price_usd": 29.0,
+      "price_cents": 2900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "partner_slot": {
+      "tier_kind": "partner_slot",
+      "label": "Verified Calculator Partner Slot",
+      "price_usd": 299.0,
+      "price_cents": 29900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    }
+  },
+  "entries": {
+    "section_179_cap_2025": {
+      "key": "section_179_cap_2025",
+      "value": 2500000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2025,
+      "citation": "P.L. 119-21 Section 70306 (amending 26 U.S.C. 179(b)(1))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Law 119-21 Section 70306 increases the Section 179 aggregate dollar limitation to $2,500,000 for property placed in service in taxable years beginning after December 31, 2024.",
+      "source_quote_sha256": "038a1bd01b02e20b762c0d3abb7ebd0c42fb8459816f32576930171181b10db3",
+      "superseded_values": [
+        {
+          "value": 1250000.0,
+          "label": "Pre-OBBBA 2025 Section 179 cap ($1,250,000)",
+          "reason": "Superseded retroactively for tax years beginning after Dec 31, 2024 by P.L. 119-21 Section 70306.",
+          "patterns": [
+            "\\$?1,250,000",
+            "1\\.25\\s*M(?:illion)?\\b"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "section-179-calculator",
+        "commercial-heavy-vehicle-section-179-weight-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "section_179_phaseout_2025": {
+      "key": "section_179_phaseout_2025",
+      "value": 4000000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2025,
+      "citation": "P.L. 119-21 Section 70306 (amending 26 U.S.C. 179(b)(2))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Law 119-21 Section 70306 raises the Section 179 investment phaseout threshold to $4,000,000 for property placed in service in taxable years beginning after December 31, 2024.",
+      "source_quote_sha256": "3c52f7ca55ea6029fc0c5d1eeaea0ed64bff48ef4cc5a82c4edc4f68dfe96e71",
+      "superseded_values": [
+        {
+          "value": 3130000.0,
+          "label": "Pre-OBBBA 2025 Section 179 phaseout ($3,130,000)",
+          "reason": "Superseded by P.L. 119-21 Section 70306 ($4,000,000 phaseout threshold).",
+          "patterns": [
+            "\\$?3,130,000"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "section-179-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "section_179_cap_2026": {
+      "key": "section_179_cap_2026",
+      "value": 2560000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.24",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the aggregate cost of any section 179 property that a taxpayer elects to treat as an expense cannot exceed $2,560,000.",
+      "source_quote_sha256": "c3e9bb65303b29ae093cf2492fd946eaac06d0149a6a8a5388a797ffe13be976",
+      "superseded_values": [
+        {
+          "value": 1220000.0,
+          "label": "2024 Section 179 cap ($1,220,000)",
+          "reason": "Outdated 2024 limit superseded for 2026 by IRS Rev. Proc. 2025-32.",
+          "patterns": [
+            "\\$?1,220,000"
+          ]
+        },
+        {
+          "value": 1250000.0,
+          "label": "Pre-OBBBA 2025 Section 179 cap ($1,250,000)",
+          "reason": "Superseded by P.L. 119-21 and IRS Rev. Proc. 2025-32.",
+          "patterns": [
+            "\\$?1,250,000"
+          ]
+        },
+        {
+          "value": 1290000.0,
+          "label": "Pre-OBBBA projected 2026 Section 179 cap ($1,290,000)",
+          "reason": "Superseded by P.L. 119-21 Section 70306 and IRS Rev. Proc. 2025-32 ($2,560,000).",
+          "patterns": [
+            "\\$?1,290,000"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "section-179-calculator"
+      ],
+      "forbidden_on_slugs": [
+        "commercial-heavy-vehicle-section-179-weight-calculator"
+      ]
+    },
+    "section_179_phaseout_2026": {
+      "key": "section_179_phaseout_2026",
+      "value": 4090000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.24",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the $2,560,000 section 179 dollar limitation is reduced by the amount by which the cost of section 179 property placed in service exceeds $4,090,000.",
+      "source_quote_sha256": "e4e149339d4d0d4d10ed8d2ade5f79e0d82deeffddabc50ce5ff4e03dd8e8633",
+      "superseded_values": [
+        {
+          "value": 3050000.0,
+          "label": "2024 Section 179 phaseout ($3,050,000)",
+          "reason": "Outdated 2024 threshold superseded by $4,090,000 for 2026.",
+          "patterns": [
+            "\\$?3,050,000"
+          ]
+        },
+        {
+          "value": 3130000.0,
+          "label": "Pre-OBBBA 2025 Section 179 phaseout ($3,130,000)",
+          "reason": "Superseded by $4,090,000 for 2026 under IRS Rev. Proc. 2025-32.",
+          "patterns": [
+            "\\$?3,130,000"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "section-179-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "section_179_heavy_suv_cap_2025": {
+      "key": "section_179_heavy_suv_cap_2025",
+      "value": 31300.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2025,
+      "citation": "IRS Rev. Proc. 2024-40 Section 2.25",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-24-40.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2025, the cost of any sport utility vehicle that may be taken into account under section 179 cannot exceed $31,300.",
+      "source_quote_sha256": "692a1dda2085f782a84d7cec68dc8bd058205c8f6efb04ce8f22c33cbf103a75",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "commercial-heavy-vehicle-section-179-weight-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "section_179_heavy_suv_cap_2026": {
+      "key": "section_179_heavy_suv_cap_2026",
+      "value": 32000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.24",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the cost of any sport utility vehicle subject to section 179(b)(5)(A) that may be taken into account under section 179 cannot exceed $32,000.",
+      "source_quote_sha256": "d15064347600ce6703ca72fc458b6e09dd7afe1a3e992d800402f91d13d82976",
+      "superseded_values": [
+        {
+          "value": 30500.0,
+          "label": "2024 Heavy SUV Section 179 cap ($30,500)",
+          "reason": "Outdated 2024 SUV cap; 2026 cap is $32,000.",
+          "patterns": [
+            "\\$?30,500"
+          ]
+        },
+        {
+          "value": 31300.0,
+          "label": "2025 Heavy SUV Section 179 cap ($31,300)",
+          "reason": "2025 SUV cap superseded for 2026 by $32,000 under IRS Rev. Proc. 2025-32.",
+          "patterns": [
+            "\\$?31,300"
+          ]
+        },
+        {
+          "value": 2560000.0,
+          "label": "General Equipment Cap ($2,560,000) misapplied to Heavy SUVs",
+          "reason": "Heavy SUVs (6,000-14,000 lbs GVWR) are capped at $32,000 under IRC Section 179(b)(5)(A), not $2,560,000.",
+          "patterns": [
+            "(?i)heavy\\s+suvs?[^.\\n]{0,50}\\$?2,560,000|\\$?2,560,000[^.\\n]{0,50}heavy\\s+suvs?"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "commercial-heavy-vehicle-section-179-weight-calculator",
+        "section-179-calculator"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "bonus_depreciation_pct_2026": {
+      "key": "bonus_depreciation_pct_2026",
+      "value": 100.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 70301 (amending 26 U.S.C. 168(k))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Law 119-21 Section 70301 amends 26 U.S.C. 168(k) to permanently restore a 100 percent additional first-year bonus depreciation allowance for qualified property acquired and placed in service after January 19, 2025.",
+      "source_quote_sha256": "4eaa78c0b58db4e02358071a4cf8b9b38026517f8980432799d41d848fb540c5",
+      "superseded_values": [
+        {
+          "value": 20.0,
+          "label": "Pre-OBBBA TCJA 2026 phasedown (20%)",
+          "reason": "The 20% 2026 phasedown was repealed by P.L. 119-21 Section 70301 restoring 100% bonus depreciation.",
+          "patterns": [
+            "\\b20%\\s*bonus\\s*depreciation",
+            "bonus\\s*depreciation\\s*(?:at|of|is)\\s*20%"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2026_single": {
+      "key": "standard_deduction_2026_single",
+      "value": 16100.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.14",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the standard deduction under section 63(c)(2) is $16,100 for single individuals and married individuals filing separate returns.",
+      "source_quote_sha256": "532844d42e3344a45270b0f08486d09a7e375eff89f4f245dfedbca9618bd58c",
+      "superseded_values": [
+        {
+          "value": 15000.0,
+          "label": "Pre-OBBBA 2025 Single Standard Deduction ($15,000)",
+          "reason": "2025 pre-OBBBA figure superseded by $16,100 for 2026.",
+          "patterns": [
+            "\\$?15,000\\s*standard\\s*deduction"
+          ]
+        },
+        {
+          "value": 15350.0,
+          "label": "Pre-OBBBA 2026 projected Single Standard Deduction ($15,350)",
+          "reason": "Superseded by P.L. 119-21 and IRS Rev. Proc. 2025-32 ($16,100).",
+          "patterns": [
+            "\\$?15,350"
+          ]
+        },
+        {
+          "value": 8600.0,
+          "label": "Repealed TCJA Sunset Single Standard Deduction ($8,600)",
+          "reason": "TCJA sunset was repealed by P.L. 119-21.",
+          "patterns": [
+            "\\$?8,600"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2026_mfj": {
+      "key": "standard_deduction_2026_mfj",
+      "value": 32200.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.14",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the standard deduction under section 63(c)(2) is $32,200 for married individuals filing joint returns and surviving spouses.",
+      "source_quote_sha256": "c1ebc078039bea0067710d12ae28eba2dc4490381d93a19c4498a79279b97fe7",
+      "superseded_values": [
+        {
+          "value": 30000.0,
+          "label": "Pre-OBBBA 2025 MFJ Standard Deduction ($30,000)",
+          "reason": "Superseded by $32,200 for 2026 under IRS Rev. Proc. 2025-32.",
+          "patterns": [
+            "\\$?30,000\\s*standard\\s*deduction"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2026_hoh": {
+      "key": "standard_deduction_2026_hoh",
+      "value": 24150.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.14",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, the standard deduction under section 63(c)(2) is $24,150 for heads of households.",
+      "source_quote_sha256": "676352356b6e2f6e11428bdb3e988db95df6fe75b4486d8bf18890941a9ab5b3",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "tax_brackets_2026_single": {
+      "key": "tax_brackets_2026_single",
+      "value": [
+        {
+          "rate": 10.0,
+          "min": 0,
+          "max": 12400
+        },
+        {
+          "rate": 12.0,
+          "min": 12400,
+          "max": 50400
+        },
+        {
+          "rate": 22.0,
+          "min": 50400,
+          "max": 105700
+        },
+        {
+          "rate": 24.0,
+          "min": 105700,
+          "max": 201775
+        },
+        {
+          "rate": 32.0,
+          "min": 201775,
+          "max": 256225
+        },
+        {
+          "rate": 35.0,
+          "min": 256225,
+          "max": 640600
+        },
+        {
+          "rate": 37.0,
+          "min": 640600,
+          "max": null
+        }
+      ],
+      "claim_class": "enacted_law",
+      "unit": "brackets",
+      "effective_year": 2026,
+      "citation": "IRS Rev. Proc. 2025-32 Section 4.01",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2026, unmarried individuals (other than surviving spouses and heads of households) are subject to marginal rates of 10%, 12%, 22%, 24%, 32%, 35%, and 37% with thresholds at $12,400, $50,400, $105,700, $201,775, $256,225, and $640,600.",
+      "source_quote_sha256": "5af6daed556ff4e091813356f4d91feebbfc62378c963ed223ab941aba8d998b",
+      "superseded_values": [
+        {
+          "value": [
+            12050,
+            48900,
+            104400
+          ],
+          "label": "Pre-OBBBA / 2025 bracket thresholds ($12,050 / $48,900 / $104,400)",
+          "reason": "Superseded by IRS Rev. Proc. 2025-32 2026 thresholds.",
+          "patterns": [
+            "\\$?12,050",
+            "\\$?48,900",
+            "\\$?104,400"
+          ]
+        },
+        {
+          "value": 39.6,
+          "label": "Repealed 39.6% TCJA sunset top rate",
+          "reason": "P.L. 119-21 permanently enacted the 37% top rate and repealed the 39.6% sunset.",
+          "patterns": [
+            "39\\.6%"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2027_single": {
+      "key": "standard_deduction_2027_single",
+      "value": 16600.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2027,
+      "citation": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-26-35.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2027, the standard deduction under section 63(c)(2) rises to $16,600 for single individuals and married individuals filing separately.",
+      "source_quote_sha256": "dba1d22e9b85e5e82033185ec1119b7ce21ec41debb448c150d412fe9f2cd381",
+      "superseded_values": [
+        {
+          "value": 8600.0,
+          "label": "Repealed TCJA Sunset Single Standard Deduction ($8,600)",
+          "reason": "TCJA sunset was repealed by P.L. 119-21; 2027 single standard deduction is $16,600.",
+          "patterns": [
+            "\\$?8,600"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2027_mfj": {
+      "key": "standard_deduction_2027_mfj",
+      "value": 33200.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2027,
+      "citation": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-26-35.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2027, the standard deduction under section 63(c)(2) rises to $33,200 for married couples filing jointly.",
+      "source_quote_sha256": "460d75f2fce4e3ac6697fb7f3666e9512b109b9dc3492f6bcbe2e9104e8cf671",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "standard_deduction_2027_hoh": {
+      "key": "standard_deduction_2027_hoh",
+      "value": 24925.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2027,
+      "citation": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-26-35.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2027, the standard deduction under section 63(c)(2) rises to $24,925 for heads of households.",
+      "source_quote_sha256": "7a1b45138ac4c9787eae24c9f624c7931570b5bdd701adebf74a67f91ac549f6",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "tax_brackets_2027_single": {
+      "key": "tax_brackets_2027_single",
+      "value": [
+        {
+          "rate": 10.0,
+          "min": 0,
+          "max": 12800
+        },
+        {
+          "rate": 12.0,
+          "min": 12800,
+          "max": 52025
+        },
+        {
+          "rate": 22.0,
+          "min": 52025,
+          "max": 109125
+        },
+        {
+          "rate": 24.0,
+          "min": 109125,
+          "max": 208325
+        },
+        {
+          "rate": 32.0,
+          "min": 208325,
+          "max": 264550
+        },
+        {
+          "rate": 35.0,
+          "min": 264550,
+          "max": 661375
+        },
+        {
+          "rate": 37.0,
+          "min": 661375,
+          "max": null
+        }
+      ],
+      "claim_class": "enacted_law",
+      "unit": "brackets",
+      "effective_year": 2027,
+      "citation": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-26-35.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For taxable years beginning in 2027, unmarried single filers are subject to marginal tax rates of 10%, 12%, 22%, 24%, 32%, 35%, and 37% with thresholds at $12,800, $52,025, $109,125, $208,325, $264,550, and $661,375.",
+      "source_quote_sha256": "008c909176fe499fc6cfc74defa170ed5649edd0a2712a07ab60230b47514c56",
+      "superseded_values": [
+        {
+          "value": 39.6,
+          "label": "Repealed 39.6% TCJA sunset rate",
+          "reason": "P.L. 119-21 repealed the 2026-2027 TCJA sunset and made 37% permanent.",
+          "patterns": [
+            "39\\.6%"
+          ]
+        },
+        {
+          "value": 30416.0,
+          "label": "Repealed CA sunset figure ($30,416)",
+          "reason": "Derived from repealed TCJA sunset schedule.",
+          "patterns": [
+            "\\$?30,416"
+          ]
+        },
+        {
+          "value": 19181.0,
+          "label": "2025 $15k standard deduction tax figure ($19,181)",
+          "reason": "Computed under superseded 2025 $15,000 standard deduction and 2025 brackets.",
+          "patterns": [
+            "\\$?19,181"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "qsbs_asset_ceiling_post_obbba": {
+      "key": "qsbs_asset_ceiling_post_obbba",
+      "value": 75000000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 70431 (amending 26 U.S.C. 1202(d)(1))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Law 119-21 Section 70431 increases the Qualified Small Business Stock aggregate gross asset ceiling from $50,000,000 to $75,000,000 for stock issued after July 4, 2025.",
+      "source_quote_sha256": "f7e9a632ee18d448347fdc0e771f8e742918fba6f7fbb20dc42abb58744373dd",
+      "superseded_values": [
+        {
+          "value": 50000000.0,
+          "label": "Legacy pre-July-4-2025 QSBS asset ceiling ($50,000,000)",
+          "reason": "Applies only to QSBS issued on or before July 4, 2025; post-OBBBA stock ceiling is $75,000,000.",
+          "patterns": [
+            "50\\s*million\\s*gross\\s*asset\\s*limit\\s*only"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "qsbs_exclusion_cap_post_obbba": {
+      "key": "qsbs_exclusion_cap_post_obbba",
+      "value": 15000000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 70431 (amending 26 U.S.C. 1202(b)(1))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Public Law 119-21 Section 70431 increases the per-issuer Section 1202 QSBS gain exclusion cap from $10,000,000 to $15,000,000 (or 10x basis) for stock acquired after July 4, 2025.",
+      "source_quote_sha256": "ea8f1bd2952fdb759140ba661100f48def4f897ecb412139d42ceb0d447ffb95",
+      "superseded_values": [
+        {
+          "value": 10000000.0,
+          "label": "Legacy pre-July-4-2025 QSBS exclusion cap ($10,000,000)",
+          "reason": "Legacy $10M cap applies only to stock acquired on or before July 4, 2025; post-OBBBA cap is $15,000,000.",
+          "patterns": [
+            "10\\s*million\\s*exclusion\\s*cap\\s*for\\s*2026\\s*issuances"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "qsbs_holding_tiers": {
+      "key": "qsbs_holding_tiers",
+      "value": {
+        "3_yr": 50,
+        "4_yr": 75,
+        "5_yr": 100
+      },
+      "claim_class": "enacted_law",
+      "unit": "percent_map",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 70431 (amending 26 U.S.C. 1202(a))",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "For QSBS acquired after July 4, 2025 under P.L. 119-21 Section 70431, the applicable gain exclusion percentage is 50 percent for stock held at least 3 years, 75 percent for stock held at least 4 years, and 100 percent for stock held at least 5 years.",
+      "source_quote_sha256": "5f531041b4068e1e20f25c2d9068202ef355e765c2ede3afc9083bd111fb149b",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "retirement_401k_2026": {
+      "key": "retirement_401k_2026",
+      "value": 24500.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "IRS Notice 2025-67 / 26 U.S.C. 402(g)",
+      "primary_source_url": "https://www.irs.gov/retirement-plans/401k-plan-fix-it-guide",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "The annual elective deferral limit for employees participating in 401(k), 403(b), and most 457 plans for 2026 is $24,500.",
+      "source_quote_sha256": "2364e7bc066c2f7f81506f1b75e29b1e738e5061476eccb3bcb411ed2c1eae75",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "oasdi_wage_base_2026": {
+      "key": "oasdi_wage_base_2026",
+      "value": 184500.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "SSA 2026 Social Security Contribution and Benefit Base",
+      "primary_source_url": "https://www.ssa.gov/news/press/factsheets/colafacts2026.pdf",
+      "publisher": "Social Security Administration",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "The maximum amount of earnings subject to the Social Security (OASDI) payroll tax for 2026 is $184,500.",
+      "source_quote_sha256": "ad57770cfee6886f8ca4cb758e52a1afcd3858f50d6bb2e76489021b31f498dd",
+      "superseded_values": [
+        {
+          "value": 176100.0,
+          "label": "2025 OASDI wage base ($176,100)",
+          "reason": "2025 wage base superseded by $184,500 for 2026.",
+          "patterns": [
+            "\\$?176,100"
+          ]
+        }
+      ],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    }
+  },
+  "formulas": {
+    "federal_income_tax_2026_single": {
+      "formula_id": "federal_income_tax_2026_single",
+      "model_name": "2026 Federal Income Tax (Single Filer, Rev. Proc. 2025-32)",
+      "expression": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0), 2)",
+      "js_expression": "(Math.round(((((((((0.1 * Math.min(Math.max(0.0, (gross_income - standard_deduction)), 12400.0)) + (0.12 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 50400.0) - 12400.0)))) + (0.22 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 105700.0) - 50400.0)))) + (0.24 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 201775.0) - 105700.0)))) + (0.32 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 256225.0) - 201775.0)))) + (0.35 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 640600.0) - 256225.0)))) + (0.37 * Math.max(0.0, (Math.max(0.0, (gross_income - standard_deduction)) - 640600.0))))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "gross_income": 125000.0,
+        "standard_deduction": 16100.0
+      },
+      "expected_baseline_output": 18734.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "Single $125k AGI baseline (Rev. Proc. 2025-32)",
+          "inputs": {
+            "gross_income": 125000.0,
+            "standard_deduction": 16100.0
+          },
+          "expected": 18734.0
+        },
+        {
+          "label": "Zero taxable income below standard deduction",
+          "inputs": {
+            "gross_income": 16000.0,
+            "standard_deduction": 16100.0
+          },
+          "expected": 0.0
+        },
+        {
+          "label": "Top 37% bracket high earner ($800k)",
+          "inputs": {
+            "gross_income": 800000.0,
+            "standard_deduction": 16100.0
+          },
+          "expected": 246000.25
+        }
+      ],
+      "citation_keys": [
+        "irs_rp_2025_32"
+      ],
+      "allowed_slug_patterns": [
+        ".*tax-bracket.*",
+        ".*irs-2026.*",
+        ".*federal-tax.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#estimated-federal-tax",
+        "[data-output='federal_tax']"
+      ]
+    },
+    "federal_income_tax_2027_single": {
+      "formula_id": "federal_income_tax_2027_single",
+      "model_name": "2027 Federal Income Tax (Single Filer, Rev. Proc. 2026-35)",
+      "expression": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12800.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 52025.0) - 12800.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 109125.0) - 52025.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 208325.0) - 109125.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 264550.0) - 208325.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 661375.0) - 264550.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 661375.0), 2)",
+      "js_expression": "(Math.round(((((((((0.1 * Math.min(Math.max(0.0, (gross_income - standard_deduction)), 12800.0)) + (0.12 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 52025.0) - 12800.0)))) + (0.22 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 109125.0) - 52025.0)))) + (0.24 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 208325.0) - 109125.0)))) + (0.32 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 264550.0) - 208325.0)))) + (0.35 * Math.max(0.0, (Math.min(Math.max(0.0, (gross_income - standard_deduction)), 661375.0) - 264550.0)))) + (0.37 * Math.max(0.0, (Math.max(0.0, (gross_income - standard_deduction)) - 661375.0))))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "gross_income": 125000.0,
+        "standard_deduction": 16600.0
+      },
+      "expected_baseline_output": 18389.5,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "Single $125k AGI 2027 (Rev. Proc. 2026-35)",
+          "inputs": {
+            "gross_income": 125000.0,
+            "standard_deduction": 16600.0
+          },
+          "expected": 18389.5
+        },
+        {
+          "label": "Single $75k AGI 2027",
+          "inputs": {
+            "gross_income": 75000.0,
+            "standard_deduction": 16600.0
+          },
+          "expected": 7389.5
+        }
+      ],
+      "citation_keys": [
+        "irs_rp_2026_35"
+      ],
+      "allowed_slug_patterns": [
+        ".*2027.*tax.*",
+        ".*tcja.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#estimated-federal-tax-2027",
+        "[data-output='federal_tax_2027']"
+      ]
+    },
+    "section_179_heavy_suv_plus_bonus_2026": {
+      "formula_id": "section_179_heavy_suv_plus_bonus_2026",
+      "model_name": "2026 Section 179 (with $32,000 Heavy SUV Cap) + 100% Bonus Depreciation",
+      "expression": "round(min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) + max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * (bonus_pct / 100.0), 2)",
+      "js_expression": "(Math.round(((Math.min((equipment_cost * business_use_pct), ((is_heavy_suv === 1) ? 32000.0 : Math.max(0.0, (2560000.0 - Math.max(0.0, (equipment_cost - 4090000.0)))))) + (Math.max(0.0, ((equipment_cost * business_use_pct) - Math.min((equipment_cost * business_use_pct), ((is_heavy_suv === 1) ? 32000.0 : Math.max(0.0, (2560000.0 - Math.max(0.0, (equipment_cost - 4090000.0)))))))) * (bonus_pct / 100.0)))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "equipment_cost": 85000.0,
+        "business_use_pct": 0.8,
+        "is_heavy_suv": 1,
+        "bonus_pct": 100.0
+      },
+      "expected_baseline_output": 68000.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "Heavy SUV $85k at 80% business use + 100% bonus",
+          "inputs": {
+            "equipment_cost": 85000.0,
+            "business_use_pct": 0.8,
+            "is_heavy_suv": 1,
+            "bonus_pct": 100.0
+          },
+          "expected": 68000.0
+        },
+        {
+          "label": "Heavy SUV $85k at 80% business use, Section 179 only (0% bonus) capped at $32,000",
+          "inputs": {
+            "equipment_cost": 85000.0,
+            "business_use_pct": 0.8,
+            "is_heavy_suv": 1,
+            "bonus_pct": 0.0
+          },
+          "expected": 32000.0
+        },
+        {
+          "label": "General Equipment $3,000,000 at 100% business use, 0% bonus (under phaseout)",
+          "inputs": {
+            "equipment_cost": 3000000.0,
+            "business_use_pct": 1.0,
+            "is_heavy_suv": 0,
+            "bonus_pct": 0.0
+          },
+          "expected": 2560000.0
+        },
+        {
+          "label": "General Equipment $5,000,000 phaseout reduction ($910k over $4.09M)",
+          "inputs": {
+            "equipment_cost": 5000000.0,
+            "business_use_pct": 1.0,
+            "is_heavy_suv": 0,
+            "bonus_pct": 0.0
+          },
+          "expected": 1650000.0
+        }
+      ],
+      "citation_keys": [
+        "pl_119_21_70306",
+        "irs_rp_2025_32",
+        "pl_119_21_70301"
+      ],
+      "allowed_slug_patterns": [
+        ".*section-179.*",
+        ".*heavy-vehicle.*",
+        ".*macrs.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#total-first-year-deduction",
+        "[data-output='first_year_deduction']"
+      ]
+    },
+    "scorp_fica_savings_2026": {
+      "formula_id": "scorp_fica_savings_2026",
+      "model_name": "2026 S-Corp vs Sole Proprietor FICA Savings (Both Sides Capped at $184,500 OASDI)",
+      "expression": "round((min(net_profit * 0.9235, 184500.0) * 0.124 + (net_profit * 0.9235) * 0.029) - (min(reasonable_salary, 184500.0) * 0.124 + reasonable_salary * 0.029), 2)",
+      "js_expression": "(Math.round(((((Math.min((net_profit * 0.9235), 184500.0) * 0.124) + ((net_profit * 0.9235) * 0.029)) - ((Math.min(reasonable_salary, 184500.0) * 0.124) + (reasonable_salary * 0.029)))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "net_profit": 155000.0,
+        "reasonable_salary": 95000.0
+      },
+      "expected_baseline_output": 7365.8,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$155k net profit / $95k S-Corp salary",
+          "inputs": {
+            "net_profit": 155000.0,
+            "reasonable_salary": 95000.0
+          },
+          "expected": 7365.8
+        },
+        {
+          "label": "$220k net profit / $95k S-Corp salary (SE capped at $184.5k)",
+          "inputs": {
+            "net_profit": 220000.0,
+            "reasonable_salary": 95000.0
+          },
+          "expected": 14234.93
+        },
+        {
+          "label": "$300k net profit / $200k S-Corp salary (BOTH sides capped at $184,500 OASDI)",
+          "inputs": {
+            "net_profit": 300000.0,
+            "reasonable_salary": 200000.0
+          },
+          "expected": 2234.45
+        }
+      ],
+      "citation_keys": [
+        "ssa_oasdi_2026"
+      ],
+      "allowed_slug_patterns": [
+        ".*s-corp.*",
+        ".*payroll.*",
+        ".*salary.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#fica-tax-savings",
+        "[data-output='fica_savings']"
+      ]
+    },
+    "section_1031_boot_recognized_gain": {
+      "formula_id": "section_1031_boot_recognized_gain",
+      "model_name": "IRC Section 1031 Exchange Recognized Gain (Boot & Debt Relief)",
+      "expression": "round(min(max(0.0, (relinquished_sale_price - selling_expenses) - (original_basis + capital_improvements - accumulated_depreciation)), max(0.0, cash_boot) + max(0.0, relinquished_mortgage - replacement_mortgage - cash_added_for_debt)), 2)",
+      "js_expression": "(Math.round((Math.min(Math.max(0.0, ((relinquished_sale_price - selling_expenses) - ((original_basis + capital_improvements) - accumulated_depreciation))), (Math.max(0.0, cash_boot) + Math.max(0.0, ((relinquished_mortgage - replacement_mortgage) - cash_added_for_debt))))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "relinquished_sale_price": 1200000.0,
+        "selling_expenses": 72000.0,
+        "original_basis": 600000.0,
+        "capital_improvements": 80000.0,
+        "accumulated_depreciation": 150000.0,
+        "cash_boot": 50000.0,
+        "relinquished_mortgage": 400000.0,
+        "replacement_mortgage": 350000.0,
+        "cash_added_for_debt": 0.0
+      },
+      "expected_baseline_output": 100000.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$1.2M sale with $50k cash boot + $50k mortgage boot",
+          "inputs": {
+            "cash_boot": 50000.0,
+            "relinquished_mortgage": 400000.0,
+            "replacement_mortgage": 350000.0
+          },
+          "expected": 100000.0
+        },
+        {
+          "label": "Full 1031 deferral (zero boot)",
+          "inputs": {
+            "cash_boot": 0.0,
+            "relinquished_mortgage": 400000.0,
+            "replacement_mortgage": 450000.0
+          },
+          "expected": 0.0
+        }
+      ],
+      "citation_keys": [
+        "irc_1031"
+      ],
+      "allowed_slug_patterns": [
+        ".*1031.*",
+        ".*like-kind.*",
+        ".*boot.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#recognized-gain",
+        "[data-output='recognized_gain']"
+      ]
+    },
+    "qsbs_1202_excluded_gain": {
+      "formula_id": "qsbs_1202_excluded_gain",
+      "model_name": "IRC Section 1202 QSBS Post-OBBBA Tiered Gain Exclusion",
+      "expression": "round((min(realized_gain, max(15000000.0, 10.0 * stock_basis)) * (1.0 if holding_years >= 5 else (0.75 if holding_years >= 4 else (0.50 if holding_years >= 3 else 0.0)))) if gross_assets_at_issuance <= 75000000.0 else 0.0, 2)",
+      "js_expression": "(Math.round((((gross_assets_at_issuance <= 75000000.0) ? (Math.min(realized_gain, Math.max(15000000.0, (10.0 * stock_basis))) * ((holding_years >= 5) ? 1.0 : ((holding_years >= 4) ? 0.75 : ((holding_years >= 3) ? 0.5 : 0.0)))) : 0.0)) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "realized_gain": 18000000.0,
+        "stock_basis": 1000000.0,
+        "holding_years": 5,
+        "gross_assets_at_issuance": 60000000.0
+      },
+      "expected_baseline_output": 15000000.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "5-year hold, $60M assets, $18M gain capped at $15M",
+          "inputs": {
+            "realized_gain": 18000000.0,
+            "stock_basis": 1000000.0,
+            "holding_years": 5,
+            "gross_assets_at_issuance": 60000000.0
+          },
+          "expected": 15000000.0
+        },
+        {
+          "label": "4-year hold (75% tier) on $10M gain",
+          "inputs": {
+            "realized_gain": 10000000.0,
+            "stock_basis": 500000.0,
+            "holding_years": 4,
+            "gross_assets_at_issuance": 60000000.0
+          },
+          "expected": 7500000.0
+        },
+        {
+          "label": "3-year hold (50% tier) on $10M gain",
+          "inputs": {
+            "realized_gain": 10000000.0,
+            "stock_basis": 500000.0,
+            "holding_years": 3,
+            "gross_assets_at_issuance": 60000000.0
+          },
+          "expected": 5000000.0
+        },
+        {
+          "label": "Ineligible >$75M gross assets",
+          "inputs": {
+            "realized_gain": 10000000.0,
+            "stock_basis": 500000.0,
+            "holding_years": 5,
+            "gross_assets_at_issuance": 80000000.0
+          },
+          "expected": 0.0
+        }
+      ],
+      "citation_keys": [
+        "irc_1202_qsbs"
+      ],
+      "allowed_slug_patterns": [
+        ".*qsbs.*",
+        ".*1202.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#qsbs-excluded-gain",
+        "[data-output='qsbs_excluded_gain']"
+      ]
+    }
+  },
+  "citations_allowlist": {
+    "pl_119_21_70306": {
+      "canonical": "P.L. 119-21 Section 70306 (OBBBA Statutory Enactment)",
+      "patterns": [
+        "P\\.?L\\.?\\s*119-21\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_179": {
+      "canonical": "IRC Section 179 / 26 U.S.C. Section 179",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*179\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?179\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*1031.*",
+        ".*qsbs.*",
+        ".*1202.*",
+        ".*runway.*",
+        ".*treasury.*"
+      ]
+    },
+    "irs_rp_2025_32": {
+      "canonical": "IRS Rev. Proc. 2025-32",
+      "patterns": [
+        "Rev\\.?\\s*Proc\\.?\\s*2025-32"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irs_rp_2026_35": {
+      "canonical": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+      "patterns": [
+        "Rev\\.?\\s*Proc\\.?\\s*2026-35",
+        "IR-2026-133"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "pl_119_21_70301": {
+      "canonical": "P.L. 119-21 Section 70301 (26 U.S.C. 168(k) Bonus Depreciation)",
+      "patterns": [
+        "168\\(k\\)",
+        "Section\\s*70301"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_1031": {
+      "canonical": "26 U.S.C. Section 1031 / Form 8824",
+      "patterns": [
+        "Section\\s*1031\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?1031\\b",
+        "Form\\s*8824\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*qsbs.*",
+        ".*1202.*",
+        ".*section-179.*",
+        ".*crypto.*",
+        ".*runway.*"
+      ]
+    },
+    "irc_1202_qsbs": {
+      "canonical": "26 U.S.C. Section 1202 / P.L. 119-21 Section 70431 (QSBS)",
+      "patterns": [
+        "Section\\s*1202\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?1202\\b",
+        "Section\\s*70431\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*1031.*",
+        ".*section-179.*",
+        ".*crypto.*",
+        ".*runway.*",
+        ".*treasury.*"
+      ]
+    },
+    "ssa_oasdi_2026": {
+      "canonical": "SSA 2026 OASDI Wage Base ($184,500) / IRC Section 3101 & 1401",
+      "patterns": [
+        "184,500",
+        "OASDI",
+        "IRC\\s*Section\\s*(?:3101|3111|1401)"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "ftc_16_cfr_255": {
+      "canonical": "16 CFR Part 255 (FTC Endorsement Guides)",
+      "patterns": [
+        "16\\s*CFR\\s*(?:Part\\s*)?255(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1j": {
+      "canonical": "IRC Section 1(j) / 26 U.S.C. Section 1",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*1(?:\\(j\\))?(?![0-9A-Za-z(])",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?1(?:\\(j\\))?(?![0-9A-Za-z(])"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_280f": {
+      "canonical": "IRC Section 280F (Luxury Auto & Listed Property Depreciation Caps)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*280F",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?280F"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_409a": {
+      "canonical": "IRC Section 409A (Nonqualified Deferred Compensation & Startup Equity)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*409A\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?409A\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_41": {
+      "canonical": "IRC Section 41 (R&D Tax Credit)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*41\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?41\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "usc_31_3124": {
+      "canonical": "31 U.S.C. 3124 (U.S. Treasury Obligation State Tax Exemption)",
+      "patterns": [
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*)?3124\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irs_rp_2024_28": {
+      "canonical": "IRS Rev. Proc. 2024-28 (Digital Asset Safe Harbor)",
+      "patterns": [
+        "Rev\\.?\\s*Proc\\.?\\s*2024-28\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "pl_115_97": {
+      "canonical": "P.L. 115-97 (Tax Cuts and Jobs Act)",
+      "patterns": [
+        "(?:P\\.?L\\.?|Pub\\.?\\s*L\\.?)\\s*115-97\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_199a": {
+      "canonical": "IRC Section 199A (Qualified Business Income Deduction)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*199A\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?199A\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*1031.*",
+        ".*qsbs.*",
+        ".*1202.*",
+        ".*crypto.*"
+      ]
+    },
+    "irc_section_280g": {
+      "canonical": "IRC Section 280G (Golden Parachute Payments)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*280G\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?280G\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*1031.*",
+        ".*section-179.*",
+        ".*crypto.*"
+      ]
+    },
+    "irc_section_55_56a": {
+      "canonical": "IRC Section 55 & Section 56A (Corporate Alternative Minimum Tax)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:55|56A)\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:55|56A)\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_6621": {
+      "canonical": "IRC Section 6621 (Underpayment & Overpayment Interest Rates)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*6621\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?6621\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1221_1h": {
+      "canonical": "IRC Section 1221 & Section 1(h) (Capital Gains & Holding Periods)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*(?:1221|1\\(h\\))\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?(?:1221|1\\(h\\))\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_6045": {
+      "canonical": "IRC Section 6045 (Broker Digital Asset Reporting / Form 1099-DA)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*6045\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?6045\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_3111_3301": {
+      "canonical": "IRC Section 3111 & Section 3301 (Employer FICA & FUTA)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:3111|3301)\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:3111|3301)\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1366_3121": {
+      "canonical": "IRC Section 1366, Section 3121 & Rev. Rul. 74-44 (S-Corp Pass-Through & Reasonable Salary)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:1366|3121)\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:1366|3121)\\b",
+        "Rev\\.?\\s*Rul\\.?\\s*74-44\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_408_401k_223": {
+      "canonical": "IRC Section 408, Section 401(k) & Section 223 (Retirement & HSA Limits)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*(?:408|401(?:\\(k\\))?|223)\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?(?:408|401(?:\\(k\\))?|223)\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    }
+  },
+  "disclosures": [
+    {
+      "disclosure_id": "circular_230_non_tax_advice",
+      "required_text_patterns": [
+        "Circular\\s*230",
+        "not\\s+(?:constitute\\s+)?(?:individualized\\s+)?(?:tax|legal|accounting)\\s+advice"
+      ],
+      "applies_to_slug_patterns": [
+        ".*"
+      ],
+      "canonical_text": "Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic statutory modeling for educational and planning purposes only and do not constitute individualized tax, legal, or accounting advice. Consult a licensed CPA or tax attorney before filing."
+    }
+  ],
+  "banned_claims": [
+    {
+      "pattern": "30\\.6%\\s+reduction\\s+in\\s+statutory\\s+capital\\s+drag",
+      "reason": "Unsubstantiated synthetic marketing claim"
+    },
+    {
+      "pattern": "30\\.6%\\s+Average\\s+Capital\\s+Efficiency\\s+Lift",
+      "reason": "Unsubstantiated synthetic marketing claim"
+    },
+    {
+      "pattern": "3\\.0%\\s+federal\\s+marginal\\s+tax\\s+bracket",
+      "reason": "Non-existent federal marginal bracket"
+    },
+    {
+      "pattern": "revert\\s+to\\s+10%\\s*(?:-|to)\\s*39\\.6%",
+      "reason": "Repealed TCJA sunset claim superseded by P.L. 119-21"
+    },
+    {
+      "pattern": "\\$30,416",
+      "reason": "Repealed CA TCJA sunset tax calculation figure"
+    },
+    {
+      "pattern": "guaranteed\\s+tax\\s+savings",
+      "reason": "Prohibited tax outcome guarantee"
+    }
+  ],
+  "cross_tenant_brand_tokens": [
+    "prexvo",
+    "prexvo.com",
+    "gainhelm",
+    "gainhelm.com",
+    "lienbond",
+    "lienbond.com",
+    "title iv",
+    "pslf",
+    "repayment assistance plan",
+    "cmmc",
+    "c3pao",
+    "sprs",
+    "miller act",
+    "wh-347",
+    "mechanics lien",
+    "splash_financial",
+    "vanta_security"
+  ],
+  "allowed_shared_legal_tokens": [
+    "irs",
+    "26 u.s.c.",
+    "irc",
+    "p.l. 119-21",
+    "circular 230",
+    "ssa",
+    "16 cfr part 255"
+  ]
+}

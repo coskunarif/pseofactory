@@ -273,10 +273,30 @@ def test_write_substrate_lock_preserves_lienbond_fields_and_syncs_ledgers_and_fr
     assert payload["substrate_hash"] == "deadbeef1234"
     assert payload["total_assets"] == 1
 
+    # Fail-closed invariant: when existing freshness_audit_report.json has mismatched hash ('old' != 'deadbeef1234'),
+    # write_substrate_lock must NOT silently overwrite drifted=False or fabricate matching substrate_hash.
     freshness = json.loads((repo_dir / "freshness_audit_report.json").read_text(encoding="utf-8"))
-    assert freshness["substrate_hash"] == "deadbeef1234"
-    assert freshness["merkle_drift"]["substrate_hash"] == "deadbeef1234"
-    assert freshness["merkle_drift"]["drifted"] is False
+    assert freshness["substrate_hash"] == "old"
+    assert freshness["merkle_drift"]["substrate_hash"] == "old"
+    assert freshness["merkle_drift"]["drifted"] is True
+    assert freshness["truth_pack_freshness"]["status"] in ("FRESH", "EXPIRING_SOON")
+
+    # When recorded hash matches expected_hash, merkle_drift.drifted clears to False cleanly
+    (repo_dir / "freshness_audit_report.json").write_text(
+        json.dumps({"merkle_drift": {"drifted": True, "substrate_hash": "deadbeef1234"}, "substrate_hash": "deadbeef1234"}),
+        encoding="utf-8",
+    )
+    write_substrate_lock(
+        repo_dir,
+        property_id="lienbond",
+        expected_hash="deadbeef1234",
+        dist_dir=tmp_path / "custom_dist",
+        sync_ledgers=True,
+    )
+    freshness_aligned = json.loads((repo_dir / "freshness_audit_report.json").read_text(encoding="utf-8"))
+    assert freshness_aligned["substrate_hash"] == "deadbeef1234"
+    assert freshness_aligned["merkle_drift"]["substrate_hash"] == "deadbeef1234"
+    assert freshness_aligned["merkle_drift"]["drifted"] is False
 
     eh_data = json.loads((agy_dir / "engine_hash.json").read_text(encoding="utf-8"))
     assert eh_data["engine_hash"] == "deadbeef1234"
@@ -885,12 +905,11 @@ def test_lienbond_ci_deploy_syndication_and_metadata_parity(tmp_path: Path):
     assert "profithelm" not in pack_txt.lower()
     assert (synd_dir / "ai_benchmarks" / "ai_benchmarks_manifest.json").is_file()
 
-    write_substrate_lock(lb_repo, property_id="lienbond", expected_hash="cafebabe9999", sync_ledgers=True)
-    assert (lb_repo / "freshness_audit_report.json").is_file()
+    lock_payload = write_substrate_lock(lb_repo, property_id="lienbond", expected_hash="cafebabe9999", sync_ledgers=True)
+    # Fail-closed invariant: write_substrate_lock must NEVER fabricate a fake CERTIFIED_FRESH report when none exists
+    assert not (lb_repo / "freshness_audit_report.json").exists()
     assert (lb_repo / "dist" / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
-    fresh = json.loads((lb_repo / "freshness_audit_report.json").read_text(encoding="utf-8"))
-    assert fresh["status"] == "PASS"
-    assert fresh["substrate_hash"] == "cafebabe9999"
+    assert lock_payload["substrate_hash"] == "cafebabe9999"
 
 
 def test_youtube_upload_ledger_merges_into_uploaded_log_before_substrate_lock_hash(tmp_path: Path):

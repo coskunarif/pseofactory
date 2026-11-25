@@ -1226,58 +1226,98 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
     }"""
 
 
-def _render_runtime_sync_maps_js() -> str:
-    return """    var _syncing = false;
+def _normalize_runtime_sync_property_id(property_id: Optional[str] = None) -> Optional[str]:
+    """Normalizes property_id for runtime sync scoping; returns None when omitted for backwards compatibility."""
+    if property_id is None:
+        return None
+    raw = str(property_id).strip().lower()
+    if not raw:
+        return None
+    if raw in ("profithelm-platform", "factory", "exchange1031"):
+        return "profithelm"
+    return raw
+
+
+def _runtime_sync_tenant_flags(property_id: Optional[str] = None) -> Tuple[bool, bool, bool, bool, bool]:
+    """Returns (include_all, is_profithelm, is_prexvo, is_gainhelm, is_lienbond)."""
+    eff_pid = _normalize_runtime_sync_property_id(property_id)
+    include_all = eff_pid is None
+    return (
+        include_all,
+        include_all or eff_pid == "profithelm",
+        include_all or eff_pid == "prexvo",
+        include_all or eff_pid == "gainhelm",
+        include_all or eff_pid == "lienbond",
+    )
+
+
+def _render_runtime_sync_maps_js(property_id: Optional[str] = None) -> str:
+    _, is_profithelm, is_prexvo, is_gainhelm, is_lienbond = _runtime_sync_tenant_flags(property_id)
+    slider_entries: List[str] = [
+        '      "field-income_slider": "field-gross_income"',
+        '      "field-salary_slider": "field-net_business_income"',
+    ]
+    if is_profithelm or is_lienbond:
+        slider_entries.extend([
+            '      "field-bond_slider": "field-bond_amount"',
+            '      "field-invoice_slider": "field-invoice_face_value"',
+            '      "field-payroll_slider": "field-annual_covered_payroll"',
+        ])
+    if is_profithelm:
+        slider_entries.extend([
+            '      "field-qre_slider": "field-current_year_domestic_qre"',
+            '      "field-customs_slider": "field-declared_customs_value"',
+            '      "field-cost_slider": "field-equipment_cost"',
+            '      "field-price_slider": "field-purchase_price"',
+            '      "field-proceeds_slider": "field-gross_proceeds_1099da"',
+            '      "tax-income-slider": "tax-income"',
+            '      "sec179-cost-slider": "sec179-cost"',
+            '      "sec1031-sale-price-slider": "sec1031-sale-price"',
+            '      "sec1031-basis-slider": "sec1031-basis"',
+            '      "sec1031-depreciation-slider": "sec1031-depreciation"',
+            '      "sec1031-rep-price-slider": "sec1031-rep-price"',
+            '      "cg-ordinary-slider": "cg-ordinary-income"',
+            '      "cg-amount-slider": "cg-amount"',
+            '      "tey-principal-slider": "tey-principal"',
+            '      "tey-tbill-slider": "tey-tbill-yield"',
+            '      "tey-hysa-slider": "tey-hysa-yield"',
+            '      "pm-tax-gain-slider": "pm-tax-gain"',
+            '      "pm-tax-income-slider": "pm-tax-income"',
+            '      "crypto-short-term-slider": "crypto-short-term"',
+            '      "crypto-long-term-slider": "crypto-long-term"',
+            '      "crypto-staking-slider": "crypto-staking"',
+            '      "crypto-ordinary-income-slider": "crypto-ordinary-income"',
+            '      "runway-cash-slider": "runway-cash"',
+            '      "runway-expenses-slider": "runway-expenses"',
+            '      "runway-revenue-slider": "runway-revenue"',
+            '      "runway-growth-slider": "runway-growth"',
+            '      "arb-yes-slider": "arb-yes-cents"',
+            '      "arb-no-slider": "arb-no-cents"',
+            '      "arb-capital-slider": "arb-capital"',
+        ])
+    if is_prexvo:
+        slider_entries.extend([
+            '      "range-agi": "input-agi"',
+            '      "range-loan_balance": "input-loan_balance"',
+            '      "range-family_size": "input-family_size"',
+            '      "range-private_refi_rate": "input-private_refi_rate"',
+        ])
+    slider_map_body = ",\n".join(slider_entries)
+
+    return f"""    var _syncing = false;
     var _userInteracted = false;
     var _initialUrlHydrated = false;
     var _lastInteractionScope = "primary";
     var _initialLiveOutputNum = NaN;
     var _initialCliffEpochBase = NaN;
     var _latestLiveOutputNum = NaN;
-    var SLIDER_TO_INPUT_MAP = {
-      "field-income_slider": "field-gross_income",
-      "field-bond_slider": "field-bond_amount",
-      "field-invoice_slider": "field-invoice_face_value",
-      "field-qre_slider": "field-current_year_domestic_qre",
-      "field-customs_slider": "field-declared_customs_value",
-      "field-payroll_slider": "field-annual_covered_payroll",
-      "field-cost_slider": "field-equipment_cost",
-      "field-price_slider": "field-purchase_price",
-      "field-salary_slider": "field-net_business_income",
-      "field-proceeds_slider": "field-gross_proceeds_1099da",
-      "tax-income-slider": "tax-income",
-      "sec179-cost-slider": "sec179-cost",
-      "sec1031-sale-price-slider": "sec1031-sale-price",
-      "sec1031-basis-slider": "sec1031-basis",
-      "sec1031-depreciation-slider": "sec1031-depreciation",
-      "sec1031-rep-price-slider": "sec1031-rep-price",
-      "cg-ordinary-slider": "cg-ordinary-income",
-      "cg-amount-slider": "cg-amount",
-      "tey-principal-slider": "tey-principal",
-      "tey-tbill-slider": "tey-tbill-yield",
-      "tey-hysa-slider": "tey-hysa-yield",
-      "pm-tax-gain-slider": "pm-tax-gain",
-      "pm-tax-income-slider": "pm-tax-income",
-      "crypto-short-term-slider": "crypto-short-term",
-      "crypto-long-term-slider": "crypto-long-term",
-      "crypto-staking-slider": "crypto-staking",
-      "crypto-ordinary-income-slider": "crypto-ordinary-income",
-      "runway-cash-slider": "runway-cash",
-      "runway-expenses-slider": "runway-expenses",
-      "runway-revenue-slider": "runway-revenue",
-      "runway-growth-slider": "runway-growth",
-      "arb-yes-slider": "arb-yes-cents",
-      "arb-no-slider": "arb-no-cents",
-      "arb-capital-slider": "arb-capital",
-      "range-agi": "input-agi",
-      "range-loan_balance": "input-loan_balance",
-      "range-family_size": "input-family_size",
-      "range-private_refi_rate": "input-private_refi_rate"
-    };
-    var INPUT_TO_SLIDER_MAP = {};
-    for (var sKey in SLIDER_TO_INPUT_MAP) {
+    var SLIDER_TO_INPUT_MAP = {{
+{slider_map_body}
+    }};
+    var INPUT_TO_SLIDER_MAP = {{}};
+    for (var sKey in SLIDER_TO_INPUT_MAP) {{
       INPUT_TO_SLIDER_MAP[SLIDER_TO_INPUT_MAP[sKey]] = sKey;
-    }
+    }}""" + """
 
     var PRESET_KEY_ALIASES = {
       "cost": ["purchase_price", "sec179-cost", "equipment_cost", "vehicle_cost", "gross_income", "tax-income", "net_business_income", "loan_balance", "gross_amount", "serp-179-cost"],
@@ -1382,7 +1422,7 @@ def _render_runtime_sync_maps_js() -> str:
       "emr_multiplier": ["experience_mod_rate", "experience_mod_factor", "field-experience_mod_rate", "field-experience_mod_factor"],
       "lease": ["year_one_financing_payments", "annual_lease_payment", "serp-b2b-deduction"],
       "year_one_financing_payments": ["year_one_financing_payments", "annual_lease_payment", "serp-b2b-deduction"],
-      "lease_annual_payment": ["equipment_cost", "field-equipment_cost", "field-cost_slider", "serp-179-cost"],
+      "lease_annual_payment": ["equipment_cost", "field-equipment_cost", "field-cost_slider", "serp-179-cost"]""" + (""",
       "headcount": ["calc-input-headcount", "serp-b2b-gross"],
       "grc_tier": ["calc-input-extra_criteria", "serp-b2b-deduction"],
       "audit_type": ["calc-input-unimplemented_5pt"],
@@ -1390,13 +1430,13 @@ def _render_runtime_sync_maps_js() -> str:
       "unimplemented_5pt": ["calc-input-unimplemented_5pt"],
       "unimplemented_3pt": ["calc-input-unimplemented_3pt"],
       "unimplemented_1pt": ["calc-input-unimplemented_1pt"],
-      "compromised_records": ["calc-input-compromised_records"],
+      "compromised_records": ["calc-input-compromised_records"]""" if is_gainhelm else "") + (""",
       "coa": ["field-loan_balance", "input-loan_balance", "serp-loan-balance"],
       "aid": ["field-agi", "input-agi", "serp-loan-agi"],
       "annual_unsubsidized_cap": ["serp-loan-spouse-agi", "field-loan_balance", "input-loan_balance"],
       "spouse_agi": ["serp-loan-spouse-agi", "field-agi", "input-agi"],
       "private_refi_rate": ["field-interest_rate", "input-private_refi_rate"],
-      "qualifying_months": ["field-family_size", "input-family_size"],
+      "qualifying_months": ["field-family_size", "input-family_size"]""" if is_prexvo else "") + (""",
       "inp-income": ["tax-income", "field-gross_income", "serp-tax-gross", "cg-ordinary-income"],
       "sec179-rate": ["sec179-bracket", "field-marginal_tax_rate_pct"],
       "crypto-income": ["crypto-ordinary-income", "serp-crypto-proceeds"],
@@ -1413,9 +1453,8 @@ def _render_runtime_sync_maps_js() -> str:
       "freight_insurance": ["field-freight_and_insurance", "field-ocean_freight_insurance", "serp-179-income", "serp-b2b-deduction"],
       "freight_and_insurance": ["field-freight_and_insurance", "field-ocean_freight_insurance", "serp-b2b-deduction"],
       "benefits_annual": ["serp-b2b-deduction"],
-      "foreign_qre": ["current_year_foreign_qre", "field-current_year_foreign_qre", "field-foreign_rd_spend"]
-    };
-    PRESET_KEY_ALIASES["kal" + "shi_price"] = ["arb-yes-cents", "arb-yes-slider"];
+      "foreign_qre": ["current_year_foreign_qre", "field-current_year_foreign_qre", "field-foreign_rd_spend"]""" if is_profithelm else "") + """
+    };""" + ('\n    PRESET_KEY_ALIASES["kal" + "shi_price"] = ["arb-yes-cents", "arb-yes-slider"];' if is_profithelm else "") + """
 
     function formatOutNum(val) {
       if (isNaN(val) || !isFinite(val)) return "0";
@@ -1520,83 +1559,128 @@ def _render_runtime_sync_maps_js() -> str:
     }"""
 
 
-def _render_runtime_sync_workbench_js() -> str:
-    return """    function bridgePrimaryInputsToSerpWorkbench() {
-      try {
+def _render_runtime_sync_workbench_js(property_id: Optional[str] = None) -> str:
+    _, is_profithelm, is_prexvo, is_gainhelm, is_lienbond = _runtime_sync_tenant_flags(property_id)
+    bridge_pairs: List[str] = [
+        '          ["field-gross_income", "serp-b2b-gross"]',
+        '          ["input-gross_amount", "serp-b2b-gross"]',
+        '          ["field-net_business_income", "serp-b2b-gross"]',
+    ]
+    if is_profithelm:
+        bridge_pairs.extend([
+            '          ["field-gross_income", "serp-tax-gross"]',
+            '          ["field-gross_income", "serp-crypto-proceeds"]',
+            '          ["field-gross_income", "serp-179-cost"]',
+            '          ["field-gross_income", "serp-1031-rel-debt"]',
+            '          ["tax-income", "serp-tax-gross"]',
+            '          ["tax-income", "serp-crypto-proceeds"]',
+            '          ["tax-income", "serp-b2b-gross"]',
+            '          ["sec179-cost", "serp-179-cost"]',
+            '          ["sec179-cost", "serp-b2b-gross"]',
+            '          ["field-purchase_price", "serp-179-cost"]',
+            '          ["field-equipment_cost", "serp-179-cost"]',
+            '          ["sec1031-sale-price", "serp-1031-rel-debt"]',
+            '          ["sec1031-sale-price", "serp-crypto-proceeds"]',
+            '          ["sec1031-sale-price", "serp-b2b-gross"]',
+            '          ["sec1031-rep-price", "serp-1031-rep-debt"]',
+            '          ["sec1031-depreciation", "serp-1031-depr"]',
+            '          ["crypto-short-term", "serp-crypto-proceeds"]',
+            '          ["field-gross_proceeds_1099da", "serp-crypto-proceeds"]',
+            '          ["input-total_parachute_payment", "serp-b2b-gross"]',
+            '          ["input-five_year_avg_w2_base_amount", "serp-b2b-deduction"]',
+            '          ["input-outside_securities_counsel_retainer", "serp-b2b-gross"]',
+            '          ["input-gross_amount", "serp-tax-gross"]',
+            '          ["input-gross_amount", "serp-179-cost"]',
+            '          ["input-gross_amount", "serp-1031-rel-debt"]',
+            '          ["input-gross_amount", "serp-crypto-proceeds"]',
+            '          ["runway-cash", "serp-b2b-gross"]',
+            '          ["tey-principal", "serp-b2b-gross"]',
+            '          ["cg-amount", "serp-b2b-gross"]',
+            '          ["arb-capital", "serp-b2b-gross"]',
+            '          ["pm-tax-gain", "serp-b2b-gross"]',
+            '          ["input-qualifying_plan_assets", "serp-b2b-gross"]',
+            '          ["field-relinquished_sale_price", "serp-1031-rel-debt"]',
+            '          ["field-relinquished_sale_price", "serp-b2b-gross"]',
+            '          ["field-vehicle_cost", "serp-179-cost"]',
+            '          ["field-vehicle_cost", "serp-b2b-gross"]',
+            '          ["field-current_qre_spend", "serp-b2b-gross"]',
+            '          ["field-customs_value_fob", "serp-b2b-gross"]',
+            '          ["cg-ordinary-income", "serp-b2b-gross"]',
+            '          ["arb-yes-cents", "serp-b2b-gross"]',
+            '          ["field-current_year_domestic_qre", "serp-b2b-gross"]',
+            '          ["field-declared_customs_value", "serp-b2b-gross"]',
+        ])
+    if is_prexvo:
+        bridge_pairs.extend([
+            '          ["input-agi", "serp-loan-agi"]',
+            '          ["input-pgy_resident_agi", "serp-loan-agi"]',
+            '          ["input-loan_balance", "serp-loan-balance"]',
+            '          ["input-med_school_loan_balance", "serp-loan-balance"]',
+            '          ["input-qualifying_health_loan_balance", "serp-loan-balance"]',
+            '          ["field-agi", "serp-loan-agi"]',
+            '          ["field-loan_balance", "serp-loan-balance"]',
+            '          ["input-gross_amount", "serp-loan-agi"]',
+            '          ["input-gross_amount", "serp-loan-balance"]',
+        ])
+    if is_profithelm or is_lienbond:
+        bridge_pairs.extend([
+            '          ["input-unpaid_subcontract_balance", "serp-b2b-gross"]',
+            '          ["input-original_prime_contract_price", "serp-b2b-deduction"]',
+            '          ["field-bond_amount", "serp-b2b-gross"]',
+            '          ["input-bond_amount", "serp-b2b-gross"]',
+            '          ["input-bond_penalty_amount", "serp-b2b-gross"]',
+            '          ["field-bond_penalty_amount", "serp-b2b-gross"]',
+            '          ["input-field_trade_payroll", "serp-b2b-gross"]',
+            '          ["input-annual_payroll", "serp-b2b-gross"]',
+            '          ["field-annual_payroll", "serp-b2b-gross"]',
+            '          ["input-unpaid_contract_draw", "serp-b2b-gross"]',
+            '          ["input-unpaid_progress_billing", "serp-b2b-gross"]',
+            '          ["input-gross_contract_billed", "serp-b2b-gross"]',
+            '          ["input-direct_job_cost", "serp-b2b-gross"]',
+            '          ["input-annual_prevailing_hours", "serp-b2b-gross"]',
+            '          ["input-manual_workers_comp_premium", "serp-b2b-gross"]',
+            '          ["input-annual_subcontract_volume", "serp-b2b-gross"]',
+            '          ["input-contract_price", "serp-b2b-gross"]',
+            '          ["field-invoice_face_value", "serp-b2b-gross"]',
+            '          ["field-annual_covered_payroll", "serp-b2b-gross"]',
+        ])
+    bridge_pairs_body = ",\n".join(bridge_pairs)
+
+    sec_targets_list = ['"serp-b2b-deduction"']
+    if is_profithelm:
+        sec_targets_list = ['"serp-tax-pretax"', '"serp-179-income"', '"serp-1031-costs"', '"serp-crypto-fees"'] + sec_targets_list
+    if is_prexvo:
+        sec_targets_list.append('"serp-loan-spouse-agi"')
+    sec_targets_js = ", ".join(sec_targets_list)
+
+    init_sel_list = ['"[data-primary-output=\'true\']"']
+    if is_profithelm:
+        init_sel_list.extend([
+            '"#val-total_federal_tax"',
+            '"#sec179-res-writeoff"',
+            '"#res-crypto-tax"',
+            '"#res-total-tax"',
+            '"#res-runway-months"',
+            '"#res-arb-profit"',
+            '"#res-pm-tax-savings"',
+        ])
+    if is_prexvo:
+        init_sel_list.append('"#metric-rap_payment"')
+    init_sel_list.extend([
+        '"#hero-range-baseline"',
+        '"[id^=\'val-\']"',
+        '"[id^=\'sec179-res-\']"' if is_profithelm else None,
+        '"[id^=\'res-\']"',
+        '"[id^=\'metric-\']:not([id^=\'metric-card-\'])"',
+        '".output-value:not(.overlay-preset-readout)"',
+    ])
+    init_sel_body = ",\n            ".join(x for x in init_sel_list if x)
+
+    return f"""    function bridgePrimaryInputsToSerpWorkbench() {{
+      try {{
         var pairs = [
-          ["field-gross_income", "serp-tax-gross"],
-          ["field-gross_income", "serp-b2b-gross"],
-          ["field-gross_income", "serp-crypto-proceeds"],
-          ["field-gross_income", "serp-179-cost"],
-          ["field-gross_income", "serp-1031-rel-debt"],
-          ["tax-income", "serp-tax-gross"],
-          ["tax-income", "serp-crypto-proceeds"],
-          ["tax-income", "serp-b2b-gross"],
-          ["sec179-cost", "serp-179-cost"],
-          ["sec179-cost", "serp-b2b-gross"],
-          ["field-purchase_price", "serp-179-cost"],
-          ["field-equipment_cost", "serp-179-cost"],
-          ["sec1031-sale-price", "serp-1031-rel-debt"],
-          ["sec1031-sale-price", "serp-crypto-proceeds"],
-          ["sec1031-sale-price", "serp-b2b-gross"],
-          ["sec1031-rep-price", "serp-1031-rep-debt"],
-          ["sec1031-depreciation", "serp-1031-depr"],
-          ["crypto-short-term", "serp-crypto-proceeds"],
-          ["field-gross_proceeds_1099da", "serp-crypto-proceeds"],
-          ["input-agi", "serp-loan-agi"],
-          ["input-pgy_resident_agi", "serp-loan-agi"],
-          ["input-loan_balance", "serp-loan-balance"],
-          ["input-med_school_loan_balance", "serp-loan-balance"],
-          ["input-qualifying_health_loan_balance", "serp-loan-balance"],
-          ["field-agi", "serp-loan-agi"],
-          ["field-loan_balance", "serp-loan-balance"],
-          ["input-total_parachute_payment", "serp-b2b-gross"],
-          ["input-five_year_avg_w2_base_amount", "serp-b2b-deduction"],
-          ["input-outside_securities_counsel_retainer", "serp-b2b-gross"],
-          ["input-unpaid_subcontract_balance", "serp-b2b-gross"],
-          ["input-original_prime_contract_price", "serp-b2b-deduction"],
-          ["input-gross_amount", "serp-tax-gross"],
-          ["input-gross_amount", "serp-179-cost"],
-          ["input-gross_amount", "serp-1031-rel-debt"],
-          ["input-gross_amount", "serp-crypto-proceeds"],
-          ["input-gross_amount", "serp-loan-agi"],
-          ["input-gross_amount", "serp-loan-balance"],
-          ["input-gross_amount", "serp-b2b-gross"],
-          ["runway-cash", "serp-b2b-gross"],
-          ["tey-principal", "serp-b2b-gross"],
-          ["cg-amount", "serp-b2b-gross"],
-          ["arb-capital", "serp-b2b-gross"],
-          ["pm-tax-gain", "serp-b2b-gross"],
-          ["field-bond_amount", "serp-b2b-gross"],
-          ["input-bond_amount", "serp-b2b-gross"],
-          ["input-bond_penalty_amount", "serp-b2b-gross"],
-          ["field-bond_penalty_amount", "serp-b2b-gross"],
-          ["input-field_trade_payroll", "serp-b2b-gross"],
-          ["input-annual_payroll", "serp-b2b-gross"],
-          ["field-annual_payroll", "serp-b2b-gross"],
-          ["input-unpaid_contract_draw", "serp-b2b-gross"],
-          ["input-unpaid_progress_billing", "serp-b2b-gross"],
-          ["input-gross_contract_billed", "serp-b2b-gross"],
-          ["input-direct_job_cost", "serp-b2b-gross"],
-          ["input-annual_prevailing_hours", "serp-b2b-gross"],
-          ["input-qualifying_plan_assets", "serp-b2b-gross"],
-          ["input-manual_workers_comp_premium", "serp-b2b-gross"],
-          ["input-annual_subcontract_volume", "serp-b2b-gross"],
-          ["input-contract_price", "serp-b2b-gross"],
-          ["field-relinquished_sale_price", "serp-1031-rel-debt"],
-          ["field-relinquished_sale_price", "serp-b2b-gross"],
-          ["field-vehicle_cost", "serp-179-cost"],
-          ["field-vehicle_cost", "serp-b2b-gross"],
-          ["field-current_qre_spend", "serp-b2b-gross"],
-          ["field-customs_value_fob", "serp-b2b-gross"],
-          ["cg-ordinary-income", "serp-b2b-gross"],
-          ["arb-yes-cents", "serp-b2b-gross"],
-          ["field-invoice_face_value", "serp-b2b-gross"],
-          ["field-current_year_domestic_qre", "serp-b2b-gross"],
-          ["field-declared_customs_value", "serp-b2b-gross"],
-          ["field-annual_covered_payroll", "serp-b2b-gross"],
-          ["field-net_business_income", "serp-b2b-gross"]
-        ];
+{bridge_pairs_body}
+        ];""" + """
         for (var i = 0; i < pairs.length; i++) {
           var src = document.getElementById(pairs[i][0]);
           var dst = document.getElementById(pairs[i][1]);
@@ -1608,7 +1692,7 @@ def _render_runtime_sync_workbench_js() -> str:
               dst.value = src.value;
             }
           }
-        }
+        }""" + ("""
         var cStEl = document.getElementById("crypto-short-term");
         var cLtEl = document.getElementById("crypto-long-term");
         var cSkEl = document.getElementById("crypto-staking");
@@ -1626,7 +1710,7 @@ def _render_runtime_sync_workbench_js() -> str:
           var cgOrdV = cgOrdEl ? (parseFloat(String(cgOrdEl.value || "0").replace(/,/g, "")) || 0) : 0;
           var cgAmtV = cgAmtEl ? (parseFloat(String(cgAmtEl.value || "0").replace(/,/g, "")) || 0) : 0;
           cgTaxGrossEl.value = String(Math.max(1000, Math.round(cgOrdV + cgAmtV)));
-        }
+        }""" if is_profithelm else "") + ("""
         var hcEl = document.getElementById("calc-input-headcount");
         var b2bGrossEl = document.getElementById("serp-b2b-gross");
         if (hcEl && b2bGrossEl) {
@@ -1648,7 +1732,9 @@ def _render_runtime_sync_workbench_js() -> str:
           if (b2bDedEl) {
             b2bDedEl.value = String(Math.round(scaledGross * 0.307));
           }
-        }
+        }""" if is_gainhelm else """
+        var hcEl = null;
+        var b2bGrossEl = document.getElementById("serp-b2b-gross");""") + """
         var primarySrcSet = {};
         for (var pIdx = 0; pIdx < pairs.length; pIdx++) {
           primarySrcSet[pairs[pIdx][0]] = true;
@@ -1677,7 +1763,7 @@ def _render_runtime_sync_workbench_js() -> str:
             }
           }
         }
-        var secTargets = ["serp-tax-pretax", "serp-179-income", "serp-1031-costs", "serp-crypto-fees", "serp-loan-spouse-agi", "serp-b2b-deduction"];
+        var secTargets = [""" + sec_targets_js + """];
         for (var stIdx = 0; stIdx < secTargets.length; stIdx++) {
           var stEl = document.getElementById(secTargets[stIdx]);
           if (stEl && !(hcEl && secTargets[stIdx] === "serp-b2b-deduction")) {
@@ -1699,14 +1785,14 @@ def _render_runtime_sync_workbench_js() -> str:
           }
         }
       } catch (e) {}
-    }
+    }""" + ("""
 
     function evalProgressiveFederalTax(taxableIncome, regime) {
       var inc = Math.max(0, taxableIncome);
       var tiers = regime === "2027_obbba" ? [
-        [12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [1e12, 0.37]
+        [12800, 0.10], [52025, 0.12], [109125, 0.22], [208325, 0.24], [264550, 0.32], [661375, 0.35], [1e12, 0.37]
       ] : [
-        [12050, 0.10], [48900, 0.12], [104400, 0.22], [199300, 0.24], [253000, 0.32], [632700, 0.35], [1e12, 0.37]
+        [12400, 0.10], [50400, 0.12], [105700, 0.22], [201775, 0.24], [256225, 0.32], [640600, 0.35], [1e12, 0.37]
       ];
       var tax = 0;
       var prev = 0;
@@ -1747,35 +1833,21 @@ def _render_runtime_sync_workbench_js() -> str:
       var ltcg = g <= 533400 ? (g * 0.15) : ((533400 * 0.15) + ((g - 533400) * 0.20));
       var niit = g > 200000 ? (g - 200000) * 0.038 : 0;
       return Math.round(ltcg + niit);
-    }
+    }""" if is_profithelm else "") + f"""
 
-    function captureInitialLiveBaseline() {
-      try {
+    function captureInitialLiveBaseline() {{
+      try {{
         var cliffYearsInit = [2024, 2025, 2026, 2027, 2028];
-        for (var ci = 0; ci < cliffYearsInit.length; ci++) {
+        for (var ci = 0; ci < cliffYearsInit.length; ci++) {{
           var ce = document.getElementById("cliff-exposure-" + String(cliffYearsInit[ci]));
-          if (ce && !ce.hasAttribute("data-ssr-text")) {
+          if (ce && !ce.hasAttribute("data-ssr-text")) {{
             ce.setAttribute("data-ssr-text", (ce.textContent || "").trim());
-          }
-        }
-        if (isNaN(_initialLiveOutputNum)) {
+          }}
+        }}
+        if (isNaN(_initialLiveOutputNum)) {{
           var initSelectors = [
-            "[data-primary-output='true']",
-            "#val-total_federal_tax",
-            "#sec179-res-writeoff",
-            "#res-crypto-tax",
-            "#res-total-tax",
-            "#res-runway-months",
-            "#res-arb-profit",
-            "#res-pm-tax-savings",
-            "#metric-rap_payment",
-            "#hero-range-baseline",
-            "[id^='val-']",
-            "[id^='sec179-res-']",
-            "[id^='res-']",
-            "[id^='metric-']:not([id^='metric-card-'])",
-            ".output-value:not(.overlay-preset-readout)"
-          ];
+            {init_sel_body}
+          ];""" + """
           for (var si = 0; si < initSelectors.length; si++) {
             var se = document.querySelector(initSelectors[si]);
             if (!se) continue;
@@ -1884,10 +1956,10 @@ def _render_runtime_sync_workbench_js() -> str:
       try {
         var wbEl = document.getElementById("serp-incumbent-depth-workbench");
         var activeMode = String(workbenchMode || (wbEl ? wbEl.getAttribute("data-workbench-mode") : "") || "").toLowerCase();
-        var isIncomeTaxMode = activeMode === "tax_brackets";
+        var isIncomeTaxMode = """ + ('activeMode === "tax_brackets"' if is_profithelm else "false") + """;
         var total = Math.max(1, retainedVal + taxVal);
         var cliffYears = [2024, 2025, 2026, 2027, 2028, 2030];
-        var stdDedsByEpoch = [14600, 15000, 16100, 16500, 16900, 17750];
+        var stdDedsByEpoch = [14600, 15750, 16100, 16600, 17100, 17950];
         var epochBase = taxVal > 0 ? taxVal : Math.max(100, Math.round(retainedVal * 0.15));
         if (!_userInteracted && isNaN(_initialCliffEpochBase) && epochBase > 0) {
           _initialCliffEpochBase = epochBase;
@@ -1943,13 +2015,14 @@ def _render_runtime_sync_workbench_js() -> str:
           var a1 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-primary") || "0") || retainedVal) : retainedVal;
           var a2 = pinnedA ? (parseFloat(compRoot.getAttribute("data-scn-a-secondary") || "0") || taxVal) : taxVal;
           var bInput = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-input") || "0") || total) : total;
-          var defaultB2;
+          var defaultB2;""" + ("""
           if (isIncomeTaxMode) {
             var unshieldedTax = evalProgressiveFederalTax(Math.max(0, total - 16100), "2026_active");
             defaultB2 = Math.max(taxVal, unshieldedTax);
           } else {
             defaultB2 = (typeof counterfactualVal === "number" && isFinite(counterfactualVal) && counterfactualVal >= 0) ? counterfactualVal : taxVal;
-          }
+          }""" if is_profithelm else """
+          defaultB2 = (typeof counterfactualVal === "number" && isFinite(counterfactualVal) && counterfactualVal >= 0) ? counterfactualVal : taxVal;""") + """
           var b2 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-secondary") || "0") || defaultB2) : defaultB2;
           var defaultB1 = isIncomeTaxMode ? Math.max(0, bInput - b2) : retainedVal;
           var b1 = pinnedB ? (parseFloat(compRoot.getAttribute("data-scn-b-primary") || "0") || defaultB1) : defaultB1;
@@ -2045,7 +2118,8 @@ def _render_runtime_sync_workbench_js() -> str:
         var ban1 = document.getElementById("serp-banner-metric-primary");
         var ban2 = document.getElementById("serp-banner-metric-secondary");
 
-        if (mode === "crypto") {
+        if (false) {
+        }""" + (""" else if (mode === "crypto") {
           var proc = parseFloat((document.getElementById("serp-crypto-proceeds") || {}).value || "85000") || 0;
           var basis = parseFloat((document.getElementById("serp-crypto-basis") || {}).value || "32000") || 0;
           var fees = parseFloat((document.getElementById("serp-crypto-fees") || {}).value || "1250") || 0;
@@ -2073,7 +2147,7 @@ def _render_runtime_sync_workbench_js() -> str:
           var pretax = parseFloat((document.getElementById("serp-tax-pretax") || {}).value || "32500") || 0;
           var ptet = parseFloat((document.getElementById("serp-tax-ptet") || {}).value || "15400") || 0;
           var regime = ((document.getElementById("serp-tax-regime") || {}).value || "2026_active").toLowerCase();
-          var stdDed = regime === "2027_obbba" ? 16500 : 16100;
+          var stdDed = regime === "2027_obbba" ? 16600 : 16100;
           var effPtet = regime === "ptet_shield" ? Math.max(ptet, Math.round(gross * 0.093)) : ptet;
           var saltDed = regime === "ptet_shield" ? effPtet : Math.min(effPtet, 10000);
           var adjTaxable = Math.max(0, gross - pretax - saltDed);
@@ -2104,13 +2178,13 @@ def _render_runtime_sync_workbench_js() -> str:
           if (pClass === "passenger_auto") {
             rawAllow = Math.min(cost, 20400);
           } else if (pClass === "heavy_suv") {
-            var suv179 = Math.min(cost, 30500);
+            var suv179 = Math.min(cost, 32000);
             var remBasis = Math.max(0, cost-suv179);
-            rawAllow = suv179 + Math.round(remBasis * 0.20);
+            rawAllow = suv179 + Math.round(remBasis * 1.00);
           } else {
             var base179 = Math.min(cost, max179);
             var rem179 = Math.max(0, cost-base179);
-            rawAllow = base179 + Math.round(rem179 * 0.20);
+            rawAllow = base179 + Math.round(rem179 * 1.00);
           }
           var writeOff = Math.min(rawAllow, Math.max(20400, incCap));
           var effRate179 = Math.min(0.45, Math.max(0.24, 0.35 + ((incCap - 320000) / 10000000)));
@@ -2145,15 +2219,15 @@ def _render_runtime_sync_workbench_js() -> str:
           if (ban1) ban1.textContent = fmtUsd(netBoot);
           if (ban2) ban2.textContent = fmtUsd(defTax);
           updateSerpSvgChart(carryBasis, defTax, "Reinvested Exchange Equity", "Deferred Tax Preserved", mode, defTax);
-        } else if (mode === "repayment_loan") {
+        }""" if is_profithelm else "") + (""" else if (mode === "repayment_loan") {
           var bAgi = parseFloat((document.getElementById("serp-loan-agi") || {}).value || "78000") || 0;
           var sAgi = parseFloat((document.getElementById("serp-loan-spouse-agi") || {}).value || "64000") || 0;
           var lBal = parseFloat((document.getElementById("serp-loan-balance") || {}).value || "68000") || 0;
           var fMode = ((document.getElementById("serp-loan-filing") || {}).value || "mfs_new").toLowerCase();
           var isForgivenessTrack = (fMode === ("ps" + "lf_track"));
           var effAgi = fMode === "mfj_new" ? (bAgi + sAgi) : bAgi;
-          var rapPov = fMode === "mfj_new" ? 47565 : 35212;
-          var ibrPov = fMode === "mfj_new" ? 31710 : (isForgivenessTrack ? 26900 : 23475);
+          var rapPov = fMode === "mfj_new" ? 48690 : 35910;
+          var ibrPov = fMode === "mfj_new" ? 32460 : (isForgivenessTrack ? 27430 : 23940);
           var ibrRate = fMode === "mfs_old" ? 0.15 : 0.10;
           var rapMo = Math.round(Math.max(0, (effAgi - rapPov) * 0.10) / 12);
           var std10Mo = Math.round(lBal * 0.01135);
@@ -2173,11 +2247,11 @@ def _render_runtime_sync_workbench_js() -> str:
           if (lBal > 0 || sAgi > 0) {
             updateInteractiveCliffAndComparator(annRet + Math.round(lBal * 0.1) + mfsSaveYr, Math.max(100, annRap + Math.round((std10Mo - refiMo) * 12) + Math.round(mfsSaveYr * 0.25)), mode, Math.max(100, annIbr));
           }
-        } else if (mode === "b2b" || mode === "cyber_grc" || mode === "surety_lien" || mode === "construction_surety_lien" || mode) {
-          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {}).value || (mode === "cyber_grc" ? "84000" : "450000")) || 0;
-          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || (mode === "cyber_grc" ? "25800" : "165000")) || 0;
-          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || (mode === "cyber_grc" ? "22.0" : "24.5")) || 0) / 100;
-          var bReg = ((document.getElementById("serp-b2b-regime") || {}).value || "optimal_election").toLowerCase();
+        }""" if is_prexvo else "") + f""" else if ({' || '.join([x for x in ['mode === "b2b"', 'mode === "cyber_grc"' if is_gainhelm else None, 'mode === "surety_lien" || mode === "construction_surety_lien"' if is_lienbond else None, 'mode'] if x])}) {{
+          var bGross = parseFloat((document.getElementById("serp-b2b-gross") || {{}}).value || """ + ('(mode === "cyber_grc" ? "84000" : "450000")' if is_gainhelm else '"450000"') + """) || 0;
+          var bDed = parseFloat((document.getElementById("serp-b2b-deduction") || {}).value || """ + ('(mode === "cyber_grc" ? "25800" : "165000")' if is_gainhelm else '"165000"') + """) || 0;
+          var bRate = (parseFloat((document.getElementById("serp-b2b-rate") || {}).value || """ + ('(mode === "cyber_grc" ? "22.0" : "24.5")' if is_gainhelm else '"24.5"') + """) || 0) / 100;
+          var bReg = ((document.getElementById("serp-b2b-regime") || {}).value || "optimal_election").toLowerCase();""" + ("""
           if (mode === "cyber_grc") {
             var effGrcDed = bReg === "unoptimized_baseline" ? 0 : (bReg === "stress_case" ? Math.round(bDed * 0.7) : bDed);
             var rateAdj = Math.round((bRate - 0.22) * bGross * 0.25);
@@ -2193,7 +2267,8 @@ def _render_runtime_sync_workbench_js() -> str:
             if (ban1) ban1.textContent = fmtUsd(netTco);
             if (ban2) ban2.textContent = fmtUsd(grcSaved);
             updateSerpSvgChart(unautoTco, netTco, "Unautomated Audit TCO", "Net Automated TCO", mode, unautoTco);
-          } else {
+          } else {""" if is_gainhelm else """
+          {""") + """
             var adjRate = bReg === "stress_case" ? (bRate * 1.2) : bRate;
             var cappedDed = Math.min(bDed, Math.round(bGross * 0.85));
             var excessDed = Math.max(0, bDed - cappedDed);
@@ -2213,7 +2288,7 @@ def _render_runtime_sync_workbench_js() -> str:
           }
         }
       } catch (wbErr) {}
-    }
+    }""" + ("""
 
     function mirrorPrimaryToLegacyBenchmarks() {
       try {
@@ -2251,7 +2326,9 @@ def _render_runtime_sync_workbench_js() -> str:
           }
         }
       } catch (e) {}
-    }
+    }""" if is_profithelm else """
+
+    function mirrorPrimaryToLegacyBenchmarks() {}""") + """
 
     function fmtUsd2(val) {
       if (isNaN(val) || !isFinite(val)) return "$0.00";
@@ -2263,7 +2340,7 @@ def _render_runtime_sync_workbench_js() -> str:
       return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(val);
     }
 
-    function syncComplianceAuditFormOutputs(outNodes) {
+    """ + ("""function syncComplianceAuditFormOutputs(outNodes) {
       var auditForm = document.querySelector("form[id$='-compliance-form']");
       if (!auditForm) return false;
       if (typeof window.__complianceSyncWorkspaceOutputs === "function") {
@@ -2279,9 +2356,9 @@ def _render_runtime_sync_workbench_js() -> str:
       var hc = Math.max(1, Math.round(Math.max(0, parseFloat(hcEl ? hcEl.value : "75") || 75)));
       var crit = Math.min(4, Math.max(0, Math.round(parseFloat(critEl ? critEl.value : "2"))));
       if (isNaN(crit)) crit = 2;
-      var u5 = Math.min(42, Math.max(0, Math.round(parseFloat(u5El ? u5El.value : "3") || 0)));
+      var u5 = Math.min(44, Math.max(0, Math.round(parseFloat(u5El ? u5El.value : "3") || 0)));
       var u3 = Math.min(14, Math.max(0, Math.round(parseFloat(u3El ? u3El.value : "2") || 0)));
-      var u1 = Math.min(54, Math.max(0, Math.round(parseFloat(u1El ? u1El.value : "2") || 0)));
+      var u1 = Math.min(51, Math.max(0, Math.round(parseFloat(u1El ? u1El.value : "2") || 0)));
       var rec = Math.max(0, Math.round(parseFloat(recEl ? recEl.value : "1500") || 0));
 
       var scaleFactor = hc / 75.0;
@@ -2292,13 +2369,13 @@ def _render_runtime_sync_workbench_js() -> str:
       var autoSavings = Math.round((internalLabor * 0.55) * 100) / 100;
       var sprsDeduction = (u5 * 5) + (u3 * 3) + (u1 * 1);
       var sprsScore = Math.max(-203, 110 - sprsDeduction);
-      var cmmcRem = Math.round((380.0 * 115.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+      var cmmcRem = Math.round((380.0 * 121.67 * Math.max(0.5, scaleFactor)) * 100) / 100;
       var cmmcTotal = Math.round((48500.0 + 26400.0 + cmmcRem + 13400.0) * 100) / 100;
       var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
       var isoReg = Math.round((isoDays * 1950.0) * 100) / 100;
-      var isoRem = Math.round((180.0 * 125.28 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
+      var isoRem = Math.round((180.0 * 121.67 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
       var isoTotal = Math.round((isoReg + 14500.0 + 8500.0 + isoRem) * 100) / 100;
-      var ocrFine = Math.min(rec * 13795.0, 2067813.0);
+      var ocrFine = Math.min(rec * 13795.0, 2190294.0);
       var hipaaResp = Math.round((95000.0 + (rec * 195.0)) * 100) / 100;
       var hipaaTotal = Math.round((ocrFine + hipaaResp) * 100) / 100;
       var pciCde = Math.round((38800.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
@@ -2403,11 +2480,13 @@ def _render_runtime_sync_workbench_js() -> str:
       if (hrLow) hrLow.textContent = fmtHeroVal(primaryVal * 0.8);
       if (hrHigh) hrHigh.textContent = fmtHeroVal(primaryVal * 1.2);
       return true;
-    }
+    }""" if is_gainhelm else """function syncComplianceAuditFormOutputs() {
+      return false;
+    }""") + """
 
     function updateOutputsSynchronously(triggerScale) {
       try {
-        if (_userInteracted && _lastInteractionScope !== "serp") bridgePrimaryInputsToSerpWorkbench();
+        if (_userInteracted && _lastInteractionScope !== "serp") bridgePrimaryInputsToSerpWorkbench();""" + ("""
         if (typeof window.updateTaxCalculator === "function" && document.getElementById("tax-income")) window.updateTaxCalculator("input");
         if (typeof window.updateCryptoCalculator === "function" && document.getElementById("crypto-short-term")) {
           window.updateCryptoCalculator();
@@ -2424,7 +2503,7 @@ def _render_runtime_sync_workbench_js() -> str:
             var coEl = document.getElementById("crypto-ordinary-income");
             var coInc = (coEl && !isNaN(parseFloat(coEl.value))) ? Math.max(0, parseFloat(coEl.value)) : 85000;
             var totOrd = coInc + csG + ckG;
-            var cTiers = cStatVal === "married_joint" ? [24100, 97800, 208800, 398600, 506300, 759600] : [17200, 66400, 171600, 334500, 506300, 633100];
+            var cTiers = cStatVal === "married_joint" ? [24800, 100800, 211400, 403550, 512450, 768700] : [17700, 67450, 174400, 340100, 512450, 640600];
             var oRate = totOrd > cTiers[5] ? 0.37 : (totOrd > cTiers[4] ? 0.35 : (totOrd > cTiers[3] ? 0.32 : (totOrd > cTiers[2] ? 0.24 : (totOrd > cTiers[1] ? 0.22 : (totOrd > cTiers[0] ? 0.12 : 0.10)))));
             var cLtcgCfg = cStatVal === "married_joint" ? { t0: 96700, t15: 600050, niit: 250000 } : { t0: 64750, t15: 566700, niit: 200000 };
             var cAt0 = Math.max(0, Math.min(totOrd + clG, cLtcgCfg.t0) - Math.max(totOrd, 0));
@@ -2448,7 +2527,7 @@ def _render_runtime_sync_workbench_js() -> str:
         if (typeof window.updateSection179Calculator === "function" && document.getElementById("sec179-cost")) window.updateSection179Calculator("input");
         if (typeof window.updateTreasuryYieldCalculator === "function" && document.getElementById("tey-principal")) window.updateTreasuryYieldCalculator("input");
         if (typeof window.updateSection1031Calculator === "function" && document.getElementById("sec1031-sale-price")) window.updateSection1031Calculator("sale-input");
-        if (typeof window.updatePredictionMarketTaxCalculator === "function" && document.getElementById("pm-tax-gain")) window.updatePredictionMarketTaxCalculator("gain-input");
+        if (typeof window.updatePredictionMarketTaxCalculator === "function" && document.getElementById("pm-tax-gain")) window.updatePredictionMarketTaxCalculator("gain-input");""" if is_profithelm else "") + """
       } catch (e) {}
       if (_userInteracted) mirrorPrimaryToLegacyBenchmarks();
       updateSerpWorkbenchSynchronously();
@@ -2477,10 +2556,10 @@ def _render_runtime_sync_workbench_js() -> str:
       }
 
       var hasNativeCalc = Boolean(
-        document.querySelector("form.calculator-form, #calc-form, #calculator-form, [id^='metric-'], [id^='val-'], [id^='res-'], #rap-subsidy-meter")
+        document.querySelector("form.calculator-form, #calc-form, #calculator-form, [id^='metric-'], [id^='val-'], [id^='res-']""" + (", #rap-subsidy-meter" if is_prexvo else "") + """")""" + ("""
         || typeof window.updateTaxCalculator === "function"
         || typeof window.updateCryptoCalculator === "function"
-        || typeof window.updateSection179Calculator === "function"
+        || typeof window.updateSection179Calculator === "function\"""" if is_profithelm else "") + """
       );
 
       if (hasNativeCalc || _lastInteractionScope === "serp") {
@@ -2493,17 +2572,17 @@ def _render_runtime_sync_workbench_js() -> str:
         }
         var nativeOutSelectors = [
           "[data-primary-output='true']",
-          "#val-total_federal_tax",
+          """ + (""""#val-total_federal_tax",
           "#sec179-res-writeoff",
           "#res-crypto-tax",
           "#res-total-tax",
           "#res-runway-months",
           "#res-arb-profit",
           "#res-pm-tax-savings",
-          "#metric-rap_payment",
-          "[id^='val-']",
-          "[id^='sec179-res-']",
-          "[id^='res-']",
+          """ if is_profithelm else "") + (""""#metric-rap_payment",
+          """ if is_prexvo else "") + """"[id^='val-']",
+          """ + (""""[id^='sec179-res-']",
+          """ if is_profithelm else "") + """"[id^='res-']",
           "[id^='metric-']:not([id^='metric-card-'])"
         ];
         var detectedNativeEl = null;
@@ -2641,7 +2720,49 @@ def _render_runtime_sync_workbench_js() -> str:
     }"""
 
 
-def _render_runtime_sync_events_js() -> str:
+def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
+    _, is_profithelm, is_prexvo, is_gainhelm, is_lienbond = _runtime_sync_tenant_flags(property_id)
+    primary_calc_ids = ['"field-gross_income"', '"field-net_business_income"']
+    priority_calc_ids = ['"field-gross_income"', '"field-net_business_income"', '"serp-b2b-gross"']
+    if is_profithelm:
+        primary_calc_ids = [
+            '"sec1031-sale-price"', '"sec179-cost"', '"tax-income"', '"field-gross_income"',
+            '"crypto-long-term"', '"crypto-short-term"', '"runway-cash"', '"tey-principal"',
+            '"cg-amount"', '"arb-capital"', '"pm-tax-gain"', '"input-qualifying_plan_assets"',
+            '"field-relinquished_sale_price"', '"field-vehicle_cost"', '"field-current_qre_spend"',
+            '"field-customs_value_fob"', '"field-current_year_domestic_qre"', '"field-declared_customs_value"',
+            '"field-net_business_income"', '"input-total_parachute_payment"',
+            '"input-outside_securities_counsel_retainer"',
+        ]
+        priority_calc_ids = [
+            '"sec1031-sale-price"', '"serp-1031-rel-debt"', '"sec179-cost"', '"serp-179-cost"',
+            '"tax-income"', '"field-gross_income"', '"serp-tax-gross"', '"crypto-short-term"',
+            '"serp-crypto-proceeds"', '"runway-cash"', '"tey-principal"', '"cg-amount"',
+            '"arb-capital"', '"pm-tax-gain"', '"input-qualifying_plan_assets"',
+            '"field-relinquished_sale_price"', '"field-vehicle_cost"', '"field-current_qre_spend"',
+            '"field-customs_value_fob"', '"field-current_year_domestic_qre"', '"field-declared_customs_value"',
+            '"field-net_business_income"', '"serp-b2b-gross"',
+        ]
+    if is_prexvo:
+        primary_calc_ids.extend(['"field-loan_balance"', '"input-loan_balance"', '"input-med_school_loan_balance"'])
+        priority_calc_ids.extend(['"field-loan_balance"', '"input-loan_balance"', '"serp-loan-balance"'])
+    if is_profithelm or is_lienbond:
+        primary_calc_ids.extend([
+            '"field-bond_amount"', '"input-bond_amount"', '"field-bond_penalty_amount"',
+            '"input-unpaid_progress_billing"', '"input-gross_contract_billed"', '"input-direct_job_cost"',
+            '"input-manual_workers_comp_premium"', '"input-annual_subcontract_volume"',
+            '"field-annual_payroll"', '"field-invoice_face_value"', '"field-annual_covered_payroll"',
+            '"input-unpaid_subcontract_balance"',
+        ])
+        priority_calc_ids.extend([
+            '"field-bond_amount"', '"input-bond_amount"', '"field-bond_penalty_amount"',
+            '"input-unpaid_progress_billing"', '"input-gross_contract_billed"', '"input-direct_job_cost"',
+            '"input-manual_workers_comp_premium"', '"input-annual_subcontract_volume"',
+            '"field-annual_payroll"', '"field-invoice_face_value"', '"field-annual_covered_payroll"',
+        ])
+    primary_calc_js = ", ".join(dict.fromkeys(primary_calc_ids))
+    priority_calc_js = ", ".join(dict.fromkeys(priority_calc_ids))
+
     return """    function resolveCurrentToolSlug() {
       try {
         var p = (window.location && window.location.pathname) ? window.location.pathname : "";
@@ -2724,28 +2845,13 @@ def _render_runtime_sync_events_js() -> str:
     }
 
     function resolveActiveScenarioAmount() {
-      var bestAmt = 0;
+      var bestAmt = 0;""" + ("""
       var socEl = document.getElementById("metric-soc2_total_cost");
       if (socEl && socEl.textContent && socEl.textContent.indexOf("$") !== -1) {
         var socV = parseFloat(socEl.textContent.replace(/[^0-9.]/g, ""));
         if (!isNaN(socV) && socV >= 1000) bestAmt = socV;
-      }
-      var primaryCalcIds = [
-        "sec1031-sale-price", "sec179-cost", "tax-income", "field-gross_income",
-        "crypto-long-term", "crypto-short-term", "field-loan_balance", "input-loan_balance",
-        "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
-        "field-bond_amount", "input-bond_amount", "field-bond_penalty_amount",
-        "input-unpaid_progress_billing", "input-gross_contract_billed",
-        "input-direct_job_cost", "input-qualifying_plan_assets",
-        "input-manual_workers_comp_premium", "input-annual_subcontract_volume",
-        "field-relinquished_sale_price", "field-vehicle_cost",
-        "field-current_qre_spend", "field-customs_value_fob", "field-annual_payroll",
-        "field-invoice_face_value", "field-current_year_domestic_qre",
-        "field-declared_customs_value", "field-annual_covered_payroll",
-        "field-net_business_income", "input-total_parachute_payment",
-        "input-med_school_loan_balance", "input-outside_securities_counsel_retainer",
-        "input-unpaid_subcontract_balance"
-      ];
+      }""" if is_gainhelm else "") + """
+      var primaryCalcIds = [""" + primary_calc_js + """];
       if (_lastInteractionScope !== "serp") {
         for (var pcIdx = 0; pcIdx < primaryCalcIds.length; pcIdx++) {
           var pcEl = document.getElementById(primaryCalcIds[pcIdx]);
@@ -2757,21 +2863,7 @@ def _render_runtime_sync_events_js() -> str:
           }
         }
       }
-      var priorityIds = [
-        "sec1031-sale-price", "serp-1031-rel-debt", "sec179-cost", "serp-179-cost",
-        "tax-income", "field-gross_income", "serp-tax-gross", "crypto-short-term",
-        "serp-crypto-proceeds", "field-loan_balance", "input-loan_balance", "serp-loan-balance",
-        "runway-cash", "tey-principal", "cg-amount", "arb-capital", "pm-tax-gain",
-        "field-bond_amount", "input-bond_amount", "field-bond_penalty_amount",
-        "input-unpaid_progress_billing", "input-gross_contract_billed",
-        "input-direct_job_cost", "input-qualifying_plan_assets",
-        "input-manual_workers_comp_premium", "input-annual_subcontract_volume",
-        "field-relinquished_sale_price", "field-vehicle_cost",
-        "field-current_qre_spend", "field-customs_value_fob", "field-annual_payroll",
-        "field-invoice_face_value", "field-current_year_domestic_qre",
-        "field-declared_customs_value", "field-annual_covered_payroll",
-        "field-net_business_income", "serp-b2b-gross"
-      ];
+      var priorityIds = [""" + priority_calc_js + """];
       for (var pIdx = 0; pIdx < priorityIds.length; pIdx++) {
         var pEl = document.getElementById(priorityIds[pIdx]);
         if (pEl && pEl.value !== undefined) {
@@ -3524,7 +3616,7 @@ def _render_runtime_sync_events_js() -> str:
         mirrorPrimaryToLegacyBenchmarks();
         syncOutboundAffiliateLinks();
       }
-    }, false);
+    }, false);""" + ("""
 
     // [retCapPct, statutoryPenaltyAprPct, topStateTaxPct, prelimNoticeDays, bondPenalSumUsd, wcClassRatePer100]
     var STATE_STATUTORY_PARAMS = {
@@ -3721,7 +3813,9 @@ def _render_runtime_sync_events_js() -> str:
           }
         }
       } catch (stErr) {}
-    }
+    }""" if (is_lienbond or is_profithelm) else """
+
+    function applyHeroStateJurisdictionToCalculator() {}""") + """
 
     document.addEventListener("change", function(e) {
       if (_syncing) return;
@@ -3788,14 +3882,15 @@ def _render_runtime_sync_events_js() -> str:
 
     function formatPreviewMetricLabel(rawKey) {
       var acronyms = {
+        sec: "SEC", ftc: "FTC", tco: "TCO", roi: "ROI",
+        cfr: "CFR", usd: "USD", hc: "Headcount", avg: "Average", est: "Estimated\"""" + (""",
         soc2: "SOC 2", nist: "NIST", sprs: "SPRS", hipaa: "HIPAA", pci: "PCI",
         dss: "DSS", cmmc: "CMMC", iso: "ISO", dora: "DORA", gdpr: "GDPR",
-        ccpa: "CCPA", cpra: "CPRA", sec: "SEC", irs: "IRS", irc: "IRC",
-        ftc: "FTC", tco: "TCO", emr: "EMR", roi: "ROI", sdi: "SDI",
-        idr: "IDR", ibr: "IBR", rap: "RAP", paye: "PAYE", icr: "ICR",
-        iso27001: "ISO 27001", agi: "AGI", ptet: "PTET",
-        salt: "SALT", macrs: "MACRS", obbba: "OBBBA", cfr: "CFR", usd: "USD",
-        grc: "GRC", hc: "Headcount", avg: "Average", est: "Estimated"
+        ccpa: "CCPA", cpra: "CPRA", iso27001: "ISO 27001", grc: "GRC\"""" if is_gainhelm else "") + (""",
+        idr: "IDR", ibr: "IBR", rap: "RAP", paye: "PAYE", icr: "ICR", agi: "AGI\"""" if is_prexvo else "") + (""",
+        irs: "IRS", irc: "IRC", sdi: "SDI", agi: "AGI", ptet: "PTET",
+        salt: "SALT", macrs: "MACRS", obbba: "OBBBA\"""" if is_profithelm else "") + (""",
+        emr: "EMR\"""" if (is_lienbond or is_profithelm) else "") + """
       };
       var cleaned = String(rawKey || "")
         .replace(/^(?:val-|res-|metric-|calc-|output-|kpi-)/i, "")
@@ -5104,16 +5199,11 @@ def _render_runtime_sync_events_js() -> str:
     }"""
 
 
-@_functools.lru_cache(maxsize=1)
-def render_runtime_synchronizer_js() -> str:
-    """
-    Renders the raw IIFE JavaScript body for the deterministic runtime calculator synchronizer
-    without enclosing <script> tags.
-    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
-    """
-    maps_js = _render_runtime_sync_maps_js()
-    workbench_js = _render_runtime_sync_workbench_js()
-    events_js = _render_runtime_sync_events_js()
+@_functools.lru_cache(maxsize=64)
+def _render_runtime_synchronizer_js_cached(norm_pid: Optional[str]) -> str:
+    maps_js = _render_runtime_sync_maps_js(norm_pid)
+    workbench_js = _render_runtime_sync_workbench_js(norm_pid)
+    events_js = _render_runtime_sync_events_js(norm_pid)
     return f"""  (function() {{
     if (window.__pseoRuntimeSyncInitialized) return;
     window.__pseoRuntimeSyncInitialized = true;
@@ -5126,22 +5216,37 @@ def render_runtime_synchronizer_js() -> str:
   }})();"""
 
 
-@_functools.lru_cache(maxsize=1)
-def get_runtime_synchronizer_js_sha10() -> str:
+def render_runtime_synchronizer_js(property_id: Optional[str] = None) -> str:
+    """
+    Renders the raw IIFE JavaScript body for the deterministic runtime calculator synchronizer
+    without enclosing <script> tags.
+    When property_id is provided, tenant-specific calculator blocks (e.g. GainHelm cmmc/sprs,
+    Prexvo rap/ibr/pslf, ProfitHelm tax/sec179/sec1031, LienBond surety/lien) are scoped to
+    that property to prevent cross-tenant token leakage; omitted property_id preserves full
+    backwards compatibility.
+    Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
+    """
+    return _render_runtime_synchronizer_js_cached(_normalize_runtime_sync_property_id(property_id))
+
+
+@_functools.lru_cache(maxsize=64)
+def _get_runtime_synchronizer_js_sha10_cached(norm_pid: Optional[str]) -> str:
+    return hashlib.sha256(_render_runtime_synchronizer_js_cached(norm_pid).encode("utf-8")).hexdigest()[:10]
+
+
+def get_runtime_synchronizer_js_sha10(property_id: Optional[str] = None) -> str:
     """Returns the deterministic 10-char SHA-256 hex digest of the runtime synchronizer JS bundle."""
-    return hashlib.sha256(render_runtime_synchronizer_js().encode("utf-8")).hexdigest()[:10]
+    return _get_runtime_synchronizer_js_sha10_cached(_normalize_runtime_sync_property_id(property_id))
 
 
-@_functools.lru_cache(maxsize=1)
-def get_runtime_synchronizer_script_src() -> str:
+def get_runtime_synchronizer_script_src(property_id: Optional[str] = None) -> str:
     """Returns the content-hashed static URL path for the external runtime synchronizer JS bundle."""
-    return f"/static/js/pseo-runtime-sync.{get_runtime_synchronizer_js_sha10()}.js"
+    return f"/static/js/pseo-runtime-sync.{get_runtime_synchronizer_js_sha10(property_id)}.js"
 
 
-@_functools.lru_cache(maxsize=1)
-def render_external_runtime_synchronizer_tag() -> str:
+def render_external_runtime_synchronizer_tag(property_id: Optional[str] = None) -> str:
     """Renders the canonical deferred external <script id='pseo-runtime-sync'> tag."""
-    src = get_runtime_synchronizer_script_src()
+    src = get_runtime_synchronizer_script_src(property_id)
     return f'  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}" src="{src}" defer></script>'
 
 
@@ -5159,7 +5264,7 @@ _VALID_JS_SCRIPT_TYPES: FrozenSet[str] = frozenset(
 )
 
 
-def has_current_external_runtime_sync_tag(html_content: str) -> bool:
+def has_current_external_runtime_sync_tag(html_content: str, property_id: Optional[str] = None) -> bool:
     """
     Returns True iff html_content contains exactly one uncommented <script id='pseo-runtime-sync'> tag
     with exact current data-version, exact current content-hashed src, valid defer attribute,
@@ -5167,7 +5272,7 @@ def has_current_external_runtime_sync_tag(html_content: str) -> bool:
     """
     if not html_content or "pseo-runtime-sync" not in html_content:
         return False
-    expected_src = get_runtime_synchronizer_script_src()
+    expected_src = get_runtime_synchronizer_script_src(property_id)
     if expected_src not in html_content:
         return False
     cleaned = re.sub(r"<!--[\s\S]*?-->", "", html_content)
@@ -5199,7 +5304,10 @@ def has_current_external_runtime_sync_tag(html_content: str) -> bool:
     return True
 
 
-def write_runtime_synchronizer_asset(dist_dir: Union[str, Path]) -> Tuple[Path, bool]:
+def write_runtime_synchronizer_asset(
+    dist_dir: Union[str, Path],
+    property_id: Optional[str] = None,
+) -> Tuple[Path, bool]:
     """
     Idempotently writes dist/static/js/pseo-runtime-sync.<sha10>.js via thread-safe atomic replace
     and prunes any stale pseo-runtime-sync.*.js bundles in dist/static/js/.
@@ -5208,10 +5316,10 @@ def write_runtime_synchronizer_asset(dist_dir: Union[str, Path]) -> Tuple[Path, 
     d = Path(dist_dir)
     js_dir = d / "static" / "js"
     js_dir.mkdir(parents=True, exist_ok=True)
-    expected_sha10 = get_runtime_synchronizer_js_sha10()
+    expected_sha10 = get_runtime_synchronizer_js_sha10(property_id)
     filename = f"pseo-runtime-sync.{expected_sha10}.js"
     target_path = js_dir / filename
-    payload_bytes = render_runtime_synchronizer_js().encode("utf-8")
+    payload_bytes = render_runtime_synchronizer_js(property_id).encode("utf-8")
     changed = False
 
     needs_write = True
@@ -5243,8 +5351,7 @@ def write_runtime_synchronizer_asset(dist_dir: Union[str, Path]) -> Tuple[Path, 
     return target_path, changed
 
 
-@_functools.lru_cache(maxsize=1)
-def render_runtime_synchronizer_script() -> str:
+def render_runtime_synchronizer_script(property_id: Optional[str] = None) -> str:
     """
     Renders the deterministic runtime calculator synchronizer (<script id="pseo-runtime-sync">).
     Guarantees immediate, synchronous two-way synchronization between range sliders, number inputs,
@@ -5253,16 +5360,15 @@ def render_runtime_synchronizer_script() -> str:
     .calc-metric-value, .metric-value, [id^="val-"], [id^="res-"], [id^="metric-"]).
     Zero em-dashes. Zero en-dashes. Zero spaced hyphens.
     """
-    body_js = render_runtime_synchronizer_js()
+    body_js = render_runtime_synchronizer_js(property_id)
     return f"""  <script id="pseo-runtime-sync" data-version="{VISUAL_PRIMITIVES_VERSION}">
 {body_js}
   </script>"""
 
 
-@_functools.lru_cache(maxsize=1)
-def render_runtime_synchronizer_script_stripped() -> str:
+def render_runtime_synchronizer_script_stripped(property_id: Optional[str] = None) -> str:
     """Cached stripped runtime synchronizer script for fast membership checks."""
-    return render_runtime_synchronizer_script().strip()
+    return render_runtime_synchronizer_script(property_id).strip()
 
 
 REQUIRED_PRIMITIVE_TOKENS: Tuple[str, ...] = (
@@ -5678,19 +5784,23 @@ def _detect_visual_and_ux_contract_issues_cached(
                 html_content,
                 re.IGNORECASE,
             )
+            detected_pid = _resolve_html_property_id(html_content)
+            sync_code = sync_match.group(1) if sync_match else ""
             if (
                 not sync_match
                 or f'data-version="{VISUAL_PRIMITIVES_VERSION}"' not in html_content
-                or "__pseoRuntimeSyncInitialized" not in sync_match.group(1)
-                or "updateOutputsSynchronously" not in sync_match.group(1)
-                or "_lastInteractionScope" not in sync_match.group(1)
-                or "data-preset-crit" not in sync_match.group(1)
-                or "carryShield" not in sync_match.group(1)
-                or "keepalive: true" in sync_match.group(1)
-                or "remBasis * 0.80" in sync_match.group(1)
-                or "rem179 * 0.80" in sync_match.group(1)
-                or "offer_price_usd || 29" in sync_match.group(1)
-                or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_match.group(1)
+                or "__pseoRuntimeSyncInitialized" not in sync_code
+                or "updateOutputsSynchronously" not in sync_code
+                or "_lastInteractionScope" not in sync_code
+                or (detected_pid == "gainhelm" and "data-preset-crit" not in sync_code)
+                or (detected_pid == "profithelm" and "carryShield" not in sync_code)
+                or "keepalive: true" in sync_code
+                or "remBasis * 0.80" in sync_code
+                or "rem179 * 0.80" in sync_code
+                or "remBasis * 0.20" in sync_code
+                or "rem179 * 0.20" in sync_code
+                or "offer_price_usd || 29" in sync_code
+                or 'document.querySelector(\'script[src*="/static/js/app.js"]\')' in sync_code
             ):
                 issues.append(
                     f"[{rel_path}] Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
@@ -6683,16 +6793,28 @@ def _resolve_html_property_id(updated: str, canon_url: str = "") -> str:
             return "profithelm"
         return raw_pid
 
+    eff_canon_url = str(canon_url or "").strip()
+    if not eff_canon_url:
+        canon_tag_m = re.search(
+            r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']'
+            r'|<meta\b[^>]*property=["\']og:url["\'][^>]*content=["\']([^"\']+)["\']',
+            updated,
+            re.IGNORECASE,
+        )
+        if canon_tag_m:
+            eff_canon_url = (canon_tag_m.group(1) or canon_tag_m.group(2) or "").strip()
+
     canon_host = ""
-    if canon_url:
+    if eff_canon_url:
         try:
-            canon_host = (urlsplit(canon_url).hostname or "").strip().lower()
+            canon_host = (urlsplit(eff_canon_url).hostname or "").strip().lower()
             if canon_host.startswith("www."):
                 canon_host = canon_host[4:]
         except Exception:
             canon_host = ""
 
     domain_to_pid: Dict[str, str] = {}
+    brand_to_pid: Dict[str, str] = {}
     try:
         from pseofactory.impact_planner import discover_active_tenants
 
@@ -6708,6 +6830,9 @@ def _resolve_html_property_id(updated: str, canon_url: str = "") -> str:
                         m_pid = str(m_data.get("property_id") or clean_pid).strip().lower()
                         if m_pid in ("profithelm-platform", "factory", "exchange1031"):
                             m_pid = "profithelm"
+                        b_name = str(m_data.get("brand_name") or "").strip().lower()
+                        if b_name:
+                            brand_to_pid[b_name] = m_pid
                         for dom_key in ("domain", "canonical_domain", "canonical_base"):
                             raw_dom = str(m_data.get(dom_key) or "").strip().lower()
                             if "://" in raw_dom:
@@ -6750,12 +6875,31 @@ def _resolve_html_property_id(updated: str, canon_url: str = "") -> str:
             return clean_label
 
     updated_lower = updated.lower()
-    canon_lower = canon_url.lower()
+    canon_lower = eff_canon_url.lower()
     for known_dom, known_pid in sorted(domain_to_pid.items(), key=lambda kv: (kv[1] == "profithelm", -len(kv[0]))):
         if known_dom in canon_lower or known_dom in updated_lower:
             return known_pid
 
-    return "profithelm"
+    site_meta_m = re.search(
+        r'<meta\b[^>]*property=["\']og:site_name["\'][^>]*content=["\']([^"\']+)["\']'
+        r'|<meta\b[^>]*name=["\']application-name["\'][^>]*content=["\']([^"\']+)["\']',
+        updated,
+        re.IGNORECASE,
+    )
+    brand_cand = (site_meta_m.group(1) or site_meta_m.group(2) or "").strip() if site_meta_m else ""
+    if not brand_cand:
+        title_brand_m = re.search(r"<title\b[^>]*>[^<]*\|\s*([^<|]{2,60})</title>", updated, re.IGNORECASE)
+        if title_brand_m:
+            brand_cand = title_brand_m.group(1).strip()
+    if brand_cand:
+        b_low = brand_cand.lower()
+        if b_low in brand_to_pid:
+            return brand_to_pid[b_low]
+        clean_brand = re.sub(r"[^a-z0-9_-]+", "_", b_low).strip("_-")
+        if clean_brand:
+            return clean_brand
+
+    return "unknown_tenant"
 
 
 def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List[str]]:
@@ -7167,6 +7311,7 @@ def _collapse_duplicate_faq_sections(html_text: str) -> Tuple[str, bool]:
 def _sync_runtime_synchronizer_tag(
     updated: str,
     dist_dir: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
 ) -> Tuple[str, bool]:
     """
     Injects or repairs <script id='pseo-runtime-sync'> using the external deferred bundle when
@@ -7174,14 +7319,14 @@ def _sync_runtime_synchronizer_tag(
     falling back to the inline script when dist_dir is None and no valid external tag is present.
     """
     if dist_dir is not None:
-        write_runtime_synchronizer_asset(Path(dist_dir))
-        if has_current_external_runtime_sync_tag(updated):
+        write_runtime_synchronizer_asset(Path(dist_dir), property_id=property_id)
+        if has_current_external_runtime_sync_tag(updated, property_id=property_id):
             return updated, False
-        script_block = render_external_runtime_synchronizer_tag()
+        script_block = render_external_runtime_synchronizer_tag(property_id=property_id)
     else:
-        if has_current_external_runtime_sync_tag(updated):
+        if has_current_external_runtime_sync_tag(updated, property_id=property_id):
             return updated, False
-        script_block = render_runtime_synchronizer_script()
+        script_block = render_runtime_synchronizer_script(property_id=property_id)
 
     sync_matches = list(_EXTERNAL_RUNTIME_SYNC_TAG_RE.finditer(updated))
     if sync_matches:
@@ -7228,6 +7373,7 @@ def normalize_html_visual_primitives(
     is_tenant_porcelain: Optional[bool] = None,
     theme: Optional[str] = None,
     dist_dir: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
 ) -> Tuple[str, List[str]]:
     """
     Normalizes an HTML document to enforce deterministic visual primitives and self-heal
@@ -7659,7 +7805,7 @@ def normalize_html_visual_primitives(
         if stripped_legacy_file_rt != updated:
             updated = stripped_legacy_file_rt
             repaired.append("legacy_file_runtime_dedup")
-        updated, rt_repaired = _sync_runtime_synchronizer_tag(updated, dist_dir=dist_dir)
+        updated, rt_repaired = _sync_runtime_synchronizer_tag(updated, dist_dir=dist_dir, property_id=property_id)
         if rt_repaired:
             repaired.append("interactive_runtime_sync")
 
@@ -8449,21 +8595,24 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         t_preset_btns = 0
         t_competing_forms = 0
         t_page_records: List[Dict[str, Any]] = []
-        expected_rt_sha10 = get_runtime_synchronizer_js_sha10()
-        expected_rt_bytes = render_runtime_synchronizer_js().encode("utf-8")
-        ext_rt_js_path = tools_dir.parent / "static" / "js" / f"pseo-runtime-sync.{expected_rt_sha10}.js"
         ext_rt_js_valid = False
-        if ext_rt_js_path.is_file():
-            try:
-                ext_rt_bytes = ext_rt_js_path.read_bytes()
-                ext_rt_txt = ext_rt_bytes.decode("utf-8", errors="ignore")
-                ext_rt_js_valid = (
-                    ext_rt_bytes == expected_rt_bytes
-                    and hashlib.sha256(ext_rt_bytes).hexdigest()[:10] == expected_rt_sha10
-                    and "resolveActiveScenarioAmount" in ext_rt_txt
-                )
-            except Exception:
-                ext_rt_js_valid = False
+        for cand_pid in (tenant, None):
+            expected_rt_sha10 = get_runtime_synchronizer_js_sha10(property_id=cand_pid)
+            expected_rt_bytes = render_runtime_synchronizer_js(property_id=cand_pid).encode("utf-8")
+            ext_rt_js_path = tools_dir.parent / "static" / "js" / f"pseo-runtime-sync.{expected_rt_sha10}.js"
+            if ext_rt_js_path.is_file():
+                try:
+                    ext_rt_bytes = ext_rt_js_path.read_bytes()
+                    ext_rt_txt = ext_rt_bytes.decode("utf-8", errors="ignore")
+                    if (
+                        ext_rt_bytes == expected_rt_bytes
+                        and hashlib.sha256(ext_rt_bytes).hexdigest()[:10] == expected_rt_sha10
+                        and "resolveActiveScenarioAmount" in ext_rt_txt
+                    ):
+                        ext_rt_js_valid = True
+                        break
+                except Exception:
+                    ext_rt_js_valid = False
 
         from pseofactory.affiliates import load_live_partner_keys_from_vault as _vp_live_keys
 

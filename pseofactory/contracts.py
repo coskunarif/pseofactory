@@ -4845,8 +4845,8 @@ assert_proprietary_models = assert_unique_first_party_information
 # =============================================================================
 
 # Statutory Tax Brackets (IRS published Rev. Proc. schedules)
-# 2024: Rev. Proc. 2023-34; 2025: Rev. Proc. 2024-40; 2026: Statutory Inflation; 2027: Post-TCJA Reversion
-STATUTORY_TAX_BRACKETS: Dict[int, Dict[str, List[Dict[str, Any]]]] = {
+# 2024: Rev. Proc. 2023-34; 2025: Rev. Proc. 2024-40; 2026: Rev. Proc. 2025-32 (OBBBA); 2027: Rev. Proc. 2026-35 (OBBBA permanent 10%-37%)
+STATUTORY_TAX_BRACKETS: Dict[Any, Dict[str, List[Dict[str, Any]]]] = {
     2024: {
         "single": [
             {"rate": 10.0, "min_income": 0.0, "max_income": 11600.0},
@@ -4925,43 +4925,81 @@ STATUTORY_TAX_BRACKETS: Dict[int, Dict[str, List[Dict[str, Any]]]] = {
     },
     2026: {
         "single": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 12050.0},
-            {"rate": 12.0, "min_income": 12050.0, "max_income": 48900.0},
-            {"rate": 22.0, "min_income": 48900.0, "max_income": 104400.0},
-            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
-            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
-            {"rate": 35.0, "min_income": 253150.0, "max_income": 633100.0},
-            {"rate": 37.0, "min_income": 633100.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12400.0},
+            {"rate": 12.0, "min_income": 12400.0, "max_income": 50400.0},
+            {"rate": 22.0, "min_income": 50400.0, "max_income": 105700.0},
+            {"rate": 24.0, "min_income": 105700.0, "max_income": 201775.0},
+            {"rate": 32.0, "min_income": 201775.0, "max_income": 256225.0},
+            {"rate": 35.0, "min_income": 256225.0, "max_income": 640600.0},
+            {"rate": 37.0, "min_income": 640600.0, "max_income": None},
         ],
         "married_filing_jointly": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 24100.0},
-            {"rate": 12.0, "min_income": 24100.0, "max_income": 97800.0},
-            {"rate": 22.0, "min_income": 97800.0, "max_income": 208800.0},
-            {"rate": 24.0, "min_income": 208800.0, "max_income": 398600.0},
-            {"rate": 32.0, "min_income": 398600.0, "max_income": 506300.0},
-            {"rate": 35.0, "min_income": 506300.0, "max_income": 759600.0},
-            {"rate": 37.0, "min_income": 759600.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 24800.0},
+            {"rate": 12.0, "min_income": 24800.0, "max_income": 100800.0},
+            {"rate": 22.0, "min_income": 100800.0, "max_income": 211400.0},
+            {"rate": 24.0, "min_income": 211400.0, "max_income": 403550.0},
+            {"rate": 32.0, "min_income": 403550.0, "max_income": 512450.0},
+            {"rate": 35.0, "min_income": 512450.0, "max_income": 768700.0},
+            {"rate": 37.0, "min_income": 768700.0, "max_income": None},
         ],
         "head_of_household": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 17200.0},
-            {"rate": 12.0, "min_income": 17200.0, "max_income": 65550.0},
-            {"rate": 22.0, "min_income": 65550.0, "max_income": 104400.0},
-            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
-            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
-            {"rate": 35.0, "min_income": 253150.0, "max_income": 633100.0},
-            {"rate": 37.0, "min_income": 633100.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 17700.0},
+            {"rate": 12.0, "min_income": 17700.0, "max_income": 67450.0},
+            {"rate": 22.0, "min_income": 67450.0, "max_income": 105700.0},
+            {"rate": 24.0, "min_income": 105700.0, "max_income": 201750.0},
+            {"rate": 32.0, "min_income": 201750.0, "max_income": 256200.0},
+            {"rate": 35.0, "min_income": 256200.0, "max_income": 640600.0},
+            {"rate": 37.0, "min_income": 640600.0, "max_income": None},
         ],
         "married_filing_separately": [
-            {"rate": 10.0, "min_income": 0.0, "max_income": 12050.0},
-            {"rate": 12.0, "min_income": 12050.0, "max_income": 48900.0},
-            {"rate": 22.0, "min_income": 48900.0, "max_income": 104400.0},
-            {"rate": 24.0, "min_income": 104400.0, "max_income": 199300.0},
-            {"rate": 32.0, "min_income": 199300.0, "max_income": 253150.0},
-            {"rate": 35.0, "min_income": 253150.0, "max_income": 379800.0},
-            {"rate": 37.0, "min_income": 379800.0, "max_income": None},
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12400.0},
+            {"rate": 12.0, "min_income": 12400.0, "max_income": 50400.0},
+            {"rate": 22.0, "min_income": 50400.0, "max_income": 105700.0},
+            {"rate": 24.0, "min_income": 105700.0, "max_income": 201775.0},
+            {"rate": 32.0, "min_income": 201775.0, "max_income": 256225.0},
+            {"rate": 35.0, "min_income": 256225.0, "max_income": 384350.0},
+            {"rate": 37.0, "min_income": 384350.0, "max_income": None},
         ],
     },
     2027: {
+        "single": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12800.0},
+            {"rate": 12.0, "min_income": 12800.0, "max_income": 52025.0},
+            {"rate": 22.0, "min_income": 52025.0, "max_income": 109125.0},
+            {"rate": 24.0, "min_income": 109125.0, "max_income": 208325.0},
+            {"rate": 32.0, "min_income": 208325.0, "max_income": 264550.0},
+            {"rate": 35.0, "min_income": 264550.0, "max_income": 661375.0},
+            {"rate": 37.0, "min_income": 661375.0, "max_income": None},
+        ],
+        "married_filing_jointly": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 25600.0},
+            {"rate": 12.0, "min_income": 25600.0, "max_income": 104050.0},
+            {"rate": 22.0, "min_income": 104050.0, "max_income": 218250.0},
+            {"rate": 24.0, "min_income": 218250.0, "max_income": 416650.0},
+            {"rate": 32.0, "min_income": 416650.0, "max_income": 529100.0},
+            {"rate": 35.0, "min_income": 529100.0, "max_income": 793650.0},
+            {"rate": 37.0, "min_income": 793650.0, "max_income": None},
+        ],
+        "head_of_household": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 18250.0},
+            {"rate": 12.0, "min_income": 18250.0, "max_income": 69650.0},
+            {"rate": 22.0, "min_income": 69650.0, "max_income": 109100.0},
+            {"rate": 24.0, "min_income": 109100.0, "max_income": 208300.0},
+            {"rate": 32.0, "min_income": 208300.0, "max_income": 264550.0},
+            {"rate": 35.0, "min_income": 264550.0, "max_income": 661375.0},
+            {"rate": 37.0, "min_income": 661375.0, "max_income": None},
+        ],
+        "married_filing_separately": [
+            {"rate": 10.0, "min_income": 0.0, "max_income": 12800.0},
+            {"rate": 12.0, "min_income": 12800.0, "max_income": 52025.0},
+            {"rate": 22.0, "min_income": 52025.0, "max_income": 109125.0},
+            {"rate": 24.0, "min_income": 109125.0, "max_income": 208325.0},
+            {"rate": 32.0, "min_income": 208325.0, "max_income": 264550.0},
+            {"rate": 35.0, "min_income": 264550.0, "max_income": 396825.0},
+            {"rate": 37.0, "min_income": 396825.0, "max_income": None},
+        ],
+    },
+    "2027_repealed_sunset": {
         "single": [
             {"rate": 10.0, "min_income": 0.0, "max_income": 12200.0},
             {"rate": 15.0, "min_income": 12200.0, "max_income": 49600.0},
@@ -5002,7 +5040,7 @@ STATUTORY_TAX_BRACKETS: Dict[int, Dict[str, List[Dict[str, Any]]]] = {
 }
 
 # Standard deductions by tax year and filing status
-STATUTORY_STANDARD_DEDUCTIONS: Dict[int, Dict[str, float]] = {
+STATUTORY_STANDARD_DEDUCTIONS: Dict[Any, Dict[str, float]] = {
     2024: {
         "single": 14600.0,
         "married_filing_jointly": 29200.0,
@@ -5040,16 +5078,25 @@ STATUTORY_STANDARD_DEDUCTIONS: Dict[int, Dict[str, float]] = {
         "additional_65_or_blind_single": 2050.0,
         "additional_65_or_blind_married": 1650.0,
     },
-    "2027_obbba": {
-        "single": 16500.0,
-        "married_filing_jointly": 33000.0,
-        "mfj": 33000.0,
-        "head_of_household": 24750.0,
-        "hoh": 24750.0,
-        "married_filing_separately": 16500.0,
-        "mfs": 16500.0,
-    },
     2027: {
+        "single": 16600.0,
+        "married_filing_jointly": 33200.0,
+        "mfj": 33200.0,
+        "head_of_household": 24925.0,
+        "hoh": 24925.0,
+        "married_filing_separately": 16600.0,
+        "mfs": 16600.0,
+    },
+    "2027_obbba": {
+        "single": 16600.0,
+        "married_filing_jointly": 33200.0,
+        "mfj": 33200.0,
+        "head_of_household": 24925.0,
+        "hoh": 24925.0,
+        "married_filing_separately": 16600.0,
+        "mfs": 16600.0,
+    },
+    "2027_repealed_sunset": {
         "single": 8600.0,
         "married_filing_jointly": 17200.0,
         "mfj": 17200.0,
@@ -5064,30 +5111,42 @@ STATUTORY_STANDARD_DEDUCTIONS: Dict[int, Dict[str, float]] = {
 STATUTORY_LIMITS: Dict[str, Any] = {
     "section_179_max_deduction": {
         2024: 1220000.0,
-        2025: 1250000.0,
+        2025: 2500000.0,
         2026: 2560000.0,
         2027: 2620000.0,
+        "2025_pre_obbba": 1250000.0,
         "2026_obbba": 2560000.0,
         "2026_projected": 1290000.0,
     },
     "section_179_phaseout_threshold": {
         2024: 3050000.0,
-        2025: 3130000.0,
+        2025: 4000000.0,
         2026: 4090000.0,
         2027: 4190000.0,
+        "2025_pre_obbba": 3130000.0,
         "2026_obbba": 4090000.0,
         "2026_projected": 3220000.0,
     },
     "section_179_heavy_vehicle_suv": {
         2024: 30500.0,
         2025: 31300.0,
-        2026: 30500.0,
-        "2026_projected": 32300.0,
+        2026: 32000.0,
+    },
+    "bonus_depreciation_pct": {
+        2024: 0.60,
+        2025: 1.0,
+        2026: 1.0,
+        2027: 1.0,
+        "2025_pre_obbba": 0.40,
+        "2026_pre_obbba": 0.20,
     },
     "section_1202_qsbs": {
-        "asset_ceiling": 50000000.0,
-        "exclusion_cap": 10000000.0,
+        "asset_ceiling": 75000000.0,
+        "exclusion_cap": 15000000.0,
+        "legacy_pre_july_4_2025_asset_ceiling": 50000000.0,
+        "legacy_pre_july_4_2025_exclusion_cap": 10000000.0,
         "holding_period_years": 5,
+        "holding_tiers_pct": {"3_yr": 50, "4_yr": 75, "5_yr": 100},
         "active_business_percent": 80.0,
     },
     "retirement_401k_elective_deferral": {
@@ -5139,14 +5198,15 @@ YEAR_BOUND_STANDARD_DEDUCTIONS: Dict[str, Dict[str, Set[float]]] = {
     "2024": {"single": {14600.0}, "mfj": {29200.0}, "hoh": {21900.0}},
     "2025": {"single": {15000.0}, "mfj": {30000.0}, "hoh": {22500.0}},
     "2026": {"single": {16100.0, 15350.0}, "mfj": {32200.0, 30700.0}, "hoh": {24150.0, 23050.0}},
-    "2027": {"single": {16500.0, 16100.0}, "mfj": {33000.0, 32200.0}, "hoh": {24750.0, 24150.0}},
+    "2027": {"single": {16600.0, 16500.0, 16100.0}, "mfj": {33200.0, 33000.0, 32200.0}, "hoh": {24925.0, 24750.0, 24150.0}},
     "repealed_pre_obbba_sunset": {"single": {8600.0}, "mfj": {17200.0}, "hoh": {12900.0}},
 }
 
 ALL_OFFICIAL_STANDARD_DEDUCTIONS: Set[float] = {
     14600.0, 29200.0, 21900.0, 15000.0, 30000.0, 22500.0,
     15350.0, 30700.0, 23050.0, 16100.0, 32200.0, 24150.0,
-    16500.0, 33000.0, 24750.0, 8600.0, 17200.0, 12900.0,
+    16500.0, 33000.0, 24750.0, 16600.0, 33200.0, 24925.0,
+    8600.0, 17200.0, 12900.0,
     1950.0, 1550.0, 2000.0, 1600.0, 2050.0, 1650.0,
 }
 
@@ -5277,12 +5337,76 @@ _UNCORROB_APP_JSON_RE = re.compile(
     r'<script[^>]*type=[\'"]application/json[\'"][^>]*id=[\'"]([^\'"]*)[\'"][^>]*>(.*?)</script>',
     re.DOTALL | re.IGNORECASE,
 )
+_INLINE_JS_SCRIPT_RE = re.compile(
+    r'<script\b([^>]*)>([\s\S]*?)</script>',
+    re.IGNORECASE,
+)
+
+
+def _scan_inline_js_statutory_constants(content: str, rel_path: str) -> List[str]:
+    """Scans executable inline <script> JS blocks for superseded statutory constants."""
+    issues: List[str] = []
+    if "<script" not in content.lower():
+        return issues
+
+    for m_script in _INLINE_JS_SCRIPT_RE.finditer(content):
+        attrs = (m_script.group(1) or "").lower()
+        if "application/json" in attrs or "application/ld+json" in attrs:
+            continue
+        if re.search(r'\bsrc\s*=', attrs):
+            continue
+        js_code = m_script.group(2) or ""
+        if not js_code.strip():
+            continue
+        js_low = js_code.lower()
+
+        if re.search(
+            r'\b(?:tcjaStdDed|sunsetStdDed|tcja_std_ded)\s*[:=]\s*\{[^}]*\b(?:15000|30000|8600|17200|12700|12900)\b',
+            js_code,
+            re.IGNORECASE,
+        ) or re.search(
+            r'["\']?202[67]["\']?\s*:\s*(?:\{[^}]*\b(?:15000|30000|8600|17200|12700|12900)\b|(?:15000|30000|8600|17200|12700|12900)\b)',
+            js_code,
+            re.IGNORECASE,
+        ):
+            issues.append(
+                f"Page {rel_path}: Superseded standard deduction constant in inline JS "
+                f"(2026 Rev. Proc. 2025-32 is $16,100/$32,200; 2027 Rev. Proc. 2026-35 is $16,600/$33,200)"
+            )
+
+        for m_bonus in re.finditer(
+            r'\b(?:bonus(?:_?rate|_?pct|_?depreciation)?\s*[:=]\s*0\.(?:20?|40?|60?|80?)\b|(?:remBasis|rem179|bonusBasis)\s*\*\s*0\.(?:20?|60?|80?)\b)',
+            js_code,
+            re.IGNORECASE,
+        ):
+            pre_ctx = js_low[max(0, m_bonus.start() - 40):m_bonus.start()]
+            if not re.search(r'\b202[45]\s*[:=]', pre_ctx):
+                issues.append(
+                    f"Page {rel_path}: Superseded bonus depreciation constant in inline JS "
+                    f"('{m_bonus.group(0).strip()}'); P.L. 119-21 Section 70301 restored 100% (1.0) bonus depreciation"
+                )
+
+        if any(tok in js_low for tok in ("suv", "vehicle", "280f", "179")):
+            for m_suv in re.finditer(r'\b(30500|31300)\b', js_code):
+                val_str = m_suv.group(1)
+                pre_ctx = js_low[max(0, m_suv.start() - 60):m_suv.start()]
+                if val_str == "30500" and re.search(r'["\']?2024["\']?\s*[:=]', pre_ctx):
+                    continue
+                if val_str == "31300" and re.search(r'["\']?2025["\']?\s*[:=]', pre_ctx):
+                    continue
+                issues.append(
+                    f"Page {rel_path}: Superseded Section 179 Heavy SUV constant '{val_str}' in inline JS "
+                    f"(2026 IRS Rev. Proc. 2025-32 cap is 32000)"
+                )
+
+    return issues
 
 
 def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.html") -> List[str]:
     """
     Detects uncorroborated tax constants, invented statutory limits, orphaned deduction figures,
-    and silent fallback defaults across document text and structured data.
+    inline JS superseded statutory constants, and silent fallback defaults across document text
+    and structured data.
     Zero em-dashes. Zero en-dashes.
     """
     issues: List[str] = []
@@ -5294,6 +5418,9 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
         issues.append(f"Page {rel_path}: Document contains forbidden em-dash")
     if "\u2013" in content:
         issues.append(f"Page {rel_path}: Document contains forbidden en-dash")
+
+    # 1b. Scan inline executable <script> JS constants before stripping JS
+    issues.extend(_scan_inline_js_statutory_constants(content, rel_path))
 
     # Clean text for document prose and structured claims analysis (preserving JSON manifests)
     clean_text = _fast_strip_style_and_js(content)
@@ -5310,7 +5437,16 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                         f"statutory constants must be explicitly reconciled against official published schedules"
                     )
 
-    # 3. Invented federal tax rates check
+    # 3. Invented or repealed federal tax rates check
+    repealed_qualifiers = (
+        "repealed",
+        "pre-obbba",
+        "prevented",
+        "avoided",
+        "hypothetical",
+        "prior to obbba",
+        "without obbba",
+    )
     if "%" in clean_text and ("rate" in clean_lower or "bracket" in clean_lower):
         rate_win = _extract_anchor_windows(clean_lower, clean_lower, ("%",), pre=48, post=80)
         if rate_win:
@@ -5318,10 +5454,15 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                 try:
                     rate = float(m.group(1))
                     surrounding = rate_win[max(0, m.start()-40):min(len(rate_win), m.end()+40)]
-                    if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding):
+                    if "state" not in surrounding and ("ordinary" in surrounding or "bracket" in surrounding or "irs" in surrounding or "federal" in surrounding):
                         if rate not in VALID_FEDERAL_TAX_RATES and rate not in {0.0, 15.0, 20.0}:
                             issues.append(
                                 f"Page {rel_path}: Invented federal tax rate '{rate}%' is not an official IRS statutory marginal bracket"
+                            )
+                        elif rate == 39.6 and ("2026" in surrounding or "2027" in surrounding or "post-tcja" in surrounding) and not any(q in surrounding for q in repealed_qualifiers):
+                            issues.append(
+                                f"Page {rel_path}: Repealed TCJA sunset rate '39.6%' presented as active 2026/2027 law "
+                                f"(OBBBA P.L. 119-21 permanently extended the 10%-37% marginal brackets)"
                             )
                 except Exception:
                     pass
@@ -5345,16 +5486,16 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                             )
                         else:
                             if "single" in surrounding and "married" not in surrounding and "mfj" not in surrounding:
-                                if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0}:
+                                if val not in {8600.0, 14600.0, 15000.0, 15350.0, 16100.0, 16500.0, 16600.0}:
                                     issues.append(
                                         f"Page {rel_path}: Mismatched single standard deduction value '${val:,.0f}': "
-                                        f"official published Single standard deduction is $14,600 (2024), $15,000 (2025), $16,100 (2026 Rev. Proc. 2025-32), or $16,500 (2027 OBBBA)"
+                                        f"official published Single standard deduction is $14,600 (2024), $15,000 (2025), $16,100 (2026 Rev. Proc. 2025-32), or $16,600 (2027 Rev. Proc. 2026-35)"
                                     )
                             elif ("married" in surrounding or "mfj" in surrounding) and "single" not in surrounding and "separately" not in surrounding:
-                                if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0}:
+                                if val not in {17200.0, 29200.0, 30000.0, 30700.0, 32200.0, 33000.0, 33200.0}:
                                     issues.append(
                                         f"Page {rel_path}: Mismatched MFJ standard deduction value '${val:,.0f}': "
-                                        f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025), $32,200 (2026 Rev. Proc. 2025-32), or $33,000 (2027 OBBBA)"
+                                        f"official published MFJ standard deduction is $29,200 (2024), $30,000 (2025), $32,200 (2026 Rev. Proc. 2025-32), or $33,200 (2027 Rev. Proc. 2026-35)"
                                     )
                             # Year- and legal-status bound enforcement:
                             # 1) 2024/2025 standard deductions ($14,600/$29,200 or $15,000/$30,000) presented as active 2026/2027 law
@@ -5367,35 +5508,46 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                             ) and not has_hist_qual:
                                 issues.append(
                                     f"Page {rel_path}: Year-bound standard deduction violation '${val:,.0f}': "
-                                    f"2024/2025 standard deduction presented as active 2026/2027 law instead of IRS Rev. Proc. 2025-32 ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027 OBBBA)"
+                                    f"2024/2025 standard deduction presented as active 2026/2027 law instead of IRS Rev. Proc. 2025-32 ($16,100 Single / $32,200 MFJ for 2026; $16,600 / $33,200 for 2027 Rev. Proc. 2026-35)"
                                 )
                             # 2) Repealed pre-OBBBA TCJA sunset standard deductions ($8,600 / $17,200 / $12,900) presented as enacted 2026/2027 law
+                            # Do NOT exempt 'post-tcja' when presenting $8,600/$17,200/$12,900 as active 2027 law
                             has_repealed_qual = any(
                                 q in surrounding
-                                for q in ("repealed", "pre-obbba", "prevented", "avoided", "hypothetical", "prior to obbba", "without obbba", "post-tcja")
+                                for q in repealed_qualifiers
                             )
                             if val in {8600.0, 17200.0, 12900.0} and (
-                                "2026" in surrounding or "2027" in surrounding or "sunset" in surrounding
+                                "2026" in surrounding or "2027" in surrounding or "sunset" in surrounding or "post-tcja" in surrounding
                             ) and not has_repealed_qual:
                                 issues.append(
                                     f"Page {rel_path}: Repealed TCJA sunset standard deduction '${val:,.0f}' presented as active 2026/2027 law: "
-                                    f"OBBBA (P.L. 119-21) permanently extended the enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
+                                    f"OBBBA (P.L. 119-21) permanently extended the enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,600 / $33,200 for 2027)"
                                 )
                 except Exception:
                     pass
 
-    # 5. Section 179 maximum deduction and phaseout limits
+    # 5. Section 179 maximum deduction and phaseout limits (with year-binding)
     if "179" in clean_text and "$" in clean_text:
-        s179_win = _extract_anchor_windows(clean_lower, clean_lower, ("179",), pre=16, post=200)
+        s179_win = _extract_anchor_windows(clean_lower, clean_lower, ("179",), pre=100, post=200)
         if s179_win:
+            s179_hist_qual = (
+                "2024", "2025", "prior", "historical", "pre-obbba",
+                "before obbba", "repealed", "projected", "up from", "increased from",
+            )
             for m in _UNCORROB_SEC179_LIMIT_RE.finditer(s179_win):
                 raw_val = m.group(1).replace(",", "")
                 try:
                     val = float(raw_val)
-                    if val not in {1220000.0, 1250000.0, 1290000.0, 2560000.0, 2620000.0}:
+                    surrounding = s179_win[max(0, m.start() - 100):min(len(s179_win), m.end() + 100)]
+                    if val not in {1220000.0, 1250000.0, 1290000.0, 2500000.0, 2560000.0, 2620000.0}:
                         issues.append(
                             f"Page {rel_path}: Mismatched Section 179 expensing limit '${val:,.0f}': "
-                            f"does not match official published schedule ($1,220,000 for 2024, $1,250,000 for 2025, $2,560,000 for 2026 OBBBA)"
+                            f"does not match official published schedule ($1,220,000 for 2024, $2,500,000 for 2025 OBBBA, $2,560,000 for 2026 Rev. Proc. 2025-32)"
+                        )
+                    elif val in {1220000.0, 1250000.0, 1290000.0} and "2026" in surrounding and not any(q in surrounding for q in s179_hist_qual):
+                        issues.append(
+                            f"Page {rel_path}: Year-bound Section 179 expensing limit violation '${val:,.0f}' paired with 2026: "
+                            f"2026 Section 179 cap is $2,560,000 under P.L. 119-21 and IRS Rev. Proc. 2025-32"
                         )
                 except Exception:
                     pass
@@ -5405,15 +5557,41 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                     raw_val = m.group(1).replace(",", "")
                     try:
                         val = float(raw_val)
-                        if val not in {3050000.0, 3130000.0, 3220000.0, 4090000.0, 4190000.0}:
+                        surrounding = s179_win[max(0, m.start() - 100):min(len(s179_win), m.end() + 100)]
+                        if val not in {3050000.0, 3130000.0, 3220000.0, 4000000.0, 4090000.0, 4190000.0}:
                             issues.append(
                                 f"Page {rel_path}: Mismatched Section 179 phaseout threshold '${val:,.0f}': "
-                                f"does not match official published schedule ($3,050,000 for 2024, $3,130,000 for 2025, $4,090,000 for 2026 OBBBA)"
+                                f"does not match official published schedule ($3,050,000 for 2024, $4,000,000 for 2025 OBBBA, $4,090,000 for 2026 Rev. Proc. 2025-32)"
                             )
+                        elif val in {3050000.0, 3130000.0, 3220000.0} and "2026" in surrounding and not any(q in surrounding for q in s179_hist_qual):
+                            msg_p = (
+                                f"Page {rel_path}: Year-bound Section 179 phaseout violation '${val:,.0f}' paired with 2026: "
+                                f"2026 Section 179 phaseout threshold is $4,090,000 under P.L. 119-21 and IRS Rev. Proc. 2025-32"
+                            )
+                            if msg_p not in issues:
+                                issues.append(msg_p)
                     except Exception:
                         pass
 
-    # 6. Section 1202 QSBS
+            # Catch flexible phrasings like "In 2026, Section 179 allows $1,250,000"
+            for m_yb in re.finditer(r'\$(1,220,000|1,250,000|1,290,000|3,050,000|3,130,000|3,220,000)\b', s179_win):
+                val = float(m_yb.group(1).replace(",", ""))
+                surrounding = s179_win[max(0, m_yb.start() - 100):min(len(s179_win), m_yb.end() + 100)]
+                if "2026" in surrounding and not any(q in surrounding for q in s179_hist_qual):
+                    if val < 2000000.0:
+                        msg_yb = (
+                            f"Page {rel_path}: Year-bound Section 179 expensing limit violation '${val:,.0f}' paired with 2026: "
+                            f"2026 Section 179 cap is $2,560,000 under P.L. 119-21 and IRS Rev. Proc. 2025-32"
+                        )
+                    else:
+                        msg_yb = (
+                            f"Page {rel_path}: Year-bound Section 179 phaseout violation '${val:,.0f}' paired with 2026: "
+                            f"2026 Section 179 phaseout threshold is $4,090,000 under P.L. 119-21 and IRS Rev. Proc. 2025-32"
+                        )
+                    if msg_yb not in issues:
+                        issues.append(msg_yb)
+
+    # 6. Section 1202 QSBS (post-OBBBA $75M/$15M and legacy pre-July-4-2025 $50M/$10M)
     if ("1202" in clean_text or "qsbs" in clean_lower or "qualified small business" in clean_lower) and "$" in clean_text:
         qsbs_win = _extract_anchor_windows(clean_lower, clean_lower, ("1202", "qsbs", "qualified small business"), pre=16, post=200)
         if qsbs_win:
@@ -5421,10 +5599,10 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                 raw_val = m.group(1).replace(",", "")
                 try:
                     val = float(raw_val)
-                    if val != 50000000.0:
+                    if val not in {50000000.0, 75000000.0}:
                         issues.append(
                             f"Page {rel_path}: Mismatched Section 1202 QSBS asset ceiling '${val:,.0f}': "
-                            f"statutory ceiling under IRC 1202(d)(1) is strictly $50,000,000"
+                            f"statutory ceiling under IRC 1202(d)(1) is $75,000,000 post-OBBBA ($50,000,000 legacy pre-July 4, 2025)"
                         )
                 except Exception:
                     pass
@@ -5433,10 +5611,10 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                 raw_val = m.group(1).replace(",", "")
                 try:
                     val = float(raw_val)
-                    if val != 10000000.0:
+                    if val not in {10000000.0, 15000000.0}:
                         issues.append(
                             f"Page {rel_path}: Mismatched Section 1202 QSBS exclusion cap '${val:,.0f}': "
-                            f"statutory cap under IRC 1202(b)(1) is strictly $10,000,000"
+                            f"statutory cap under IRC 1202(b)(1) is $15,000,000 post-OBBBA ($10,000,000 legacy pre-July 4, 2025)"
                         )
                 except Exception:
                     pass
@@ -5504,17 +5682,17 @@ def detect_uncorroborated_statutory_claims(content: str, rel_path: str = "index.
                                         f"Page {rel_path}: Structured manifest bracket {idx} contains invented sunset rate {srate}%"
                                     )
                     if "max_asset_issuance_usd" in data:
-                        if float(data["max_asset_issuance_usd"]) != 50000000.0:
+                        if float(data["max_asset_issuance_usd"]) not in {50000000.0, 75000000.0}:
                             issues.append(
                                 f"Page {rel_path}: Structured manifest contains invalid Section 1202 asset cap: {data['max_asset_issuance_usd']}"
                             )
                     if "gain_exclusion_cap_usd" in data:
-                        if float(data["gain_exclusion_cap_usd"]) != 10000000.0:
+                        if float(data["gain_exclusion_cap_usd"]) not in {10000000.0, 15000000.0}:
                             issues.append(
                                 f"Page {rel_path}: Structured manifest contains invalid Section 1202 exclusion cap: {data['gain_exclusion_cap_usd']}"
                             )
                     if "holding_period_years" in data:
-                        if int(data["holding_period_years"]) != 5:
+                        if int(data["holding_period_years"]) not in {3, 4, 5}:
                             issues.append(
                                 f"Page {rel_path}: Structured manifest contains invalid Section 1202 holding period: {data['holding_period_years']}"
                             )
@@ -5614,24 +5792,38 @@ def assert_cross_web_consensus_and_corroboration(
 
     # 3. Requirement check
     if require_corroboration:
-        has_verified_constant = (
-            "1,250,000" in content
-            or "1,220,000" in content
-            or "1,290,000" in content
-            or "15,000" in content
-            or "30,000" in content
-            or "14,600" in content
-            or "29,200" in content
-            or "8,600" in content
-            or "17,200" in content
-            or "50,000,000" in content
-            or "10,000,000" in content
-            or "23,500" in content
-            or "23,000" in content
-            or "24,000" in content
-            or "tax-brackets" in content
-            or "brackets" in content
+        verified_constants = (
+            "2,560,000",
+            "4,090,000",
+            "2,500,000",
+            "4,000,000",
+            "32,000",
+            "16,100",
+            "32,200",
+            "16,600",
+            "33,200",
+            "24,500",
+            "75,000,000",
+            "15,000,000",
+            "184,500",
+            "1,250,000",
+            "1,220,000",
+            "1,290,000",
+            "15,000",
+            "30,000",
+            "14,600",
+            "29,200",
+            "8,600",
+            "17,200",
+            "50,000,000",
+            "10,000,000",
+            "23,500",
+            "23,000",
+            "24,000",
+            "tax-brackets",
+            "brackets",
         )
+        has_verified_constant = any(tok in content for tok in verified_constants)
         if not has_verified_constant:
             raise ValueError(f"Document missing verified statutory constants or published schedule reconciliation{ctx}")
 

@@ -224,6 +224,26 @@ def extract_and_verify_three_sentence_script(
         context=f"{prop}:{slug}:segment_0",
     )
 
+    from pseofactory.truth_gate import UnifiedTruthGate
+
+    script_audit_content = "\n".join(
+        [
+            str(yt_pack.get("title") or ""),
+            str(yt_pack.get("description") or ""),
+            str(yt_pack.get("transcript") or ""),
+            precision["spoken_script"],
+        ]
+    )
+    tg_script_report = UnifiedTruthGate().audit_non_html_file(
+        file_path=f"videos/{slug}_script.txt",
+        property_id=prop,
+        content=script_audit_content,
+    )
+    if not tg_script_report.passed:
+        raise ValueError(
+            f"[{prop}:{slug}] UnifiedTruthGate failed on video script: {tg_script_report.summary()}"
+        )
+
     return {
         "slug": slug,
         "property_id": prop,
@@ -2665,6 +2685,17 @@ def synthesize_tool_video_asset(
                     float(existing_probe.get("duration_seconds") or 15.0),
                     vtt_path,
                 )
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            vtt_tg_rep = UnifiedTruthGate().audit_non_html_file(
+                vtt_path,
+                property_id=prop,
+                dist_dir=eff_dist,
+            )
+            if not vtt_tg_rep.passed:
+                raise ValueError(
+                    f"[{prop}:{slug}] UnifiedTruthGate failed on VTT captions {vtt_path.name}: {vtt_tg_rep.summary()}"
+                )
             uploaded_map = _load_upload_idempotency_map(eff_repo, prop)
             up_rec = uploaded_map.get(slug)
             cat_entry = sync_video_catalog_and_metadata(
@@ -2722,6 +2753,18 @@ def synthesize_tool_video_asset(
             voice=branding["voice"],
             use_neural_tts=use_neural_tts,
         )
+
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        vtt_tg_rep = UnifiedTruthGate().audit_non_html_file(
+            vtt_path,
+            property_id=prop,
+            dist_dir=eff_dist,
+        )
+        if not vtt_tg_rep.passed:
+            raise ValueError(
+                f"[{prop}:{slug}] UnifiedTruthGate failed on synthesized VTT captions {vtt_path.name}: {vtt_tg_rep.summary()}"
+            )
 
         render_res = _render_screencast_or_slides_mp4(
             slug=slug,
@@ -3679,8 +3722,30 @@ def run_autonomous_video_pipeline(
         "results": upload_results,
     }
 
-    # Stage 5: Stage-Level Observability & Blackout Guard
+    # Also audit any existing .vtt captions in dist/videos/ via UnifiedTruthGate fail-closed
+    truth_violations: List[Dict[str, Any]] = []
+    for rej in rejected_precision:
+        if "UnifiedTruthGate" in str(getattr(rej, "gate_reason", "")):
+            truth_violations.append({"slug": rej.slug, "stage": "2_script", "reason": rej.gate_reason})
+    for s_err in synthesis_errors:
+        if "UnifiedTruthGate" in str(s_err.get("error") or ""):
+            truth_violations.append({"slug": s_err.get("slug"), "stage": "3_vtt", "reason": s_err.get("error")})
     videos_dir = eff_dist / "videos"
+    if videos_dir.is_dir():
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        _v_gate = UnifiedTruthGate()
+        for vtt_file in sorted(videos_dir.glob("*.vtt")):
+            vtt_rep = _v_gate.audit_non_html_file(vtt_file, property_id=prop, dist_dir=eff_dist)
+            if not vtt_rep.passed:
+                truth_violations.append(
+                    {
+                        "slug": vtt_file.stem,
+                        "stage": "5_vtt_disk",
+                        "reason": vtt_rep.summary(),
+                    }
+                )
+
     rendered_mp4_files = (
         [
             p
@@ -3706,7 +3771,9 @@ def run_autonomous_video_pipeline(
             or quota_starvation_detected
         )
     )
-    if blackout_detected:
+    if truth_violations:
+        pipeline_status = "TRUTH_GATE_FAILED"
+    elif blackout_detected:
         pipeline_status = "BLACKOUT_DETECTED"
     elif live_upload and upload_error_count > 0:
         pipeline_status = "UPLOAD_BLACKOUT" if total_uploaded_verified == 0 else "UPLOAD_DEGRADED"
@@ -3743,6 +3810,7 @@ def run_autonomous_video_pipeline(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "property_id": prop,
         "status": pipeline_status,
+        "truth_violations": truth_violations,
         "blackout_detected": blackout_detected,
         "upload_blackout_detected": upload_blackout_detected,
         "total_tools_evaluated": len(eligibilities),

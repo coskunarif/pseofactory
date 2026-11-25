@@ -18,13 +18,75 @@ from typing import Any, Dict, List
 import pytest
 
 
+def _write_temp_truth_pack(packs_dir: Path, pid: str) -> None:
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    tp_payload = {
+        "schema_version": "2.0",
+        "property_id": pid,
+        "brand_name": pid.capitalize(),
+        "canonical_domain": f"https://{pid}.com",
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {
+            "sample_calc": {
+                "formula_id": "sample_calc",
+                "model_name": "Sample Sum Model",
+                "expression": "a + b",
+                "variables": {"a": 10.0, "b": 20.0},
+                "expected_baseline_output": 30.0,
+                "tolerance": 0.01,
+                "test_vectors": [
+                    {"label": "baseline", "inputs": {"a": 10.0, "b": 20.0}, "expected": 30.0},
+                    {"label": "scaled", "inputs": {"a": 15.0, "b": 25.0}, "expected": 40.0},
+                ],
+                "citation_keys": [],
+                "allowed_slug_patterns": ["sample-calc"],
+                "forbidden_slug_patterns": [],
+                "output_selectors": [".output-value"],
+            }
+        },
+        "citations_allowlist": {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{pid}.json").write_text(json.dumps(tp_payload, indent=2), encoding="utf-8")
+
+
 def _make_handoff_tenant(ws_root: Path, pid: str) -> Path:
     repo = ws_root / ("profithelm-platform" if pid == "profithelm" else pid)
     dist = repo / "dist"
     (dist / "tools" / "sample-calc").mkdir(parents=True, exist_ok=True)
-    (dist / "index.html").write_text("<html><body>Index</body></html>", encoding="utf-8")
+    (dist / "index.html").write_text(
+        f'<!DOCTYPE html><html lang="en"><head><title>{pid.capitalize()}</title>'
+        f'<link rel="canonical" href="https://{pid}.com/"></head><body><h1>{pid.capitalize()}</h1></body></html>',
+        encoding="utf-8",
+    )
     (dist / "tools" / "sample-calc" / "index.html").write_text(
-        '<html><body><script id="calculation-manifest" type="application/json">{"ok":true}</script></body></html>',
+        f'<!DOCTYPE html><html lang="en"><head><title>Sample Calc | {pid.capitalize()}</title>'
+        f'<link rel="canonical" href="https://{pid}.com/tools/sample-calc/">'
+        f'<script type="application/ld+json">{{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Sample Calc"}}</script>'
+        f'<script id="calculation-manifest" type="application/json">'
+        f'{{"formula":"a + b","inputs":{{"a":10,"b":20}},"published_output":30.0}}'
+        f'</script></head><body>'
+        f'<h1>Sample Calc</h1>'
+        f'<form class="calculator-form">'
+        f'<input id="input-a" name="a" value="10">'
+        f'<input id="input-b" name="b" value="20">'
+        f'<span class="output-value">30</span>'
+        f'</form>'
+        f'<script>'
+        f'function recompute(){{var a=Number(document.getElementById("input-a").value||0);var b=Number(document.getElementById("input-b").value||0);document.querySelector(".output-value").textContent=String(a+b);}}'
+        f'document.querySelector("form").addEventListener("input",recompute);'
+        f'document.addEventListener("DOMContentLoaded",recompute);'
+        f'</script></body></html>',
         encoding="utf-8",
     )
     (repo / ".pseofactory.json").write_text(
@@ -49,14 +111,20 @@ def test_handoff_stages_3_to_6_parallel_deterministic_order_and_fail_closed(
     """
     Verifies DepartmentHandoffChainVerifier Stages 3..6 run tenants concurrently via
     _map_tenants_ordered, preserve deterministic tenant ordering even when earlier
-    tenants take longer, and fail closed when any tenant reports an error.
+    tenants take longer, and fail closed when any tenant reports an error or lacks a Truth Pack.
     """
     import pseofactory.maintenance as maint_mod
     import pseofactory.supervisor as sup_mod
+    import pseofactory.truth_pack as tp_mod
     from pseofactory.maintenance import ConfigurablePropertyAdapter
     from pseofactory.supervisor import DepartmentHandoffChainVerifier
 
     tenants = ["alpha", "beta", "gamma", "delta"]
+    tmp_packs = tmp_path / "truth_packs"
+    for pid in tenants:
+        _write_temp_truth_pack(tmp_packs, pid)
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", tmp_packs)
+
     ws = tmp_path / "ws"
     adapters: Dict[str, ConfigurablePropertyAdapter] = {}
     for pid in tenants:
@@ -154,6 +222,28 @@ def test_handoff_stages_3_to_6_parallel_deterministic_order_and_fail_closed(
     assert sum4["per_tenant"]["gamma"]["status"] == "FAIL"
     assert sum4["per_tenant"]["alpha"]["status"] == "PASS"
     assert any("VERIFICATION[gamma]:" in e for e in errs4)
+
+    # 2b. Verify missing TruthPack fails closed in Stage 4 (no silent fallback)
+    missing_repo = _make_handoff_tenant(ws, "no_pack_site")
+    missing_adapter = ConfigurablePropertyAdapter(
+        property_id="no_pack_site",
+        brand_name="NoPackSite",
+        domain="no-pack-site.com",
+        canonical_base="https://no-pack-site.com",
+        dist_dir=missing_repo / "dist",
+        repo_path=missing_repo,
+    )
+    ok_missing, _, sum_missing, errs_missing = verifier._run_verification_stage(
+        {
+            "discovered_tenants": ["no_pack_site"],
+            "tenant_adapters": {"no_pack_site": missing_adapter},
+            "engine_hash": "a" * 64,
+            "compiler_smoke_by_tenant": {"no_pack_site": {"query": "no_pack_site calc"}},
+        }
+    )
+    assert ok_missing is False
+    assert sum_missing["per_tenant"]["no_pack_site"]["status"] == "FAIL"
+    assert any("TRUTH_PACK_MISSING" in e for e in errs_missing)
 
     # 3. Verify Stage 5 (_run_syndication_stage) runs concurrently and preserves order
     import pseofactory.indexing.preflight as pre_mod

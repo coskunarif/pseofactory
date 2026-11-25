@@ -248,6 +248,25 @@ def compute_audit_tenant_workers(
     return max(1, min(tenant_count, max(2, min(cpu_cap, ram_cap))))
 
 
+def _discover_cli_tenant_ids(ws_root: Optional[str] = None) -> List[str]:
+    """Dynamically discovers active tenant IDs via discover_active_tenants() without hardcoded 4-tenant limits."""
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws = ws_root or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    discovered = [pid for pid, _ in discover_active_tenants(ws)]
+    if discovered:
+        return list(dict.fromkeys(discovered))
+    try:
+        from pseofactory.truth_pack import discover_truth_pack_ids
+
+        tp_ids = discover_truth_pack_ids(workspace_root=Path(ws))
+        if tp_ids:
+            return list(dict.fromkeys(tp_ids))
+    except Exception:
+        pass
+    return list(CANONICAL_TENANT_IDS)
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """
     Executes asset integrity audit across property static assets.
@@ -255,10 +274,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
     Zero em-dashes. Zero en-dashes.
     """
     if getattr(args, "department_handoffs", False):
-        from pseofactory.supervisor import CANONICAL_TENANTS, verify_department_handoff_chain
+        from pseofactory.supervisor import verify_department_handoff_chain
         from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
 
-        handoff_props = list(CANONICAL_TENANTS)
+        ws_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        handoff_props = _discover_cli_tenant_ids(ws_arg)
         for sp_id, sp_decl in SPAWNED_TENANT_DECLARATIONS.items():
             if sp_id not in handoff_props and sp_decl.repo_root and Path(sp_decl.repo_root).is_dir():
                 handoff_props.append(sp_id)
@@ -403,6 +423,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     reg = TenantRegistry.default(workspace_root=ws_root_arg)
     if args.dist_dir:
+        from pseofactory.truth_gate import UnifiedTruthGate
+
         dist_path = Path(args.dist_dir).resolve()
         property_id = args.property or "custom"
         adapter = ConfigurablePropertyAdapter(
@@ -414,13 +436,24 @@ def cmd_audit(args: argparse.Namespace) -> int:
         )
         evaluator = AssetIntegrityEvaluator()
         report = evaluator.audit_all(adapter, check_engine_drift=getattr(args, "check_engine_drift", False))
+        truth_rep = UnifiedTruthGate().audit_estate(
+            dist_dir=dist_path,
+            property_id=property_id,
+            repo_root=dist_path.parent,
+        )
+        all_ok = report.status == "PASS" and truth_rep.passed
         if args.json:
-            print(json.dumps(report.to_dict(), indent=2))
+            payload = report.to_dict()
+            payload["truth_gate"] = truth_rep.to_dict()
+            print(json.dumps(payload, indent=2))
         else:
             print(f"[{report.status}] Property: {report.property_id} | Total: {report.total_assets_checked} | Compliant: {report.compliant_assets_count} | Drifted: {report.drifted_assets_count}")
             for d in report.drifted_assets:
                 print(f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} ({'; '.join(d.details)})")
-        return 0 if report.status == "PASS" else 1
+            print(f"TruthGate: {truth_rep.summary()}")
+            for tv in truth_rep.violations[:20]:
+                print(f"  - [{tv.gate}:{tv.code}] {tv.file_path}: {tv.message}")
+        return 0 if all_ok else 1
 
     property_id = (args.property or "prexvo").strip().lower()
     run_default_browser = (
@@ -446,13 +479,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     if property_id == "all":
         from concurrent.futures import ThreadPoolExecutor
-        from pseofactory.impact_planner import discover_active_tenants
+        from pseofactory.truth_gate import UnifiedTruthGate
         from pseofactory.verifier import audit_estate_seo_fix_checklist
 
         all_passed = True
         reports_dict: Dict[str, Any] = {}
-        discovered_ids = [pid for pid, _ in discover_active_tenants(ws_root_arg)]
-        all_tenant_ids = list(dict.fromkeys(discovered_ids)) if discovered_ids else list(CANONICAL_TENANT_IDS)
+        all_tenant_ids = _discover_cli_tenant_ids(ws_root_arg)
         explicit_cdp_port = getattr(args, "cdp_port", None)
         use_parallel = (
             explicit_cdp_port is None
@@ -481,7 +513,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         else:
             per_tenant_browser_workers = req_browser_workers
 
-        def _audit_single_tenant(p_id: str) -> Tuple[str, Any, Dict[str, Any], Dict[str, Any]]:
+        def _audit_single_tenant(p_id: str) -> Tuple[str, Any, Dict[str, Any], Dict[str, Any], Any]:
             adp = reg.get_adapter(p_id)
             rep = audit_property_assets(
                 property_id=p_id,
@@ -489,6 +521,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 check_engine_drift=getattr(args, "check_engine_drift", False),
             )
             rep_dict = rep.to_dict()
+            truth_rep = UnifiedTruthGate().audit_estate(
+                dist_dir=adp.dist_dir,
+                property_id=p_id,
+                repo_root=getattr(adp, "repo_path", None) or Path(adp.dist_dir).parent,
+            )
+            rep_dict["truth_gate"] = truth_rep.to_dict()
             if run_default_browser:
                 b_adp = _resolve_browser_adapter(p_id, _default_adapter_map, registry=reg)
                 if b_adp is not None:
@@ -503,7 +541,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     b_rep = b_auditor.run_audit(sample_size=default_sample)
                     rep_dict["browser_audit"] = b_rep
             seo_fix_rep = audit_estate_seo_fix_checklist(property_id=p_id)
-            return p_id, rep, rep_dict, seo_fix_rep
+            return p_id, rep, rep_dict, seo_fix_rep, truth_rep
 
         if use_parallel:
             with ThreadPoolExecutor(max_workers=max_tenant_workers) as pool:
@@ -518,7 +556,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             }
 
         for p_id in all_tenant_ids:
-            _, rep, rep_dict, seo_fix_rep = tenant_results[p_id]
+            _, rep, rep_dict, seo_fix_rep, truth_rep = tenant_results[p_id]
             if "browser_audit" in rep_dict and rep_dict["browser_audit"].get("status") != "PASS":
                 all_passed = False
             reports_dict[p_id] = rep_dict
@@ -532,6 +570,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
                         f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} "
                         f"({'; '.join(d.details)})"
                     )
+                print(f"TruthGate ({p_id}): {truth_rep.summary()}")
+                for tv in truth_rep.violations[:20]:
+                    print(f"  - [{tv.gate}:{tv.code}] {tv.file_path}: {tv.message}")
                 if "browser_audit" in rep_dict:
                     _print_browser_audit_report(p_id, rep_dict["browser_audit"])
                 print(
@@ -541,6 +582,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 for issue in seo_fix_rep["issues"][:20]:
                     print(f"  - {issue}")
             if rep.status != "PASS":
+                all_passed = False
+            if not truth_rep.passed:
                 all_passed = False
             if not bool(seo_fix_rep["passed"]):
                 all_passed = False
@@ -553,12 +596,20 @@ def cmd_audit(args: argparse.Namespace) -> int:
         print(f"Error: Property '{property_id}' not found in registry", file=sys.stderr)
         return 1
 
+    from pseofactory.truth_gate import UnifiedTruthGate
+
     report = audit_property_assets(
         property_id=property_id,
         adapter=adapter,
         check_engine_drift=getattr(args, "check_engine_drift", False),
     )
     rep_dict = report.to_dict()
+    truth_rep = UnifiedTruthGate().audit_estate(
+        dist_dir=adapter.dist_dir,
+        property_id=property_id,
+        repo_root=getattr(adapter, "repo_path", None) or Path(adapter.dist_dir).parent,
+    )
+    rep_dict["truth_gate"] = truth_rep.to_dict()
     browser_ok = True
     if run_default_browser:
         b_adp = _resolve_browser_adapter(property_id, _default_adapter_map, registry=reg)
@@ -580,10 +631,13 @@ def cmd_audit(args: argparse.Namespace) -> int:
         print(f"[{report.status}] Property: {report.property_id} | Total: {report.total_assets_checked} | Compliant: {report.compliant_assets_count} | Drifted: {report.drifted_assets_count}")
         for d in report.drifted_assets:
             print(f"  - {d.asset_path}: {[r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons]} ({'; '.join(d.details)})")
+        print(f"TruthGate ({property_id}): {truth_rep.summary()}")
+        for tv in truth_rep.violations[:20]:
+            print(f"  - [{tv.gate}:{tv.code}] {tv.file_path}: {tv.message}")
         if "browser_audit" in rep_dict:
             _print_browser_audit_report(property_id, rep_dict["browser_audit"])
     seo_fix_ok = _run_seo_fix_checklist_gate(property_id, args.json)
-    return 0 if (report.status == "PASS" and browser_ok and seo_fix_ok) else 1
+    return 0 if (report.status == "PASS" and truth_rep.passed and browser_ok and seo_fix_ok) else 1
 
 
 def cmd_maintain(args: argparse.Namespace) -> int:
@@ -1215,10 +1269,10 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
     from pseofactory.supervisor import AutonomousLifecycleSupervisor, verify_department_handoff_chain
 
     if getattr(args, "verify_handoffs", False):
-        from pseofactory.supervisor import CANONICAL_TENANTS
         from pseofactory.tenant_facts import SPAWNED_TENANT_DECLARATIONS
 
-        handoff_props = list(CANONICAL_TENANTS)
+        ws_arg = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+        handoff_props = _discover_cli_tenant_ids(ws_arg)
         for sp_id, sp_decl in SPAWNED_TENANT_DECLARATIONS.items():
             if sp_id not in handoff_props and sp_decl.repo_root and Path(sp_decl.repo_root).is_dir():
                 handoff_props.append(sp_id)
@@ -1452,7 +1506,7 @@ def cmd_distribute(args: argparse.Namespace) -> int:
     if property_id.lower() == "all":
         reports = {}
         all_ok = True
-        for p_id in CANONICAL_TENANT_IDS:
+        for p_id in _discover_cli_tenant_ids():
             r = dispatch_to_distribution_lead(run_id=None, property_id=p_id, dry_run=dry_run)
             reports[p_id] = r
             if r.get("status") not in ("SUCCESS", "STAGED", "DRY_RUN"):
@@ -1715,7 +1769,7 @@ def cmd_factory_pipeline(args: argparse.Namespace) -> int:
         for aborted in result.aborted_opportunities:
             print(f" -> [ABORTED] {aborted.query} - Reason: {aborted.reason} [{aborted.action}]")
 
-    return 0
+    return 1 if getattr(result, "aborted_count", 0) > 0 else 0
 
 
 def cmd_trend_backfill(args: argparse.Namespace) -> int:
@@ -3011,6 +3065,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_rt.add_argument("--sol-price", type=float, default=90.0, help="SOL/USD reference price (default: 90.0)")
     p_rt.add_argument("--json", action="store_true", help="Output machine-readable JSON truth report")
 
+    p_ta = subparsers.add_parser(
+        "truth-audit",
+        help="Execute fail-closed UnifiedTruthGate and TruthPack freshness audit across one or all properties",
+    )
+    p_ta.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_ta.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory override for single property")
+    p_ta.add_argument("--as-of", type=str, default=None, help="ISO date YYYY-MM-DD for freshness/expiry evaluation")
+    p_ta.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic tenant discovery")
+    p_ta.add_argument("--json", action="store_true", help="Output machine-readable JSON truth-audit report")
+
     return parser
 
 
@@ -3287,9 +3351,116 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_video(args)
     elif args.command == "revenue-truth":
         return cmd_revenue_truth(args)
+    elif args.command == "truth-audit":
+        return cmd_truth_audit(args)
     else:
         parser.print_help()
         return 1
+
+
+def cmd_truth_audit(args: argparse.Namespace) -> int:
+    """
+    Runs fail-closed UnifiedTruthGate and check_truth_pack_freshness across
+    one property or all dynamically discovered properties.
+    Returns 0 on PASS, 1 on FAIL.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.truth_gate import UnifiedTruthGate
+    from pseofactory.truth_intake import check_truth_pack_freshness
+    from pseofactory.truth_pack import load_truth_pack
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    prop_arg = str(getattr(args, "property", "all") or "all").strip().lower()
+    as_of_arg = getattr(args, "as_of", None)
+    dist_override = getattr(args, "dist_dir", None)
+    as_json = bool(getattr(args, "json", False))
+
+    if prop_arg == "all":
+        target_props = _discover_cli_tenant_ids(ws_root)
+    else:
+        target_props = [prop_arg]
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    gate = UnifiedTruthGate()
+    results: Dict[str, Any] = {}
+    all_passed = True
+
+    for p_id in target_props:
+        freshness_info: Dict[str, Any] = {}
+        freshness_ok = False
+        try:
+            tp = load_truth_pack(p_id, workspace_root=Path(ws_root), allow_expired=True)
+            f_rep = check_truth_pack_freshness(tp, as_of=as_of_arg)
+            freshness_info = (
+                f_rep.to_dict()
+                if hasattr(f_rep, "to_dict")
+                else {
+                    "status": f_rep.status,
+                    "expired_keys": list(f_rep.expired_keys),
+                    "expiring_soon_keys": list(f_rep.expiring_soon_keys),
+                    "as_of": str(f_rep.as_of),
+                    "checked_count": f_rep.checked_count,
+                }
+            )
+            freshness_ok = f_rep.status != "FREEZE_EXPIRED"
+        except Exception as tp_exc:
+            freshness_info = {
+                "status": "FREEZE_EXPIRED",
+                "error": str(tp_exc),
+                "expired_keys": ["__truth_pack_load_failed__"],
+            }
+            freshness_ok = False
+
+        if dist_override and len(target_props) == 1:
+            d_dir = Path(dist_override).resolve()
+            repo_root = d_dir.parent
+        else:
+            try:
+                adp = reg.get_adapter(p_id)
+                d_dir = Path(adp.dist_dir).resolve()
+                repo_root = Path(getattr(adp, "repo_path", None) or d_dir.parent).resolve()
+            except KeyError:
+                repo_root = (Path(ws_root) / p_id).resolve()
+                d_dir = repo_root / "dist"
+
+        gate_rep = gate.audit_estate(
+            dist_dir=d_dir,
+            property_id=p_id,
+            repo_root=repo_root,
+            as_of=as_of_arg,
+        )
+        prop_passed = bool(gate_rep.passed and freshness_ok)
+        if not prop_passed:
+            all_passed = False
+
+        results[p_id] = {
+            "status": "PASS" if prop_passed else "FAIL",
+            "passed": prop_passed,
+            "freshness": freshness_info,
+            "truth_gate": gate_rep.to_dict(),
+        }
+
+    payload = {
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+        "properties_audited": len(target_props),
+        "properties": results,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for p_id, res in results.items():
+            f_st = res["freshness"].get("status", "UNKNOWN")
+            tg_dict = res["truth_gate"]
+            print(
+                f"[{res['status']}] truth-audit ({p_id}): freshness={f_st} | "
+                f"files={tg_dict.get('files_audited_count', 0)} | violations={tg_dict.get('violation_count', 0)}"
+            )
+            for tv in tg_dict.get("violations", [])[:20]:
+                print(f"  - [{tv.get('gate')}:{tv.get('code')}] {tv.get('file_path')}: {tv.get('message')}")
+            if res["freshness"].get("status") == "FREEZE_EXPIRED":
+                print(f"  - [FRESHNESS] expired_keys={res['freshness'].get('expired_keys')} error={res['freshness'].get('error', '')}")
+    return 0 if all_passed else 1
 
 
 def cmd_revenue_truth(args: argparse.Namespace) -> int:

@@ -373,7 +373,7 @@ def test_live_edge_verifier_rejects_stale_figures_and_local_dist_divergence(tmp_
         '<link rel="canonical" href="https://gainhelm.com/">'
         '<style id="pseo-visual-primitives">.card{contain: layout style}</style>'
         '<script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-31"}</script>'
-        '</head><body><p>4 penalty tiers ($141 to $2,067,813 annual cap per identical provision)</p></body></html>'
+        '</head><body><p>4 penalty tiers ($141 to $2,190,294 annual cap per identical provision)</p></body></html>'
     )
     fresh_soc2 = (
         '<!doctype html><html><head><title>SOC 2 Audit Cost Calculator</title>'
@@ -392,9 +392,9 @@ def test_live_edge_verifier_rejects_stale_figures_and_local_dist_divergence(tmp_
         '<link rel="canonical" href="https://gainhelm.com/tools/hipaa-violation-penalty-breach-cost-calculator/">'
         '<style id="pseo-visual-primitives">.card{contain: layout style}</style>'
         '<script type="application/ld+json">{"@context":"https://schema.org","dateModified":"2026-10-31"}</script>'
-        '</head><body><p>Annual cap $2,067,813 under 45 CFR 160.404.</p>'
+        '</head><body><p>Annual cap $2,190,294 under 45 CFR 160.404.</p>'
         '<script type="application/json" class="calculation-manifest">'
-        '{"published_output": 2455313.0, "formula": "min(records * per_violation, 2067813.0) + forensics", "inputs": {"records": 500, "per_violation": 68928.0, "forensics": 387500.0}}'
+        '{"published_output": 2577794.0, "formula": "min(records * per_violation, 2190294.0) + forensics", "inputs": {"records": 500, "per_violation": 68928.0, "forensics": 387500.0}}'
         '</script></body></html>'
     )
     (dist_dir / "index.html").write_text(fresh_index, encoding="utf-8")
@@ -402,13 +402,13 @@ def test_live_edge_verifier_rejects_stale_figures_and_local_dist_divergence(tmp_
     (hipaa_dir / "index.html").write_text(fresh_hipaa, encoding="utf-8")
 
     verifier = LiveEdgeVerifier(timeout=2, retries=1)
-    stale_index = fresh_index.replace('"2026-10-31"', '"2026-10-27"').replace("$2,067,813", "$2,134,831")
+    stale_index = fresh_index.replace('"2026-10-31"', '"2026-10-27"').replace("$2,190,294", "$2,134,831")
     stale_soc2 = fresh_soc2.replace('"2026-10-31"', '"2026-10-27"').replace(
         "totals $78,100.40.", "totals $78,100.00."
     )
     stale_hipaa = fresh_hipaa.replace('"2026-10-31"', '"2026-10-27"').replace(
-        "$2,067,813", "$2,134,831"
-    ).replace("2067813.0", "2134831.0")
+        "$2,190,294", "$2,134,831"
+    ).replace("2190294.0", "2134831.0")
 
     idx_issues = verifier.audit_live_versus_local_html(
         live_html=stale_index, local_html=fresh_index, property_id="gainhelm", rel_path="index.html"

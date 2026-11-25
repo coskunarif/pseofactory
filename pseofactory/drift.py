@@ -136,6 +136,16 @@ def compute_engine_hash(
     ):
         collected[f"pseofactory/{rel_sub}"] = (fp, m_ns, c_ns, sz)
 
+    truth_packs_dir = pseofactory_pkg_dir / "truth_packs"
+    if truth_packs_dir.is_dir():
+        for rel_sub, fp, m_ns, c_ns, sz in _scan_dir_files_with_stats(
+            truth_packs_dir,
+            include_exts=(".json",),
+            exclude_dir_names=("__pycache__",),
+            exclude_file_suffixes=(".pyc",),
+        ):
+            collected[f"pseofactory/truth_packs/{rel_sub}"] = (fp, m_ns, c_ns, sz)
+
     if base_dirs:
         b_exts = (".py", ".css", ".js", ".json")
         b_ex_dirs = ("__pycache__", ".git", ".pytest_cache", "dist", "node_modules", "_pseo_substrate")
@@ -546,30 +556,73 @@ def write_substrate_lock(
         try:
             f_data = json.loads(freshness_f.read_text(encoding="utf-8"))
             if isinstance(f_data, dict):
-                if isinstance(f_data.get("merkle_drift"), dict):
-                    f_data["merkle_drift"]["substrate_hash"] = eh
-                    f_data["merkle_drift"]["drifted"] = False
-                f_data["substrate_hash"] = eh
+                prev_sub_hash = str(f_data.get("substrate_hash") or "").strip()
+                md = f_data.get("merkle_drift")
+                md_sub_hash = str(md.get("substrate_hash") or "").strip() if isinstance(md, dict) else ""
+
+                tp_fresh_dict: Optional[Dict[str, Any]] = None
+                tp_sha256: str = ""
+                tp_expired = False
+                try:
+                    from pseofactory.truth_intake import check_truth_pack_freshness
+                    from pseofactory.truth_pack import (
+                        TruthPackMissingError,
+                        compute_truth_pack_sha256,
+                        load_truth_pack,
+                    )
+
+                    try:
+                        tp_obj = load_truth_pack(pid, allow_expired=True)
+                        tp_sha256 = compute_truth_pack_sha256(tp_obj)
+                        tp_rep = check_truth_pack_freshness(tp_obj)
+                        tp_fresh_dict = tp_rep.to_dict()
+                        tp_expired = tp_rep.status == "FREEZE_EXPIRED"
+                    except TruthPackMissingError:
+                        tp_fresh_dict = {
+                            "status": "MISSING",
+                            "expired_keys": [],
+                            "expiring_soon_keys": [],
+                            "checked_count": 0,
+                        }
+                    except Exception as tp_exc:
+                        tp_fresh_dict = {
+                            "status": "ERROR",
+                            "error": f"{type(tp_exc).__name__}: {tp_exc}",
+                        }
+                except Exception:
+                    tp_fresh_dict = None
+
+                prev_tp_sha = str(f_data.get("truth_pack_sha256") or "").strip()
+                if tp_fresh_dict is not None:
+                    f_data["truth_pack_freshness"] = tp_fresh_dict
+
+                # Update merkle_drift ONLY when recorded hashes actually match eh (and Truth Pack hash if present)
+                recorded_hash = md_sub_hash if (isinstance(md, dict) and md_sub_hash) else prev_sub_hash
+                hashes_match = bool(eh) and recorded_hash == eh
+                if tp_sha256 and prev_tp_sha and prev_tp_sha != tp_sha256:
+                    hashes_match = False
+
+                if isinstance(md, dict):
+                    if hashes_match and not tp_expired:
+                        md["substrate_hash"] = eh
+                        md["drifted"] = False
+                    else:
+                        md["drifted"] = True
+
+                if tp_expired:
+                    f_data["overall_pass"] = False
+                    f_data["status"] = "FAIL"
+                    if f_data.get("verdict") == "CERTIFIED_FRESH":
+                        f_data["verdict"] = "FREEZE_EXPIRED"
+
+                if hashes_match and not tp_expired:
+                    f_data["substrate_hash"] = eh
+                    if tp_sha256:
+                        f_data["truth_pack_sha256"] = tp_sha256
+
                 f_txt = json.dumps(f_data, indent=2, sort_keys=True) + "\n"
                 if freshness_f.read_text(encoding="utf-8") != f_txt:
                     freshness_f.write_text(f_txt, encoding="utf-8")
-        except Exception:
-            pass
-    elif pid == "lienbond" and (eff_dist / "index.html").is_file() and (r_root / ".pseofactory.json").is_file():
-        try:
-            lb_fresh_payload = {
-                "craftsmanship_score": 10.0,
-                "merkle_drift": {
-                    "drifted": False,
-                    "substrate_hash": eh,
-                },
-                "overall_pass": True,
-                "property_id": "lienbond",
-                "status": "PASS",
-                "substrate_hash": eh,
-                "verdict": "CERTIFIED_FRESH",
-            }
-            freshness_f.write_text(json.dumps(lb_fresh_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         except Exception:
             pass
     al_file_precheck = r_root / ".agy" / "asset_ledger.json"
@@ -578,13 +631,45 @@ def write_substrate_lock(
         eff_dist,
         include_md_hashes=need_ledger_hashes,
     )
+    cand_pkg_names: List[str] = []
+    marker_file = r_root / ".pseofactory.json"
+    if marker_file.is_file():
+        try:
+            m_data = json.loads(marker_file.read_text(encoding="utf-8"))
+            if isinstance(m_data, dict):
+                for m_key in ("package_name", "property_id"):
+                    m_val = str(m_data.get(m_key) or "").strip()
+                    if m_val and m_val not in cand_pkg_names:
+                        cand_pkg_names.append(m_val)
+        except Exception:
+            pass
+    if pid and pid not in cand_pkg_names:
+        cand_pkg_names.append(pid)
+    if r_root.is_dir():
+        try:
+            for child in sorted(r_root.iterdir(), key=lambda p: p.name):
+                if (
+                    child.is_dir()
+                    and not child.name.startswith(".")
+                    and child.name not in ("dist", "node_modules", "__pycache__")
+                    and (child / "_pseo_substrate" / "pseofactory").is_dir()
+                    and child.name not in cand_pkg_names
+                ):
+                    cand_pkg_names.append(child.name)
+        except OSError:
+            pass
+
     synced_sub_hash: Optional[str] = None
-    for cand_pkg in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+    for cand_pkg in cand_pkg_names:
         cand_sub_dir = r_root / cand_pkg / "_pseo_substrate" / "pseofactory"
         if cand_sub_dir.is_dir():
             sub_files: Dict[str, bytes] = {}
-            for p in cand_sub_dir.glob("**/*.py"):
-                if "__pycache__" in p.parts or p.name.endswith(".pyc"):
+            cand_patterns = list(cand_sub_dir.glob("**/*.py"))
+            cand_tp_dir = cand_sub_dir / "truth_packs"
+            if cand_tp_dir.is_dir():
+                cand_patterns.extend(cand_tp_dir.glob("**/*.json"))
+            for p in cand_patterns:
+                if not p.is_file() or "__pycache__" in p.parts or p.name.endswith(".pyc"):
                     continue
                 rel = f"pseofactory/{p.relative_to(cand_sub_dir).as_posix()}"
                 try:

@@ -109,13 +109,38 @@ BANNED_TAUTOLOGICAL_FORMULA_PATTERNS: Tuple[Tuple[str, str], ...] = (
     ),
     (
         "2134831.0",
-        "Stale 2024 HIPAA annual penalty cap '2134831.0' (current 45 CFR 160.404 Tier 3/4 cap is 2067813.0)",
+        "Stale 2024 HIPAA annual penalty cap '2134831.0' (current 45 CFR 160.404 Tier 4 cap is 2190294.0)",
     ),
     (
         "$2,134,831",
-        "Stale 2024 HIPAA annual penalty cap '$2,134,831' (current 45 CFR 160.404 Tier 3/4 cap is $2,067,813)",
+        "Stale 2024 HIPAA annual penalty cap '$2,134,831' (current 45 CFR 160.404 Tier 4 cap is $2,190,294)",
+    ),
+    (
+        "2067813.0",
+        "Stale 2023/2025 HIPAA annual penalty cap '2067813.0' (current 45 CFR 160.404 Tier 4 cap is 2190294.0)",
+    ),
+    (
+        "$2,067,813",
+        "Stale 2023/2025 HIPAA annual penalty cap '$2,067,813' (current 45 CFR 160.404 Tier 4 cap is $2,190,294)",
     ),
 )
+
+
+def _resolve_gainhelm_hipaa_tier4_cap() -> float:
+    """Reads the canonical 2026 HIPAA Tier 4 annual cap from load_truth_pack('gainhelm')."""
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        gh_pack = load_truth_pack("gainhelm", allow_expired=True)
+        cap_entry = gh_pack.entries.get("hipaa_tier4_annual_cap_2026")
+        if cap_entry is not None and cap_entry.value is not None:
+            return float(cap_entry.value)
+        exp_formula = gh_pack.formulas.get("hipaa_tier4_exposure")
+        if exp_formula is not None:
+            return float(exp_formula.expected_baseline_output)
+    except Exception:
+        pass
+    return 2190294.0
 
 
 GAINHELM_CANONICAL_BASELINE_OUTPUTS: Dict[str, float] = {
@@ -123,7 +148,7 @@ GAINHELM_CANONICAL_BASELINE_OUTPUTS: Dict[str, float] = {
     "cmmc-2-0-compliance-cost-calculator": 132000.00,
     "nist-800-171-sprs-score-calculator": 87.0,
     "iso-27001-certification-cost-calculator": 67000.40,
-    "hipaa-violation-penalty-breach-cost-calculator": 2455313.00,
+    "hipaa-violation-penalty-breach-cost-calculator": round(_resolve_gainhelm_hipaa_tier4_cap() + 387500.0, 2),
     "pci-dss-4-0-compliance-cost-calculator": 94800.00,
     "fedramp-authorization-3pao-cost-calculator": 500000.00,
     "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
@@ -268,42 +293,6 @@ def verify_manifest_ssr_metric_parity(
                     f"Gate 5 (SSR Metric Parity): Manifest/output-value ({published_output}) diverges from rendered SSR calculator metric #{target_metric} ({expected_val})"
                 )
             return issues
-
-    # Skip multi-plan shared widget check on specialized Prexvo or GainHelm tools whose primary model is outside the 4-card shared widget
-    if "metric-rap_payment" in metrics and len(metrics) >= 4:
-        return issues
-
-    if "metric-soc2_total_cost" in metrics and len(metrics) >= 4:
-        return issues
-
-    if (
-        "val-total_federal_tax" in metrics
-        and metrics.get("val-total_federal_tax") in (23530.0, 19181.0, 18734.0)
-        and not any(k in slug_low for k in ("tax-bracket", "irs-2027-tax-brackets"))
-    ):
-        return issues
-
-    if (
-        slug_leaf == "irs-2027-tax-brackets"
-        and abs(float(published_output) - 18734.0) <= 1.0
-        and metrics.get("val-total_federal_tax") in (18734.0, 19181.0)
-        and "$18,734" in visible_html
-    ):
-        return issues
-
-    if (
-        "val-net_tax_deferred" in metrics
-        and metrics.get("val-net_tax_deferred") == 348900.0
-        and slug_leaf not in ("section-1031-calculator", "section-1031-exchange")
-    ):
-        return issues
-
-    if (
-        "val-net_burn" in metrics
-        and metrics.get("val-net_burn") == 45000.0
-        and slug_leaf != "saas-runway-calculator"
-    ):
-        return issues
 
     pub_f = float(published_output)
     tol = 1.0 if abs(pub_f) >= 100.0 else 0.02
@@ -1477,26 +1466,54 @@ def _audit_schema_and_fact_gates(
     gate_results["visual_ui_quality_contract"] = len(visual_ux_issues) == 0
 
     g11_ok = True
+    real_rel_path = (
+        str(candidate_spec.get("rel_path") or "").strip()
+        if isinstance(candidate_spec, dict)
+        else ""
+    ) or (
+        slug
+        if (slug and str(slug).endswith(".html"))
+        else (f"tools/{slug}/index.html" if slug else "index.html")
+    )
     try:
         from pseofactory.contracts import detect_uncorroborated_statutory_claims
         from pseofactory.tenant_facts import TenantFactStore, TruthReconciliationEngine
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        truth_rep = UnifiedTruthGate().audit_html_content(
+            html_content,
+            property_id=tenant,
+            file_path=real_rel_path,
+            slug=slug or "",
+            dist_dir=resolved_dist,
+            run_js_parity=True,
+        )
+        if not truth_rep.passed:
+            g11_ok = False
+            for tv in truth_rep.violations:
+                msg = f"Gate 11 ({tv.gate}:{tv.code}): {tv.message}"
+                if msg not in violations:
+                    violations.append(msg)
+
         fact_store = TenantFactStore.get_instance()
         if fact_store.get_profile(tenant) is not None:
             spec_disclosures = candidate_spec.get("mandatory_disclosures") or []
             is_valid, fact_violations = fact_store.verify_claim(
                 tenant=tenant,
                 text=html_content,
-                context="Gate 11",
+                context=real_rel_path,
                 spec_disclosures=spec_disclosures,
             )
             if not is_valid:
                 g11_ok = False
                 for fv in fact_violations:
-                    violations.append(f"Gate 11 (Tenant Fact Parity): {fv}")
+                    msg = f"Gate 11 (Tenant Fact Parity): {fv}"
+                    if msg not in violations:
+                        violations.append(msg)
             recon_issues = TruthReconciliationEngine.audit_html_truth_reconciliation(
                 html_content,
                 tenant=tenant,
-                rel_path=slug or "index.html",
+                rel_path=real_rel_path,
                 slug=slug or "",
             )
             if recon_issues:
@@ -1505,14 +1522,16 @@ def _audit_schema_and_fact_gates(
                     msg = f"Gate 11 (Truth Reconciliation): {ri}"
                     if msg not in violations:
                         violations.append(msg)
-        stat_issues = detect_uncorroborated_statutory_claims(html_content, rel_path=slug or "index.html")
+        stat_issues = detect_uncorroborated_statutory_claims(html_content, rel_path=real_rel_path)
         if stat_issues:
             g11_ok = False
             for si in stat_issues:
-                violations.append(f"Gate 11 (Tenant Fact Parity): {si}")
+                msg = f"Gate 11 (Tenant Fact Parity): {si}"
+                if msg not in violations:
+                    violations.append(msg)
     except Exception as ex:
         g11_ok = False
-        violations.append(f"Gate 11 (Tenant Fact Parity): Fact store check failed: {ex}")
+        violations.append(f"Gate 11 (Tenant Fact Parity): Fact store / UnifiedTruthGate check failed: {ex}")
 
     gate_results["tenant_fact_parity"] = g11_ok
 
@@ -1852,11 +1871,14 @@ def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str,
         has_primary_content = isinstance(payload.get("content"), str) and bool(payload["content"].strip())
         for key in (
             "title",
+            "subject",
             "content",
             "copy",
             "description",
             "pinned_comment",
             "article_markdown",
+            "answer_markdown",
+            "pitch_text",
             "markdown",
             "html",
             "code",
@@ -1882,12 +1904,14 @@ def _extract_channel_text_and_urls(channel_name: str, payload: Any) -> Dict[str,
                         seg_txt = seg.get("spoken_script") or seg.get("text")
                         if isinstance(seg_txt, str) and seg_txt.strip():
                             parts.append(seg_txt.strip())
-        if channel_name == "github_gist" and isinstance(payload.get("files"), dict):
+        if isinstance(payload.get("files"), dict):
             for fmeta in payload["files"].values():
                 if isinstance(fmeta, dict) and isinstance(fmeta.get("content"), str):
                     parts.append(fmeta["content"].strip())
                 elif isinstance(fmeta, str):
                     parts.append(fmeta.strip())
+        if not parts and channel_name == "ai_benchmarks":
+            parts.append(json.dumps(payload, default=str))
         text = "\n".join(parts)
     else:
         text = str(payload)
@@ -2052,11 +2076,36 @@ def audit_syndication_asset_against_truth_store(
     # Gate S3: Calculation proof & AST parity
     violations.extend(_check_calculation_proof_gate(asset_pack, channel_texts))
 
-    # Gate S4: Statutory Truth-Store Verification
-    combined_text = "\n".join(channel_texts.values())
-    for extra_key in ("linkedin_pulse", "substack_teardown", "x"):
+    # Gate S4: Statutory Truth-Store & UnifiedTruthGate Verification across ALL syndication surfaces
+    all_extra_channels = (
+        "linkedin_pulse",
+        "substack_teardown",
+        "x",
+        "google_sites",
+        "quora",
+        "outreach_pitch",
+        "newsletter",
+        "newsletter_hook",
+        "regulatory_lead_magnet",
+        "ai_benchmarks",
+    )
+    surface_texts: Dict[str, str] = dict(channel_texts)
+    for extra_key in all_extra_channels:
         if extra_key in asset_pack:
-            combined_text += "\n" + _extract_channel_text_and_urls(extra_key, asset_pack[extra_key])["text"]
+            ext_res = _extract_channel_text_and_urls(extra_key, asset_pack[extra_key])
+            if ext_res["text"]:
+                surface_texts[extra_key] = ext_res["text"]
+
+    # Also include any raw .md/.txt/.json entries attached directly on asset_pack
+    for extra_key, extra_val in asset_pack.items():
+        if extra_key in surface_texts or extra_key in ("slug", "tool_slug", "property_id", "channels", "calculation_proof", "dual_dataset_citations", "url", "parameterized_url", "syndication_dir"):
+            continue
+        if isinstance(extra_key, str) and (extra_key.endswith((".md", ".txt", ".json", ".html")) or extra_key.startswith("ai_benchmarks")):
+            ext_res = _extract_channel_text_and_urls(extra_key, extra_val)
+            if ext_res["text"]:
+                surface_texts[extra_key] = ext_res["text"]
+
+    combined_text = "\n".join(surface_texts.values())
 
     try:
         assert_no_forbidden_dashes(combined_text, context=f"syndication:{slug}")
@@ -2089,6 +2138,59 @@ def audit_syndication_asset_against_truth_store(
         elif not claim_res:
             violations.append("STATUTORY_TRUTH_MISMATCH:verify_claim_failed")
 
+    # UnifiedTruthGate fail-closed verification across ALL syndication channels and files
+    try:
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        truth_gate = UnifiedTruthGate()
+        for ch_name, ch_txt in surface_texts.items():
+            if not ch_txt:
+                continue
+            if ch_name == "google_sites" or ch_name.endswith(".html"):
+                tg_rep = truth_gate.audit_html_content(
+                    ch_txt,
+                    property_id=resolved_prop,
+                    file_path=f"syndication/{slug}/{ch_name}.html",
+                    slug=slug,
+                    run_js_parity=False,
+                    is_tool_page=False,
+                )
+            else:
+                ext = ".md" if ch_name in ("ghost", "linkedin_pulse", "substack_teardown", "quora") else (
+                    ".json" if ch_name == "ai_benchmarks" else ".txt"
+                )
+                fname = ch_name if ch_name.endswith((".md", ".txt", ".json", ".vtt")) else f"{ch_name}{ext}"
+                tg_rep = truth_gate.audit_non_html_file(
+                    file_path=f"syndication/{slug}/{fname}",
+                    property_id=resolved_prop,
+                    content=ch_txt,
+                )
+            for tv in tg_rep.violations:
+                v_msg = f"TRUTH_GATE_FAIL:{tv.gate}:{tv.code}:{ch_name}:{tv.message}"
+                if v_msg not in violations:
+                    violations.append(v_msg)
+
+        # If a syndication_dir path is provided on asset_pack, scan ALL .md, .txt, .json, .html, .vtt files (incl. ai_benchmarks/*)
+        syn_dir_raw = asset_pack.get("syndication_dir")
+        if syn_dir_raw:
+            syn_dir_p = Path(str(syn_dir_raw))
+            if syn_dir_p.is_dir():
+                for sf in sorted(syn_dir_p.rglob("*")):
+                    if not sf.is_file() or sf.name.startswith("."):
+                        continue
+                    if sf.suffix.lower() == ".html":
+                        sf_rep = truth_gate.audit_html_file(sf, resolved_prop, run_js_parity=False, is_tool_page=False)
+                    elif sf.suffix.lower() in (".md", ".txt", ".json", ".vtt", ".xml", ".js"):
+                        sf_rep = truth_gate.audit_non_html_file(sf, resolved_prop)
+                    else:
+                        continue
+                    for tv in sf_rep.violations:
+                        v_msg = f"TRUTH_GATE_FAIL:{tv.gate}:{tv.code}:{sf.name}:{tv.message}"
+                        if v_msg not in violations:
+                            violations.append(v_msg)
+    except Exception as tg_exc:
+        violations.append(f"TRUTH_GATE_FAIL:RUNTIME_ERROR:{tg_exc}")
+
     proof = asset_pack.get("calculation_proof")
     if isinstance(proof, dict):
         stat_Claim = str(proof.get("statutory_claim_key", "")).strip()
@@ -2104,7 +2206,7 @@ def audit_syndication_asset_against_truth_store(
                         "qsbs_exclusion_cap": "section_1202_qsbs_exclusion_cap",
                     }
                     lookup_key = alias_map.get(stat_Claim, stat_Claim)
-                    if lookup_key in limits_map and lookup_key not in ("standard_deduction_2026_single",):
+                    if lookup_key in limits_map:
                         try:
                             if abs(float(limits_map[lookup_key]) - float(stat_Val)) > 0.05:
                                 violations.append(f"STATUTORY_TRUTH_MISMATCH:unverified_claim:{stat_Claim}={stat_Val}")
@@ -2401,6 +2503,7 @@ def audit_estate_accuracy(
     tolerance: float = 0.01,
     include_syndication: bool = True,
     auto_reconcile: bool = False,
+    repo_root: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Fail-closed, non-mutating factual and numerical verification across 100% of emitted
@@ -2418,12 +2521,26 @@ def audit_estate_accuracy(
     from pseofactory.contracts import detect_uncorroborated_statutory_claims
     from pseofactory.maintenance import LiveTruthAuditEngine
     from pseofactory.tenant_facts import TenantFactStore, resolve_canonical_property_id
+    from pseofactory.truth_gate import UnifiedTruthGate
 
     d = Path(dist_dir).resolve()
     tenant_norm = resolve_canonical_property_id(property_id)
+    eff_repo_root = Path(repo_root).resolve() if repo_root is not None else d.parent
     if not d.is_dir():
+        missing_msg = f"EMPTY_OR_MISSING_DIST_DIR: dist_dir does not exist or is not a directory: {d}"
+        if strict:
+            raise ContentAccuracyAuditError(
+                missing_msg,
+                report=ContentAccuracyAuditReport(
+                    slug="__dist_dir__",
+                    tenant=tenant_norm,
+                    passed=False,
+                    violations=[missing_msg],
+                ),
+            )
         return {
-            "status": "PASS",
+            "status": "FAIL",
+            "reason": "EMPTY_OR_MISSING_DIST_DIR",
             "property_id": property_id,
             "tools_audited": 0,
             "tools_passed": 0,
@@ -2433,12 +2550,12 @@ def audit_estate_accuracy(
             "html_pages_audited": 0,
             "html_pages_failed": 0,
             "non_html_audited": 0,
-            "non_html_failed": 0,
+            "non_html_failed": 1,
             "surfaces_audited": 0,
             "surfaces_passed": 0,
-            "surfaces_failed": 0,
+            "surfaces_failed": 1,
             "violations_by_tool": {},
-            "violations_by_surface": {},
+            "violations_by_surface": {"__dist_dir__": [missing_msg]},
         }
 
     auditor = ContentAccuracyAuditStage(tolerance=tolerance, strict=False)
@@ -2593,10 +2710,69 @@ def audit_estate_accuracy(
             violations_by_surface[surf_key] = surf_violations
             violations_by_tool[surf_key] = surf_violations
 
-    surfaces_audited = html_pages_audited + non_html_audited
+    # 3. UnifiedTruthGate fail-closed estate audit across 100% of HTML, JS, JSON-LD, llms*.txt, manifests, and syndication
+    eff_syn_dir: Path = (eff_repo_root / "syndication") if include_syndication else (d / "__syndication_disabled__")
+    truth_gate_report = UnifiedTruthGate().audit_estate(
+        d,
+        tenant_norm,
+        repo_root=eff_repo_root,
+        syndication_dir=eff_syn_dir,
+        run_js_parity=True,
+    )
+    for tv in truth_gate_report.violations:
+        tv_path = Path(tv.file_path)
+        try:
+            surf_key = tv_path.resolve().relative_to(d).as_posix()
+        except Exception:
+            try:
+                surf_key = tv_path.resolve().relative_to(eff_repo_root).as_posix()
+            except Exception:
+                surf_key = tv.file_path or "__truth_gate__"
+
+        v_msg = f"[{tv.gate}:{tv.code}] {tv.message}"
+        was_surface_failed = surf_key in violations_by_surface
+        surf_list = violations_by_surface.setdefault(surf_key, [])
+        if v_msg not in surf_list:
+            surf_list.append(v_msg)
+
+        if not was_surface_failed:
+            if surf_key.endswith(".html") and not surf_key.startswith("syndication/"):
+                html_pages_failed += 1
+            else:
+                non_html_failed += 1
+
+        # Also map tool HTML / manifest surfaces back to violations_by_tool
+        parts_s = Path(surf_key).parts
+        if len(parts_s) == 3 and parts_s[0] == "tools" and parts_s[2] == "index.html":
+            t_slug = parts_s[1]
+            was_tool_failed = t_slug in violations_by_tool
+            t_list = violations_by_tool.setdefault(t_slug, [])
+            if v_msg not in t_list:
+                t_list.append(v_msg)
+            if not was_tool_failed:
+                tools_failed += 1
+                if tools_passed > 0:
+                    tools_passed -= 1
+        elif len(parts_s) >= 4 and parts_s[0] == "tools" and parts_s[-1] == "index.html":
+            t_slug = "/".join(parts_s[1:-1])
+            was_tool_failed = t_slug in violations_by_tool
+            t_list = violations_by_tool.setdefault(t_slug, [])
+            if v_msg not in t_list:
+                t_list.append(v_msg)
+            if not was_tool_failed:
+                tools_failed += 1
+                spokes_failed += 1
+                if tools_passed > 0:
+                    tools_passed -= 1
+        elif not surf_key.endswith(".html"):
+            t_list = violations_by_tool.setdefault(surf_key, [])
+            if v_msg not in t_list:
+                t_list.append(v_msg)
+
+    surfaces_audited = max(html_pages_audited + non_html_audited, len(truth_gate_report.files_audited))
     surfaces_failed = html_pages_failed + non_html_failed
-    surfaces_passed = surfaces_audited - surfaces_failed
-    status = "PASS" if (tools_failed == 0 and surfaces_failed == 0) else "FAIL"
+    surfaces_passed = max(0, surfaces_audited - surfaces_failed)
+    status = "PASS" if (tools_failed == 0 and surfaces_failed == 0 and truth_gate_report.passed) else "FAIL"
 
     if strict and status != "PASS":
         first_key = next(iter(violations_by_surface))

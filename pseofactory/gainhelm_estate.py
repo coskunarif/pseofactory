@@ -178,13 +178,13 @@ GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = {
             "c3pao_assessment_fee": 48500.0,
             "enclave_licensing_annual": 26400.0,
             "remediation_hours": 380.0,
-            "engineering_hourly_rate": 115.0,
+            "engineering_hourly_rate": 121.67,
             "rpo_advisory_fee": 13400.0,
         },
-        "published_output": 132000.0,
+        "published_output": 134534.6,
         "statutory_authority": "32 CFR Part 170 (CMMC 2.0 Final Rule) & DFARS 252.204-7012 / 252.204-7021",
         "economic_dataset": "DoD CMMC 2.0 Regulatory Impact Analysis (RIA) & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Defense contractor (75 employees) pursuing CMMC 2.0 Level 2 C3PAO certification across 110 NIST SP 800-171 controls: C3PAO fee ($48,500.00) + FedRAMP enclave licensing ($26,400.00) + 380 remediation hours at $115/hr ($43,700.00) + RPO advisory ($13,400.00) = $132,000.00 total certification investment.",
+        "sample_calculation": "Defense contractor (75 employees) pursuing CMMC 2.0 Level 2 C3PAO certification across 110 NIST SP 800-171 controls: C3PAO fee ($48,500.00) + FedRAMP enclave licensing ($26,400.00) + 380 remediation hours at $121.67/hr ($46,234.60) + RPO advisory ($13,400.00) = $134,534.60 total certification investment.",
     },
     "nist-800-171-sprs-score-calculator": {
         "model_name": "GainHelm-DoD-NIST800171-SPRS-Scoring-Engine-2026",
@@ -210,12 +210,12 @@ GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = {
             "isms_platform_cost": 14500.0,
             "internal_audit_fee": 8500.0,
             "remediation_hours": 180.0,
-            "engineering_hourly_rate": 125.28,
+            "engineering_hourly_rate": 121.67,
         },
-        "published_output": 67000.4,
+        "published_output": 66350.6,
         "statutory_authority": "ISO/IEC 27001:2022 & ISO/IEC 27006-1:2024 Mandatory Auditor-Day Tables",
         "economic_dataset": "IAF MD 5 / ISO 27006 Auditor-Day Schedule & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "For a 75-employee organization requiring 11.0 accredited Stage 1 and Stage 2 auditor days under ISO/IEC 27006-1:2024 at $1,950/day ($21,450.00) + ISMS platform ($14,500.00) + Clause 9.2 internal audit ($8,500.00) + 180 Annex A remediation hours at $125.28/hr ($22,550.40) = $67,000.40 total first-year ISO 27001:2022 cost.",
+        "sample_calculation": "For a 75-employee organization requiring 11.0 accredited Stage 1 and Stage 2 auditor days under ISO/IEC 27006-1:2024 at $1,950/day ($21,450.00) + ISMS platform ($14,500.00) + Clause 9.2 internal audit ($8,500.00) + 180 Annex A remediation hours at $121.67/hr ($21,900.60) = $66,350.60 total first-year ISO 27001:2022 cost.",
     },
     "hipaa-violation-penalty-breach-cost-calculator": {
         "model_name": "GainHelm-HHS-OCR-HIPAA-Breach-Penalty-Model-2026",
@@ -224,14 +224,14 @@ GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = {
         "inputs": {
             "compromised_records": 1500.0,
             "tier_penalty_per_record": 13795.0,
-            "statutory_annual_cap": 2067813.0,
+            "statutory_annual_cap": 2190294.0,
             "forensic_legal_retainer": 95000.0,
             "notification_cost_per_record": 195.0,
         },
-        "published_output": 2455313.0,
-        "statutory_authority": "45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act) & 45 CFR Part 164 Subpart D",
+        "published_output": 2577794.0,
+        "statutory_authority": "45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), 91 FR 3665 / 91 FR 66566 & 45 CFR Part 164 Subpart D",
         "economic_dataset": "HHS Annual Civil Monetary Penalty Inflation Adjustment Rule & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "For a 1,500-record ePHI breach classified under Tier 3 Willful Neglect Corrected (45 CFR 160.404): statutory civil penalty capped at the $2,067,813.00 annual limit ($13,795/record * 1,500 = $20,692,500 raw) + forensic and legal retainer ($95,000.00) + patient notification and credit monitoring ($195/record * 1,500 = $292,500.00) = $2,455,313.00 total exposure.",
+        "sample_calculation": "For a 1,500-record ePHI breach classified under 45 CFR 160.404 (91 FR 3665 / 91 FR 66566): statutory civil penalty capped at the $2,190,294.00 annual limit ($13,795/record * 1,500 = $20,692,500 raw) + forensic and legal retainer ($95,000.00) + patient notification and credit monitoring ($195/record * 1,500 = $292,500.00) = $2,577,794.00 total exposure.",
     },
     "pci-dss-4-0-compliance-cost-calculator": {
         "model_name": "GainHelm-PCIDSS-v401-QSA-ROC-Cost-Model-2026",
@@ -243,12 +243,12 @@ GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = {
             "cde_system_count": 6.0,
             "fee_per_cde_system": 2200.0,
             "segmentation_pentest_fee": 12500.0,
-            "remediation_labor_cost": 23300.0,
+            "remediation_labor_cost": 21900.6,
         },
-        "published_output": 94800.0,
+        "published_output": 93400.6,
         "statutory_authority": "PCI DSS v4.0.1 Standard (PCI SSC) & Requirement 11.3 / 11.4 Testing Rules",
         "economic_dataset": "PCI SSC QSA Assessment Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Level 1 Merchant requiring an annual QSA Report on Compliance (ROC) across 6 CDE systems: QSA ROC fee ($42,000.00) + quarterly ASV scans ($3,800.00) + 6 CDE systems at $2,200 ($13,200.00) + segmentation pentesting ($12,500.00) + 180 remediation hours ($23,300.00) = $94,800.00 total annual PCI DSS v4.0.1 cost.",
+        "sample_calculation": "Level 1 Merchant requiring an annual QSA Report on Compliance (ROC) across 6 CDE systems: QSA ROC fee ($42,000.00) + quarterly ASV scans ($3,800.00) + 6 CDE systems at $2,200 ($13,200.00) + segmentation pentesting ($12,500.00) + 180 remediation hours at $121.67/hr ($21,900.60) = $93,400.60 total annual PCI DSS v4.0.1 cost.",
     },
     "fedramp-authorization-3pao-cost-calculator": {
         "model_name": "GainHelm-FedRAMP-NIST80053-3PAO-ATO-Cost-Model-2026",
@@ -373,14 +373,47 @@ GAINHELM_CALCULATION_MANIFESTS: List[Dict[str, Any]] = [
 ]
 
 
+def _gainhelm_truth_constants() -> Dict[str, Any]:
+    """Loads verified 2026 GainHelm constants from TruthPack when available, with canonical fallbacks."""
+    defaults: Dict[str, Any] = {
+        "hipaa_tier4_cap": 2190294.0,
+        "eng_hourly_rate": 121.67,
+        "sprs_5pt_max": 44,
+        "sprs_3pt_max": 14,
+        "sprs_1pt_max": 51,
+    }
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        pack = load_truth_pack("gainhelm", allow_expired=True)
+        cap_entry = pack.entries.get("hipaa_tier4_annual_cap_2026")
+        if cap_entry is not None and isinstance(cap_entry.value, (int, float)):
+            defaults["hipaa_tier4_cap"] = float(cap_entry.value)
+        rate_entry = pack.entries.get("bls_infosec_hourly_loaded_2026")
+        if rate_entry is not None and isinstance(rate_entry.value, (int, float)):
+            defaults["eng_hourly_rate"] = float(rate_entry.value)
+        sprs_entry = pack.entries.get("sprs_control_counts")
+        if sprs_entry is not None and isinstance(sprs_entry.value, dict):
+            defaults["sprs_5pt_max"] = int(sprs_entry.value.get("5_pt", 44))
+            defaults["sprs_3pt_max"] = int(sprs_entry.value.get("3_pt", 14))
+            defaults["sprs_1pt_max"] = int(sprs_entry.value.get("1_pt", 51))
+    except Exception:
+        pass
+    return defaults
+
+
 def get_gainhelm_tool_quick_answers() -> Dict[str, str]:
-    """Builds 40-to-60-word GEO quick answers keyed by GainHelm tool slug."""
+    """Builds 40-to-58-word GEO quick answers keyed by GainHelm tool slug."""
     from pseofactory.gsc_remediation import _normalize_quick_answer_40_60_words
 
-    return {
-        m_slug: _normalize_quick_answer_40_60_words("", "gainhelm", slug=m_slug)
-        for m_slug in GAINHELM_FALLBACK_MANIFESTS_MAP
-    }
+    out: Dict[str, str] = {}
+    for m_slug in GAINHELM_FALLBACK_MANIFESTS_MAP:
+        qa = _normalize_quick_answer_40_60_words("", "gainhelm", slug=m_slug)
+        words = qa.split()
+        if len(words) > 58:
+            qa = " ".join(words[:57]).rstrip(",;:-") + "."
+        out[m_slug] = qa
+    return out
 
 
 GAINHELM_TOOL_QUICK_ANSWERS: Dict[str, str] = get_gainhelm_tool_quick_answers()
@@ -397,8 +430,9 @@ def compute_gainhelm_framework_benchmarks(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Computes multi-framework compliance benchmarks dynamically using the tenant's
-    `gainhelm/engine/compliance_formulas.py` when present, or identical stdlib math.
+    `gainhelm/engine/compliance_formulas.py` when present, or TruthPack-backed stdlib math.
     """
+    truth_c = _gainhelm_truth_constants()
     if repo_root is not None:
         formulas_py = Path(repo_root) / "gainhelm" / "engine" / "compliance_formulas.py"
         if formulas_py.is_file():
@@ -422,31 +456,36 @@ def compute_gainhelm_framework_benchmarks(
             except Exception:
                 pass
 
+    eng_rate = float(truth_c["eng_hourly_rate"])
+    hipaa_cap = float(truth_c["hipaa_tier4_cap"])
     hc = max(1, int(headcount))
     extra_c = max(0, int(extra_criteria_count))
     cpa_total = round(28000.0 + (extra_c * 4500.0), 2)
-    internal_labor = round(120.0 * 121.67, 2)
+    internal_labor = round(120.0 * eng_rate, 2)
     soc2_total = round(cpa_total + 11500.0 + 15000.0 + internal_labor, 2)
     auto_savings = round(internal_labor * 0.55, 2)
 
-    remediation_labor = round(380.0 * 115.0, 2)
+    remediation_labor = round(380.0 * eng_rate, 2)
     cmmc_total = round(48500.0 + 26400.0 + remediation_labor + 13400.0, 2)
 
-    u5 = max(0, min(44, int(unimplemented_5pt)))
-    u3 = max(0, min(14, int(unimplemented_3pt)))
-    u1 = max(0, min(52, int(unimplemented_1pt)))
+    u5 = max(0, min(int(truth_c["sprs_5pt_max"]), int(unimplemented_5pt)))
+    u3 = max(0, min(int(truth_c["sprs_3pt_max"]), int(unimplemented_3pt)))
+    u1 = max(0, min(int(truth_c["sprs_1pt_max"]), int(unimplemented_1pt)))
     deduction = (u5 * 5) + (u3 * 3) + (u1 * 1)
     sprs_score = float(max(-203, 110 - deduction))
 
     iso_days = 11.0
     iso_reg = round(iso_days * 1950.0, 2)
-    iso_rem = round(180.0 * 125.28, 2)
+    iso_rem = round(180.0 * eng_rate, 2)
     iso_total = round(iso_reg + 14500.0 + 8500.0 + iso_rem, 2)
 
     records = max(0, int(compromised_records))
-    ocr_fine = round(min(records * 13795.0, 2067813.0), 2)
+    ocr_fine = round(min(records * 13795.0, hipaa_cap), 2)
     notif_cost = round(records * 195.0, 2)
     hipaa_total = round(ocr_fine + 95000.0 + notif_cost, 2)
+
+    pci_labor = round(180.0 * eng_rate, 2)
+    pci_total = round(42000.0 + 3800.0 + (6.0 * 2200.0) + 12500.0 + pci_labor, 2)
 
     return {
         "soc2": {
@@ -500,7 +539,7 @@ def compute_gainhelm_framework_benchmarks(
         },
         "pci_dss": {
             "framework": "PCI DSS v4.0.1 Level 1 QSA ROC",
-            "total_cost": 94800.0,
+            "total_cost": pci_total,
             "timeline_months": 6,
         },
         "fedramp": {"framework": "FedRAMP Moderate 3PAO (44 U.S.C. 3607)", "total_cost": 500000.0, "timeline_months": 12},
@@ -555,9 +594,9 @@ def _get_gainhelm_organization_schema() -> Dict[str, Any]:
 _COMPLIANCE_FIELDS: List[Dict[str, Any]] = [
     {"id": "headcount", "label": "In-Scope Employee Headcount", "default": 75, "min_val": 1, "max_val": 10000, "step": 5, "unit": "employees", "tooltip": "Total engineering, operations, and administrative personnel within the ISMS or SOC 2 audit boundary."},
     {"id": "extra_criteria", "label": "Additional SOC 2 Trust Services Criteria", "default": 2, "min_val": 0, "max_val": 4, "step": 1, "unit": "criteria", "tooltip": "Optional criteria beyond mandatory Security (Availability, Confidentiality, Processing Integrity, Privacy)."},
-    {"id": "unimplemented_5pt", "label": "Unimplemented NIST 800-171 5-Point Controls", "default": 3, "min_val": 0, "max_val": 42, "step": 1, "unit": "controls", "tooltip": "Each unimplemented 5-point NIST SP 800-171 control deducts 5 points from the +110 SPRS baseline."},
+    {"id": "unimplemented_5pt", "label": "Unimplemented NIST 800-171 5-Point Controls", "default": 3, "min_val": 0, "max_val": 44, "step": 1, "unit": "controls", "tooltip": "Each unimplemented 5-point NIST SP 800-171 control deducts 5 points from the +110 SPRS baseline."},
     {"id": "unimplemented_3pt", "label": "Unimplemented NIST 800-171 3-Point Controls", "default": 2, "min_val": 0, "max_val": 14, "step": 1, "unit": "controls", "tooltip": "Each unimplemented 3-point NIST SP 800-171 control deducts 3 points from the +110 SPRS baseline."},
-    {"id": "unimplemented_1pt", "label": "Unimplemented NIST 800-171 1-Point Controls", "default": 2, "min_val": 0, "max_val": 54, "step": 1, "unit": "controls", "tooltip": "Each unimplemented 1-point NIST SP 800-171 control deducts 1 point from the +110 SPRS baseline."},
+    {"id": "unimplemented_1pt", "label": "Unimplemented NIST 800-171 1-Point Controls", "default": 2, "min_val": 0, "max_val": 51, "step": 1, "unit": "controls", "tooltip": "Each unimplemented 1-point NIST SP 800-171 control deducts 1 point from the +110 SPRS baseline."},
     {"id": "compromised_records", "label": "Regulated ePHI / PII Records in Scope", "default": 1500, "min_val": 0, "max_val": 1000000, "step": 100, "unit": "records", "tooltip": "Total patient ePHI or cardholder records exposed for 45 CFR 160.404 HIPAA penalty modeling."},
 ]
 
@@ -565,7 +604,7 @@ _COMPLIANCE_FAQS: List[Dict[str, str]] = [
     {"question": "How is a SOC 2 Type II total audit budget calculated under AICPA SSAE 18?", "answer": "SOC 2 Type II cost combines the accredited CPA firm examination fee ($28,000 base for Security plus $4,500 per additional Trust Services Criterion), an external CREST/OSCP penetration test ($11,500), continuous GRC automation licensing ($15,000), and internal engineering evidence hours (120 hours at $121.67/hr loaded BLS 15-1212 wage rate = $14,600.40), totaling $78,100.40."},
     {"question": "How does the DoD NIST SP 800-171 SPRS score calculator work under DFARS 252.204-7019?", "answer": "Every defense contractor starts at +110 points across the 110 security requirements of NIST SP 800-171 Rev 2. Unimplemented controls deduct 5 points, 3 points, or 1 point based on DoD Assessment Methodology weights, producing a score between -203 and +110. Under 32 CFR 170.21, a minimum score of 88 with zero open critical 5-point CUI controls is required for a 180-day Conditional CMMC Level 2 POA&M."},
     {"question": "How are ISO/IEC 27001 Stage 1 and Stage 2 auditor days determined?", "answer": "Accredited certification bodies allocate Stage 1 and Stage 2 auditor days strictly from ISO/IEC 27006-1:2024 Annex B headcount tables (11 auditor days at $1,950/day = $21,450 for a 75-employee ISMS scope), with mandatory Surveillance Year 1 and Year 2 audits sized at 33% of initial certification time."},
-    {"question": "What are the inflation-adjusted HIPAA civil monetary penalty tiers under 45 CFR 160.404?", "answer": "Under 45 CFR 160.404 and 45 CFR 102.3, HHS OCR assesses Tier 1 ($141 to $71,162 per violation), Tier 2 ($1,424 to $71,162), Tier 3 Willful Neglect Corrected ($13,795 to $71,162), and Tier 4 Willful Neglect Uncorrected ($71,162 to $2,067,813 per violation), plus 45 CFR 164.406 media notification and forensic response costs when 500 or more ePHI records are compromised."},
+    {"question": "What are the inflation-adjusted HIPAA civil monetary penalty tiers under 45 CFR 160.404?", "answer": "Under 45 CFR 160.404, 45 CFR 102.3, and 91 FR 3665 / 91 FR 66566, HHS OCR assesses Tier 1 ($141 to $71,162 per violation), Tier 2 ($1,424 to $71,162), Tier 3 Willful Neglect Corrected ($13,795 to $71,162), and Tier 4 Willful Neglect Uncorrected ($71,162 to $2,190,294 annual cap per identical provision), plus 45 CFR 164.406 media notification and forensic response costs when 500 or more ePHI records are compromised."},
 ]
 
 
@@ -943,8 +982,8 @@ def _compute_meter_breakdown(slug_low: str, benchmarks: Dict[str, Dict[str, Any]
             "mode": "pci_dss",
             "pay": 42000.0,
             "right": 14000.0,
-            "int": 38800.0,
-            "sub": round(38800.0 * 0.45, 2),
+            "int": 37400.6,
+            "sub": round(37400.6 * 0.45, 2),
             "pct": max(5, min(95, round((42000.0 / max(1.0, float(b_pci["total_cost"]))) * 100))),
         },
         "fedramp-authorization-3pao-cost-calculator": {
@@ -1208,11 +1247,11 @@ def _render_calculator_widget(
           var critEl = document.getElementById("calc-input-extra_criteria");
           var crit = critEl ? Math.min(4, Math.round(clampNonNeg(critEl.value, 2))) : 2;
           var u5El = document.getElementById("calc-input-unimplemented_5pt");
-          var u5 = u5El ? Math.min(42, Math.round(clampNonNeg(u5El.value, 3))) : 3;
+          var u5 = u5El ? Math.min(44, Math.round(clampNonNeg(u5El.value, 3))) : 3;
           var u3El = document.getElementById("calc-input-unimplemented_3pt");
           var u3 = u3El ? Math.min(14, Math.round(clampNonNeg(u3El.value, 2))) : 2;
           var u1El = document.getElementById("calc-input-unimplemented_1pt");
-          var u1 = u1El ? Math.min(54, Math.round(clampNonNeg(u1El.value, 2))) : 2;
+          var u1 = u1El ? Math.min(51, Math.round(clampNonNeg(u1El.value, 2))) : 2;
           var recEl = document.getElementById("calc-input-compromised_records");
           var rec = recEl ? Math.round(clampNonNeg(recEl.value, 1500)) : 1500;
 
@@ -1227,18 +1266,18 @@ def _render_calculator_widget(
           var sprsDeduction = (u5 * 5) + (u3 * 3) + (u1 * 1);
           var sprsScore = Math.max(-203, 110 - sprsDeduction);
 
-          var cmmcRem = Math.round((380.0 * 115.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
+          var cmmcRem = Math.round((380.0 * 121.67 * Math.max(0.5, scaleFactor)) * 100) / 100;
           var cmmcTotal = Math.round((48500.0 + 26400.0 + cmmcRem + 13400.0) * 100) / 100;
           var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
           var isoReg = Math.round((isoDays * 1950.0) * 100) / 100;
-          var isoRem = Math.round((180.0 * 125.28 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
+          var isoRem = Math.round((180.0 * 121.67 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
           var isoTotal = Math.round((isoReg + 14500.0 + 8500.0 + isoRem) * 100) / 100;
           var recFactor = Math.max(0.5, rec / 1500.0);
-          var ocrFine = Math.min(rec * 13795.0, 2067813.0);
+          var ocrFine = Math.min(rec * 13795.0, 2190294.0);
           var hipaaRetainer = Math.round((95000.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
           var hipaaResp = Math.round((hipaaRetainer + (rec * 195.0)) * 100) / 100;
           var hipaaTotal = Math.round((ocrFine + hipaaResp) * 100) / 100;
-          var pciCde = Math.round((38800.0 * Math.max(0.5, scaleFactor) * Math.pow(recFactor, 0.25)) * 100) / 100;
+          var pciCde = Math.round((37400.6 * Math.max(0.5, scaleFactor) * Math.pow(recFactor, 0.25)) * 100) / 100;
           var pciTotal = Math.round((42000.0 + 14000.0 + pciCde) * 100) / 100;
           var fedTotal = Math.round((500000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35))) * 100) / 100;
           var hitTotal = Math.round((115000.0 * Math.max(0.5, Math.pow(scaleFactor, 0.35)) * Math.pow(recFactor, 0.20)) * 100) / 100;
@@ -1670,7 +1709,7 @@ def _render_base_html(
 _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
     "cmmc-2-0-compliance-cost-calculator": {
         "faqs": (
-            {"question": "How is a CMMC 2.0 Level 2 C3PAO total budget calculated under 32 CFR Part 170?", "answer": "Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense supplier models a $48,500.00 Cyber-AB C3PAO assessment fee, $26,400.00 CUI enclave licensing, $43,700.00 remediation labor, and $13,400.00 RPO advisory ($132,000.00 total program cost)."},
+            {"question": "How is a CMMC 2.0 Level 2 C3PAO total budget calculated under 32 CFR Part 170?", "answer": "Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense supplier models a $48,500.00 Cyber-AB C3PAO assessment fee, $26,400.00 CUI enclave licensing, $46,234.60 remediation labor, and $13,400.00 RPO advisory ($134,534.60 total program cost)."},
             {"question": "When are conditional CMMC Level 2 POA&M items allowed?", "answer": "Under 32 CFR 170.21, contractors achieving at least 88 of 110 controls (80% minimum) may place eligible 1-point controls on a 180-day POA&M closeout plan prior to final certification."},
         ),
         "howto": (
@@ -1716,9 +1755,9 @@ _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
             "Prioritize 5-point controls in the System Security Plan (SSP) and POA&M prior to SPRS upload.",
         ),
         "table_rows": (
-            ("5-Point Foundational Controls", "NIST SP 800-171 Rev 2 (42 Controls)", "MFA, FIPS Crypto &amp; CUI Isolation", "DoD Assessment Methodology", "Immediate 5-Pt Deduction Each"),
-            ("3-Point Medium Controls", "NIST SP 800-171 Rev 2 (14 Controls)", "Audit Logging &amp; Least Privilege", "DFARS 252.204-7019 / 7020", "3-Pt Deduction Until Closed"),
-            ("1-Point Procedural Controls", "NIST SP 800-171 Rev 2 (54 Controls)", "Training, Media &amp; Policy Hygiene", "SPRS Self-Assessment Filing", "1-Pt Deduction Each"),
+            ("5-Point Foundational Controls", "NIST SP 800-171 Rev 2 (44 Controls)", "MFA, FIPS Crypto &amp; CUI Isolation", "DoD Assessment Methodology v1.2.1", "Immediate 5-Pt Deduction Each (220 Max)"),
+            ("3-Point Medium Controls", "NIST SP 800-171 Rev 2 (14 Controls)", "Audit Logging &amp; Least Privilege", "DFARS 252.204-7019 / 7020", "3-Pt Deduction Until Closed (42 Max)"),
+            ("1-Point Procedural &amp; 0-Pt SSP Controls", "NIST SP 800-171 Rev 2 (51 1-Pt + 1 0-Pt SSP)", "Training, Media, Policy &amp; 3.12.4 SSP", "SPRS Self-Assessment Filing", "1-Pt Deduction Each (51 Max; 313 Total)"),
         ),
         "provenance": (
             ("Dataset 1:", "https://csrc.nist.gov/pubs/sp/800/171/r2/upd1/final", "NIST SP 800-171 Rev 2 Security Requirements"),
@@ -1757,7 +1796,7 @@ _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
     },
     "hipaa-violation-penalty-breach-cost-calculator": {
         "faqs": (
-            {"question": "What are the HIPAA civil monetary penalty tiers under 45 CFR 160.404?", "answer": "HHS OCR assesses inflation-adjusted Tier 1 ($141-$71,162), Tier 2 ($1,424-$71,162), Tier 3 Willful Neglect Corrected ($13,795-$71,162), and Tier 4 Uncorrected ($71,162-$2,067,813 annual cap per identical provision)."},
+            {"question": "What are the HIPAA civil monetary penalty tiers under 45 CFR 160.404?", "answer": "HHS OCR assesses inflation-adjusted Tier 1 ($141-$71,162), Tier 2 ($1,424-$71,162), Tier 3 Willful Neglect Corrected ($13,795-$71,162), and Tier 4 Uncorrected ($71,162-$2,190,294 annual cap per identical provision under 91 FR 3665 / 91 FR 66566)."},
             {"question": "When is media notice required after an ePHI data breach?", "answer": "Under 45 CFR 164.406, breaches involving 500 or more unencrypted ePHI records trigger prominent media notice alongside 60-day HHS OCR and individual notifications."},
         ),
         "howto": (
@@ -1774,7 +1813,7 @@ _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
             "Evaluate ePHI encryption safe harbor and HITECH Recognized Security Practices (42 U.S.C. 17941).",
         ),
         "table_rows": (
-            ("Tier 3 Willful Neglect (Corrected)", "45 CFR 160.404 &amp; 45 CFR 102.3", "$13,795+ / violation ($2,067,813 Cap)", "HHS Office for Civil Rights", "Per Identical Provision / Yr"),
+            ("Tier 3 / Tier 4 Annual Statutory Cap", "45 CFR 160.404 &amp; 91 FR 3665 / 91 FR 66566", "$13,795 to $71,162 / violation ($2,190,294 Cap)", "HHS Office for Civil Rights", "Per Identical Provision / Yr"),
             ("HITECH Breach Notification", "45 CFR 164.404-408", "Individual, OCR &amp; Media (&gt;=500 Rec)", "HHS OCR Breach Portal", "60-Day Statutory Window"),
             ("Recognized Security Practices", "42 U.S.C. 17941 (HITECH Amendment)", "12-Month Continuous Safeguards", "HHS OCR Enforcement Factor", "Audit &amp; Fine Reduction Factor"),
         ),
@@ -2035,36 +2074,36 @@ def _build_home_html(benchmarks: Dict[str, Dict[str, Any]], all_tools: Sequence[
             <tr>
               <td class="td-plan-name">SOC 2 Type II Attestation</td>
               <td>AICPA SSAE 18 (AT-C 205)</td>
-              <td class="td-num">${benchmarks["soc2"]["cpa_audit_fee"]:.2f}</td>
-              <td class="td-num" id="oracle-soc2-total">${benchmarks["soc2"]["total_cost"]:.2f}</td>
+              <td class="td-num">${benchmarks["soc2"]["cpa_audit_fee"]:,.2f}</td>
+              <td class="td-num" id="oracle-soc2-total">${benchmarks["soc2"]["total_cost"]:,.2f}</td>
               <td class="td-num">3 TSC Criteria</td>
             </tr>
             <tr>
               <td class="td-plan-name">CMMC 2.0 Level 2 (C3PAO)</td>
               <td>32 CFR Part 170 &amp; DFARS 7021</td>
-              <td class="td-num">${benchmarks["cmmc"]["c3pao_assessment_fee"]:.2f}</td>
-              <td class="td-num" id="oracle-cmmc-total">${benchmarks["cmmc"]["total_cost"]:.2f}</td>
+              <td class="td-num">${benchmarks["cmmc"]["c3pao_assessment_fee"]:,.2f}</td>
+              <td class="td-num" id="oracle-cmmc-total">${benchmarks["cmmc"]["total_cost"]:,.2f}</td>
               <td class="td-num" id="oracle-sprs-score">{benchmarks["sprs"]["sprs_score"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">ISO/IEC 27001:2022 ISMS</td>
               <td>ISO/IEC 27006-1:2024</td>
-              <td class="td-num">${benchmarks["iso27001"]["registrar_fee"]:.2f}</td>
-              <td class="td-num" id="oracle-iso27001-total">${benchmarks["iso27001"]["total_cost"]:.2f}</td>
+              <td class="td-num">${benchmarks["iso27001"]["registrar_fee"]:,.2f}</td>
+              <td class="td-num" id="oracle-iso27001-total">${benchmarks["iso27001"]["total_cost"]:,.2f}</td>
               <td class="td-num">{benchmarks["iso27001"]["auditor_days"]:.1f} Auditor Days</td>
             </tr>
             <tr>
-              <td class="td-plan-name">HIPAA HITECH Tier 3 Breach</td>
+              <td class="td-plan-name">HIPAA HITECH Tier 3/4 Breach</td>
               <td>45 CFR 160.404 &amp; 42 U.S.C. 1320d-5</td>
-              <td class="td-num">${benchmarks["hipaa"]["ocr_civil_penalty"]:.2f}</td>
-              <td class="td-num" id="oracle-hipaa-total">${benchmarks["hipaa"]["total_exposure"]:.2f}</td>
+              <td class="td-num">${benchmarks["hipaa"]["ocr_civil_penalty"]:,.2f}</td>
+              <td class="td-num" id="oracle-hipaa-total">${benchmarks["hipaa"]["total_exposure"]:,.2f}</td>
               <td class="td-num">{benchmarks["hipaa"]["compromised_records"]:,} ePHI Records</td>
             </tr>
             <tr>
               <td class="td-plan-name">PCI DSS v4.0.1 Level 1 ROC</td>
               <td>PCI SSC v4.0.1 &amp; Req 11.3</td>
-              <td class="td-num">$42000.00</td>
-              <td class="td-num" id="oracle-pci-total">${benchmarks["pci_dss"]["total_cost"]:.2f}</td>
+              <td class="td-num">$42,000.00</td>
+              <td class="td-num" id="oracle-pci-total">${benchmarks["pci_dss"]["total_cost"]:,.2f}</td>
               <td class="td-num">Level 1 QSA ROC</td>
             </tr>
           </tbody>
@@ -2463,7 +2502,7 @@ def _build_methodology_html(css_text: str) -> str:
       </section>
       <section class="card">
         <h2 class="section-title">2. 32 CFR Part 170 CMMC 2.0 &amp; NIST SP 800-171 DoD SPRS Scoring</h2>
-        <p>Under 32 CFR Part 170 and DFARS 252.204-7019 / 252.204-7020, defense contractors start at a maximum Supplier Performance Risk System (SPRS) score of +110 across all 110 NIST SP 800-171 Rev 2 controls. Unimplemented controls deduct 5 points (42 foundational architectural controls), 3 points (14 medium-impact controls), or 1 point (54 procedural controls), establishing an exact statutory floor of -203.</p>
+        <p>Under 32 CFR Part 170 and DFARS 252.204-7019 / 252.204-7020, defense contractors start at a maximum Supplier Performance Risk System (SPRS) score of +110 across all 110 NIST SP 800-171 Rev 2 controls. Under NIST SP 800-171 DoD Assessment Methodology v1.2.1, unimplemented controls deduct 5 points (44 foundational architectural controls), 3 points (14 medium-impact controls), or 1 point (51 procedural controls), plus 1 zero-point SSP control (3.12.4), establishing an exact statutory floor of -203 (110 - 313).</p>
       </section>
       <section class="card">
         <h2 class="section-title">3. ISO/IEC 27006-1:2024 Mandatory ISMS Auditor-Day Schedule</h2>
@@ -2562,12 +2601,25 @@ def _build_disclaimers_html(css_text: str) -> str:
 
 
 def _write_llms_files(dist: Path, all_tools: Sequence[Dict[str, Any]], quick_answers: Dict[str, str]) -> None:
-    statutory_notes = """## Enterprise Cyber Compliance Statutory Parameter Specifications & Formula Definitions
+    statutory_notes = html.unescape(
+        """## Enterprise Cyber Compliance Statutory Parameter Specifications & Formula Definitions
 - SOC 2 Attestation (AICPA SSAE 18 / AT-C Section 205): Evaluates Security Common Criteria (CC1-CC9) plus optional Availability, Confidentiality, Processing Integrity, and Privacy under TSP Section 100. Baseline 75-employee SaaS Type II program (3 TSC) equals $78,100.40.
-- CMMC 2.0 Level 2 Certification (32 CFR Part 170 & DFARS 252.204-7021): Requires triennial C3PAO assessment across all 110 NIST SP 800-171 Rev 2 controls (320 objectives). Baseline 75-employee defense contractor program equals $132,000.00.
-- NIST SP 800-171 DoD SPRS Score (DFARS 252.204-7019 / 7020): Starts at +110 and deducts 5, 3, or 1 points per unimplemented requirement down to -203. Conditional POA&M eligibility requires >= 88 points with zero open 5-point controls.
-- ISO/IEC 27001:2022 Certification (ISO/IEC 27006-1:2024): Stage 1 + Stage 2 auditor days scale deterministically from effective ISMS headcount (11.0 auditor days for 66-85 employees; $67,000.40 first-year total).
-- HIPAA Civil Monetary Penalties (45 CFR 160.404 & 42 U.S.C. 1320d-5): Four culpability tiers plus 45 CFR Part 164 Subpart D notification and credit monitoring ($2,455,313.00 baseline exposure for 1,500 ePHI records under Tier 3, including the $2,067,813.00 annual penalty cap)."""
+- CMMC 2.0 Level 2 Certification (32 CFR Part 170 & DFARS 252.204-7021): Requires triennial C3PAO assessment across all 110 NIST SP 800-171 Rev 2 controls (320 objectives). Baseline 75-employee defense contractor program equals $134,534.60 at the BLS SOC 15-1212 $121.67/hr loaded rate.
+- NIST SP 800-171 DoD SPRS Score (DFARS 252.204-7019 / 7020): Starts at +110 and deducts 5, 3, or 1 points per unimplemented requirement across 44 five-point, 14 three-point, 51 one-point, and 1 zero-point SSP controls down to -203. Conditional POA&M eligibility requires >= 88 points with zero open 5-point controls.
+- ISO/IEC 27001:2022 Certification (ISO/IEC 27006-1:2024): Stage 1 + Stage 2 auditor days scale deterministically from effective ISMS headcount (11.0 auditor days for 66-85 employees; $66,350.60 first-year total).
+- HIPAA Civil Monetary Penalties (45 CFR 160.404, 42 U.S.C. 1320d-5 & 91 FR 3665 / 91 FR 66566): Four culpability tiers plus 45 CFR Part 164 Subpart D notification and credit monitoring ($2,577,794.00 baseline exposure for 1,500 ePHI records, including the $2,190,294.00 annual penalty cap)."""
+    )
+    clean_tools = [
+        {
+            k: (html.unescape(v) if isinstance(v, str) else v)
+            for k, v in tool_item.items()
+        }
+        for tool_item in all_tools
+    ]
+    clean_quick_answers = {
+        k: html.unescape(v) if isinstance(v, str) else v
+        for k, v in quick_answers.items()
+    }
     write_llms_files(
         dist=dist,
         property_id="gainhelm",
@@ -2580,8 +2632,8 @@ def _write_llms_files(dist: Path, all_tools: Sequence[Dict[str, Any]], quick_ans
         headquarters=f"{GAINHELM_COMPANY_STREET}, {GAINHELM_COMPANY_CITY}, {GAINHELM_COMPANY_STATE} {GAINHELM_COMPANY_ZIP}",
         query_syntax_params="?employee_headcount={employees}&tsc_criteria_count={tsc}&unimplemented_controls={open_controls}",
         statutory_notes=statutory_notes,
-        all_tools=all_tools,
-        quick_answers=quick_answers,
+        all_tools=clean_tools,
+        quick_answers=clean_quick_answers,
     )
 
 

@@ -1016,16 +1016,36 @@ class FactoryPipeline:
                     context=f"compiled page '{decision.slug}'",
                 )
 
-                # 10. Autonomous Content Accuracy & Truthfulness Audit Stage
+                # 10. Autonomous Content Accuracy & Truthfulness Audit Stage (fail-closed strict=True + UnifiedTruthGate)
+                from pseofactory.truth_gate import UnifiedTruthGate
+
                 audit_stage = ContentAccuracyAuditStage(
                     tolerance=self.config.audit_tolerance,
-                    strict=False,
+                    strict=True,
                 )
                 audit_report = audit_stage.audit(
                     html=compiled_res["html"],
                     candidate_spec=candidate_spec,
                     tenant=tenant,
                 )
+                tg_report = UnifiedTruthGate().audit_html_content(
+                    compiled_res["html"],
+                    property_id=tenant,
+                    file_path=f"tools/{decision.slug}/index.html",
+                    slug=decision.slug,
+                    dist_dir=adapter.dist_dir if adapter else None,
+                    run_js_parity=True,
+                )
+                if not tg_report.passed:
+                    raise ContentAccuracyAuditError(
+                        f"UnifiedTruthGate failed for {tenant}/{decision.slug}: {tg_report.summary()}",
+                        report=ContentAccuracyAuditReport(
+                            passed=False,
+                            violations=[f"[{v.gate}:{v.code}] {v.message}" for v in tg_report.violations],
+                            tenant=tenant,
+                            slug=decision.slug,
+                        ),
+                    )
             except Exception as comp_exc:
                 clean_err = str(comp_exc).replace("\u2014", "-").replace("\u2013", "-")
                 logger.warning(
@@ -1049,22 +1069,21 @@ class FactoryPipeline:
                 continue
 
             if not audit_report.passed:
-                if self.config.strict_audit:
-                    aborted_opportunities.append(
-                        AbortedOpportunity(
-                            query=decision.query,
-                            slug=decision.slug,
-                            reason=RejectionReason.AUDIT_STAGE_FAILED,
-                            jev_score=decision.jev_score,
-                            durable_prob=decision.durable_prob,
-                            search_volume=getattr(decision, "search_volume", 0),
-                            keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
-                            foreign_tokens=list(audit_report.violations),
-                            action="REJECT",
-                            tenant=tenant,
-                        )
+                aborted_opportunities.append(
+                    AbortedOpportunity(
+                        query=decision.query,
+                        slug=decision.slug,
+                        reason=RejectionReason.AUDIT_STAGE_FAILED,
+                        jev_score=decision.jev_score,
+                        durable_prob=decision.durable_prob,
+                        search_volume=getattr(decision, "search_volume", 0),
+                        keyword_difficulty=getattr(decision, "keyword_difficulty", 0.0),
+                        foreign_tokens=list(audit_report.violations),
+                        action="REJECT",
+                        tenant=tenant,
                     )
-                    continue
+                )
+                continue
 
             # 10.5 Autonomous SEO audit stage before writing static HTML to disk
             verifier = MasterSEOVerifier(
@@ -2072,23 +2091,22 @@ def execute_autonomous_daily_trend_page_build(
                 html_out = html_out.replace('href="/methodology/"', 'href="/about/"')
                 html_out = html_out.replace("https://profithelm.com/methodology/", "https://profithelm.com/about/")
             manifest_out = compiled_res.get("manifest", {})
-            try:
-                from pseofactory.maintenance import RetroReflectionEngine
-                html_out, _ = RetroReflectionEngine.retrofit_html(
-                    html_out,
-                    property_id=t_id,
-                    slug=c_slug,
-                    canonical_url=f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/",
-                    manifest_override=manifest_out if isinstance(manifest_out, dict) and manifest_out.get("formula") else None,
-                )
-            except Exception:
-                pass
+            from pseofactory.maintenance import RetroReflectionEngine
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            html_out, _ = RetroReflectionEngine.retrofit_html(
+                html_out,
+                property_id=t_id,
+                slug=c_slug,
+                canonical_url=f"{adp.canonical_base.rstrip('/')}/tools/{c_slug}/",
+                manifest_override=manifest_out if isinstance(manifest_out, dict) and manifest_out.get("formula") else None,
+            )
             scanner.assert_clean(
                 html_out,
                 property_id=t_id,
                 context=f"p2_daily_build:{t_id}:{c_slug}",
             )
-            audit_stage = ContentAccuracyAuditStage(tolerance=0.01, strict=False)
+            audit_stage = ContentAccuracyAuditStage(tolerance=0.01, strict=True)
             audit_rep = audit_stage.audit(
                 html=html_out,
                 candidate_spec=candidate_spec,
@@ -2096,6 +2114,16 @@ def execute_autonomous_daily_trend_page_build(
             )
             if not audit_rep.passed:
                 raise ValueError(f"ContentAccuracyAuditStage failed: {audit_rep.violations}")
+            tg_pre_rep = UnifiedTruthGate().audit_html_content(
+                html_out,
+                property_id=t_id,
+                file_path=f"tools/{c_slug}/index.html",
+                slug=c_slug,
+                dist_dir=adp.dist_dir,
+                run_js_parity=True,
+            )
+            if not tg_pre_rep.passed:
+                raise ValueError(f"UnifiedTruthGate failed pre-write: {tg_pre_rep.summary()}")
 
             partner_slot_issues = detect_asset_partner_roster_and_slot_issues(
                 html_out,
@@ -2172,10 +2200,52 @@ def execute_autonomous_daily_trend_page_build(
         out_html_path = dist_dir / "tools" / c_slug / "index.html"
         out_manifest_path = dist_dir / "manifests" / f"{c_slug}.json"
 
+        link_mutated = False
         if (dist_dir / "about" / "index.html").is_file() and not (dist_dir / "methodology" / "index.html").is_file():
-            html_out = html_out.replace('href="/methodology/"', 'href="/about/"').replace("href='/methodology/'", "href='/about/'")
+            new_html = html_out.replace('href="/methodology/"', 'href="/about/"').replace("href='/methodology/'", "href='/about/'")
+            if new_html != html_out:
+                html_out = new_html
+                link_mutated = True
         if (dist_dir / "privacy" / "index.html").is_file() and not (dist_dir / "disclaimers" / "index.html").is_file():
-            html_out = html_out.replace('href="/disclaimers/"', 'href="/privacy/"').replace("href='/disclaimers/'", "href='/privacy/'")
+            new_html = html_out.replace('href="/disclaimers/"', 'href="/privacy/"').replace("href='/disclaimers/'", "href='/privacy/'")
+            if new_html != html_out:
+                html_out = new_html
+                link_mutated = True
+
+        if link_mutated:
+            try:
+                from pseofactory.truth_gate import UnifiedTruthGate
+
+                ContentAccuracyAuditStage(tolerance=0.01, strict=True).audit(
+                    html=html_out,
+                    candidate_spec=candidate_spec,
+                    tenant=t_id,
+                    dist_dir=dist_dir,
+                )
+                post_link_tg = UnifiedTruthGate().audit_html_content(
+                    html_out,
+                    property_id=t_id,
+                    file_path=f"tools/{c_slug}/index.html",
+                    slug=c_slug,
+                    dist_dir=dist_dir,
+                    run_js_parity=True,
+                )
+                if not post_link_tg.passed:
+                    raise ValueError(f"UnifiedTruthGate failed after link mutation: {post_link_tg.summary()}")
+            except Exception as post_mut_exc:
+                clean_err = str(post_mut_exc).replace("\u2014", "-").replace("\u2013", "-")
+                item["status"] = "ABORTED_QUALIFICATION"
+                item["abort_reason"] = clean_err
+                queue_mutated = True
+                aborted_candidates.append(
+                    {
+                        "property_id": t_id,
+                        "slug": c_slug,
+                        "query": c_query,
+                        "reason": clean_err,
+                    }
+                )
+                continue
 
         if not dry_run:
             from pseofactory.gitops import TenantFactoryLockGuard
@@ -2187,6 +2257,8 @@ def execute_autonomous_daily_trend_page_build(
             ) as lock_guard:
                 if not lock_guard.acquired:
                     continue
+                prior_html_bytes = out_html_path.read_bytes() if out_html_path.is_file() else None
+                prior_manifest_bytes = out_manifest_path.read_bytes() if out_manifest_path.is_file() else None
                 out_html_path.parent.mkdir(parents=True, exist_ok=True)
                 out_html_path.write_text(html_out, encoding="utf-8")
                 out_manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2327,6 +2399,8 @@ def execute_autonomous_daily_trend_page_build(
                 try:
                     from pseofactory.maintenance import RetroReflectionEngine
                     from pseofactory.drift import write_substrate_lock
+                    from pseofactory.truth_gate import UnifiedTruthGate
+
                     RetroReflectionEngine.retrofit_estate(
                         dist_dir=dist_dir,
                         property_id=t_id,
@@ -2334,8 +2408,37 @@ def execute_autonomous_daily_trend_page_build(
                     )
                     if repo_root and Path(repo_root).is_dir():
                         write_substrate_lock(Path(repo_root))
-                except Exception:
-                    pass
+                    post_retrofit_tg = UnifiedTruthGate().audit_estate(
+                        dist_dir,
+                        t_id,
+                        repo_root=repo_root,
+                    )
+                    if not post_retrofit_tg.passed:
+                        raise ValueError(
+                            f"Post-retrofit UnifiedTruthGate audit failed for {t_id}/{c_slug}: {post_retrofit_tg.summary()}"
+                        )
+                except Exception as retro_exc:
+                    if prior_html_bytes is not None:
+                        out_html_path.write_bytes(prior_html_bytes)
+                    else:
+                        out_html_path.unlink(missing_ok=True)
+                    if prior_manifest_bytes is not None:
+                        out_manifest_path.write_bytes(prior_manifest_bytes)
+                    else:
+                        out_manifest_path.unlink(missing_ok=True)
+                    clean_err = str(retro_exc).replace("\u2014", "-").replace("\u2013", "-")
+                    item["status"] = "ABORTED_QUALIFICATION"
+                    item["abort_reason"] = clean_err
+                    queue_mutated = True
+                    aborted_candidates.append(
+                        {
+                            "property_id": t_id,
+                            "slug": c_slug,
+                            "query": c_query,
+                            "reason": clean_err,
+                        }
+                    )
+                    continue
 
         item["status"] = "BUILT"
         item["built_at"] = built_ts

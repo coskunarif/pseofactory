@@ -174,6 +174,169 @@ class CompetitorGapEngine:
             self.tenant_id = str(self.tenant_profile.tenant_id).lower().strip()
         self.scanner = CrossPropertyContaminationScanner()
 
+    @staticmethod
+    def _resolve_lienbond_model_spec(combined_text: str) -> Dict[str, Any]:
+        """Resolves topic-aware LienBond statutory authority, formula, and sample calculation."""
+        q_low = str(combined_text or "").lower()
+        if "bid-bond" in q_low or "bid bond" in q_low:
+            return {
+                "statutory_authority": "48 CFR 28.101 (FAR 28.101 Bid Guarantees) & 40 U.S.C. Section 3131 (Miller Act)",
+                "economic_dataset": "SFAA Commercial Surety Loss Cost Series & Federal Construction Solicitation Schedules",
+                "model_name": "LienBond-FAR-28-101-Bid-Bond-Model-2026",
+                "formula": "round(bid_amount * (penal_sum_pct / 100.0), 2)",
+                "inputs": {"bid_amount": 500000, "penal_sum_pct": 10.0},
+                "published_output": 50000.0,
+                "sample_calculation": (
+                    "$500,000.00 construction bid at a 10.0% FAR 28.101 bid bond penal sum "
+                    "(5% to 20% statutory range) yields a $50,000.00 bid guarantee liability"
+                ),
+            }
+        if any(
+            t in q_low
+            for t in (
+                "performance-bond",
+                "performance bond",
+                "payment-bond",
+                "payment bond",
+                "miller-act",
+                "miller act",
+            )
+        ):
+            return {
+                "statutory_authority": "40 U.S.C. Section 3131 (Federal Miller Act) & FAR 28.102-1 ($150,000 Threshold)",
+                "economic_dataset": "FRED Total Construction Spending Series (TTLCONS) & SFAA Class B Contract Surety Rate Manuals",
+                "model_name": "LienBond-Miller-Act-Performance-Payment-Bond-Model-2026",
+                "formula": "round(min(contract_price, 100000.0) * 0.025 + max(0.0, min(contract_price - 100000.0, 400000.0)) * 0.015 + max(0.0, contract_price - 500000.0) * (sliding_tier_rate_pct / 100.0), 2)",
+                "inputs": {"contract_price": 1200000.0, "sliding_tier_rate_pct": 1.0},
+                "published_output": 15500.0,
+                "sample_calculation": (
+                    "Federal contract of $1,200,000.00 (exceeding the $150,000 Miller Act threshold under "
+                    "40 U.S.C. Section 3131 / FAR 28.102) at SFAA Class B sliding-scale rates yields "
+                    "$15,500.00 combined performance and payment bond premium"
+                ),
+            }
+        if any(
+            t in q_low
+            for t in (
+                "workers-comp",
+                "workers comp",
+                "workers-compensation",
+                "workers compensation",
+                "emr",
+                "class-code",
+                "class code",
+                "experience-modification",
+            )
+        ):
+            return {
+                "statutory_authority": "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual & State Workers Compensation Rating Bureaus",
+                "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC Construction Series) & NCCI Loss Cost Filings",
+                "model_name": "LienBond-NCCI-Workers-Comp-EMR-Model-2026",
+                "formula": "round((annual_payroll / 100.0) * class_rate * emr_factor * (1.0 - schedule_credit), 2)",
+                "inputs": {
+                    "annual_payroll": 500000.0,
+                    "class_rate": 6.4,
+                    "emr_factor": 1.15,
+                    "schedule_credit": 0.0,
+                },
+                "published_output": 36800.0,
+                "sample_calculation": (
+                    "$500,000.00 field payroll at $6.40 per $100 NCCI class-code rate multiplied by "
+                    "a 1.15 Experience Modification Rate (EMR) yields $36,800.00 annual workers compensation premium"
+                ),
+            }
+        if any(
+            t in q_low
+            for t in (
+                "davis-bacon",
+                "davis bacon",
+                "wh-347",
+                "wh347",
+                "prevailing-wage",
+                "prevailing wage",
+            )
+        ):
+            return {
+                "statutory_authority": "40 U.S.C. Section 3141 (Davis-Bacon Act) & 29 CFR Section 5.5 (WH-347 Certified Payroll)",
+                "economic_dataset": "BLS National Compensation Survey Construction Fringe Benefit Series & DOL Wage Determinations",
+                "model_name": "LienBond-Davis-Bacon-WH347-Prevailing-Wage-Model-2026",
+                "formula": "round((base_prevailing_rate * 1.5) + max(0.0, required_fringe_rate - bona_fide_benefit_credit), 2)",
+                "inputs": {
+                    "base_prevailing_rate": 42.0,
+                    "required_fringe_rate": 16.5,
+                    "bona_fide_benefit_credit": 6.5,
+                },
+                "published_output": 73.0,
+                "sample_calculation": (
+                    "$42.00/hr base prevailing wage at 1.5x overtime ($63.00/hr) plus $10.00/hr net cash-in-lieu "
+                    "fringe ($16.50 required minus $6.50 bona fide credit) under 40 U.S.C. Section 3141 and "
+                    "29 CFR Section 5.5 yields $73.00/hr overtime hourly rate"
+                ),
+            }
+        if any(
+            t in q_low
+            for t in (
+                "mechanics-lien",
+                "mechanics lien",
+                "preliminary-notice",
+                "preliminary notice",
+                "lien-release",
+                "lien release",
+                "lien-deadline",
+                "lien deadline",
+            )
+        ):
+            return {
+                "statutory_authority": "50-State Statutory Mechanics Lien Statutes (CA Civ. Code Sec. 8204, TX Prop. Code Ch. 53, FL Stat. Sec. 713.06) & 40 U.S.C. Section 3133(b)",
+                "economic_dataset": "FRED Commercial Construction Credit Series & BLS Producer Price Index for Construction",
+                "model_name": "LienBond-50-State-Statutory-Lien-Deadline-Model-2026",
+                "formula": "round(unpaid_progress_billing * max(0.0, min(1.0, (statutory_lookback_window_days - max(0.0, days_elapsed_since_first_furnishing - statutory_lookback_window_days)) / statutory_lookback_window_days)), 2)",
+                "inputs": {
+                    "unpaid_progress_billing": 120000.0,
+                    "days_elapsed_since_first_furnishing": 20.0,
+                    "statutory_lookback_window_days": 20.0,
+                },
+                "published_output": 120000.0,
+                "sample_calculation": (
+                    "Serving a statutory preliminary notice within the 20-day lookback window from first "
+                    "furnishing preserves 100% ($120,000.00) of enforceable mechanics lien principal across "
+                    "50-state notice schedules"
+                ),
+            }
+        if any(
+            t in q_low
+            for t in (
+                "license-bond",
+                "license bond",
+                "contractor-license-bond",
+                "contractor license bond",
+            )
+        ):
+            return {
+                "statutory_authority": "31 CFR Part 223 U.S. Treasury Circular 570 & State Contractor License Surety Statutes",
+                "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+                "model_name": "LienBond-Contractor-License-Bond-Underwriting-Model-2026",
+                "formula": "round((bond_amount * (credit_tier_rate_pct / 100.0)) * term_years, 2)",
+                "inputs": {"bond_amount": 25000, "credit_tier_rate_pct": 1.5, "term_years": 1},
+                "published_output": 375.0,
+                "sample_calculation": (
+                    "$25,000.00 statutory contractor license bond at 1.50% preferred credit tier rate "
+                    "over 1 year yields $375.00 annual surety premium"
+                ),
+            }
+        return {
+            "statutory_authority": "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes",
+            "economic_dataset": "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
+            "model_name": "LienBond-Commercial-Surety-Underwriting-Model-2026",
+            "formula": "round(min(contract_price, 100000.0) * 0.025 + max(0.0, min(contract_price - 100000.0, 400000.0)) * 0.015 + max(0.0, contract_price - 500000.0) * (sliding_tier_rate_pct / 100.0), 2)",
+            "inputs": {"contract_price": 1200000.0, "sliding_tier_rate_pct": 1.0},
+            "published_output": 15500.0,
+            "sample_calculation": (
+                "Commercial construction surety bond on a $1,200,000.00 contract under SFAA Class B "
+                "sliding-scale underwriting tiers yields $15,500.00 combined surety premium"
+            ),
+        }
+
     def diff_competitor_serp(
         self,
         query: str,
@@ -351,10 +514,10 @@ class CompetitorGapEngine:
                     "compromised_records": 1500,
                     "per_record_forensic_cost": 175,
                     "legal_and_credit_monitoring_cost": 125000,
-                    "ocr_tier_penalty_estimate": 2067813,
+                    "ocr_tier_penalty_estimate": 2190294,
                 }
-                published_output = 2455313.0
-                sample_calculation = "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring ($387,500 response) plus $2,067,813 45 CFR 160.404 Tier 3 penalty cap yields $2,455,313.00 total HIPAA breach exposure"
+                published_output = 2577794.0
+                sample_calculation = "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring ($387,500 response) plus $2,190,294 45 CFR 160.404 Tier 4 penalty cap yields $2,577,794.00 total HIPAA breach exposure"
             elif any(
                 t in combined_q
                 for t in ("dora", "ict-third-party", "2022/2554", "eu-ai-act", "eu ai act", "article43", "conformity-assessment", "8k-item-105", "item-105", "item 1.05", "sec-cybersecurity", "materiality")
@@ -397,13 +560,14 @@ class CompetitorGapEngine:
         elif self.tenant_id == "lienbond":
             default_category = "Construction Surety & Statutory Lien Compliance"
             affiliates = ["suretybonds_direct", "Viking_Bond_Service"]
-            statutory_authority = "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes"
-            economic_dataset = "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001"
-            model_name = "LienBond-Commercial-Surety-Underwriting-Model-2026"
-            formula = "round((bond_amount * (credit_tier_rate_pct / 100.0)) * term_years, 2)"
-            inputs = {"bond_amount": 25000, "credit_tier_rate_pct": 1.5, "term_years": 1}
-            published_output = 375.0
-            sample_calculation = "$25,000.00 statutory contractor license bond at 1.50% preferred credit tier rate over 1 year yields $375.00 annual surety premium"
+            lb_model = self._resolve_lienbond_model_spec(combined_q)
+            statutory_authority = str(lb_model["statutory_authority"])
+            economic_dataset = str(lb_model["economic_dataset"])
+            model_name = str(lb_model["model_name"])
+            formula = str(lb_model["formula"])
+            inputs = dict(lb_model["inputs"])
+            published_output = float(lb_model["published_output"])
+            sample_calculation = str(lb_model["sample_calculation"])
             disclosures = [
                 LIENBOND_DISCLOSURES.get("statutory_surety_disclaimer", ""),
                 LIENBOND_DISCLOSURES.get("ftc_disclosure", ""),
@@ -477,9 +641,9 @@ class CompetitorGapEngine:
                 economic_dataset = "FRED CPILFESL Series"
                 model_name = "Section 179 Grounded Model"
                 formula = "min(cost, cap)"
-                inputs = {"cost": 400000, "cap": 1220000}
+                inputs = {"cost": 400000, "cap": 2560000}
                 published_output = 400000.0
-                sample_calculation = "Cost 400,000 under cap 1,220,000 gives 400,000 deduction"
+                sample_calculation = "Cost 400,000 under cap 2,560,000 gives 400,000 deduction"
             disclosures = [
                 "Circular 230 Tax Modeling Disclaimer",
                 "FTC Independent Financial Research Publisher Disclosure",
@@ -759,32 +923,23 @@ class CompetitorGapEngine:
                 ],
             )
         elif tenant_id == "lienbond":
+            lb_model = self._resolve_lienbond_model_spec(combined)
             spec.setdefault("tenant", "lienbond")
             spec.setdefault("property_id", "lienbond")
             spec.setdefault("domain", "lienbond.com")
             spec.setdefault("canonical_base", "https://lienbond.com")
-            spec.setdefault("statutory_authority", "40 U.S.C. Section 3131 (Miller Act) & State Commercial Surety Statutes")
-            spec.setdefault("economic_dataset", "SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001")
+            spec.setdefault("statutory_authority", str(lb_model["statutory_authority"]))
+            spec.setdefault("economic_dataset", str(lb_model["economic_dataset"]))
             spec.setdefault("category", "Construction Surety & Statutory Lien Compliance")
             spec.setdefault(
                 "affiliates",
                 monetization.get("recommended_partners") or ["suretybonds_direct", "Viking_Bond_Service"],
             )
-            spec.setdefault("model_name", "LienBond-Commercial-Surety-Underwriting-Model-2026")
-            spec.setdefault("formula", "round((bond_amount * (credit_tier_rate_pct / 100.0)) * term_years, 2)")
-            spec.setdefault(
-                "inputs",
-                {
-                    "bond_amount": 25000,
-                    "credit_tier_rate_pct": 1.5,
-                    "term_years": 1,
-                },
-            )
-            spec.setdefault("published_output", 375.0)
-            spec.setdefault(
-                "sample_calculation",
-                "$25,000.00 statutory contractor license bond at 1.50% preferred credit tier rate over 1 year yields $375.00 annual surety premium",
-            )
+            spec.setdefault("model_name", str(lb_model["model_name"]))
+            spec.setdefault("formula", str(lb_model["formula"]))
+            spec.setdefault("inputs", dict(lb_model["inputs"]))
+            spec.setdefault("published_output", float(lb_model["published_output"]))
+            spec.setdefault("sample_calculation", str(lb_model["sample_calculation"]))
             spec.setdefault(
                 "mandatory_disclosures",
                 [
@@ -904,11 +1059,11 @@ class CompetitorGapEngine:
                 spec.setdefault("affiliates", ["crest_capital", "mercury"])
                 spec.setdefault("model_name", "Section 179 Grounded Model")
                 spec.setdefault("formula", "min(cost, cap)")
-                spec.setdefault("inputs", {"cost": 400000, "cap": 1220000})
+                spec.setdefault("inputs", {"cost": 400000, "cap": 2560000})
                 spec.setdefault("published_output", 400000.0)
                 spec.setdefault(
                     "sample_calculation",
-                    "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
+                    "Cost 400,000 under cap 2,560,000 gives 400,000 deduction",
                 )
             spec.setdefault("mandatory_disclosures", [
                 "Circular 230 Tax Modeling Disclaimer",
@@ -2830,7 +2985,7 @@ _GAINHELM_TRAP_SPECS: Dict[str, Tuple[str, str, List[str], List[Tuple[str, str, 
     ),
     "hipaa": (
         "Immediate 45 CFR 160.404 OCR Penalty &amp; 60-Day HITECH Breach Notice Trap Alert",
-        "Under 45 CFR 160.404, 45 CFR Part 164, and HITECH 42 U.S.C. 1320d-5, operating without a documented Security Risk Analysis, unexecuted Business Associate Agreements (BAAs), or unencrypted ePHI stores exposes covered entities to Tier 3-4 OCR caps ($2,067,813/yr) and 60-day media breach notices.",
+        "Under 45 CFR 160.404, 45 CFR Part 164, and HITECH 42 U.S.C. 1320d-5, operating without a documented Security Risk Analysis, unexecuted Business Associate Agreements (BAAs), or unencrypted ePHI stores exposes covered entities to Tier 3-4 OCR caps ($2,190,294/yr) and 60-day media breach notices.",
         [
             "Maintain a current 45 CFR 164.308(a)(1) Security Risk Analysis documenting all ePHI repositories and transmission paths.",
             "Enforce AES-256 encryption at rest and TLS 1.2+ in transit with split KMS keys to preserve the 45 CFR 164.402 breach safe harbor.",
@@ -3114,6 +3269,291 @@ def _resolve_gainhelm_trap_and_clusters(
     return trap_tuple, clusters
 
 
+def _resolve_lienbond_vertical_content(s_low: str) -> Dict[str, Any]:
+    """Resolves topic-aware trap, checklist, pitfalls, handoff, and tier clusters for LienBond."""
+    if any(tok in s_low for tok in ("workers-comp", "workers-compensation", "emr", "class-code")):
+        return {
+            "trap_title": "Immediate NCCI Workers Compensation Class Code & EMR Audit Trap Alert",
+            "trap_body": (
+                "Under NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual Rule 2-E, and State Workers "
+                "Compensation Rating Bureaus, failing to segregate clerical (Class 8810) and outside sales (Class 8742) "
+                "from field construction codes or failing to track overtime 0.5x premium exclusions causes auditors to "
+                "reclassify 100% of undivided payroll to the highest-rated governing construction trade class code."
+            ),
+            "checklist_items": [
+                "Assign accurate 4-digit NCCI (or state rating bureau) classification codes separating clerical/office payroll (Class 8810) from field trade payroll.",
+                "Apply your Experience Modification Rate (EMR) multiplier and state workplace safety credits before bidding fixed-price contracts.",
+                "Exclude the 0.5x overtime premium increment (reducing time-and-a-half to straight-time wages) from auditable payroll where permitted by NCCI rules.",
+                "Collect active Workers Compensation Certificates of Insurance (COIs) from all 1099 subcontractors prior to disbursement.",
+            ],
+            "pitfalls": [
+                (
+                    "Lumping clerical, estimating, and field labor into a single payroll bucket during workers comp audit",
+                    "NCCI Governing Class rules reassign 100% of unsegregated payroll to the highest-rated construction trade class code",
+                    "Maintain contemporaneous trade-by-trade timecards separating Class 8810 clerical staff from field installation codes",
+                ),
+                (
+                    "Engaging uninsured 1099 subcontractors without collecting verified Workers Comp COIs",
+                    "Annual payroll audits reclassify uninsured subcontractor payments as direct auditable payroll at full class rates",
+                    "Verify active Workers Comp COIs or state exemption certificates before releasing subcontractor progress draws",
+                ),
+                (
+                    "Including the 0.5x overtime premium increment in reportable workers compensation payroll",
+                    "Overstates manual premium base on overtime-heavy field schedules in NCCI jurisdictions",
+                    "Track overtime premium separately in payroll registers to claim the standard straight-time wage credit",
+                ),
+            ],
+            "handoff_title": "NCCI Workers Compensation & EMR Underwriting Vetting Checklist",
+            "handoff_items": [
+                "Audit state workers compensation Experience Modification Rate (EMR) worksheets against NCCI primary/excess split-point tables.",
+                "Verify multi-class payroll segregation (Class 8810 clerical vs governing construction codes) in your payroll system.",
+                "Confirm instant digital COI issuance and subcontractor certificate tracking prior to annual premium audit.",
+            ],
+            "tier_clusters": [
+                (
+                    "Tier 1: NCCI Workers Compensation Class Code & EMR Models",
+                    [
+                        ("workers-compensation-class-code-rate-calculator-by-state", "NCCI Workers Compensation Class Code Rate Calculator by State"),
+                        ("experience-modification-rate-emr-workers-comp-penalty-calculator", "Experience Modification Rate (EMR) Workers Comp Penalty Calculator"),
+                        ("contractor-overhead-and-profit-markup-vs-margin-calculator", "Contractor Overhead and Profit Markup vs Margin Calculator"),
+                    ],
+                ),
+                (
+                    "Tier 2: Prevailing Wage, Surety & Lien Compliance Matrices",
+                    [
+                        ("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "Davis-Bacon Prevailing Wage & WH-347 Fringe Benefit Rate Calculator"),
+                        ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator by Credit Score"),
+                        ("contractor-lien-release-statutory-matrix-by-state", "50-State Contractor Mechanics Lien Release Statutory Matrix"),
+                    ],
+                ),
+            ],
+        }
+    return {
+        "trap_title": "Immediate Statutory Notice Deadline & Surety Underwriting Trap Alert (40 U.S.C. 3131 & State Lien Codes)",
+        "trap_body": (
+            "Under 40 U.S.C. Section 3131 (Federal Miller Act), Little Miller Acts, and state mechanics lien statutes "
+            "(such as California Civil Code Section 8200 20-day Preliminary Notice and Texas Property Code Section 53.056 "
+            "15th-day-of-the-3rd-month trap), serving a Preliminary Notice even 1 calendar day late or signing an "
+            "unconditional waiver before funds clear bank settlement permanently extinguishes statutory lien and payment bond rights."
+        ),
+        "checklist_items": [
+            "Serve statutory Preliminary Notice via Certified Mail with Return Receipt Requested within the state window (20 days from first furnishing in CA/AZ; 45 days in FL).",
+            "Maintain verified CPA Reviewed or Audited financial statements showing net working capital (current assets minus current liabilities) at or above 10% of aggregate bonded backlog.",
+            "Segregate high-rate field construction payroll (Class 5403/5190) from clerical (Class 8810) and outside sales (Class 8742) with daily timecards before annual NCCI workers comp audit.",
+            "Verify weekly Davis-Bacon Certified Payroll Form WH-347 submission and bona fide fringe benefit plan credits under 29 CFR Section 5.5 to prevent contract progress withholding.",
+        ],
+        "pitfalls": [
+            (
+                "Executing an Unconditional Waiver and Release on Progress Payment before check clearing",
+                "Extinguishes statutory mechanics lien and payment bond rights immediately upon signature even if the check bounces",
+                "Strictly execute Conditional Waivers upon invoice submission and release Unconditional Waivers only after bank wire settlement",
+            ),
+            (
+                "Lumping clerical, estimating, and field labor into a single payroll bucket during workers comp audit",
+                "NCCI Governing Class rules reassign 100% of unsegregated payroll to the highest-rated construction trade class code",
+                "Maintain contemporaneous trade-by-trade timecards separating Class 8810 clerical staff from field installation codes",
+            ),
+            (
+                "Bidding public works above single-job surety capacity without verified CPA working capital schedules",
+                "Triggers bid bond rejection or 5% bid bond forfeiture if the principal cannot execute AIA A312 performance/payment bonds",
+                "Pre-qualify single and aggregate surety credit lines against Treasury Circular 570 underwriting ratios before bid opening",
+            ),
+        ],
+        "handoff_title": "Treasury Circular 570 Surety & Commercial Contractor Insurance Vetting Checklist",
+        "handoff_items": [
+            "Confirm surety carrier listing on U.S. Department of the Treasury Circular 570 with AM Best A- (Excellent) or higher rating.",
+            "Verify instant digital COI issuance with ISO CG 20 10 (ongoing operations) and CG 20 37 (completed operations) additional insured endorsements.",
+            "Audit state workers compensation Experience Modification Rate (EMR) worksheets against NCCI primary/excess split-point tables.",
+        ],
+        "tier_clusters": [
+            (
+                "Tier 1: Statutory Surety Bond & Public Works Pillar Models",
+                [
+                    ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator by Credit Score"),
+                    ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance and Payment Bond Premium Calculator"),
+                    ("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "Davis-Bacon Prevailing Wage & WH-347 Fringe Benefit Rate Calculator"),
+                    ("erisa-fidelity-bond-coverage-amount-calculator", "ERISA Section 412 Fidelity Bond Coverage Amount Calculator"),
+                ],
+            ),
+            (
+                "Tier 2: 50-State Mechanics Lien, Retainage & Preliminary Notice Matrices",
+                [
+                    ("contractor-lien-release-statutory-matrix-by-state", "50-State Contractor Mechanics Lien Release Statutory Matrix"),
+                    ("california-texas-florida-preliminary-notice-deadline-calculator", "California, Texas and Florida Preliminary Notice Deadline Calculator"),
+                    ("commercial-construction-retainage-interest-penalty-calculator-by-state", "Commercial Construction Retainage Interest Penalty Calculator by State"),
+                ],
+            ),
+            (
+                "Tier 3: Workers Compensation Class Code, EMR & Contractor Margin Spokes",
+                [
+                    ("workers-compensation-class-code-rate-calculator-by-state", "NCCI Workers Compensation Class Code Rate Calculator by State"),
+                    ("experience-modification-rate-emr-workers-comp-penalty-calculator", "Experience Modification Rate (EMR) Workers Comp Penalty Calculator"),
+                    ("contractor-overhead-and-profit-markup-vs-margin-calculator", "Contractor Overhead and Profit Markup vs Margin Calculator"),
+                ],
+            ),
+        ],
+    }
+
+
+def _resolve_prexvo_vertical_content(slug: str, s_low: str) -> Dict[str, Any]:
+    """Resolves domain-isolated trap, checklist, pitfalls, handoff, and tier clusters for Prexvo."""
+    restricted_ps = is_restricted_public_service_slug(slug)
+    is_refi = any(tok in s_low for tok in ("refinance", "refinancing"))
+    if restricted_ps:
+        trap_title = "Immediate Title IV Statutory Eligibility and Buyback Trap Alert (34 CFR 685.219)"
+        trap_body = (
+            "Under 34 CFR 685.219, Public Service Loan Forgiveness requires strictly 120 qualifying "
+            "monthly payments while employed full-time by an eligible governmental or 501(c)(3) non-profit "
+            "organization. Consolidating Direct Loans after submitting a PSLF hold-harmless buyback request "
+            "or converting federal balances into private credit permanently voids qualifying buyback months."
+        )
+        checklist_items = [
+            "Annual Employment Certification Form (ECF) signature verification by an authorized employer official under 34 CFR 685.219(c).",
+            "Direct Loan program status audit confirming any legacy FFEL or Perkins loans were consolidated into Direct Loans prior to qualifying service.",
+            "NSLDS payment counter reconciliation verifying all 120 qualifying monthly payments occurred during full-time (>=30 hours weekly) public service.",
+            "Formal PSLF Buyback eligibility check confirming 120 months of approved employment exist before requesting lump-sum hold-harmless assessment.",
+        ]
+        pitfalls = [
+            (
+                "Consolidating Direct Loans during pending PSLF Buyback review",
+                "Creates a new Direct Consolidation substrate that erases pre-consolidation buyback month eligibility",
+                "Complete PSLF Buyback settlement and receive official discharge determination before any loan consolidation",
+            ),
+            (
+                "Employer 501(c)(3) revocation or non-qualifying contractor status",
+                "Disqualifies monthly payments made while billed as a 1099 independent contractor rather than a W-2 employee",
+                "Verify EIN eligibility in the official Federal Student Aid PSLF Employer Search database annually",
+            ),
+            (
+                "Relying on non-qualifying general forbearance without hold-harmless buyback",
+                "Months in discretionary forbearance do not count toward the 120 qualifying monthly payments without buyback",
+                "Track eligible deferment or forbearance periods and submit a formal 34 CFR 685.219(g) buyback request at month 120",
+            ),
+        ]
+        handoff_title = "Non-Commercial Title IV Statutory Verification Checklist"
+        handoff_items = [
+            "Verify qualifying employer EIN status directly in the official StudentAid.gov PSLF Help Tool.",
+            "Download your raw NSLDS loan-level text file to audit cumulative qualifying payment counts across servicers.",
+            "Retain signed W-2 wage statements and employer certifications for all 120 qualifying monthly payment periods.",
+        ]
+    elif is_refi:
+        trap_title = "Immediate Title IV Federal Protection Forfeiture Trap Alert (34 CFR Part 685)"
+        trap_body = (
+            "Refinancing federal student loans into a private credit agreement is irreversible: borrowers "
+            "permanently waive federal protections, including Income-Based Repayment (IBR), the Repayment "
+            "Assistance Plan (RAP), federal unpaid interest subsidies, and 120-payment Public Service Loan Forgiveness."
+        )
+        checklist_items = [
+            "Confirm zero remaining eligibility or intent for 120-payment Public Service Loan Forgiveness (34 CFR 685.219) before private conversion.",
+            "Verify emergency cash reserves cover at least 6 months of fixed private loan obligations since private contracts lack statutory IDR hardship caps.",
+            "Audit soft-pull rate pre-qualification disclosures under Truth in Lending Act (TILA) Regulation Z (12 CFR Part 1026) before authorizing a hard inquiry.",
+            "Compare fixed vs variable APR amortization schedules alongside autopay discount permanence and cosigner release clauses.",
+        ]
+        pitfalls = [
+            (
+                "Refinancing Direct Loans while employed at a 501(c)(3) hospital or public agency",
+                "Permanently waives federal protections and forfeits tax-free 120-payment PSLF principal discharge",
+                "Isolate only private student loans for refinancing while retaining federal Direct Loans in Title IV IDR plans",
+            ),
+            (
+                "Comparing nominal interest rate reduction without modeling lost RAP unpaid interest subsidies",
+                "Overstates net savings when federal unpaid interest waivers reduce effective Title IV borrowing cost",
+                "Compare lifetime out-of-pocket cash outflow across both Title IV RAP/IBR and private amortization schedules",
+            ),
+            (
+                "Triggering multiple uncoordinated hard credit inquiries across private lenders",
+                "Can depress FICO credit scores if applications span outside the bureau rate-shopping window",
+                "Use soft-pull pre-qualification first and batch final applications within a single 14-day underwriting window",
+            ),
+        ]
+        handoff_title = "Vetted Private Refinance Underwriting Checklist (TILA Reg-Z)"
+        handoff_items = [
+            "Confirm 100% soft-credit-pull rate check with zero impact on your FICO score before formal underwriting.",
+            "Verify fixed APR terms, zero origination or prepayment fees, and documented disability/death discharge policies.",
+            "Review mandatory Title IV forfeiture disclosure confirming refinancing federal student loans permanently waives federal protections.",
+        ]
+    else:
+        trap_title = "Immediate AGI Filing Status and Interest Capitalization Trap Alert (34 CFR 685.209)"
+        trap_body = (
+            "Under 34 CFR 685.209 and OBBBA Title VIII Subtitle B, Married Filing Jointly (MFJ) pools both "
+            "spouses' Adjusted Gross Income when computing RAP and IBR discretionary payments, whereas Married "
+            "Filing Separately (MFS) isolates individual borrower AGI. Exiting Income-Based Repayment (IBR) "
+            "also triggers statutory capitalization of accrued unpaid interest onto principal."
+        )
+        checklist_items = [
+            "Model Married Filing Jointly (MFJ) vs Married Filing Separately (MFS) tax liability delta against annual Title IV repayment savings.",
+            "Verify whether your Direct Loans meet the July 1, 2014 New Borrower threshold (10% vs 15% discretionary income under 34 CFR 685.209).",
+            "Confirm annual IRS Data Retrieval Tool (DRT) income recertification deadlines to prevent administrative payment spikes.",
+            "Audit accrued unpaid interest balances before switching out of IBR, as statutory exit rules capitalize unpaid interest into principal.",
+        ]
+        pitfalls = [
+            (
+                "Filing joint tax returns (MFJ) when both spouses have disparate income-to-debt ratios",
+                "Combines household AGI and can double or triple monthly RAP/IBR required payments",
+                "Run side-by-side MFS vs MFJ tax and repayment simulations prior to filing annual federal returns",
+            ),
+            (
+                "Switching out of statutory IBR into another repayment plan with accrued unpaid interest",
+                "Triggers mandatory statutory interest capitalization under 20 U.S.C. 1098e(b)(3), permanently increasing principal",
+                "Evaluate accrued interest balance impact before executing a formal plan migration away from IBR",
+            ),
+            (
+                "Missing annual IDR income recertification deadline with loan servicer",
+                "Reverts monthly billing to the 10-year Standard Repayment amount and can trigger interest capitalization",
+                "Enable automatic IRS tax data consent or submit recertification documentation 45 days before anniversary date",
+            ),
+        ]
+        handoff_title = "Title IV Repayment Execution and Verification Checklist"
+        handoff_items = [
+            "Cross-check loan origination dates in StudentAid.gov to confirm pre-2014 vs post-2014 IBR statutory tier.",
+            "Compare total 240-to-360-month cumulative repayment cost including potential tax treatment of forgiven balances.",
+            "Verify family size and state of residence against current HHS Federal Poverty Guidelines (42 U.S.C. 9902(2)).",
+        ]
+
+    tier_clusters = [
+        (
+            "Tier 1: Core Title IV Statutory Pillar Models",
+            [
+                ("student-loan-repayment-calculator", "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)"),
+                ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs Income-Based Repayment (IBR) Calculator"),
+                ("rap-payment-calculator", "Repayment Assistance Plan (RAP) Monthly Payment Calculator"),
+                ("tiered-standard-calculator", "Tiered Standard Repayment Plan Amortization Calculator"),
+            ],
+        ),
+        (
+            "Tier 2: Forgiveness, Buyback and Litigation Transition Matrices",
+            [
+                ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
+                ("pslf-buyback-months-reconsideration-student-loan-calculator", "PSLF Hold Harmless Buyback & Reconsideration Months Calculator"),
+                ("student-loan-forgiveness-2026", "2026 Federal Student Loan Forgiveness Pathways & Discharge Estimator"),
+                ("student-loan-forgiveness-tax-bomb-insolvency-calculator", "Student Loan Forgiveness Tax Bomb & IRS Form 982 Insolvency Calculator"),
+                ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
+                ("paye-sunset-calculator", "PAYE Sunset & Statutory Repayment Plan Transition Calculator"),
+                ("ibr-hardship-cap-calculator", "IBR Partial Financial Hardship Cap Calculator"),
+            ],
+        ),
+        (
+            "Tier 3: Filing Status, Consolidation and Specialty Borrower Spokes",
+            [
+                ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint Income-Driven Repayment Tax Model"),
+                ("icr-repayment-calculator", "Income-Contingent Repayment (ICR) & Parent PLUS Statutory Calculator"),
+                ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
+                ("parent-plus-double-consolidation-loophole-2026-calculator", "Parent PLUS Double Consolidation Loophole 2026 Sunset & ICR vs IDR Calculator"),
+                ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
+            ],
+        ),
+    ]
+    return {
+        "trap_title": trap_title,
+        "trap_body": trap_body,
+        "checklist_items": checklist_items,
+        "pitfalls": pitfalls,
+        "handoff_title": handoff_title,
+        "handoff_items": handoff_items,
+        "tier_clusters": tier_clusters,
+    }
+
+
 def _resolve_vertical_competitor_content(
     slug: str,
     property_id: str,
@@ -3133,152 +3573,14 @@ def _resolve_vertical_competitor_content(
     base_url = canonical_base.rstrip("/")
 
     if is_prexvo:
-        restricted_ps = is_restricted_public_service_slug(slug)
-        is_refi = any(tok in s_low for tok in ("refinance", "refinancing"))
-        if restricted_ps:
-            trap_title = "Immediate Title IV Statutory Eligibility and Buyback Trap Alert (34 CFR 685.219)"
-            trap_body = (
-                "Under 34 CFR 685.219, Public Service Loan Forgiveness requires strictly 120 qualifying "
-                "monthly payments while employed full-time by an eligible governmental or 501(c)(3) non-profit "
-                "organization. Consolidating Direct Loans after submitting a PSLF hold-harmless buyback request "
-                "or converting federal balances into private credit permanently voids qualifying buyback months."
-            )
-            checklist_items = [
-                "Annual Employment Certification Form (ECF) signature verification by an authorized employer official under 34 CFR 685.219(c).",
-                "Direct Loan program status audit confirming any legacy FFEL or Perkins loans were consolidated into Direct Loans prior to qualifying service.",
-                "NSLDS payment counter reconciliation verifying all 120 qualifying monthly payments occurred during full-time (>=30 hours weekly) public service.",
-                "Formal PSLF Buyback eligibility check confirming 120 months of approved employment exist before requesting lump-sum hold-harmless assessment.",
-            ]
-            pitfalls = [
-                (
-                    "Consolidating Direct Loans during pending PSLF Buyback review",
-                    "Creates a new Direct Consolidation substrate that erases pre-consolidation buyback month eligibility",
-                    "Complete PSLF Buyback settlement and receive official discharge determination before any loan consolidation",
-                ),
-                (
-                    "Employer 501(c)(3) revocation or non-qualifying contractor status",
-                    "Disqualifies monthly payments made while billed as a 1099 independent contractor rather than a W-2 employee",
-                    "Verify EIN eligibility in the official Federal Student Aid PSLF Employer Search database annually",
-                ),
-                (
-                    "Relying on non-qualifying general forbearance without hold-harmless buyback",
-                    "Months in discretionary forbearance do not count toward the 120 qualifying monthly payments without buyback",
-                    "Track eligible deferment or forbearance periods and submit a formal 34 CFR 685.219(g) buyback request at month 120",
-                ),
-            ]
-            handoff_title = "Non-Commercial Title IV Statutory Verification Checklist"
-            handoff_items = [
-                "Verify qualifying employer EIN status directly in the official StudentAid.gov PSLF Help Tool.",
-                "Download your raw NSLDS loan-level text file to audit cumulative qualifying payment counts across servicers.",
-                "Retain signed W-2 wage statements and employer certifications for all 120 qualifying monthly payment periods.",
-            ]
-        elif is_refi:
-            trap_title = "Immediate Title IV Federal Protection Forfeiture Trap Alert (34 CFR Part 685)"
-            trap_body = (
-                "Refinancing federal student loans into a private credit agreement is irreversible: borrowers "
-                "permanently waive federal protections, including Income-Based Repayment (IBR), the Repayment "
-                "Assistance Plan (RAP), federal unpaid interest subsidies, and 120-payment Public Service Loan Forgiveness."
-            )
-            checklist_items = [
-                "Confirm zero remaining eligibility or intent for 120-payment Public Service Loan Forgiveness (34 CFR 685.219) before private conversion.",
-                "Verify emergency cash reserves cover at least 6 months of fixed private loan obligations since private contracts lack statutory IDR hardship caps.",
-                "Audit soft-pull rate pre-qualification disclosures under Truth in Lending Act (TILA) Regulation Z (12 CFR Part 1026) before authorizing a hard inquiry.",
-                "Compare fixed vs variable APR amortization schedules alongside autopay discount permanence and cosigner release clauses.",
-            ]
-            pitfalls = [
-                (
-                    "Refinancing Direct Loans while employed at a 501(c)(3) hospital or public agency",
-                    "Permanently waives federal protections and forfeits tax-free 120-payment PSLF principal discharge",
-                    "Isolate only private student loans for refinancing while retaining federal Direct Loans in Title IV IDR plans",
-                ),
-                (
-                    "Comparing nominal interest rate reduction without modeling lost RAP unpaid interest subsidies",
-                    "Overstates net savings when federal unpaid interest waivers reduce effective Title IV borrowing cost",
-                    "Compare lifetime out-of-pocket cash outflow across both Title IV RAP/IBR and private amortization schedules",
-                ),
-                (
-                    "Triggering multiple uncoordinated hard credit inquiries across private lenders",
-                    "Can depress FICO credit scores if applications span outside the bureau rate-shopping window",
-                    "Use soft-pull pre-qualification first and batch final applications within a single 14-day underwriting window",
-                ),
-            ]
-            handoff_title = "Vetted Private Refinance Underwriting Checklist (TILA Reg-Z)"
-            handoff_items = [
-                "Confirm 100% soft-credit-pull rate check with zero impact on your FICO score before formal underwriting.",
-                "Verify fixed APR terms, zero origination or prepayment fees, and documented disability/death discharge policies.",
-                "Review mandatory Title IV forfeiture disclosure confirming refinancing federal student loans permanently waives federal protections.",
-            ]
-        else:
-            trap_title = "Immediate AGI Filing Status and Interest Capitalization Trap Alert (34 CFR 685.209)"
-            trap_body = (
-                "Under 34 CFR 685.209 and OBBBA Title VIII Subtitle B, Married Filing Jointly (MFJ) pools both "
-                "spouses' Adjusted Gross Income when computing RAP and IBR discretionary payments, whereas Married "
-                "Filing Separately (MFS) isolates individual borrower AGI. Exiting Income-Based Repayment (IBR) "
-                "also triggers statutory capitalization of accrued unpaid interest onto principal."
-            )
-            checklist_items = [
-                "Model Married Filing Jointly (MFJ) vs Married Filing Separately (MFS) tax liability delta against annual Title IV repayment savings.",
-                "Verify whether your Direct Loans meet the July 1, 2014 New Borrower threshold (10% vs 15% discretionary income under 34 CFR 685.209).",
-                "Confirm annual IRS Data Retrieval Tool (DRT) income recertification deadlines to prevent administrative payment spikes.",
-                "Audit accrued unpaid interest balances before switching out of IBR, as statutory exit rules capitalize unpaid interest into principal.",
-            ]
-            pitfalls = [
-                (
-                    "Filing joint tax returns (MFJ) when both spouses have disparate income-to-debt ratios",
-                    "Combines household AGI and can double or triple monthly RAP/IBR required payments",
-                    "Run side-by-side MFS vs MFJ tax and repayment simulations prior to filing annual federal returns",
-                ),
-                (
-                    "Switching out of statutory IBR into another repayment plan with accrued unpaid interest",
-                    "Triggers mandatory statutory interest capitalization under 20 U.S.C. 1098e(b)(3), permanently increasing principal",
-                    "Evaluate accrued interest balance impact before executing a formal plan migration away from IBR",
-                ),
-                (
-                    "Missing annual IDR income recertification deadline with loan servicer",
-                    "Reverts monthly billing to the 10-year Standard Repayment amount and can trigger interest capitalization",
-                    "Enable automatic IRS tax data consent or submit recertification documentation 45 days before anniversary date",
-                ),
-            ]
-            handoff_title = "Title IV Repayment Execution and Verification Checklist"
-            handoff_items = [
-                "Cross-check loan origination dates in StudentAid.gov to confirm pre-2014 vs post-2014 IBR statutory tier.",
-                "Compare total 240-to-360-month cumulative repayment cost including potential tax treatment of forgiven balances.",
-                "Verify family size and state of residence against current HHS Federal Poverty Guidelines (42 U.S.C. 9902(2)).",
-            ]
-
-        tier_clusters = [
-            (
-                "Tier 1: Core Title IV Statutory Pillar Models",
-                [
-                    ("student-loan-repayment-calculator", "Income-Based & Income-Driven Student Loan Repayment Calculator (Title IV IBR & RAP)"),
-                    ("rap-vs-ibr-calculator", "Repayment Assistance Plan (RAP) vs Income-Based Repayment (IBR) Calculator"),
-                    ("rap-payment-calculator", "Repayment Assistance Plan (RAP) Monthly Payment Calculator"),
-                    ("tiered-standard-calculator", "Tiered Standard Repayment Plan Amortization Calculator"),
-                ],
-            ),
-            (
-                "Tier 2: Forgiveness, Buyback and Litigation Transition Matrices",
-                [
-                    ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
-                    ("pslf-buyback-months-reconsideration-student-loan-calculator", "PSLF Hold Harmless Buyback & Reconsideration Months Calculator"),
-                    ("student-loan-forgiveness-2026", "2026 Federal Student Loan Forgiveness Pathways & Discharge Estimator"),
-                    ("student-loan-forgiveness-tax-bomb-insolvency-calculator", "Student Loan Forgiveness Tax Bomb & IRS Form 982 Insolvency Calculator"),
-                    ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
-                    ("paye-sunset-calculator", "PAYE Sunset & Statutory Repayment Plan Transition Calculator"),
-                    ("ibr-hardship-cap-calculator", "IBR Partial Financial Hardship Cap Calculator"),
-                ],
-            ),
-            (
-                "Tier 3: Filing Status, Consolidation and Specialty Borrower Spokes",
-                [
-                    ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint Income-Driven Repayment Tax Model"),
-                    ("icr-repayment-calculator", "Income-Contingent Repayment (ICR) & Parent PLUS Statutory Calculator"),
-                    ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
-                    ("parent-plus-double-consolidation-loophole-2026-calculator", "Parent PLUS Double Consolidation Loophole 2026 Sunset & ICR vs IDR Calculator"),
-                    ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
-                ],
-            ),
-        ]
+        px_ctx = _resolve_prexvo_vertical_content(slug, s_low)
+        trap_title = px_ctx["trap_title"]
+        trap_body = px_ctx["trap_body"]
+        checklist_items = px_ctx["checklist_items"]
+        pitfalls = px_ctx["pitfalls"]
+        handoff_title = px_ctx["handoff_title"]
+        handoff_items = px_ctx["handoff_items"]
+        tier_clusters = px_ctx["tier_clusters"]
     elif is_gainhelm:
         if any(k in s_low for k in ("dora", "ict-third-party", "2022/2554")):
             trap_title = "Immediate DORA Article 26 TLPT & Register of Information Trap Alert (Regulation (EU) 2022/2554)"
@@ -3397,69 +3699,14 @@ def _resolve_vertical_competitor_content(
                 ]
         _, tier_clusters = _resolve_gainhelm_trap_and_clusters(s_low)
     elif is_lienbond:
-        trap_title = "Immediate Statutory Notice Deadline & Surety Underwriting Trap Alert (40 U.S.C. 3131 & State Lien Codes)"
-        trap_body = (
-            "Under 40 U.S.C. Section 3131 (Federal Miller Act), Little Miller Acts, and state mechanics lien statutes "
-            "(such as California Civil Code Section 8200 20-day Preliminary Notice and Texas Property Code Section 53.056 "
-            "15th-day-of-the-3rd-month trap), serving a Preliminary Notice even 1 calendar day late or signing an "
-            "unconditional waiver before funds clear bank settlement permanently extinguishes statutory lien and payment bond rights."
-        )
-        checklist_items = [
-            "Serve statutory Preliminary Notice via Certified Mail with Return Receipt Requested within the state window (20 days from first furnishing in CA/AZ; 45 days in FL).",
-            "Maintain verified CPA Reviewed or Audited financial statements showing net working capital (current assets minus current liabilities) at or above 10% of aggregate bonded backlog.",
-            "Segregate high-rate field construction payroll (Class 5403/5190) from clerical (Class 8810) and outside sales (Class 8742) with daily timecards before annual NCCI workers comp audit.",
-            "Verify weekly Davis-Bacon Certified Payroll Form WH-347 submission and bona fide fringe benefit plan credits under 29 CFR Section 5.5 to prevent contract progress withholding.",
-        ]
-        pitfalls = [
-            (
-                "Executing an Unconditional Waiver and Release on Progress Payment before check clearing",
-                "Extinguishes statutory mechanics lien and payment bond rights immediately upon signature even if the check bounces",
-                "Strictly execute Conditional Waivers upon invoice submission and release Unconditional Waivers only after bank wire settlement",
-            ),
-            (
-                "Lumping clerical, estimating, and field labor into a single payroll bucket during workers comp audit",
-                "NCCI Governing Class rules reassign 100% of unsegregated payroll to the highest-rated construction trade class code",
-                "Maintain contemporaneous trade-by-trade timecards separating Class 8810 clerical staff from field installation codes",
-            ),
-            (
-                "Bidding public works above single-job surety capacity without verified CPA working capital schedules",
-                "Triggers bid bond rejection or 5% bid bond forfeiture if the principal cannot execute AIA A312 performance/payment bonds",
-                "Pre-qualify single and aggregate surety credit lines against Treasury Circular 570 underwriting ratios before bid opening",
-            ),
-        ]
-        handoff_title = "Treasury Circular 570 Surety & Commercial Contractor Insurance Vetting Checklist"
-        handoff_items = [
-            "Confirm surety carrier listing on U.S. Department of the Treasury Circular 570 with AM Best A- (Excellent) or higher rating.",
-            "Verify instant digital COI issuance with ISO CG 20 10 (ongoing operations) and CG 20 37 (completed operations) additional insured endorsements.",
-            "Audit state workers compensation Experience Modification Rate (EMR) worksheets against NCCI primary/excess split-point tables.",
-        ]
-        tier_clusters = [
-            (
-                "Tier 1: Statutory Surety Bond & Public Works Pillar Models",
-                [
-                    ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator by Credit Score"),
-                    ("miller-act-performance-and-payment-bond-premium-calculator", "Miller Act Performance and Payment Bond Premium Calculator"),
-                    ("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator", "Davis-Bacon Prevailing Wage & WH-347 Fringe Benefit Rate Calculator"),
-                    ("erisa-fidelity-bond-coverage-amount-calculator", "ERISA Section 412 Fidelity Bond Coverage Amount Calculator"),
-                ],
-            ),
-            (
-                "Tier 2: 50-State Mechanics Lien, Retainage & Preliminary Notice Matrices",
-                [
-                    ("contractor-lien-release-statutory-matrix-by-state", "50-State Contractor Mechanics Lien Release Statutory Matrix"),
-                    ("california-texas-florida-preliminary-notice-deadline-calculator", "California, Texas and Florida Preliminary Notice Deadline Calculator"),
-                    ("commercial-construction-retainage-interest-penalty-calculator-by-state", "Commercial Construction Retainage Interest Penalty Calculator by State"),
-                ],
-            ),
-            (
-                "Tier 3: Workers Compensation Class Code, EMR & Contractor Margin Spokes",
-                [
-                    ("workers-compensation-class-code-rate-calculator-by-state", "NCCI Workers Compensation Class Code Rate Calculator by State"),
-                    ("experience-modification-rate-emr-workers-comp-penalty-calculator", "Experience Modification Rate (EMR) Workers Comp Penalty Calculator"),
-                    ("contractor-overhead-and-profit-markup-vs-margin-calculator", "Contractor Overhead and Profit Markup vs Margin Calculator"),
-                ],
-            ),
-        ]
+        lb_ctx = _resolve_lienbond_vertical_content(s_low)
+        trap_title = lb_ctx["trap_title"]
+        trap_body = lb_ctx["trap_body"]
+        checklist_items = lb_ctx["checklist_items"]
+        pitfalls = lb_ctx["pitfalls"]
+        handoff_title = lb_ctx["handoff_title"]
+        handoff_items = lb_ctx["handoff_items"]
+        tier_clusters = lb_ctx["tier_clusters"]
     else:
         # ProfitHelm vertical resolution
         tax_bracket_ctx = _resolve_tax_bracket_and_entity_competitor_content(s_low)
@@ -3881,32 +4128,32 @@ def _build_repayment_loan_depth_spec(
         "table_rows": [
             (
                 "Repayment Assistance Plan (RAP)",
-                "OBBBA Title VIII Subtitle B; 34 CFR Part 685",
-                "10% of AGI above 225% HHS Poverty ($35,212 Single)",
-                "100% unpaid undergraduate interest subsidy; 240-to-300-month cap",
+                "P.L. 119-21 Section 82001 (OBBBA); 34 CFR Part 685",
+                "1% to 10% tiered AGI schedule minus $50/dependent ($10/mo floor)",
+                "100% unpaid monthly interest subsidy + up to $50/mo principal match; 360-month (30-year) forgiveness",
             ),
             (
                 "New IBR (Post-July 1, 2014)",
                 "20 U.S.C. 1098e(e); 34 CFR 685.209",
-                "10% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "10% of AGI above 150% HHS Poverty ($23,940 Single)",
                 "Capped at 10-Year Standard payment; 20-year (240-month) discharge",
             ),
             (
                 "Old IBR (Pre-July 1, 2014)",
                 "20 U.S.C. 1098e(b); 34 CFR 685.221",
-                "15% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "15% of AGI above 150% HHS Poverty ($23,940 Single)",
                 "Capped at 10-Year Standard payment; 25-year (300-month) discharge",
             ),
             (
                 "Pay As You Earn (PAYE)",
                 "34 CFR 685.209(a) Statutory Transition Rules",
-                "10% of AGI above 150% HHS Poverty ($23,475 Single)",
+                "10% of AGI above 150% HHS Poverty ($23,940 Single)",
                 "10-Year Standard payment ceiling; 20-year (240-month) forgiveness",
             ),
             (
                 "Income-Contingent Repayment (ICR)",
                 "34 CFR 685.209(b); HEA Section 455(d)",
-                "20% of AGI above 100% HHS Poverty ($15,650 Single)",
+                "20% of AGI above 100% HHS Poverty ($15,960 Single)",
                 "Sole IDR plan eligible for consolidated Parent PLUS loans (25 years)",
             ),
             (
@@ -4069,7 +4316,7 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
                 '{"sec179-cost":95000,"sec179-rate":35,"serp-179-cost":95000,"serp-179-income":280000,"serp-179-apr":6.5,"serp-179-class":"machinery_100"}',
             ),
             (
-                "Heavy SUV 6,000 to 14,000 lbs ($110k / $30,500 SUV Cap)",
+                "Heavy SUV 6,000 to 14,000 lbs ($110k / $32,000 SUV Cap)",
                 '{"sec179-cost":110000,"sec179-rate":37,"serp-179-cost":110000,"serp-179-income":350000,"serp-179-apr":6.75,"serp-179-class":"heavy_suv"}',
             ),
             (
@@ -4098,7 +4345,7 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
             '          <label for="serp-179-class" class="serp-field-label">Asset GVWR &amp; IRC 179 / 280F Property Class</label>\n'
             '          <select id="serp-179-class" name="serp-179-class" class="touch-target serp-sub-select">\n'
             '            <option value="machinery_100" selected="selected">Machinery / Software / Heavy Truck &gt;6,000 lbs (Uncapped 100%)</option>\n'
-            '            <option value="heavy_suv">Heavy SUV 6,000 to 14,000 lbs GVWR ($30,500 IRC 179(b)(5) Cap + Bonus)</option>\n'
+            '            <option value="heavy_suv">Heavy SUV 6,000 to 14,000 lbs GVWR ($32,000 IRC 179(b)(5) Cap + Bonus)</option>\n'
             '            <option value="passenger_auto">Luxury Passenger Auto &lt;6,000 lbs GVWR ($20,400 IRC 280F Year-1 Cap)</option>\n'
             '          </select>\n'
             '        </div>'
@@ -4137,8 +4384,8 @@ def _build_sec179_depth_spec(topic_label: str, statutory_authority: str) -> Dict
             (
                 "Heavy Passenger SUV (6,000 to 14,000 lbs GVWR, &lt;6-ft Bed)",
                 "IRC Section 179(b)(5)(A) Heavy SUV Cap",
-                "$30,500 statutory Section 179 cap ($31,300 for 2025 inflation-adjusted schedule)",
-                "Remaining basis eligible for Section 168(k) bonus + 5-year 200% DB MACRS",
+                "$32,000 statutory 2026 Section 179(b)(5) heavy SUV cap",
+                "Remaining basis eligible for 100% Section 168(k) bonus + 5-year 200% DB MACRS",
             ),
             (
                 "Standard Passenger Automobile (&lt;6,000 lbs GVWR Sedan / Crossover)",
@@ -4721,7 +4968,7 @@ _GAINHELM_SPECIAL_DEPTH_SPECS: Dict[str, Dict[str, Any]] = {
         ],
         "table_rows": [
             ("HIPAA Security Risk Analysis &amp; Risk Management", "45 CFR 164.308(a)(1)(ii)(A)-(B)", "$16,000 to $42,000 baseline SRA + remediation", "Annual documented ePHI threat &amp; vulnerability inventory"),
-            ("HHS OCR Four-Tier Civil Monetary Penalties", "45 CFR 160.404 &amp; 42 U.S.C. 1320d-5", "$141 to $2,067,813 annual cap per provision", "Tiered culpability structure escalated for willful neglect"),
+            ("HHS OCR Four-Tier Civil Monetary Penalties", "45 CFR 160.404 &amp; 42 U.S.C. 1320d-5", "$141 to $2,190,294 annual cap per provision", "Tiered culpability structure escalated for willful neglect"),
             ("Breach Notification &amp; Forensics Surge (>500 Records)", "45 CFR 164.404-408 (HITECH)", "60-day OCR, individual &amp; media notification clock", "Encryption safe harbor eliminates reportable breach notice"),
             ("Business Associate Agreement (BAA) &amp; Technical Safeguards", "45 CFR 164.312 &amp; 164.504(e)", "$12,500 BAA inventory + KMS/audit-log automation", "Mandatory vendor BAAs, RBAC access &amp; immutable audit logs"),
         ],
@@ -5129,7 +5376,7 @@ def _build_gainhelm_depth_spec(
             (
                 "HIPAA Civil Monetary Penalties &amp; HITECH Breach",
                 "45 CFR 160.404, 45 CFR Part 164 &amp; 42 U.S.C. 1320d-5",
-                "4 penalty tiers ($141 to $2,067,813 annual cap per identical provision)",
+                "4 penalty tiers ($141 to $2,190,294 annual cap per identical provision)",
                 "60-day OCR &amp; media breach notification (>500 records) + BAA encryption",
             ),
             (
@@ -5238,15 +5485,27 @@ def _build_gainhelm_depth_spec(
 def _build_lienbond_depth_spec(
     topic_label: str, statutory_authority: str, economic_dataset: str
 ) -> Dict[str, Any]:
-    return {
-        "workbench_mode": "construction_surety_lien",
-        "workbench_h2": f"Interactive Surety Indemnity, NCCI EMR &amp; Statutory Lien Sub-Ledger: {topic_label}",
-        "workbench_intro": (
-            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, construction "
-            f"CFOs, general contractors, and project controllers optimize Treasury Circular 570 surety bond rates, "
-            f"NCCI workers compensation EMR modifiers, and 50-state statutory mechanics lien deadlines:"
-        ),
-        "presets": [
+    is_wc_emr = any(
+        tok in f"{topic_label} {statutory_authority}".lower()
+        for tok in ("workers comp", "workers' comp", "class code", "emr", "experience modification", "ncci")
+    )
+    presets = (
+        [
+            (
+                "NCCI Clerical Class 8810 ($500k Payroll / 0.85 Credit EMR)",
+                '{"serp-b2b-gross":500000,"serp-b2b-deduction":1500,"serp-b2b-rate":0.35,"serp-b2b-regime":"optimal_election"}',
+            ),
+            (
+                "NCCI Field Trade Class 5403 ($500k Payroll / 1.00 Unity EMR)",
+                '{"serp-b2b-gross":500000,"serp-b2b-deduction":32000,"serp-b2b-rate":6.4,"serp-b2b-regime":"unoptimized_baseline"}',
+            ),
+            (
+                "NCCI Workers Comp EMR Stress ($500k Trade Payroll / 1.25 Debit EMR)",
+                '{"serp-b2b-gross":500000,"serp-b2b-deduction":40000,"serp-b2b-rate":8.0,"serp-b2b-regime":"stress_case"}',
+            ),
+        ]
+        if is_wc_emr
+        else [
             (
                 "Preferred Credit License Bond ($25,000 Penal Sum / 720+ FICO / 1.5% Rate)",
                 '{"serp-b2b-gross":25000,"serp-b2b-deduction":375,"serp-b2b-rate":1.5,"serp-b2b-regime":"optimal_election"}',
@@ -5263,7 +5522,72 @@ def _build_lienbond_depth_spec(
                 "Federal Miller Act &amp; WH-347 Prevailing Wage ($2.5M Contract / 100% Bond)",
                 '{"serp-b2b-gross":2500000,"serp-b2b-deduction":31250,"serp-b2b-rate":1.25,"serp-b2b-regime":"stress_case"}',
             ),
-        ],
+        ]
+    )
+    wc_rows = [
+        (
+            "NCCI Workers Compensation &amp; EMR Split-Point",
+            "NCCI Experience Rating Plan Manual &amp; State Rating Bureaus",
+            "Manual Premium = (Payroll / 100) x Class Rate x EMR ($18,500 split point)",
+            "3-year NCCI unit statistical loss run verification and class-code audit",
+        ),
+        (
+            "Clerical vs Governing Class Code Segregation",
+            "NCCI Basic Manual Rule 2-G Interchange of Labor",
+            "Class 8810 clerical vs high-hazard construction trade class codes",
+            "Contemporaneous payroll register separation and daily timecards",
+        ),
+        (
+            "Overtime 0.5x Premium Payroll Exclusion",
+            "NCCI Basic Manual Rule 2-E-1 Overtime Remuneration",
+            "Deduct 0.5x overtime premium increment from auditable payroll",
+            "Separate straight-time vs overtime pay columns in certified payroll",
+        ),
+    ]
+    all_rows = wc_rows if is_wc_emr else [
+        (
+            "Federal Miller Act Performance &amp; Payment Bonds",
+            "40 U.S.C. Section 3131 &amp; FAR 28.102-1",
+            "100% performance and payment bonds on federal contracts exceeding $150,000",
+            "U.S. Treasury Department Circular 570 admitted corporate surety underwriting",
+        ),
+        (
+            "State Contractor License Surety Bonds",
+            "CA BPC Section 7071.6, WA RCW 18.27.040 &amp; State Licensing Codes",
+            "$25,000 CA CSLB bond ($30,000 WA general); 0.75% to 3.5% preferred rate",
+            "Continuous statutory license bond certificate filed with state registrar",
+        ),
+        *wc_rows[:1],
+        (
+            "50-State Statutory Mechanics Lien Deadlines",
+            "CA Civ. Code Section 8200, TX Prop. Code Ch. 53 &amp; FL Stat. Section 713.06",
+            "CA 20-day preliminary notice; TX 15th day of 2nd/3rd month; FL 45-day NTO",
+            "Certified mail return-receipt affidavit and county recorder statutory form",
+        ),
+        (
+            "Davis-Bacon Certified Payroll Form WH-347",
+            "40 U.S.C. Section 3141 &amp; 29 CFR Part 5 (DOL Wage &amp; Hour Division)",
+            "Weekly WH-347 submission; cash-in-lieu fringe excluded from 1.5x OT base",
+            "Signed Statement of Compliance under 18 U.S.C. Section 1001 and 31 U.S.C. Section 3729",
+        ),
+    ]
+    return {
+        "workbench_mode": "construction_surety_lien",
+        "workbench_h2": (
+            f"Interactive NCCI Class Code &amp; EMR Audit Sub-Ledger: {topic_label}"
+            if is_wc_emr
+            else f"Interactive Surety Indemnity, NCCI EMR &amp; Statutory Lien Sub-Ledger: {topic_label}"
+        ),
+        "workbench_intro": (
+            f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, construction "
+            f"CFOs, general contractors, and project controllers optimize NCCI workers compensation class codes, "
+            f"EMR modifiers, and statutory compliance buffers:"
+            if is_wc_emr
+            else f"Under <strong>{statutory_authority}</strong> and <strong>{economic_dataset}</strong>, construction "
+            f"CFOs, general contractors, and project controllers optimize Treasury Circular 570 surety bond rates, "
+            f"NCCI workers compensation EMR modifiers, and 50-state statutory mechanics lien deadlines:"
+        ),
+        "presets": presets,
         "inputs_html": (
             '        <div class="serp-field-group">\n'
             '          <label for="serp-b2b-gross" class="serp-field-label">Gross Contract Sum / Penal Bond / Trade Payroll ($)</label>\n'
@@ -5280,68 +5604,37 @@ def _build_lienbond_depth_spec(
             '        <div class="serp-field-group">\n'
             '          <label for="serp-b2b-regime" class="serp-field-label">Underwriting &amp; Statutory Compliance Tier</label>\n'
             '          <select id="serp-b2b-regime" name="serp-b2b-regime" class="touch-target serp-sub-select">\n'
-            '            <option value="optimal_election" selected="selected">Treasury Circular 570 Preferred Tier + 0.85 Credit EMR</option>\n'
+            '            <option value="optimal_election" selected="selected">Preferred Underwriting + 0.85 Credit EMR</option>\n'
             '            <option value="unoptimized_baseline">Standard Market Indemnity + 1.00 Unity EMR</option>\n'
             '            <option value="stress_case">High-Risk Collateral Indemnity + 1.25 Debit EMR</option>\n'
             '          </select>\n'
             '        </div>'
         ),
         "metrics_meta": [
-            ("serp-out-primary", "Net Preferred Surety &amp; Insurance Cost", "$7,500"),
+            ("serp-out-primary", "Net Preferred Insurance &amp; Compliance Cost", "$7,500"),
             ("serp-out-secondary", "Unoptimized Standard Market Cost", "$13,750"),
             ("serp-out-tertiary", "Annual Underwriting &amp; EMR Savings", "$6,250"),
-            ("serp-out-quaternary", "Protected Statutory Lien &amp; Bond Capacity", "$500,000"),
+            ("serp-out-quaternary", "Audited Payroll / Compliance Capacity", "$500,000"),
         ],
-        "svg_left_label": "Protected Contract & Bond Capacity: $492,500 (98.5%)",
+        "svg_left_label": "Protected Contract & Payroll Capacity: $492,500 (98.5%)",
         "svg_right_label": "Net Surety & Insurance Burden: $7,500 (1.5%)",
         "svg_left_width": "520",
         "svg_right_x": "520",
         "svg_right_width": "80",
-        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing Surety, NCCI &amp; Lien Thresholds",
+        "table_h3": f"Statutory Reference Schedule: {topic_label} Governing NCCI &amp; Compliance Thresholds",
         "table_headers": [
             "Statutory Program / Construction Regime",
             "Governing Legal &amp; Regulatory Citation",
-            "2026 Penal Sum, Rate or Filing Window",
-            "Underwriting &amp; Recording Standard",
+            "2026 Rate, Split Point or Filing Window",
+            "Underwriting &amp; Audit Standard",
         ],
-        "table_rows": [
-            (
-                "Federal Miller Act Performance &amp; Payment Bonds",
-                "40 U.S.C. Section 3131 &amp; FAR 28.102-1",
-                "100% performance and payment bonds on federal contracts exceeding $150,000",
-                "U.S. Treasury Department Circular 570 admitted corporate surety underwriting",
-            ),
-            (
-                "State Contractor License Surety Bonds",
-                "CA BPC Section 7071.6, WA RCW 18.27.040 &amp; State Licensing Codes",
-                "$25,000 CA CSLB bond ($30,000 WA general); 0.75% to 3.5% preferred rate",
-                "Continuous statutory license bond certificate filed with state registrar",
-            ),
-            (
-                "NCCI Workers Compensation &amp; EMR Split-Point",
-                "NCCI Experience Rating Plan Manual &amp; State Rating Bureaus",
-                "Manual Premium = (Payroll / 100) x Class Rate x EMR ($18,500 split point)",
-                "3-year NCCI unit statistical loss run verification and class-code audit",
-            ),
-            (
-                "50-State Statutory Mechanics Lien Deadlines",
-                "CA Civ. Code Section 8200, TX Prop. Code Ch. 53 &amp; FL Stat. Section 713.06",
-                "CA 20-day preliminary notice; TX 15th day of 2nd/3rd month; FL 45-day NTO",
-                "Certified mail return-receipt affidavit and county recorder statutory form",
-            ),
-            (
-                "Davis-Bacon Certified Payroll Form WH-347",
-                "40 U.S.C. Section 3141 &amp; 29 CFR Part 5 (DOL Wage &amp; Hour Division)",
-                "Weekly WH-347 submission; cash-in-lieu fringe excluded from 1.5x OT base",
-                "Signed Statement of Compliance under 18 U.S.C. Section 1001 and 31 U.S.C. Section 3729",
-            ),
-        ],
+        "table_rows": all_rows,
         "banner_html": (
             '      <div id="dynamic-commercial-intent-banner" class="serp-intent-banner" data-banner-mode="construction_surety_lien">\n'
             '        <div class="serp-intent-banner-text">\n'
-            '          <strong>Live Surety, EMR &amp; Lien Readiness Signal:</strong> Qualifying for Treasury Circular 570 preferred underwriting and NCCI credit EMR reduces net premium burden to <span id="serp-banner-metric-primary">$7,500</span> and saves <span id="serp-banner-metric-secondary">$6,250</span> annually. Compare vetted surety underwriters, workers comp carriers, and statutory lien filing partners below.\n'
+            '          <strong>Live Compliance &amp; EMR Readiness Signal:</strong> Qualifying for NCCI credit EMR and preferred underwriting reduces net premium burden to <span id="serp-banner-metric-primary">$7,500</span> and saves <span id="serp-banner-metric-secondary">$6,250</span> annually. Compare vetted commercial insurance and compliance partners below.\n'
             '        </div>\n'
-            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Surety Bond, Workers Comp &amp; Lien Partners</a>\n'
+            '        <a href="#vetted-commercial-handoff" class="touch-target serp-intent-banner-btn">Review Vetted Workers Comp &amp; Surety Partners</a>\n'
             '      </div>'
         ),
     }
@@ -6513,7 +6806,7 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
         ),
         "content_effort": (
             "Explicit GVWR vehicle classification tiers (Passenger Auto <=6,000 lbs vs Heavy SUV 6,000-14,000 lbs "
-            "$30,500 cap vs Cargo/Work Truck >6ft bed 100% cap), placed-in-service deadline rules, and Section "
+            "$32,000 cap vs Cargo/Work Truck >6ft bed 100% cap), placed-in-service deadline rules, and Section "
             "179(d)(10) recapture warnings when business use drops to 50% or below."
         ),
         "trust_signals": (
@@ -6648,7 +6941,7 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
         ),
         "trust_signals": (
             "Citations to OBBBA Title VIII Subtitle B, HEA Section 493C (20 U.S.C. 1098e), 34 CFR 685.209, "
-            "2026 HHS Federal Poverty Guidelines ($15,650 base + $5,500 per person), and mandatory Title IV "
+            "2026 HHS Federal Poverty Guidelines ($15,960 base + $5,680 per person), and mandatory Title IV "
             "forfeiture warnings before private refinancing."
         ),
         "seo_structure": (
@@ -6962,7 +7255,7 @@ COMPETITIVE_INCUMBENT_PROFILES: Dict[str, Dict[str, Any]] = {
         ),
         "content_effort": (
             "Reconciliation of 42 U.S.C. 1320d-5 statutory tiers vs 45 CFR 160.404 inflation-adjusted caps ($141 to "
-            "$2,067,813 annual cap per identical provision) and HITECH Act recognized security practices mitigation."
+            "$2,190,294 annual cap per identical provision) and HITECH Act recognized security practices mitigation."
         ),
         "trust_signals": (
             "Citations to 45 CFR 160.404, 45 CFR Part 164 Subpart C/D, 42 U.S.C. 1320d-5, Public Law 116-321 (HITECH "

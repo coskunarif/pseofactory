@@ -67,6 +67,41 @@ CLEAN_HTML = """<!DOCTYPE html>
 </body>
 </html>"""
 
+PROFITHELM_COMPLIANT_HTML = CLEAN_HTML.replace(
+    "</main>",
+    '    <p class="disclosure">Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>\n    </main>',
+)
+
+PREXVO_COMPLIANT_HTML = CLEAN_HTML.replace(
+    "</main>",
+    '    <p class="disclosure">Refinancing federal student loans into a private loan permanently forfeits access to federal IDR, RAP, and PSLF protections.</p>\n    </main>',
+)
+
+
+def _write_temp_truth_pack(packs_dir: Path, pid: str) -> None:
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    tp_payload = {
+        "schema_version": "2.0",
+        "property_id": pid,
+        "brand_name": pid.capitalize(),
+        "canonical_domain": f"https://{pid}.com",
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {},
+        "citations_allowlist": {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{pid}.json").write_text(json.dumps(tp_payload, indent=2), encoding="utf-8")
+
 
 @pytest.fixture(autouse=True)
 def clean_sys_modules():
@@ -259,12 +294,20 @@ def test_supervisor_heartbeat_and_backoff_ceiling(tmp_path):
     assert final_hb["consecutive_failures"] == MAX_CONSECUTIVE_FAILURES
 
 
-def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
+def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path, monkeypatch):
     """
-    Verifies concurrency semaphore ceiling (max 2 parallel workers)
-    and per-tenant timeout budget aborting runaway execution without crashing fleet.
+    Verifies concurrency semaphore ceiling (max 2 parallel workers),
+    per-tenant timeout budget aborting runaway execution without crashing fleet,
+    and fail-closed rejection on unknown edge domains lacking a Truth Pack.
     Zero em-dashes. Zero en-dashes.
     """
+    import pseofactory.truth_pack as tp_mod
+
+    packs_dir = tmp_path / "truth_packs"
+    for pid in ("t1", "t2", "t3", "fast", "runaway"):
+        _write_temp_truth_pack(packs_dir, pid)
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
+
     class FastTrendRunner:
         def run_cron_cycle(self, *args, **kwargs):
             return {"status": "SUCCESS", "approved_build": [], "refactor_pages": []}
@@ -354,16 +397,50 @@ def test_async_fleet_coordinator_concurrency_and_timeout(tmp_path):
     assert t_results["runaway"].status == "TIMEOUT"
     assert t_results["fast"].status in ("SUCCESS", "SKIPPED_NO_CHANGES")
 
+    # 3. Assert fail-closed on unknown edge domain lacking a Truth Pack
+    unknown_dist = tmp_path / "unknown_edge_dist"
+    unknown_dist.mkdir(parents=True, exist_ok=True)
+    (unknown_dist / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    unknown_reg = TenantRegistry()
+    unknown_reg.register_adapter(
+        ConfigurablePropertyAdapter("unknown_edge_site", "Unknown", "unknown-edge.com", "https://unknown-edge.com", unknown_dist)
+    )
+    unknown_coord = AsyncFleetCoordinator(
+        registry=unknown_reg,
+        lifecycle=MaintenanceLifecycle(trend_runner=FastTrendRunner()),
+        concurrency_ceiling=1,
+    )
+    unknown_res = unknown_coord.run_fleet(force=True)
+    assert unknown_res["unknown_edge_site"].status == "FAILED"
+    assert any("TRUTH_PACK_MISSING" in str(r) for r in unknown_res["unknown_edge_site"].failed_records)
+
 
 def test_cross_tenant_fault_isolation(tmp_path):
     """
     Verifies cross-tenant isolation and memory firewall:
-    Failure or contamination in one tenant never halts or contaminates sibling tenants.
+    Failure or contamination in one tenant never halts or contaminates sibling tenants,
+    and non-compliant mock HTML missing mandatory disclosures fails closed at Stage 6.
     Zero em-dashes. Zero en-dashes.
     """
     class FastTrendRunner:
         def run_cron_cycle(self, *args, **kwargs):
             return {"status": "SUCCESS", "approved_build": [], "refactor_pages": []}
+
+    # First prove non-compliant mock HTML missing mandatory disclosures fails closed at Stage 6
+    noncompliant_dist = tmp_path / "profithelm_noncompliant_dist"
+    noncompliant_dist.mkdir(parents=True, exist_ok=True)
+    (noncompliant_dist / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    nc_reg = TenantRegistry()
+    nc_reg.register_adapter(
+        ConfigurablePropertyAdapter("profithelm", "ProfitHelm", "profithelm.com", "https://profithelm.com", noncompliant_dist)
+    )
+    nc_res = AsyncFleetCoordinator(
+        registry=nc_reg,
+        lifecycle=MaintenanceLifecycle(trend_runner=FastTrendRunner()),
+        concurrency_ceiling=1,
+    ).run_fleet(force=True)
+    assert nc_res["profithelm"].status == "FAILED"
+    assert any("MISSING_DISCLOSURE" in str(r) for r in nc_res["profithelm"].failed_records)
 
     dist_prexvo = tmp_path / "prexvo_dist"
     dist_profithelm = tmp_path / "profithelm_dist"
@@ -372,7 +449,7 @@ def test_cross_tenant_fault_isolation(tmp_path):
 
     # prexvo has a drifted asset with em-dash so contaminating_builder will be called
     (dist_prexvo / "index.html").write_text("<html><body>Drifted with em dash \u2014 invalid</body></html>", encoding="utf-8")
-    (dist_profithelm / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    (dist_profithelm / "index.html").write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
 
     def contaminating_builder(slug: str, target_file=None):
         raise PropertyContaminationError("Foreign statutory token found in prexvo: profithelm")
@@ -421,9 +498,15 @@ def test_network_partition_fail_closed_recovery(tmp_path, monkeypatch):
     Simulates network partition drops (URLError socket.timeout during live edge verification
     and remote git operations).
     Asserts fail-closed unlatched state (HWL-1349) with zero byte corruption.
-    Restores network and asserts clean self-healing recovery.
+    Restores network and asserts clean self-healing recovery when Truth Pack is present.
     Zero em-dashes. Zero en-dashes.
     """
+    import pseofactory.truth_pack as tp_mod
+
+    packs_dir = tmp_path / "truth_packs"
+    _write_temp_truth_pack(packs_dir, "recovery_app")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
+
     prop_dir = tmp_path / "property"
     dist_dir = prop_dir / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
@@ -512,9 +595,9 @@ def test_e2e_drift_cascade_multi_tenant(tmp_path):
     prexvo_dir = tmp_path / "prexvo"
     profithelm_dir = tmp_path / "profithelm"
 
-    for p_dir, p_id, p_domain in (
-        (prexvo_dir, "prexvo", "prexvo.com"),
-        (profithelm_dir, "profithelm", "profithelm.com"),
+    for p_dir, p_id, p_domain, compliant_doc in (
+        (prexvo_dir, "prexvo", "prexvo.com", PREXVO_COMPLIANT_HTML),
+        (profithelm_dir, "profithelm", "profithelm.com", PROFITHELM_COMPLIANT_HTML),
     ):
         p_dir.mkdir(parents=True, exist_ok=True)
         (p_dir / ".pseofactory.json").write_text(
@@ -529,7 +612,7 @@ def test_e2e_drift_cascade_multi_tenant(tmp_path):
         )
         d_dir = p_dir / "dist"
         d_dir.mkdir(parents=True, exist_ok=True)
-        (d_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+        (d_dir / "index.html").write_text(compliant_doc, encoding="utf-8")
 
     state_file = tmp_path / ".agy" / "engine_hash.json"
     ledger_file = tmp_path / ".agy" / "asset_ledger.json"
@@ -1202,7 +1285,8 @@ def test_spoke_overlay_routing_geo_meta_and_partial_success_streak(tmp_path):
 
     meta = _normalize_meta_120_155("", "prexvo", "Student Loan Repayment Calculator")
     assert "225% hhs poverty" not in meta.lower()
-    assert "150% hhs poverty" in meta.lower()
+    assert "150%" in meta.lower() and "hhs poverty" in meta.lower()
+    assert "$23,940" in meta
     assert 120 <= len(meta) <= 155
 
     yt_pack = generate_youtube_syndication(

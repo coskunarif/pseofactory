@@ -291,11 +291,12 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     # DORA & void pages have zero SOC 2 / CMMC leakage and pass strict ContentAccuracyAuditStage
     dora_html = (dist_dir / "tools" / "dora-ict-third-party-risk-compliance-cost-calculator" / "index.html").read_text(encoding="utf-8")
     assert "$78,100.40" not in dora_html and "78,100" not in dora_html
+    assert "$134,534.60" not in dora_html and "134,534" not in dora_html
     assert "$132,000.00" not in dora_html and "132,000" not in dora_html
     assert ContentAccuracyAuditStage.audit_rendered_asset(dora_html, property_id="gainhelm", strict=True) == []
 
     sec_html = (dist_dir / "tools" / "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator" / "index.html").read_text(encoding="utf-8")
-    assert "$78,100.40" not in sec_html and "$132,000.00" not in sec_html
+    assert "$78,100.40" not in sec_html and "$134,534.60" not in sec_html and "$132,000.00" not in sec_html
     assert ContentAccuracyAuditStage.audit_rendered_asset(sec_html, property_id="gainhelm", strict=True) == []
 
     # SOC 2 has extra_criteria input; non-SOC-2 core tools omit it
@@ -531,8 +532,11 @@ def test_gainhelm_overlay_leak_guard_and_slop_ratchet(tmp_path: Path) -> None:
     empty_res = compiler_mod.compile_gainhelm_estate(empty_out, run_retrofit=True)
     assert empty_res["status"] == "PASS"
     empty_home = (empty_out / "dist" / "index.html").read_text(encoding="utf-8")
-    assert 'id="oracle-soc2-total">$78100.40<' in empty_home
-    assert 'id="oracle-cmmc-total">$132000.00<' in empty_home
+    assert 'id="oracle-soc2-total">$78,100.40<' in empty_home
+    assert 'id="oracle-cmmc-total">$134,534.60<' in empty_home
+    assert 'id="oracle-iso27001-total">$66,350.60<' in empty_home
+    assert 'id="oracle-hipaa-total">$2,577,794.00<' in empty_home
+    assert 'id="oracle-pci-total">$93,400.60<' in empty_home
 
     # RetroReflectionEngine manifest table mirrors central single source of truth
     assert "dora-ict-third-party-risk-compliance-cost-calculator" in RetroReflectionEngine.GAINHELM_FALLBACK_MANIFESTS

@@ -208,7 +208,7 @@ def test_profithelm_fallback_manifests_match_ground_truth_statutory_math() -> No
 
     ph_limits = TenantFactStore.get_instance().get_profile("profithelm").statutory_truth.limits_and_thresholds
     assert ph_limits["obbba_2026_single_125k_fed_tax"] == 18734.0
-    assert ph_limits["obbba_2027_single_125k_fed_tax"] == 18638.0
+    assert ph_limits["obbba_2027_single_125k_fed_tax"] == 18389.50
     assert ph_limits["ssa_oasdi_wage_base_2026"] == 184500.0
     assert ph_limits["scorp_220k_95k_salary_fica_savings"] == 14235.0
 
@@ -277,13 +277,13 @@ def test_spoke_manifest_and_quick_answer_ground_truth() -> None:
 
 
 def test_tenant_fact_store_2026_poverty_guideline_consistency() -> None:
-    """TenantFactStore must use $15,650 for 2026 individual poverty guideline across all fields."""
+    """TenantFactStore must use $15,960 for 2026 individual poverty guideline (91 FR 1797) across all fields."""
     store = TenantFactStore()
     profile = store.get_profile("prexvo")
     assert profile is not None
     prexvo_facts = profile.statutory_truth.limits_and_thresholds
-    assert prexvo_facts["poverty_guidelines_2026_hhs_contiguous"] == 15650.0
-    assert prexvo_facts["poverty_guidelines"][2026]["individual"] == 15650.0
+    assert prexvo_facts["poverty_guidelines_2026_hhs_contiguous"] == 15960.0
+    assert prexvo_facts["poverty_guidelines"][2026]["individual"] == 15960.0
 
 
 def test_sidecar_manifest_lockstep_audit_and_healing(tmp_path) -> None:
@@ -470,11 +470,11 @@ def test_gainhelm_fallback_manifests_match_ground_truth_compliance_formulas() ->
     """Every GainHelm fallback manifest must match compliance_formulas.py ground truth without tautologies."""
     expected_outputs = {
         "soc-2-audit-cost-calculator": 78100.40,
-        "cmmc-2-0-compliance-cost-calculator": 132000.00,
+        "cmmc-2-0-compliance-cost-calculator": 134534.60,
         "nist-800-171-sprs-score-calculator": 87.00,
-        "iso-27001-certification-cost-calculator": 67000.40,
-        "hipaa-violation-penalty-breach-cost-calculator": 2455313.00,
-        "pci-dss-4-0-compliance-cost-calculator": 94800.00,
+        "iso-27001-certification-cost-calculator": 66350.60,
+        "hipaa-violation-penalty-breach-cost-calculator": 2577794.00,
+        "pci-dss-4-0-compliance-cost-calculator": 93400.60,
         "fedramp-authorization-3pao-cost-calculator": 500000.00,
         "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
         "penetration-testing-scoping-cost-calculator": 23300.00,
@@ -569,7 +569,7 @@ def test_adversarial_seeded_false_claims_caught_and_rejected_across_all_three_te
         context="tools/hipaa-violation-penalty-breach-cost-calculator/index.html",
     )
     assert not gh_hipaa_ok
-    assert any("2,067,813" in v for v in gh_hipaa_violations)
+    assert any("2,190,294" in v for v in gh_hipaa_violations)
 
     gh_iso_ok, gh_iso_violations = store.verify_claim(
         "gainhelm",

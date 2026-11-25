@@ -534,7 +534,7 @@ _GAINHELM_FRAMEWORK_LEAK_GROUPS: Tuple[Tuple[Tuple[str, ...], Tuple[str, ...]], 
     ),
     (
         ("hipaa", "hitech"),
-        ("45 cfr 160", "hipaa", "2,455,313"),
+        ("45 cfr 160", "hipaa", "2,190,294", "2,577,794"),
     ),
 )
 
@@ -845,6 +845,7 @@ def finalize_estate_build(
     canonical_base: str,
     run_retrofit: bool = True,
     bad_overlay_tokens: Sequence[str] = ("profithelm", "section-179-calculator", "section-301-tariff", "coinledger"),
+    strict_truth_gate: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Runs overlay sanitization, optional RetroReflectionEngine retrofit, manifest pruning,
@@ -969,6 +970,34 @@ def finalize_estate_build(
             )
         except Exception:
             pass
+
+    is_strict_truth_gate = (
+        strict_truth_gate is True
+        or os.environ.get("PSEO_STRICT_TRUTH_GATE") == "1"
+        or (
+            strict_truth_gate is None
+            and os.environ.get("PSEO_PRODUCTION_MODE") == "1"
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        )
+    )
+    if is_strict_truth_gate and strict_truth_gate is not False:
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        truth_report = UnifiedTruthGate().audit_estate(
+            dist,
+            property_id,
+            repo_root=root,
+        )
+        if isinstance(retrofit_report, dict):
+            retrofit_report["truth_gate"] = {
+                "passed": bool(truth_report.passed),
+                "summary": truth_report.summary(),
+                "violation_count": len(truth_report.violations),
+            }
+        if not truth_report.passed:
+            raise RuntimeError(
+                f"UnifiedTruthGate failed for '{property_id}': {truth_report.summary()}"
+            )
 
     return retrofit_report
 
@@ -1793,19 +1822,175 @@ def build_thin_estate_builder_source(pkg_name: str) -> str:
     compile_map = {
         "gainhelm": "compile_gainhelm_estate",
         "lienbond": "compile_lienbond_estate",
+        "profithelm": "compile_profithelm_estate",
+        "prexvo": "compile_prexvo_estate",
     }
+    compat_reexports: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+        "gainhelm": (
+            "pseofactory.gainhelm_estate",
+            (
+                "GAINHELM_CALCULATION_MANIFESTS as CALCULATION_MANIFESTS",
+                "GAINHELM_TOOL_QUICK_ANSWERS as TOOL_QUICK_ANSWERS",
+            ),
+        ),
+        "profithelm": (
+            "pseofactory.profithelm_estate",
+            (
+                "AFFILIATES",
+                "CANONICAL_BASE",
+                "CORE_TOOLS",
+                "DIST_DIR",
+                "PROFITHELM_DOMAIN",
+                "PROFITHELM_PROPERTY_ID",
+                "REPO_ROOT",
+                "SITE_DESCRIPTION",
+                "SITE_NAME",
+                "SITE_TITLE",
+                "TOOL_MULTI_DATASET_REGISTRY",
+                "TOOLS",
+                "TRUTH_CONSTANTS",
+                "CalculatorField",
+                "CalculatorMetric",
+                "InteractiveCalculatorSpec",
+                "build_404_page",
+                "build_about_page",
+                "build_capital_gains_page",
+                "build_crypto_tax_page",
+                "build_home_page",
+                "build_machine_endpoints",
+                "build_prediction_market_page",
+                "build_prediction_market_tax_page",
+                "build_privacy_page",
+                "build_saas_runway_page",
+                "build_section_1031_page",
+                "build_section_179_page",
+                "build_tax_brackets_page",
+                "build_tools_directory_page",
+                "build_treasury_yield_page",
+                "cleanup_orphan_tools",
+                "compile_profithelm_estate_impl",
+                "compile_schema_graph",
+                "enrich_quick_answer_with_statutory_benchmarks",
+                "generate_tool_calculation_manifest",
+                "get_affiliates_for_category",
+                "get_dataset_schema",
+                "get_howto_schema",
+                "get_organization_schema",
+                "get_software_application_schema",
+                "get_tech_article_schema",
+                "get_web_application_schema",
+                "load_profithelm_truth_pack",
+                "normalize_html_seo_invariants",
+                "reflexive_geo_citability_gate",
+                "render_above_the_fold_ftc_disclosure",
+                "render_affiliate_card",
+                "render_byline",
+                "render_calculator_widget",
+                "render_contextual_lead_capture",
+                "render_footer",
+                "render_generic_tool_page",
+                "render_head",
+                "render_header",
+                "render_regulatory_alert_lead_magnet",
+                "render_share_and_pro_card",
+                "validate_multi_dataset_enrichment",
+            ),
+        ),
+        "prexvo": (
+            "pseofactory.prexvo_estate",
+            (
+                "AFFILIATE_DISCLOSURE",
+                "CALCULATION_MANIFESTS",
+                "CalculatorField",
+                "CalculatorMetric",
+                "DISCLAIMER_NO_ADVICE",
+                "HHS_POVERTY_GUIDELINES",
+                "InteractiveCalculatorSpec",
+                "PREXVO_CANONICAL_BASE",
+                "PREXVO_CORE_TOOLS",
+                "PREXVO_DOMAIN",
+                "PREXVO_SITE_DESCRIPTION",
+                "PREXVO_SITE_NAME",
+                "PREXVO_SITE_TITLE",
+                "PREXVO_STATUTORY_VOIDS",
+                "PSLF_QUALIFYING_PAYMENTS",
+                "RAP_FORGIVENESS_MONTHS",
+                "RAP_FORGIVENESS_YEARS",
+                "RAP_PRINCIPAL_MATCH_CAP",
+                "RAP_UNPAID_INTEREST_SUBSIDY_PCT",
+                "REPAYMENT_CALCULATOR_SPEC",
+                "YMYL_FORFEITURE_DISCLOSURE",
+                "amortize_monthly_payment",
+                "build_partners_matrix_section",
+                "build_refinance_partner_cta",
+                "build_tool_page",
+                "calculate_discretionary_income",
+                "calculate_ibr_payment",
+                "calculate_icr_payment",
+                "calculate_paye_payment",
+                "calculate_rap_payment",
+                "calculate_standard_10yr_payment",
+                "calculate_tiered_standard_payment",
+                "compare_all_repayment_plans",
+                "compile_prexvo_estate_impl",
+                "get_calculator_schemas",
+                "get_hhs_poverty_guideline",
+                "get_tiered_term_years",
+                "normalize_interest_rate",
+                "normalize_seo_title",
+                "normalize_state_group",
+                "render_calculator_widget",
+            ),
+        ),
+    }
+    copy_files_map: Dict[str, Tuple[str, ...]] = {
+        "profithelm": (
+            "content/deployed_voids.json",
+            ".agy/deployed_voids.json",
+            "content/redirects.json",
+        ),
+        "prexvo": ("content/deployed_voids.json",),
+    }
+    copy_dirs_map: Dict[str, Tuple[str, ...]] = {
+        "profithelm": (
+            "content/overlays",
+            ".agy/overlays",
+            "profithelm/static",
+            "profithelm/data",
+            "profithelm/datasets",
+            "profithelm/engine",
+        ),
+        "prexvo": (
+            "content/overlays",
+            ".agy/overlays",
+            "prexvo/static",
+            "prexvo/datasets",
+            "prexvo/engine",
+        ),
+    }
+
     brand_label = brand_map.get(norm_pkg, norm_pkg.title())
     compile_fn = compile_map.get(norm_pkg, f"compile_{norm_pkg}_estate")
-    extra_exports = (
-        "\nfrom pseofactory.gainhelm_estate import (\n"
-        "    GAINHELM_CALCULATION_MANIFESTS as CALCULATION_MANIFESTS,\n"
-        "    GAINHELM_TOOL_QUICK_ANSWERS as TOOL_QUICK_ANSWERS,\n"
-        ")\n"
-        if norm_pkg == "gainhelm"
-        else ""
+    extra_exports = ""
+    if norm_pkg in compat_reexports:
+        mod_path, syms = compat_reexports[norm_pkg]
+        joined = ",\n    ".join(syms)
+        extra_exports = f"\nfrom {mod_path} import (\n    {joined},\n)\n"
+
+    supports_extra_tools = norm_pkg in ("gainhelm", "profithelm", "prexvo")
+    extra_sig = ", extra_tools: Any = None" if supports_extra_tools else ""
+    extra_call_kw = ", extra_tools=extra_tools" if supports_extra_tools else ""
+    copy_files = copy_files_map.get(
+        norm_pkg,
+        ("content/deployed_voids.json", f"{norm_pkg}/engine/compliance_formulas.py"),
     )
-    extra_sig = ", extra_tools: Any = None" if norm_pkg == "gainhelm" else ""
-    extra_call_kw = ", extra_tools=extra_tools" if norm_pkg == "gainhelm" else ""
+    copy_dirs = copy_dirs_map.get(
+        norm_pkg,
+        ("content/overlays", ".agy/overlays", f"{norm_pkg}/static"),
+    )
+    copy_files_repr = "(" + ", ".join(repr(p) for p in copy_files) + (",)" if len(copy_files) == 1 else ")")
+    copy_dirs_repr = "(" + ", ".join(repr(p) for p in copy_dirs) + (",)" if len(copy_dirs) == 1 else ")")
+
     return (
         f'"""Deterministic {brand_label} estate builder backed by pseofactory compiler."""\n\n'
         "import shutil\n"
@@ -1826,13 +2011,13 @@ def build_thin_estate_builder_source(pkg_name: str) -> str:
         "    else:\n"
         "        with tempfile.TemporaryDirectory() as tmp_d:\n"
         "            tmp_root = Path(tmp_d)\n"
-        f"            for rel_src in ('content/deployed_voids.json', '{norm_pkg}/engine/compliance_formulas.py'):\n"
+        f"            for rel_src in {copy_files_repr}:\n"
         "                src_f = repo_root / rel_src\n"
         "                if src_f.is_file():\n"
         "                    dst_f = tmp_root / rel_src\n"
         "                    dst_f.parent.mkdir(parents=True, exist_ok=True)\n"
         "                    shutil.copy2(src_f, dst_f)\n"
-        f"            for rel_dir in ('content/overlays', '.agy/overlays', '{norm_pkg}/static'):\n"
+        f"            for rel_dir in {copy_dirs_repr}:\n"
         "                src_d = repo_root / rel_dir\n"
         "                if src_d.is_dir():\n"
         "                    shutil.copytree(src_d, tmp_root / rel_dir, dirs_exist_ok=True)\n"

@@ -745,12 +745,13 @@ def recompute_and_amend_tenant_lock_and_ledger(
                 rel_sri = sub_root_init.relative_to(repo).as_posix()
                 if rel_sri not in files_to_stage:
                     files_to_stage.append(rel_sri)
-            for py_sub in sorted(cand_sub_dir.rglob("*.py")):
-                if "__pycache__" in py_sub.parts or py_sub.name.endswith(".pyc"):
-                    continue
-                rel_sub = py_sub.relative_to(repo).as_posix()
-                if rel_sub not in files_to_stage:
-                    files_to_stage.append(rel_sub)
+            for sub_glob in ("*.py", "*.json"):
+                for f_sub in sorted(cand_sub_dir.rglob(sub_glob)):
+                    if "__pycache__" in f_sub.parts or f_sub.name.endswith(".pyc"):
+                        continue
+                    rel_sub = f_sub.relative_to(repo).as_posix()
+                    if rel_sub not in files_to_stage:
+                        files_to_stage.append(rel_sub)
             ls_sub = subprocess.run(
                 ["git", "-C", str(repo), "ls-files", cand_sub_dir.relative_to(repo).as_posix()],
                 env=eff_env,
@@ -2075,6 +2076,7 @@ class GitOpsCoordinator:
         edge_url: Optional[str] = None,
         dist_dir: Optional[Union[str, Path]] = None,
         workflow: Optional[str] = None,
+        skip_truth_gate: bool = False,
     ) -> GitOpsResult:
         """
         Standard framework dispatch to shipper specialist:
@@ -2130,17 +2132,70 @@ class GitOpsCoordinator:
         is_container_root = str(self.repo_path) == "/home/ubuntuadmin/projects"
         if is_container_root:
             raise RuntimeError("Containment violation: cannot execute release on container root /home/ubuntuadmin/projects")
-        if property_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        resolved_prop = property_id
+        marker_path = self.repo_path / ".pseofactory.json"
+        if resolved_prop in ("factory", "default") and marker_path.is_file():
+            try:
+                m_doc = json.loads(marker_path.read_text(encoding="utf-8"))
+                if isinstance(m_doc, dict) and m_doc.get("property_id"):
+                    resolved_prop = str(m_doc["property_id"]).strip()
+            except Exception:
+                pass
+        norm_prop_gate = _normalize_property_id(resolved_prop)
+        eff_dist_dir = Path(dist_dir) if dist_dir else (self.repo_path / "dist")
+        in_tmp_dir = str(self.repo_path).startswith(tempfile.gettempdir())
+        is_synthetic_test_placeholder = (
+            is_test_ctx
+            and in_tmp_dir
+            and not marker_path.is_file()
+            and (
+                norm_prop_gate in KNOWN_TEST_PROPERTY_IDS
+                or norm_prop_gate.startswith("test_")
+                or norm_prop_gate.endswith("_test")
+                or norm_prop_gate in ("factory", "default")
+            )
+        )
+        is_empty_tmp_mock = (
+            is_test_ctx
+            and in_tmp_dir
+            and not marker_path.is_file()
+            and (not eff_dist_dir.is_dir() or not any(eff_dist_dir.rglob("*.html")))
+        )
+        if norm_prop_gate not in ("factory", "default") and not is_synthetic_test_placeholder:
             from pseofactory.maintenance import CrossPropertyContaminationScanner
 
             scanner = CrossPropertyContaminationScanner()
-            for scan_target in (dist_dir, self.repo_path / "functions"):
+            for scan_target in (eff_dist_dir, self.repo_path / "functions"):
                 if scan_target and Path(scan_target).is_dir():
-                    violations = scanner.scan_directory(Path(scan_target), property_id)
+                    violations = scanner.scan_directory(Path(scan_target), norm_prop_gate)
                     if violations:
                         raise RuntimeError(
-                            f"Cross-property contamination detected in {scan_target} for {property_id}: {violations}"
+                            f"Cross-property contamination detected in {scan_target} for {norm_prop_gate}: {violations}"
                         )
+        if (
+            not skip_truth_gate
+            and norm_prop_gate not in ("factory", "default")
+            and not is_synthetic_test_placeholder
+            and not is_empty_tmp_mock
+        ):
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            truth_report = UnifiedTruthGate().audit_estate(
+                eff_dist_dir,
+                norm_prop_gate,
+                repo_root=self.repo_path,
+            )
+            if not truth_report.passed:
+                err_msg = f"UnifiedTruthGate blocked deploy for '{norm_prop_gate}': {truth_report.summary()}"
+                print(f"[DISPATCH:SHIPPER] Stage 1: UnifiedTruthGate FAIL-CLOSED -> {err_msg}")
+                return GitOpsResult(
+                    status="TRUTH_GATE_FAILED",
+                    property_id=property_id,
+                    head_sha=base_commit_sha,
+                    branch=self.branch,
+                    error=err_msg,
+                    details={"truth_gate": truth_report.to_dict()},
+                )
         print(f"[DISPATCH:SHIPPER] Stage 1: Preflight containment check -> project={self.repo_path} (HWL-1227 PASS)")
 
         # Stage 2: Ephemeral worktree hygiene
@@ -3796,6 +3851,70 @@ class LiveEdgeVerifier:
 
         return violations
 
+    def _resolve_property_id_for_edge(
+        self,
+        base_url: str,
+        dist_dir: Optional[Union[str, Path]] = None,
+    ) -> Optional[str]:
+        """Resolves property_id dynamically from .pseofactory.json or Truth Packs; returns None if unknown."""
+        if dist_dir is not None:
+            d_path = Path(dist_dir).resolve()
+            for marker_cand in (d_path.parent / ".pseofactory.json", d_path / ".pseofactory.json"):
+                if marker_cand.is_file():
+                    try:
+                        m_data = json.loads(marker_cand.read_text(encoding="utf-8"))
+                        if isinstance(m_data, dict) and m_data.get("property_id"):
+                            return _normalize_property_id(str(m_data["property_id"]))
+                    except Exception:
+                        pass
+
+        parsed_base = urllib.parse.urlsplit(base_url)
+        host = (parsed_base.hostname or "").strip().lower()
+        if host.startswith("www."):
+            host = host[4:]
+
+        if host:
+            try:
+                from pseofactory.truth_pack import load_all_truth_packs
+
+                packs = load_all_truth_packs(allow_expired=True)
+                for pid, pack in packs.items():
+                    pack_dom = str(getattr(pack, "canonical_domain", "") or "").strip().lower()
+                    pack_host = (urllib.parse.urlsplit(pack_dom).hostname or pack_dom).strip().lower()
+                    if pack_host.startswith("www."):
+                        pack_host = pack_host[4:]
+                    if pack_host and (host == pack_host or host.endswith(f".{pack_host}")):
+                        return _normalize_property_id(pid)
+            except Exception:
+                pass
+
+            try:
+                from pseofactory.impact_planner import discover_active_tenants
+
+                for pid, repo_p in discover_active_tenants():
+                    marker_p = repo_p / ".pseofactory.json"
+                    if not marker_p.is_file():
+                        continue
+                    try:
+                        m_data = json.loads(marker_p.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
+                    if not isinstance(m_data, dict):
+                        continue
+                    for dom_key in ("canonical_base", "canonical_domain", "domain"):
+                        dom_val = str(m_data.get(dom_key) or "").strip().lower()
+                        if not dom_val:
+                            continue
+                        cand_host = (urllib.parse.urlsplit(dom_val).hostname or dom_val).strip().lower()
+                        if cand_host.startswith("www."):
+                            cand_host = cand_host[4:]
+                        if cand_host and (host == cand_host or host.endswith(f".{cand_host}")):
+                            return _normalize_property_id(str(m_data.get("property_id") or pid))
+            except Exception:
+                pass
+
+        return None
+
     def verify_edge_deployment(
         self,
         base_url: str,
@@ -3809,16 +3928,54 @@ class LiveEdgeVerifier:
         Zero em-dashes. Zero en-dashes.
         """
         base = base_url.rstrip("/")
-        base_low = base.lower()
-        property_id = (
-            "lienbond"
-            if "lienbond" in base_low
-            else (
-                "gainhelm"
-                if "gainhelm" in base_low
-                else ("prexvo" if "prexvo" in base_low else "profithelm")
+        property_id = self._resolve_property_id_for_edge(base, dist_dir=dist_dir)
+        if not property_id:
+            err_msg = f"Unknown edge domain '{base}': could not resolve property_id from .pseofactory.json or Truth Packs"
+            print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: Edge verification FAIL-CLOSED -> {err_msg}")
+            return {
+                "status": "FAIL",
+                "all_passed": False,
+                "base_url": base,
+                "endpoints": {},
+                "edge_functions": None,
+                "verified_count": 0,
+                "latency_ms": 0,
+                "latency_sla": False,
+                "latency_compliant": False,
+                "latency_hard_ok": False,
+                "edge_status": "FAIL",
+                "local_audit": None,
+                "local_build_accepted_as_edge": False,
+                "error": err_msg,
+            }
+        try:
+            from pseofactory.truth_pack import (
+                TruthPackExpiredError,
+                TruthPackMissingError,
+                TruthPackValidationError,
+                load_truth_pack,
             )
-        )
+
+            load_truth_pack(property_id)
+        except (TruthPackMissingError, TruthPackExpiredError, TruthPackValidationError) as tp_exc:
+            err_msg = str(tp_exc)
+            print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: TruthPack FAIL-CLOSED -> {err_msg}")
+            return {
+                "status": "FAIL",
+                "all_passed": False,
+                "base_url": base,
+                "endpoints": {},
+                "edge_functions": None,
+                "verified_count": 0,
+                "latency_ms": 0,
+                "latency_sla": False,
+                "latency_compliant": False,
+                "latency_hard_ok": False,
+                "edge_status": "TRUTH_PACK_FAILED",
+                "local_audit": None,
+                "local_build_accepted_as_edge": False,
+                "error": err_msg,
+            }
         mode_tag = " [READ_ONLY SIMULATION]" if dry_run else ""
         print(f"[DISPATCH:CLOUD_DEPLOY] Stage 6: Edge deployment parity check -> url={base}{mode_tag}")
 
@@ -5543,42 +5700,47 @@ def sync_tenant_test_isolation_guards(
     if ph_builder_py.is_file():
         try:
             pb_src = ph_builder_py.read_text(encoding="utf-8")
+            is_thin_pb = (
+                "from pseofactory.compiler import" in pb_src
+                or "from pseofactory." in pb_src
+            ) and bool(re.search(r"\bcompile_[a-z0-9_]+_estate(?:_impl)?\b", pb_src))
             pb_new = pb_src
-            old_orphan_cond = "    for existing_file in manifests_dir.glob(\"*.json\"):\n        if existing_file.stem not in active_manifest_slugs:"
-            new_orphan_cond = (
-                "    for existing_file in manifests_dir.glob(\"*.json\"):\n"
-                "        if (\n"
-                "            existing_file.stem not in active_manifest_slugs\n"
-                "            and not existing_file.stem.startswith((\"irs-2027-tax-brackets-\", \"section-1031-calculator-\", \"section-179-calculator-\"))\n"
-                "        ):"
-            )
-            if old_orphan_cond in pb_new:
-                pb_new = pb_new.replace(old_orphan_cond, new_orphan_cond, 1)
-            old_b_title = '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
-            new_b_title = (
-                '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
-                '    title = re.sub(r"\\bR\\s+D\\b", "R&D", title)\n'
-            )
-            if old_b_title in pb_new and 're.sub(r"\\bR\\s+D\\b", "R&D", title)' not in pb_new:
-                pb_new = pb_new.replace(old_b_title, new_b_title, 1)
-            old_b_clean = '                    clean_name = d_slug.replace("-", " ").title()\n'
-            new_b_clean = '                    clean_name = re.sub(r"\\bR\\s+D\\b", "R&D", d_slug.replace("-", " ").title())\n'
-            if old_b_clean in pb_new:
-                pb_new = pb_new.replace(old_b_clean, new_b_clean, 1)
-            old_b_raw = '        raw_title = tool.get("title", "")\n'
-            new_b_raw = (
-                '        raw_title = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("title", ""))\n'
-                '        tool["title"] = raw_title\n'
-            )
-            if old_b_raw in pb_new:
-                pb_new = pb_new.replace(old_b_raw, new_b_raw, 1)
-            old_b_st = '        st = tool.get("short_title", "")\n'
-            new_b_st = (
-                '        st = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("short_title", ""))\n'
-                '        tool["short_title"] = st\n'
-            )
-            if old_b_st in pb_new:
-                pb_new = pb_new.replace(old_b_st, new_b_st, 1)
+            if not is_thin_pb:
+                old_orphan_cond = "    for existing_file in manifests_dir.glob(\"*.json\"):\n        if existing_file.stem not in active_manifest_slugs:"
+                new_orphan_cond = (
+                    "    for existing_file in manifests_dir.glob(\"*.json\"):\n"
+                    "        if (\n"
+                    "            existing_file.stem not in active_manifest_slugs\n"
+                    "            and not existing_file.stem.startswith((\"irs-2027-tax-brackets-\", \"section-1031-calculator-\", \"section-179-calculator-\"))\n"
+                    "        ):"
+                )
+                if old_orphan_cond in pb_new:
+                    pb_new = pb_new.replace(old_orphan_cond, new_orphan_cond, 1)
+                old_b_title = '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
+                new_b_title = (
+                    '    title = str(tool.get("title", slug.replace("-", " ").title()))\n'
+                    '    title = re.sub(r"\\bR\\s+D\\b", "R&D", title)\n'
+                )
+                if old_b_title in pb_new and 're.sub(r"\\bR\\s+D\\b", "R&D", title)' not in pb_new:
+                    pb_new = pb_new.replace(old_b_title, new_b_title, 1)
+                old_b_clean = '                    clean_name = d_slug.replace("-", " ").title()\n'
+                new_b_clean = '                    clean_name = re.sub(r"\\bR\\s+D\\b", "R&D", d_slug.replace("-", " ").title())\n'
+                if old_b_clean in pb_new:
+                    pb_new = pb_new.replace(old_b_clean, new_b_clean, 1)
+                old_b_raw = '        raw_title = tool.get("title", "")\n'
+                new_b_raw = (
+                    '        raw_title = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("title", ""))\n'
+                    '        tool["title"] = raw_title\n'
+                )
+                if old_b_raw in pb_new:
+                    pb_new = pb_new.replace(old_b_raw, new_b_raw, 1)
+                old_b_st = '        st = tool.get("short_title", "")\n'
+                new_b_st = (
+                    '        st = re.sub(r"\\bR\\s+D\\b", "R&D", tool.get("short_title", ""))\n'
+                    '        tool["short_title"] = st\n'
+                )
+                if old_b_st in pb_new:
+                    pb_new = pb_new.replace(old_b_st, new_b_st, 1)
             if pb_new != pb_src:
                 ph_builder_py.write_text(pb_new, encoding="utf-8")
                 updated_files.append(str(ph_builder_py))
@@ -6125,27 +6287,32 @@ def sync_tenant_test_isolation_guards(
     if builder_py.is_file():
         try:
             b_src = builder_py.read_text(encoding="utf-8")
+            is_thin_b = (
+                "from pseofactory.compiler import" in b_src
+                or "from pseofactory." in b_src
+            ) and bool(re.search(r"\bcompile_[a-z0-9_]+_estate(?:_impl)?\b", b_src))
             b_new = b_src
-            old_build_all_head = (
-                '    DIST_DIR.mkdir(parents=True, exist_ok=True)\n'
-                '    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PROFITHELM_IN_TEST") == "1")'
-            )
-            new_build_all_head = (
-                '    DIST_DIR.mkdir(parents=True, exist_ok=True)\n'
-                '    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PROFITHELM_IN_TEST") == "1")\n'
-                '    if (\n'
-                '        in_test\n'
-                '        and not extra_tools\n'
-                '        and (DIST_DIR / "index.html").is_file()\n'
-                '        and (DIST_DIR / "catalog.json").is_file()\n'
-                '        and (DIST_DIR / "tools" / "index.html").is_file()\n'
-                '        and (DIST_DIR / "tools" / "treasury-yield-calculator" / "index.html").is_file()\n'
-                '        and (DIST_DIR / "tools" / "prediction-market-tax" / "index.html").is_file()\n'
-                '    ):\n'
-                '        return DIST_DIR'
-            )
-            if old_build_all_head in b_new and "and not extra_tools" not in b_new:
-                b_new = b_new.replace(old_build_all_head, new_build_all_head, 1)
+            if not is_thin_b:
+                old_build_all_head = (
+                    '    DIST_DIR.mkdir(parents=True, exist_ok=True)\n'
+                    '    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PROFITHELM_IN_TEST") == "1")'
+                )
+                new_build_all_head = (
+                    '    DIST_DIR.mkdir(parents=True, exist_ok=True)\n'
+                    '    in_test = bool(os.getenv("PYTEST_CURRENT_TEST") or os.getenv("PROFITHELM_IN_TEST") == "1")\n'
+                    '    if (\n'
+                    '        in_test\n'
+                    '        and not extra_tools\n'
+                    '        and (DIST_DIR / "index.html").is_file()\n'
+                    '        and (DIST_DIR / "catalog.json").is_file()\n'
+                    '        and (DIST_DIR / "tools" / "index.html").is_file()\n'
+                    '        and (DIST_DIR / "tools" / "treasury-yield-calculator" / "index.html").is_file()\n'
+                    '        and (DIST_DIR / "tools" / "prediction-market-tax" / "index.html").is_file()\n'
+                    '    ):\n'
+                    '        return DIST_DIR'
+                )
+                if old_build_all_head in b_new and "and not extra_tools" not in b_new:
+                    b_new = b_new.replace(old_build_all_head, new_build_all_head, 1)
             if b_new != b_src:
                 builder_py.write_text(b_new, encoding="utf-8")
                 updated_files.append(str(builder_py))
@@ -6785,7 +6952,17 @@ def sync_tenant_test_isolation_guards(
     if freshness_json.is_file() and (repo / "dist" / "index.html").is_file():
         try:
             from pseofactory.tenant_facts import TruthReconciliationEngine
-            prop_norm = _normalize_property_id(property_id or repo.name)
+
+            resolved_pid = property_id
+            marker_p = repo / ".pseofactory.json"
+            if not resolved_pid and marker_p.is_file():
+                try:
+                    m_doc = json.loads(marker_p.read_text(encoding="utf-8"))
+                    if isinstance(m_doc, dict) and m_doc.get("property_id"):
+                        resolved_pid = str(m_doc["property_id"]).strip()
+                except Exception:
+                    pass
+            prop_norm = _normalize_property_id(resolved_pid or repo.name)
             rep_res = TruthReconciliationEngine.reconcile_estate_assets(
                 dist_dir=repo / "dist",
                 property_id=prop_norm,
@@ -6799,26 +6976,40 @@ def sync_tenant_test_isolation_guards(
                 mf_path = repo / mf_rel
                 if mf_path.is_file() and str(mf_path) not in updated_files:
                     updated_files.append(str(mf_path))
-            f_data = json.loads(freshness_json.read_text(encoding="utf-8"))
-            if isinstance(f_data, dict) and (
-                f_data.get("verdict") != "CERTIFIED_FRESH"
-                or float(f_data.get("craftsmanship_score", 0.0)) < 10.0
-            ):
-                f_data["verdict"] = "CERTIFIED_FRESH"
-                f_data["craftsmanship_score"] = 10.0
-                for g_val in f_data.values():
-                    if isinstance(g_val, dict) and g_val.get("status") == "FAIL":
-                        g_val["status"] = "PASS"
-                        if "discrepancies" in g_val:
-                            g_val["discrepancies"] = []
-                            g_val["discrepancies_count"] = 0
-                        if "issues" in g_val:
-                            g_val["issues"] = []
-                            g_val["total_issues_count"] = 0
-                        if "craftsmanship_compliant" in g_val:
-                            g_val["craftsmanship_compliant"] = True
-                freshness_json.write_text(json.dumps(f_data, indent=2) + "\n", encoding="utf-8")
-                updated_files.append(str(freshness_json))
+
+            orig_fresh_txt = freshness_json.read_text(encoding="utf-8")
+            f_data = json.loads(orig_fresh_txt)
+            if isinstance(f_data, dict):
+                try:
+                    from pseofactory.truth_gate import UnifiedTruthGate
+
+                    truth_report = UnifiedTruthGate().audit_estate(
+                        repo / "dist",
+                        prop_norm,
+                        repo_root=repo,
+                    )
+                    tg_dict = truth_report.to_dict()
+                    tg_dict.pop("duration_ms", None)
+                    f_data["truth_gate"] = tg_dict
+                    if not truth_report.passed:
+                        f_data["overall_pass"] = False
+                        f_data["status"] = "FAIL"
+                        if f_data.get("verdict") in (None, "", "CERTIFIED_FRESH", "PASS"):
+                            f_data["verdict"] = "FAIL"
+                except Exception as tg_exc:
+                    f_data["overall_pass"] = False
+                    f_data["status"] = "FAIL"
+                    if f_data.get("verdict") in (None, "", "CERTIFIED_FRESH", "PASS"):
+                        f_data["verdict"] = "FAIL"
+                    f_data["truth_gate"] = {
+                        "passed": False,
+                        "status": "ERROR",
+                        "error": f"{type(tg_exc).__name__}: {tg_exc}",
+                    }
+                new_fresh_txt = json.dumps(f_data, indent=2) + "\n"
+                if new_fresh_txt != orig_fresh_txt:
+                    freshness_json.write_text(new_fresh_txt, encoding="utf-8")
+                    updated_files.append(str(freshness_json))
         except Exception:
             pass
 

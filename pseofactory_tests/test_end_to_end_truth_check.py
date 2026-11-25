@@ -23,22 +23,22 @@ def test_statutory_brackets_and_obbba_section_179_constants():
     """Verifies 2026/2027 statutory tax brackets and 2026 OBBBA Section 179 limits."""
     assert STATUTORY_LIMITS["section_179_max_deduction"][2026] == 2560000.0
     assert STATUTORY_LIMITS["section_179_phaseout_threshold"][2026] == 4090000.0
-    assert STATUTORY_LIMITS["section_179_heavy_vehicle_suv"][2026] == 30500.0
+    assert STATUTORY_LIMITS["section_179_heavy_vehicle_suv"][2026] == 32000.0
 
     b2026_single = STATUTORY_TAX_BRACKETS[2026]["single"]
-    assert b2026_single[0]["max_income"] == 12050.0
-    assert b2026_single[1]["max_income"] == 48900.0
-    assert b2026_single[2]["max_income"] == 104400.0
+    assert b2026_single[0]["max_income"] == 12400.0
+    assert b2026_single[1]["max_income"] == 50400.0
+    assert b2026_single[2]["max_income"] == 105700.0
 
     b2027_single = STATUTORY_TAX_BRACKETS[2027]["single"]
-    assert b2027_single[0]["max_income"] == 12200.0
-    assert b2027_single[1]["max_income"] == 49600.0
-    assert b2027_single[2]["max_income"] == 120200.0
-    assert b2027_single[-1]["rate"] == 39.6
+    assert b2027_single[0]["max_income"] == 12800.0
+    assert b2027_single[1]["max_income"] == 52025.0
+    assert b2027_single[2]["max_income"] == 109125.0
+    assert b2027_single[-1]["rate"] == 37.0
 
     clean_claims = (
         "Under 2026 OBBBA rules, the Section 179 deduction limit is $2,560,000 with a "
-        "$4,090,000 phase-out threshold and $30,500 heavy SUV cap."
+        "$4,090,000 phase-out threshold and $32,000 heavy SUV cap."
     )
     assert detect_uncorroborated_statutory_claims(clean_claims) == []
 
@@ -109,9 +109,24 @@ def test_live_truth_audit_engine_end_to_end_verification():
     aligned_html = """
     <html>
       <body>
-        <span class="output-value">$245.83</span>
+        <form class="calculator-form">
+          <input id="input-agi" name="agi" value="60000">
+          <input id="input-dependents" name="dependents" value="1">
+          <span class="output-value">$245.83</span>
+        </form>
+        <p class="disclosure">Refinancing federal student loans into a private loan permanently forfeits access to federal IDR, RAP, and PSLF protections.</p>
         <script type="application/json" class="calculation-manifest">
           {"formula": "round((agi * 0.05) / 12 - (dependents * 50 / 12), 2)", "inputs": {"agi": 60000, "dependents": 1}, "published_output": 245.83}
+        </script>
+        <script>
+          function recompute() {
+            var agi = Number(document.getElementById("input-agi").value || 0);
+            var deps = Number(document.getElementById("input-dependents").value || 0);
+            var out = Math.round(((agi * 0.05) / 12 - (deps * 50 / 12)) * 100) / 100;
+            document.querySelector(".output-value").textContent = "$" + out.toFixed(2);
+          }
+          document.querySelector("form").addEventListener("input", recompute);
+          document.addEventListener("DOMContentLoaded", recompute);
         </script>
         <table class="scenario-table">
           <tbody>
@@ -141,6 +156,7 @@ def test_live_truth_audit_engine_end_to_end_verification():
             <tr><td>Conservative Baseline</td><td>$100,000</td><td>$15,000</td><td>-2.5%</td><td>$85,000</td></tr>
           </tbody>
         </table>
+        <p class="disclosure">Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic statutory modeling for educational and planning purposes only and do not constitute individualized tax, legal, or accounting advice. Consult a licensed CPA or tax attorney before filing.</p>
       </body>
     </html>
     """
@@ -1703,7 +1719,7 @@ def test_truth_reconciliation_engine_auto_remediation_and_audit():
     <p>In today's rapidly evolving tax landscape, In 2026, Commercial Asset allows immediate first-year expensing of up to $1,250,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $3,130,000 in total asset purchases.</p>
     <p>Heavy SUVs are capped at a $31,300 Section 179 deduction in 2026. IRC 179 ($1.29M Cap) / 168(k) 20% Bonus.</p>
     <table><tr><td>$1,220,000 (Full Basis 100%)</td><td>60% on balance</td><td>$31,300 + Bonus Depr.</td></tr></table>
-    <details class="faq-item"><summary>What is the 2026 Section 179 SUV cap?</summary><p>Under IRC Section 179(b)(5), the 2026 Heavy SUV cap is $30,500 ($31,300 for 2025 inflation-adjusted schedules).</p></details>
+    <details class="faq-item"><summary>What is the 2026 Section 179 SUV cap?</summary><p>Under IRC Section 179(b)(5), the 2026 Heavy SUV cap is $32,000 ($31,300 for 2025 inflation-adjusted schedules).</p></details>
     <script>var suv179 = Math.min(cost, 31300);</script>
     </body></html>"""
 
@@ -1727,9 +1743,9 @@ def test_truth_reconciliation_engine_auto_remediation_and_audit():
     assert "$2,560,000 (Full Basis 100%)" in reconciled_ph
     assert "up to $2,560,000 in qualifying commercial equipment" in reconciled_ph
     assert "above $4,090,000 in total asset purchases" in reconciled_ph
-    assert "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus" in reconciled_ph
-    assert "var suv179 = Math.min(cost, 30500);" in reconciled_ph
-    assert "<td>20% on balance</td>" in reconciled_ph
+    assert "IRC 179 ($2.56M Cap) / 168(k) 100% Bonus" in reconciled_ph
+    assert "var suv179 = Math.min(cost, 32000);" in reconciled_ph
+    assert "<td>100% on balance</td>" in reconciled_ph
     assert "Stale schema answer" not in reconciled_ph
 
     post_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
@@ -1919,9 +1935,9 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     from pseofactory.verifier import verify_html_cross_web_consensus_and_corroboration
     from pseofactory.visual_primitives import render_runtime_synchronizer_script
 
-    # 1. Runtime script uses 20% bonus depreciation (0.20) and tenant-aware offer price fallback
+    # 1. Runtime script uses 100% bonus depreciation (1.00) and tenant-aware offer price fallback
     runtime_js = render_runtime_synchronizer_script()
-    assert "remBasis * 0.20" in runtime_js
+    assert "remBasis * 1.00" in runtime_js
     assert "remBasis * 0.80" not in runtime_js
     assert "offer_price_usd || 29" not in runtime_js
 
@@ -1956,7 +1972,7 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
         slug="s-corp-reasonable-salary-tax-calculator",
     )
     assert ph_repairs
-    assert "remBasis * 0.20" in healed_ph_html
+    assert "remBasis * 1.0" in healed_ph_html
     assert "hoh: 12900" in healed_ph_html
     assert "$14,235 in self-employment tax ($11,098 OASDI + $3,137 Medicare)" in healed_ph_html
     assert "(1 - 13.3% state rate)" in healed_ph_html

@@ -2864,15 +2864,17 @@ _GAINHELM_PARTNER_CONTEXTUAL_COPY: Dict[str, Dict[str, Tuple[str, str, str, str]
 
 LIENBOND_DISCLOSURES: Dict[str, str] = {
     "statutory_compliance_disclaimer": (
-        "Statutory Surety, Workers Comp & Construction Lien Disclaimer: Bond premium, NCCI workers compensation "
-        "EMR, mechanics lien deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic "
-        "computational models and do not constitute legal advice, a recorded mechanics lien, "
+        "Underwriting & Statutory Notice: LienBond is not a licensed attorney, law firm, admitted surety "
+        "underwriter, or licensed insurance producer. Bond premium, NCCI workers compensation EMR, mechanics lien "
+        "deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic computational models and "
+        "informational underwriting estimates only; they do not constitute legal advice, a recorded mechanics lien, "
         "or an active surety binder from a Treasury Circular 570 carrier."
     ),
     "statutory_surety_disclaimer": (
-        "Statutory Surety, Workers Comp & Construction Lien Disclaimer: Bond premium, NCCI workers compensation "
-        "EMR, mechanics lien deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic "
-        "computational models and do not constitute legal advice, a recorded mechanics lien, "
+        "Underwriting & Statutory Notice: LienBond is not a licensed attorney, law firm, admitted surety "
+        "underwriter, or licensed insurance producer. Bond premium, NCCI workers compensation EMR, mechanics lien "
+        "deadline, retainage penalty, and Davis-Bacon WH-347 figures are deterministic computational models and "
+        "informational underwriting estimates only; they do not constitute legal advice, a recorded mechanics lien, "
         "or an active surety binder from a Treasury Circular 570 carrier."
     ),
     "ftc_disclosure": (

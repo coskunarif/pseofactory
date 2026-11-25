@@ -362,7 +362,7 @@ def classify_deterministic_math_opportunity(
         if "miller" in comb or "performance" in comb or "payment" in comb:
             stat_ref = "40 U.S.C. Section 3131 (Miller Act) & 48 CFR Part 28"
         elif "workers" in comb or "class" in comb or "emr" in comb:
-            stat_ref = "NCCI Basic Manual, NCCI Experience Rating Plan & 29 CFR Part 1904"
+            stat_ref = "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State Workers Compensation Rating Bureaus"
         elif "davis" in comb or "prevailing" in comb or "wh-347" in comb:
             stat_ref = "40 U.S.C. Section 3141 (Davis-Bacon Act) & 29 CFR Section 5.5"
         elif "retainage" in comb or "prompt" in comb:
@@ -2760,13 +2760,19 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 )
             ) and "rap" not in q_low:
                 return (
-                    f"Calculate {lbl} under Title IV 34 CFR 685.209 using 150% HHS Poverty "
-                    f"Guidelines ($23,475 single exemption), hardship caps, and forgiveness rules.",
+                    f"Calculate {lbl} under Title IV 34 CFR 685.209 using 150% 2026 HHS Poverty "
+                    f"Guidelines ($23,940 single exemption), hardship caps, and forgiveness rules.",
                     " Verified under Title IV 34 CFR Part 685 statutory rules.",
                 )
+            if "rap" in q_low or "obbba" in q_low:
+                return (
+                    f"Calculate {lbl} under P.L. 119-21 Section 82001 RAP tiered AGI rules, 100% unpaid "
+                    f"interest subsidy, $50/mo principal match, and 360-month forgiveness.",
+                    " Verified under P.L. 119-21 Section 82001 and 34 CFR Part 685.",
+                )
             return (
-                f"Calculate {lbl} obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty "
-                f"Guidelines, discretionary income caps, and forgiveness rules.",
+                f"Calculate {lbl} obligations under Title IV 34 CFR Part 685 across PSLF (120 months), "
+                f"IBR (240 to 300 months), and OBBBA RAP (360 months) forgiveness rules.",
                 " Verified under Title IV 34 CFR Part 685 statutory rules.",
             )
         if tenant_id == "gainhelm":
@@ -3115,14 +3121,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
             ):
                 return (
                     "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions "
-                    "($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
+                    "($32,000 SUV cap vs full truck expensing) on IRS Form 4562.",
                     " Grounded in IRC Section 179(b)(5) and Section 280F limits.",
                 )
             if not is_vehicle_spoke and (
                 "vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low
             ):
                 return (
-                    "Model combined IRC Section 179 expensing, 20% bonus depreciation, "
+                    "Model combined IRC Section 179 expensing, 100% bonus depreciation, "
                     "and business-use recapture thresholds for commercial vehicles and equipment.",
                     " Grounded in IRC Section 179, Section 168(k), and Section 280F.",
                 )
@@ -3224,10 +3230,10 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     if tenant_id == "gainhelm":
         if any(k in combined_low for k in ("hipaa", "hitech", "ephi", "160.404")):
             base_words = (
-                "Pursuant to 45 CFR 160.404 and the HITECH Act (42 U.S.C. 1320d-5), HHS Office for Civil Rights "
-                "assesses four-tier inflation-adjusted civil monetary penalties alongside mandatory breach notification "
-                "under 45 CFR Part 164 Subpart D. A 1,500-record ePHI breach under Tier 3 Willful Neglect Corrected "
-                "results in $2,455,313.00 total exposure, including the $2,067,813.00 statutory penalty cap."
+                "Pursuant to 45 CFR 160.404, 91 FR 3665 / 91 FR 66566, and the HITECH Act (42 U.S.C. 1320d-5), "
+                "HHS Office for Civil Rights assesses four-tier civil monetary penalties alongside 45 CFR Part 164 "
+                "breach notification. A 1,500-record ePHI breach reaches $2,577,794.00 total exposure, including "
+                "the $2,190,294.00 annual statutory penalty cap."
             ).split()
         elif any(k in combined_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
             base_words = (
@@ -3268,22 +3274,22 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             base_words = (
                 "Under ISO/IEC 27006-1:2024 mandatory auditor-day tables and ISO/IEC 27001:2022 Annex A (93 controls), "
                 "a 75-employee organization requires 11.0 accredited Stage 1 and Stage 2 auditor days. Total first-year "
-                "ISMS certification cost reaches $67,000.40, combining $21,450.00 in registrar fees, $14,500.00 for ISMS "
-                "platform licensing, $8,500.00 for internal audit, and $22,550.40 in gap remediation."
+                "ISMS certification cost reaches $66,350.60, combining $21,450.00 in registrar fees, $14,500.00 for ISMS "
+                "platform licensing, $8,500.00 for internal audit, and $21,900.60 in gap remediation."
             ).split()
         elif any(k in combined_low for k in ("sprs", "800-171")):
             base_words = (
-                "Under DFARS 252.204-7019 and the DoD NIST SP 800-171 Assessment Methodology, Supplier Performance "
-                "Risk System (SPRS) scores begin at +110 and deduct 1, 3, or 5 points per unimplemented control down "
-                "to a floor of -203. A contractor missing three 5-point controls, two 3-point controls, and two 1-point "
-                "controls records a verified SPRS score of 87.00."
+                "Under DFARS 252.204-7019 and DoD NIST SP 800-171 Assessment Methodology v1.2.1, Supplier Performance "
+                "Risk System (SPRS) scores begin at +110 across 44 five-point, 14 three-point, 51 one-point, and 1 "
+                "zero-point SSP control down to -203. Missing 3 five-point, 2 three-point, and 2 one-point controls "
+                "yields an 87.00 SPRS score."
             ).split()
         elif any(k in combined_low for k in ("cmmc", "c3pao", "32 cfr")):
             base_words = (
                 "Pursuant to 32 CFR Part 170 and DFARS 252.204-7021, achieving CMMC 2.0 Level 2 certification across "
                 "all 110 NIST SP 800-171 Rev 2 security requirements for a 75-employee defense contractor costs "
-                "$132,000.00, encompassing $48,500.00 in accredited C3PAO assessment fees, $26,400.00 for enclave "
-                "licensing, $43,700.00 in engineering remediation labor, and $13,400.00 for RPO advisory."
+                "$134,534.60, encompassing $48,500.00 in accredited C3PAO assessment fees, $26,400.00 for enclave "
+                "licensing, $46,234.60 in engineering remediation labor, and $13,400.00 for RPO advisory."
             ).split()
         elif any(k in combined_low for k in ("soc-2", "soc 2", "ssae")):
             base_words = (
@@ -3326,8 +3332,8 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     elif tenant_id == "lienbond":
         if any(k in combined_low for k in ("workers-compensation", "workers comp", "class-code")):
             base_words = (
-                "Under IRC Section 3111, 29 CFR Part 1904 OSHA recordkeeping rules, and NCCI Basic Manual "
-                "classification standards, construction workers compensation manual premium equals field trade "
+                "Under NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State Workers "
+                "Compensation Rating Bureaus, construction workers compensation manual premium equals field trade "
                 "payroll divided by $100, multiplied by the state class-code rate and Experience Modification "
                 "Rate (EMR) factor ($44,200.00 annual baseline on $650,000 payroll at $6.80 per $100)."
             ).split()
@@ -3382,10 +3388,10 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             ).split()
         elif any(k in combined_low for k in ("experience-modification", "emr")):
             base_words = (
-                "Under NCCI Experience Rating Plan Rule 2-E and 29 CFR Part 1904 OSHA injury reporting standards, "
-                "modifying a $52,000 manual workers compensation premium by a 1.15 debit Experience Modification "
-                "Rate (EMR) and a 5.0 percent state workplace safety credit produces $56,810.00 in net audited "
-                "annual workers compensation premium."
+                "Under NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State Workers "
+                "Compensation Rating Bureaus, modifying a $52,000 manual workers compensation premium by a 1.15 "
+                "debit Experience Modification Rate (EMR) and a 5.0 percent state workplace safety credit produces "
+                "$56,810.00 in net audited annual workers compensation premium."
             ).split()
         elif any(k in combined_low for k in ("preliminary-notice", "california-texas-florida")):
             base_words = (
@@ -3422,10 +3428,10 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             ).split()
         elif any(k in combined_low for k in ("forgiveness-2026", "forgiveness 2026")):
             base_words = (
-                f"Under Title IV regulation 34 CFR Part 685 and IRC Section 108(f), {short_q} "
-                f"evaluates 2026 federal student loan discharge pathways across PSLF (120 months), "
-                f"IBR (240 to 300 months), and OBBBA RAP schedules. Public Service Loan Forgiveness "
-                f"remains permanently tax-free while 20-to-25-year IDR forgiveness reverts to taxable income."
+                f"Under Title IV regulation 34 CFR Part 685, P.L. 119-21 Section 82001, and IRC Section 108(f), "
+                f"{short_q} evaluates 2026 federal student loan discharge timelines across PSLF (120 qualifying "
+                f"monthly payments), IBR (240 to 300 payments), and OBBBA RAP (360 qualifying monthly payments, "
+                f"30 years). PSLF remains permanently tax-free."
             ).split()
         elif any(k in combined_low for k in ("pslf", "buyback", "public service")):
             base_words = (
@@ -3471,20 +3477,26 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 f"value of forfeited federal benefits including 100 percent RAP unpaid interest waivers and "
                 f"tax-free Public Service Loan Forgiveness under 26 U.S.C. 108(f)(1)."
             ).split()
-        elif any(k in combined_low for k in ("ibr-hardship", "paye-sunset", "paye sunset", "ibr hardship", "income-based", "income based", "student-loan-repayment")) and "rap-vs" not in combined_low:
+        elif any(k in combined_low for k in ("rap-vs-ibr", "rap-payment", "rap", "obbba")):
+            base_words = (
+                f"Under P.L. 119-21 Section 82001 (OBBBA) and 34 CFR Part 685, {short_q} models "
+                f"the Repayment Assistance Plan (RAP) tiered AGI formula ($10 monthly minimum minus $50 "
+                f"per dependent), 100 percent unpaid monthly interest subsidy, up to $50 monthly principal "
+                f"match, and forgiveness after 360 qualifying monthly payments (30 years), distinct from 120-payment PSLF."
+            ).split()
+        elif any(k in combined_low for k in ("ibr-hardship", "paye-sunset", "paye sunset", "ibr hardship", "income-based", "income based", "student-loan-repayment")):
             base_words = (
                 f"Under Title IV regulation 34 CFR 685.209 and 20 U.S.C. 1098e, {short_q} determines monthly "
-                f"obligations using the 150 percent HHS Poverty Guideline exemption ($23,475 protected "
+                f"obligations using the 150 percent 2026 HHS Poverty Guideline exemption ($23,940 protected "
                 f"single-filer income) and a 10 to 15 percent discretionary rate capped at the 10-year "
-                f"Standard Repayment ceiling, with principal forgiveness after 240 to 300 qualifying payments."
+                f"Standard Repayment ceiling, with forgiveness after 240 to 300 qualifying payments."
             ).split()
         else:
             base_words = (
-                f"Under Title IV regulation 34 CFR Part 685, {short_q} determines monthly "
-                f"obligations using the 225 percent HHS Poverty Guideline exemption ($35,212.50 protected "
-                f"single-filer income) and a 10 percent discretionary rate. Qualifying borrowers "
-                f"receive a 100 percent unpaid interest subsidy and full principal forgiveness after "
-                f"120 to 240 certified monthly payments."
+                f"Under Title IV regulation 34 CFR Part 685 and P.L. 119-21 Section 82001, {short_q} "
+                f"models 2026 federal repayment schedules using the $15,960 HHS Poverty Guideline: 120 "
+                f"qualifying monthly payments for tax-free PSLF (34 CFR 685.219), 240 to 300 monthly "
+                f"payments under IBR, and 360 qualifying monthly payments (30 years) under RAP."
             ).split()
         filler_pool = [
             "Verified", "against", "annual", "Department", "of", "Education",
@@ -3600,7 +3612,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             "Verified", "against", "commercial", "treasury", "working", "capital",
             "cost", "of", "capital", "and", "DSO", "benchmarks.",
         ]
-    elif any(k in combined_low for k in ("workers-comp", "payroll-burden", "payroll burden", "futa", "suta")):
+    elif any(k in combined_low for k in ("payroll-burden", "payroll burden", "futa", "suta")):
         base_words = (
             f"Under IRC Section 3111, Section 3301, and NCCI classification schedules, {short_q} "
             f"computes fully burdened employer hourly and annual labor cost by stacking 7.65 percent "
@@ -3610,6 +3622,17 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         filler_pool = [
             "Benchmarked", "against", "Bureau", "of", "Labor", "Statistics",
             "Employer", "Costs", "for", "Employee", "Compensation", "series.",
+        ]
+    elif any(k in combined_low for k in ("workers-comp", "workers comp", "class-code", "emr")):
+        base_words = (
+            f"Under NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State "
+            f"Workers Compensation Rating Bureaus, {short_q} computes manual workers compensation "
+            f"premiums from auditable trade payroll divided by $100, multiplied by class-code rates "
+            f"and Experience Modification Rate (EMR) safety multipliers."
+        ).split()
+        filler_pool = [
+            "Benchmarked", "against", "NCCI", "Experience", "Rating", "Plan",
+            "split-point", "filings", "and", "state", "rating", "bureaus.",
         ]
     elif any(k in combined_low for k in ("1202", "qsbs")):
         base_words = (
@@ -3655,7 +3678,7 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         base_words = (
             f"Under IRC Section 179 and Section 168(k), {clean_179_q} computes immediate first-year "
             f"capital expensing up to the $2,560,000 statutory deduction cap ($4,090,000 phase-out threshold) "
-            f"plus 20 percent bonus depreciation on IRS Form 4562 for qualifying commercial equipment, "
+            f"plus 100 percent bonus depreciation on IRS Form 4562 for qualifying commercial equipment, "
             f"off-the-shelf software, and commercial work trucks exceeding 6,000 pounds GVWR."
         ).split()
         filler_pool = [
@@ -4426,10 +4449,31 @@ def _build_vertical_profithelm_overlay_blocks(
             ],
         }
     if any(k in comb for k in ("workers-comp", "payroll-burden", "payroll burden", "futa", "suta")):
+        is_payroll_burden = any(k in comb for k in ("payroll-burden", "payroll burden", "futa", "suta"))
+        wc_h2 = (
+            f"{heading_label}: IRC Section 3111 FICA, FUTA/SUTA & NCCI EMR Rules"
+            if is_payroll_burden
+            else f"{heading_label}: NCCI Basic Manual Class Codes & EMR Rules"
+        )
+        wc_authority = (
+            "NCCI Basic Manual, IRC Section 3111 & Section 3301"
+            if is_payroll_burden
+            else "NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual & State Rating Bureaus"
+        )
+        wc_faq_answer = (
+            "Fully burdened employer cost stacks mandatory statutory payroll taxes (7.65% FICA under IRC Section 3111, "
+            "0.6% net FUTA on the first $7,000 under IRC Section 3301, and state SUTA), NCCI Workers' Compensation "
+            "(manual rate per $100 payroll times EMR), and employer health/401(k) contributions, typically adding 18% to 38%."
+            if is_payroll_burden
+            else "Workers' compensation premium equals auditable trade payroll divided by $100, multiplied by the governing "
+            "NCCI Basic Manual (or state rating bureau) class-code rate and your Experience Modification Rate (EMR) under the NCCI Experience Rating Plan Manual."
+        )
         return {
             "h2_headings": [
-                f"{heading_label}: IRC Section 3111 FICA, FUTA/SUTA & NCCI EMR Rules",
-                f"Audit-Ready {heading_label} Fully Burdened Labor Rate Scenarios",
+                wc_h2,
+                f"Audit-Ready {heading_label} Fully Burdened Labor Rate Scenarios"
+                if is_payroll_burden
+                else f"Audit-Ready {heading_label} NCCI Class Code & EMR Scenarios",
             ],
             "preset_scenarios": [
                 {
@@ -4440,7 +4484,11 @@ def _build_vertical_profithelm_overlay_blocks(
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"annual_wage": 85000, "wc_rate_per_100": 0.35, "emr_multiplier": 1.0, "benefits_annual": 9600},
-                    "description": "Low-hazard clerical/technical employee (Code 8810) stacking 7.65% FICA, FUTA/SUTA, and employer benefits.",
+                    "description": (
+                        "Low-hazard clerical/technical employee (Code 8810) stacking 7.65% FICA, FUTA/SUTA, and employer benefits."
+                        if is_payroll_burden
+                        else "Low-hazard clerical/technical employee (NCCI Code 8810) benchmarked under NCCI Basic Manual class rates and 1.00 unity EMR."
+                    ),
                 },
                 {
                     "id": "preset-wc-field",
@@ -4459,24 +4507,24 @@ def _build_vertical_profithelm_overlay_blocks(
                     "baseline": "$5,865 Workers' Comp Premium (100% Billed at Field Rate)",
                     "optimized": "$3,610 After Segregating Clerical 8810 & Overtime 0.5x Premium",
                     "delta": "+$2,255 Annual Workers' Comp Audit Savings",
-                    "authority": "NCCI Basic Manual, IRC Section 3111 & Section 3301",
+                    "authority": wc_authority,
                 },
                 {
                     "scenario": "Uninsured 1099 Subcontractor Discovered at Annual Payroll Audit",
                     "baseline": "Reclassified as Direct Payroll at Highest Governing Class Rate",
                     "optimized": "Verified Active COI Collected Prior to Disbursement",
                     "delta": "Eliminates Retroactive Audit Premium Surcharge",
-                    "authority": "29 CFR Part 795 (FLSA) & State Workers' Comp Statutes",
+                    "authority": "NCCI Basic Manual Payroll Audit Rules & State Workers' Comp Statutes",
                 },
             ],
             "faq_entries": [
                 {
-                    "question": "How is fully burdened employee labor cost calculated above base hourly or W-2 salary?",
-                    "answer": (
-                        "Fully burdened employer cost stacks mandatory statutory payroll taxes (7.65% FICA under IRC Section 3111, "
-                        "0.6% net FUTA on the first $7,000 under IRC Section 3301, and state SUTA), NCCI Workers' Compensation "
-                        "(manual rate per $100 payroll times EMR), and employer health/401(k) contributions, typically adding 18% to 38%."
+                    "question": (
+                        "How is fully burdened employee labor cost calculated above base hourly or W-2 salary?"
+                        if is_payroll_burden
+                        else "How is workers' compensation class-code and EMR premium calculated?"
                     ),
+                    "answer": wc_faq_answer,
                 },
                 {
                     "question": "How does NCCI treat overtime pay during a workers' compensation payroll audit?",
@@ -5570,16 +5618,16 @@ def _build_autonomous_citation_assertions_and_matrix(
     if tenant_id == "gainhelm":
         if any(k in low for k in ("hipaa", "hitech", "ephi", "160.404")):
             assertions = [
-                f"In 2026, {heading_label} calculates HHS Office for Civil Rights four-tier civil monetary penalties under 45 CFR 160.404 and the HITECH Act (42 U.S.C. 1320d-5) up to the $2,067,813.00 annual statutory tier cap.",
+                f"In 2026, {heading_label} calculates HHS Office for Civil Rights four-tier civil monetary penalties under 45 CFR 160.404, 91 FR 3665 / 91 FR 66566, and the HITECH Act (42 U.S.C. 1320d-5) up to the $2,190,294.00 annual statutory tier cap.",
                 "Under 45 CFR 164.404 through 164.408, any unsecured ePHI breach affecting 500 or more individuals triggers mandatory notification to affected patients, prominent media outlets, and the HHS OCR Breach Portal within 60 calendar days.",
-                "For a 1,500-record ePHI breach classified under Tier 3 Willful Neglect Corrected ($13,795 minimum per violation capped at $2,067,813.00), total exposure reaches $2,455,313.00 including $95,000.00 in forensic/legal retainer and $292,500.00 in notification and monitoring.",
+                "For a 1,500-record ePHI breach classified under 45 CFR 160.404 ($13,795 minimum per violation capped at the $2,190,294.00 annual cap), total exposure reaches $2,577,794.00 including $95,000.00 in forensic/legal retainer and $292,500.00 in notification and monitoring.",
             ]
             matrix = [
                 {
-                    "profile": "Covered Entity / Business Associate (1,500 ePHI Records, Tier 3)",
-                    "statutory_threshold": "45 CFR 160.404 Tier 3 ($13,795/Violation, $2,067,813 Annual Cap)",
+                    "profile": "Covered Entity / Business Associate (1,500 ePHI Records, Annual Cap)",
+                    "statutory_threshold": "45 CFR 160.404 & 91 FR 3665 / 91 FR 66566 ($2,190,294 Annual Cap)",
                     "optimal_path": "30-Day Corrective Action + Recognized Security Practices (P.L. 116-321)",
-                    "net_dollar_impact": "$2,455,313.00 Total Exposure Modeled ($2,067,813.00 OCR Cap + $387,500.00 Response)",
+                    "net_dollar_impact": "$2,577,794.00 Total Exposure Modeled ($2,190,294.00 OCR Cap + $387,500.00 Response)",
                     "next_action": "Model Tier 1-4 OCR Civil Penalty & Breach Response Costs",
                 },
                 {
@@ -6022,16 +6070,16 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         elif any(k in low for k in ("icr", "income contingent", "income-contingent", "parent-plus", "parent plus", "double-consolidation")):
             assertions = [
-                f"In 2026, {heading_label} calculates monthly payments as the lesser of 20% of discretionary income above 100% of the HHS poverty guideline ($15,650 single baseline) or a 12-year fixed payment adjusted by an income percentage factor under 34 CFR 685.209(b).",
+                f"In 2026, {heading_label} calculates monthly payments as the lesser of 20% of discretionary income above 100% of the 2026 HHS poverty guideline ($15,960 single baseline) or a 12-year fixed payment adjusted by an income percentage factor under 34 CFR 685.209(b).",
                 "Under Higher Education Act Section 455(d) and 34 CFR 685.209, single-consolidated federal Parent PLUS loans are statutorily restricted to the Income-Contingent Repayment (ICR) plan unless double-consolidated prior to the statutory cutoff.",
-                "At $65,000 AGI and $60,000 loan balance (6.5% APR), the 34 CFR 685.209(b) 12-year income-adjusted cap reduces the monthly ICR obligation to $651.25/mo compared to $822.50/mo under the raw 20% discretionary formula.",
+                "At $65,000 AGI and $60,000 loan balance (6.5% APR), the 34 CFR 685.209(b) 12-year income-adjusted cap reduces the monthly ICR obligation to $651.25/mo compared to $817.33/mo under the raw 20% discretionary formula.",
             ]
             matrix = [
                 {
                     "profile": "Single Borrower on ICR ($65k AGI, $60k Direct Loan at 6.5%)",
-                    "statutory_threshold": "100% Federal Poverty Exemption ($15,650 Single ICR Baseline)",
+                    "statutory_threshold": "100% Federal Poverty Exemption ($15,960 Single ICR Baseline)",
                     "optimal_path": "12-Year Fixed Payment Adjusted by Income Percentage Factor (34 CFR 685.209(b))",
-                    "net_dollar_impact": "$651.25/mo Capped ICR Payment ($171.25/mo Below 20% Discretionary Formula)",
+                    "net_dollar_impact": "$651.25/mo Capped ICR Payment ($166.08/mo Below 20% Discretionary Formula)",
                     "next_action": "Compare 12-Year IPF Cap vs 20% Discretionary Formula",
                 },
                 {
@@ -6043,7 +6091,7 @@ def _build_autonomous_citation_assertions_and_matrix(
                 },
                 {
                     "profile": "Legacy Double-Consolidated Parent PLUS Borrower",
-                    "statutory_threshold": "10% Discretionary Rate Above 150%-225% Poverty Exemption",
+                    "statutory_threshold": "10% Discretionary Rate Above 150% Poverty Exemption ($23,940 Single)",
                     "optimal_path": "Maintain RAP / IBR Enrollment Completed Before Statutory Sunset",
                     "net_dollar_impact": "$540.94/mo Payment Savings vs 20% Single-Consolidation ICR",
                     "next_action": "Verify Annual IDR Income Recertification Deadline",
@@ -6138,16 +6186,16 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         elif any(k in low for k in ("ibr", "hardship", "paye", "pay as you earn", "income-based", "income based", "student-loan-repayment")) and "rap" not in low:
             assertions = [
-                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the federal poverty guideline ($23,475 single baseline) under 34 CFR 685.209.",
+                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% of the 2026 HHS federal poverty guideline ($23,940 single baseline) under 34 CFR 685.209.",
                 "Under 34 CFR 685.209 and 20 U.S.C. 1098e, monthly IBR and PAYE obligations never exceed the 10-year Standard Repayment ceiling calculated at repayment entry once partial financial hardship is established.",
                 "Starting January 1, 2026, standard 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
             ]
             matrix = [
                 {
                     "profile": "Early-Career Borrower ($45k AGI, $55k Direct Loans)",
-                    "statutory_threshold": "150% Federal Poverty Exemption ($23,475 Single IBR/PAYE Baseline)",
+                    "statutory_threshold": "150% 2026 Federal Poverty Exemption ($23,940 Single IBR/PAYE Baseline)",
                     "optimal_path": "2026 IBR / PAYE Hardship Cap vs RAP Transition Evaluation",
-                    "net_dollar_impact": "$179.38/mo Post-2014 IBR/PAYE Payment Capped Below 10-Year Standard (34 CFR 685.209)",
+                    "net_dollar_impact": "$175.50/mo Post-2014 IBR/PAYE Payment Capped Below 10-Year Standard (34 CFR 685.209)",
                     "next_action": "Lock 2026 IDR Recertification Baseline",
                 },
                 {
@@ -6167,17 +6215,17 @@ def _build_autonomous_citation_assertions_and_matrix(
             ]
         else:
             assertions = [
-                f"In 2026, {heading_label} caps monthly federal student loan payments at 10% to 15% of discretionary income above 150% to 225% of the federal poverty guideline ($15,650 single baseline) under 34 CFR 685.209.",
-                "Under the 2026-2027 Repayment Assistance Plan (RAP) and amended IBR rules under 34 CFR 685.221, unpaid monthly interest accrual is waived when scheduled payments are less than monthly interest.",
-                "Starting January 1, 2026, standard 20-year and 25-year IDR balance forgiveness is includible in federal gross income under IRC Section 108(f)(5) unless the borrower qualifies for the IRC Section 108(a)(1)(B) insolvency exclusion.",
+                f"In 2026, {heading_label} computes Repayment Assistance Plan (RAP) obligations under P.L. 119-21 Section 82001 (1% to 10% tiered AGI schedule minus $50/dependent, $10/mo minimum) alongside 2026 IBR rules under 34 CFR 685.209 ($15,960 single HHS poverty baseline).",
+                "Under P.L. 119-21 Section 82001, 100% of unpaid monthly accrued interest not covered by the borrower's RAP payment is subsidized, and the Department of Education matches principal reduction up to $50/month.",
+                "RAP grants remaining balance forgiveness after 360 qualifying monthly payments (30 years), remaining distinct from 120-payment Public Service Loan Forgiveness (34 CFR 685.219) and 240-to-300-payment IBR tracks.",
             ]
             matrix = [
                 {
                     "profile": "Early-Career Borrower ($45k AGI, $55k Direct Loans)",
-                    "statutory_threshold": "225% Federal Poverty Exemption ($35,212.50 Single RAP Baseline)",
-                    "optimal_path": "2026 RAP / IBR with 100% Unpaid Interest Waiver",
-                    "net_dollar_impact": "$2,244 Annual Payment Reduction + $1,420 Annual Interest Subsidy (34 CFR 685.209)",
-                    "next_action": "Lock 2026 IDR Recertification Baseline",
+                    "statutory_threshold": "P.L. 119-21 Section 82001 4% Tiered AGI Schedule ($150/mo RAP Baseline)",
+                    "optimal_path": "2026 RAP with 100% Unpaid Interest Subsidy & Up to $50/mo Principal Match",
+                    "net_dollar_impact": "360-Month (30-Year) Forgiveness + Zero Negative Amortization (P.L. 119-21)",
+                    "next_action": "Compare 360-Month RAP vs 240-Month IBR & 120-Month PSLF",
                 },
                 {
                     "profile": "Mid-Career Dual-Earner Household ($135k Combined AGI)",
@@ -6256,7 +6304,7 @@ def _build_autonomous_citation_assertions_and_matrix(
         elif any(k in low for k in ("equipment-lease", "equipment lease", "lease-tax-deduction", "162(a)(3)")):
             assertions = [
                 f"In 2026, {heading_label} deducts 100% of true operating lease payments as ordinary and necessary business expenses under IRC Section 162(a)(3) and GAAP ASC 842 without consuming capital expensing limits.",
-                "Under IRC Section 162(a)(3) and Revenue Procedure 2001-28, operating lease rentals bypass the IRC Section 280F(d)(7) $30,500 Heavy SUV cap and the IRC Section 163(j) 30% ATI business interest limitation.",
+                "Under IRC Section 162(a)(3) and Revenue Procedure 2001-28, operating lease rentals bypass the IRC Section 280F(d)(7) $32,000 Heavy SUV cap and the IRC Section 163(j) 30% ATI business interest limitation.",
                 "For a $120,000 commercial equipment lease paid at $2,450/mo ($29,400/yr) in the 32% marginal tax bracket, full Section 162(a)(3) rental deductibility generates a $9,408 annual cash tax shield ($19,992 net after-tax lease cost).",
             ]
             matrix = [
@@ -6269,15 +6317,15 @@ def _build_autonomous_citation_assertions_and_matrix(
                 },
                 {
                     "profile": "Conditional Sales / $1 Buyout Capital Lease ($120k Financed Asset)",
-                    "statutory_threshold": "IRC Section 179(b)(1) ($2.56M Cap) & IRC Section 168(k) (20% Bonus)",
+                    "statutory_threshold": "IRC Section 179(b)(1) ($2.56M Cap) & IRC Section 168(k) (100% Bonus)",
                     "optimal_path": "Reclassify as Capital Purchase & Elect Section 179 on Form 4562",
                     "net_dollar_impact": "$38,400 Year-1 Immediate Depreciation Tax Shield at 32% Rate",
                     "next_action": "Evaluate $1 Buyout vs Fair Market Value Residual Structure",
                 },
                 {
                     "profile": "Heavy SUV / Passenger Fleet Acquisition (6,000-14,000 lbs GVWR)",
-                    "statutory_threshold": "IRC Section 280F(d)(7) $30,500 SUV Purchase Cap vs Lease Inclusion Table",
-                    "optimal_path": "Compare 36-Month Operating Lease Deduction vs $38,000 Year-1 Purchase Write-Off",
+                    "statutory_threshold": "IRC Section 280F(d)(7) $32,000 SUV Purchase Cap vs Lease Inclusion Table",
+                    "optimal_path": "Compare 36-Month Operating Lease Deduction vs $32,000 Section 179 + 100% Bonus",
                     "net_dollar_impact": "Preserves Working Capital Liquidity While Deducting Business-Use Rentals",
                     "next_action": "Model Lease Inclusion Offset vs Section 179 SUV Cap",
                 },
@@ -6292,8 +6340,8 @@ def _build_autonomous_citation_assertions_and_matrix(
             clean_179_label = re.sub(r"\s+", " ", clean_179_label).strip()
             assertions = [
                 f"In 2026, {clean_179_label} allows immediate first-year expensing of up to $2,560,000 in qualifying commercial equipment and software placed in service under IRC Section 179(b)(1), phasing out dollar-for-dollar above $4,090,000 in total asset purchases.",
-                "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) bonus depreciation can create a carryforward Net Operating Loss (NOL) under IRC Section 172.",
-                "Under IRC Section 280F(d)(7) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules) before applying remaining bonus and MACRS depreciation.",
+                "Under IRC Section 179(b)(3), first-year Section 179 expensing cannot exceed aggregate taxable income from active trades or businesses, whereas IRC Section 168(k) 100% bonus depreciation (P.L. 119-21 Section 70301) can create a carryforward Net Operating Loss (NOL) under IRC Section 172.",
+                "Under IRC Section 179(b)(5) and IRS Form 4562 Part V, heavy SUVs rated between 6,000 and 14,000 lbs GVWR are capped at a $32,000 statutory 2026 Section 179 deduction before applying 100% Section 168(k) bonus depreciation to remaining basis.",
             ]
             matrix = [
                 {
@@ -6519,6 +6567,23 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "optimal_path": "Request Administrative First Time Abate on IRC 6651 Failure-to-Pay Penalty",
                     "net_dollar_impact": "Abates Failure-to-Pay Penalty and Associated Penalty Interest",
                     "next_action": "Verify 3-Year Clean Filing & Payment Eligibility",
+                },
+            ]
+        elif any(k in low for k in ("workers-comp", "emr", "class-code")) and not any(
+            k in low for k in ("payroll-burden", "payroll burden", "futa", "suta")
+        ):
+            assertions = [
+                f"In 2026, {heading_label} computes workers' compensation premiums under NCCI Basic Manual Class Codes, NCCI Experience Rating Plan Manual, and State Workers Compensation Rating Bureaus.",
+                "Workers' compensation manual premium equals auditable trade payroll divided by $100, multiplied by the state NCCI class-code rate and adjusted by the employer's Experience Modification Rate (EMR).",
+                "For a $1,250,000 covered payroll with a $7.00 per $100 NCCI manual rate, achieving a 0.85 safety EMR credit reduces annual workers' compensation premium from $87,500 to $74,375 ($13,125 saved).",
+            ]
+            matrix = [
+                {
+                    "profile": "Commercial Employer ($1.25M Covered Payroll, 0.85 NCCI EMR Credit)",
+                    "statutory_threshold": "NCCI Basic Manual Class Codes & NCCI Experience Rating Plan Manual (0.85 EMR)",
+                    "optimal_path": "Enforce Workplace Safety Return-to-Work Program + Audit NCCI Class Codes",
+                    "net_dollar_impact": "$74,375 Net Annual Workers' Comp Premium ($13,125 EMR Savings)",
+                    "next_action": "Model NCCI Class Code Rate & Experience Modification Factor",
                 },
             ]
         elif any(k in low for k in ("workers-comp", "payroll-burden", "invoice-factoring", "surety-bond", "llc")):
@@ -7089,7 +7154,7 @@ def _build_vertical_prexvo_overlay_blocks(
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"loan_balance": 60000, "agi": 65000, "family_size": 1, "interest_rate": 6.5},
-                    "description": "Single borrower at $65,000 AGI with 150% HHS poverty exemption ($23,475 protected baseline).",
+                    "description": "Single borrower at $65,000 AGI with 150% 2026 HHS poverty exemption ($23,940 protected baseline).",
                 },
                 {
                     "id": "preset-accelerated",
@@ -7106,15 +7171,15 @@ def _build_vertical_prexvo_overlay_blocks(
                 {
                     "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
                     "baseline": "$681.29 / mo (10-Year Standard Ceiling)",
-                    "optimized": "$346.04 / mo (10% Post-2014 IBR / PAYE at 150% Poverty)",
-                    "delta": "-$335.25 / mo (-49.2% Obligation)",
+                    "optimized": "$342.17 / mo (10% Post-2014 IBR at 150% 2026 Poverty)",
+                    "delta": "-$339.12 / mo (-49.8% Obligation)",
                     "authority": "34 CFR 685.209 & 20 U.S.C. 1098e",
                 },
                 {
                     "scenario": "Public Service Track (120 Qualifying Payments)",
                     "baseline": "$68,100 Cumulative Standard Outflow",
-                    "optimized": "$41,525 Outflow + Tax-Free Discharge",
-                    "delta": "$26,575 Statutory Principal Relief",
+                    "optimized": "$41,060 Outflow + Tax-Free Discharge",
+                    "delta": "$27,040 Statutory Principal Relief",
                     "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
                 },
             ],
@@ -7122,8 +7187,8 @@ def _build_vertical_prexvo_overlay_blocks(
                 {
                     "question": f"How is {query_clean} calculated under 2026 Title IV regulations?",
                     "answer": (
-                        f"Under 34 CFR 685.209 and 20 U.S.C. 1098e, {query_clean} subtracts 150 percent of the applicable HHS Poverty "
-                        f"Guideline ($23,475 single baseline) from Adjusted Gross Income and assesses 10 percent (post-2014 new borrowers "
+                        f"Under 34 CFR 685.209 and 20 U.S.C. 1098e, {query_clean} subtracts 150 percent of the 2026 HHS Poverty "
+                        f"Guideline ($23,940 single baseline) from Adjusted Gross Income and assesses 10 percent (post-2014 new borrowers "
                         f"or PAYE) or 15 percent (pre-2014 IBR borrowers) of discretionary income divided by 12, capped at the 10-year Standard Repayment amount."
                     ),
                 },
@@ -11065,7 +11130,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
             if "capped at a $31,300 Section 179 deduction in 2026" in a_str:
                 a_str = a_str.replace(
                     "capped at a $31,300 Section 179 deduction in 2026",
-                    "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
+                    "capped at a $32,000 statutory 2026 Section 179(b)(5) deduction",
                 )
             sanitized_assertions.append(normalize_statutory_acronym_casing(a_str))
         li_items = [

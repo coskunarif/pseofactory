@@ -1,0 +1,645 @@
+{
+  "schema_version": "2.0",
+  "property_id": "lienbond",
+  "brand_name": "LienBond",
+  "canonical_domain": "https://lienbond.com",
+  "audience_tier": "business",
+  "pricing_tiers": {
+    "free": {
+      "tier_kind": "free",
+      "label": "Free Calculator",
+      "price_usd": 0.0,
+      "price_cents": 0,
+      "currency": "usd",
+      "billing_mode": "free"
+    },
+    "quick": {
+      "tier_kind": "quick",
+      "label": "Quick Worksheet",
+      "price_usd": 15.0,
+      "price_cents": 1500,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "full": {
+      "tier_kind": "full",
+      "label": "Full Workpaper & Data Pack",
+      "price_usd": 29.0,
+      "price_cents": 2900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    },
+    "partner_slot": {
+      "tier_kind": "partner_slot",
+      "label": "Verified Calculator Partner Slot",
+      "price_usd": 299.0,
+      "price_cents": 29900,
+      "currency": "usd",
+      "billing_mode": "payment"
+    }
+  },
+  "entries": {
+    "miller_act_threshold_usd": {
+      "key": "miller_act_threshold_usd",
+      "value": 150000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "40 U.S.C. 3131 / FAR 28.102-1 / 90 FR 41872",
+      "primary_source_url": "https://www.acquisition.gov/far/28.102-1",
+      "publisher": "U.S. General Services Administration / FAR Council",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 40 U.S.C. 3131 and FAR 28.102-1, performance and payment bonds are required for any federal construction contract exceeding $150,000.",
+      "source_quote_sha256": "9165af6175453f88e4772a239fb384936876db43a024645076e17734f7140586",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "miller_act_alt_protection_min_usd": {
+      "key": "miller_act_alt_protection_min_usd",
+      "value": 35000.0,
+      "claim_class": "enacted_law",
+      "unit": "usd",
+      "effective_year": 2026,
+      "citation": "FAR 28.102-1(b)",
+      "primary_source_url": "https://www.acquisition.gov/far/28.102-1",
+      "publisher": "U.S. General Services Administration / FAR Council",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under FAR 28.102-1(b), contracting officers must require alternative payment protection for federal construction contracts exceeding $35,000 but not exceeding $150,000.",
+      "source_quote_sha256": "8a8e9f94b34f3be04b882361e3c4c1113506137ede4e8460e83ed4f9b4ba8787",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "bid_bond_penal_sum_pct_range": {
+      "key": "bid_bond_penal_sum_pct_range",
+      "value": [
+        5.0,
+        20.0
+      ],
+      "claim_class": "enacted_law",
+      "unit": "percent_range",
+      "effective_year": 2026,
+      "citation": "FAR 28.101-2",
+      "primary_source_url": "https://www.acquisition.gov/far/28.101",
+      "publisher": "U.S. General Services Administration / FAR Council",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under FAR 28.101, federal bid guarantees are typically set at 20 percent of the bid price (commonly 5% to 20% across federal and public works solicitations), not to exceed $3,000,000.",
+      "source_quote_sha256": "b3f15ea395ff175c1a23043d74296792ca52a41bec7cfec00a3aecd3a6085b55",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "davis_bacon_wh347": {
+      "key": "davis_bacon_wh347",
+      "value": "40 U.S.C. 3141 / 29 CFR 5.5",
+      "claim_class": "enacted_law",
+      "unit": "statutory_reference",
+      "effective_year": 2026,
+      "citation": "40 U.S.C. 3141 / 29 CFR 5.5",
+      "primary_source_url": "https://www.dol.gov/agencies/whd/government-contracts/construction",
+      "publisher": "U.S. Department of Labor Wage and Hour Division",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under the Davis-Bacon Act (40 U.S.C. 3141) and 29 CFR 5.5, contractors on federally funded construction contracts over $2,000 must pay prevailing wages plus fringe benefits and submit weekly WH-347 certified payroll statements.",
+      "source_quote_sha256": "f27fcb6276410728f8671d961e6b23560f4db68cc9552052c5b01dc2cc002083",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "contractor_license_bond_rate_range_pct": {
+      "key": "contractor_license_bond_rate_range_pct",
+      "value": [
+        0.75,
+        10.0
+      ],
+      "claim_class": "market_benchmark",
+      "unit": "percent_range",
+      "effective_year": 2026,
+      "citation": "SFAA / Commercial Surety Underwriting Rate Benchmarks",
+      "primary_source_url": "https://www.surety.org/",
+      "publisher": "Surety & Fidelity Association of America (SFAA) / Commercial Surety Benchmarks",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Contractor license bond annual underwriting rates typically range from 0.75% for Tier 1 prime credit to 10.0% for subprime credit tiers as an underwriting benchmark estimate.",
+      "source_quote_sha256": "3ea8483a5f6e770047a35badb63fad3c78bc91a3827c09eef5bf43d627b526bf",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(estimate|underwriting|benchmark|typical|range)\\b"
+      ],
+      "applies_to_slugs": [
+        "contractor-license-bond-cost-calculator-by-credit-score"
+      ],
+      "forbidden_on_slugs": [
+        "bid-bond-to-performance-bond-capacity-calculator"
+      ]
+    },
+    "ncci_workers_comp_emr": {
+      "key": "ncci_workers_comp_emr",
+      "value": "NCCI Experience Rating Plan Manual / Basic Manual",
+      "claim_class": "market_benchmark",
+      "unit": "methodology_reference",
+      "effective_year": 2026,
+      "citation": "NCCI Experience Rating Plan Manual / Basic Manual",
+      "primary_source_url": "https://www.ncci.com/",
+      "publisher": "National Council on Compensation Insurance (NCCI)",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Workers compensation manual premium is calculated per $100 of remuneration using NCCI Basic Manual class rates and adjusted by the Experience Modification Rate (EMR) benchmark methodology.",
+      "source_quote_sha256": "2043375b7a7cb8c5052c039d0268a9c06fbc5169886c9c3f8238372768eeb4ac",
+      "superseded_values": [],
+      "required_qualifier_patterns": [
+        "\\b(benchmark|manual|estimate|rating|typical)\\b"
+      ],
+      "applies_to_slugs": [
+        "workers-compensation-class-code-rate-calculator-by-state",
+        "experience-modification-rate-emr-workers-comp-penalty-calculator"
+      ],
+      "forbidden_on_slugs": []
+    }
+  },
+  "formulas": {
+    "bid_bond": {
+      "formula_id": "bid_bond",
+      "model_name": "Federal / Commercial Bid Bond Penal Sum (FAR 28.101: 5%-20% of Bid)",
+      "expression": "round(contract_bid_amount * (min(20.0, max(5.0, penal_sum_pct)) / 100.0), 2)",
+      "js_expression": "(Math.round(((contract_bid_amount * (Math.min(20.0, Math.max(5.0, penal_sum_pct)) / 100.0))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "contract_bid_amount": 500000.0,
+        "penal_sum_pct": 20.0
+      },
+      "expected_baseline_output": 100000.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$500k bid at 20% FAR 28.101 penal sum",
+          "inputs": {
+            "contract_bid_amount": 500000.0,
+            "penal_sum_pct": 20.0
+          },
+          "expected": 100000.0
+        },
+        {
+          "label": "$1M bid at 5% penal sum floor",
+          "inputs": {
+            "contract_bid_amount": 1000000.0,
+            "penal_sum_pct": 5.0
+          },
+          "expected": 50000.0
+        },
+        {
+          "label": "Clamped penal sum above 20% caps at 20%",
+          "inputs": {
+            "contract_bid_amount": 250000.0,
+            "penal_sum_pct": 30.0
+          },
+          "expected": 50000.0
+        }
+      ],
+      "citation_keys": [
+        "far_28_101_bid_bond",
+        "miller_act_40usc3131"
+      ],
+      "allowed_slug_patterns": [
+        ".*bid-bond.*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*license-bond.*"
+      ],
+      "output_selectors": [
+        "#bid-bond-penal-sum",
+        "[data-output='bid_bond_penal_sum']"
+      ]
+    },
+    "contractor_license_bond": {
+      "formula_id": "contractor_license_bond",
+      "model_name": "Contractor License Surety Bond Annual / Multi-Year Premium",
+      "expression": "round(max(min_premium, bond_amount * (min(10.0, max(0.75, rate_pct)) / 100.0) * term_years * (1.0 - multi_year_discount)), 2)",
+      "js_expression": "(Math.round((Math.max(min_premium, (((bond_amount * (Math.min(10.0, Math.max(0.75, rate_pct)) / 100.0)) * term_years) * (1.0 - multi_year_discount)))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "bond_amount": 25000.0,
+        "rate_pct": 1.5,
+        "term_years": 1,
+        "multi_year_discount": 0.0,
+        "min_premium": 100.0
+      },
+      "expected_baseline_output": 375.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "CA CSLB $25k bond at 1.5% prime rate",
+          "inputs": {
+            "bond_amount": 25000.0,
+            "rate_pct": 1.5,
+            "term_years": 1,
+            "multi_year_discount": 0.0,
+            "min_premium": 100.0
+          },
+          "expected": 375.0
+        },
+        {
+          "label": "CA CSLB $25k bond at 6.0% subprime rate",
+          "inputs": {
+            "bond_amount": 25000.0,
+            "rate_pct": 6.0,
+            "term_years": 1,
+            "multi_year_discount": 0.0,
+            "min_premium": 100.0
+          },
+          "expected": 1500.0
+        },
+        {
+          "label": "Minimum $100 floor on low $10k bond at 0.75%",
+          "inputs": {
+            "bond_amount": 10000.0,
+            "rate_pct": 0.75,
+            "term_years": 1,
+            "multi_year_discount": 0.0,
+            "min_premium": 100.0
+          },
+          "expected": 100.0
+        }
+      ],
+      "citation_keys": [
+        "sfaa_surety_underwriting"
+      ],
+      "allowed_slug_patterns": [
+        ".*license-bond.*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*bid-bond.*"
+      ],
+      "output_selectors": [
+        "#license-bond-premium",
+        "[data-output='license_bond_premium']"
+      ]
+    },
+    "ncci_workers_comp_premium": {
+      "formula_id": "ncci_workers_comp_premium",
+      "model_name": "NCCI Workers Compensation Manual & EMR Net Premium",
+      "expression": "round((annual_payroll / 100.0) * class_rate * emr_factor * (1.0 - schedule_credit), 2)",
+      "js_expression": "(Math.round((((((annual_payroll / 100.0) * class_rate) * emr_factor) * (1.0 - schedule_credit))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "annual_payroll": 500000.0,
+        "class_rate": 6.4,
+        "emr_factor": 1.15,
+        "schedule_credit": 0.0
+      },
+      "expected_baseline_output": 36800.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$500k payroll, 6.40 class rate, 1.15 EMR",
+          "inputs": {
+            "annual_payroll": 500000.0,
+            "class_rate": 6.4,
+            "emr_factor": 1.15,
+            "schedule_credit": 0.0
+          },
+          "expected": 36800.0
+        },
+        {
+          "label": "$500k payroll, 6.40 class rate, 0.85 EMR credit + 10% schedule credit",
+          "inputs": {
+            "annual_payroll": 500000.0,
+            "class_rate": 6.4,
+            "emr_factor": 0.85,
+            "schedule_credit": 0.1
+          },
+          "expected": 24480.0
+        }
+      ],
+      "citation_keys": [
+        "ncci_emr_manual"
+      ],
+      "allowed_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#net-wc-premium",
+        "[data-output='net_wc_premium']"
+      ]
+    },
+    "davis_bacon_overtime_hourly": {
+      "formula_id": "davis_bacon_overtime_hourly",
+      "model_name": "Davis-Bacon Act (40 U.S.C. 3141 / 29 CFR 5.5) Overtime Hourly Rate",
+      "expression": "round((base_prevailing_rate * 1.5) + max(0.0, required_fringe_rate - bona_fide_benefit_credit), 2)",
+      "js_expression": "(Math.round((((base_prevailing_rate * 1.5) + Math.max(0.0, (required_fringe_rate - bona_fide_benefit_credit)))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "base_prevailing_rate": 42.0,
+        "required_fringe_rate": 16.5,
+        "bona_fide_benefit_credit": 6.5
+      },
+      "expected_baseline_output": 73.0,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "$42 base + $10 net cash fringe on OT",
+          "inputs": {
+            "base_prevailing_rate": 42.0,
+            "required_fringe_rate": 16.5,
+            "bona_fide_benefit_credit": 6.5
+          },
+          "expected": 73.0
+        },
+        {
+          "label": "Full bona fide benefit credit (no excess fringe cash)",
+          "inputs": {
+            "base_prevailing_rate": 42.0,
+            "required_fringe_rate": 16.5,
+            "bona_fide_benefit_credit": 18.0
+          },
+          "expected": 63.0
+        }
+      ],
+      "citation_keys": [
+        "davis_bacon_wh347"
+      ],
+      "allowed_slug_patterns": [
+        ".*davis-bacon.*",
+        ".*prevailing-wage.*",
+        ".*wh-?347.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#davis-bacon-ot-rate",
+        "[data-output='ot_hourly_rate']"
+      ]
+    }
+  },
+  "citations_allowlist": {
+    "miller_act_40usc3131": {
+      "canonical": "40 U.S.C. 3131 / FAR 28.102-1 (Miller Act)",
+      "patterns": [
+        "40\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3131\\b",
+        "FAR\\s*28\\.102",
+        "Miller\\s*Act"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ]
+    },
+    "miller_act_40usc3133": {
+      "canonical": "40 U.S.C. Section 3133(b) / 40 U.S.C. 3133 (Miller Act Payment Bond Suit & Notice)",
+      "patterns": [
+        "40\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3133(?:\\([a-zA-Z0-9]+\\))?\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ]
+    },
+    "far_28_101_bid_bond": {
+      "canonical": "FAR 28.101 (Bid Guarantees)",
+      "patterns": [
+        "FAR\\s*28\\.101"
+      ],
+      "allowed_slug_patterns": [
+        ".*bid-bond.*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*license-bond.*",
+        ".*workers-comp.*"
+      ]
+    },
+    "davis_bacon_wh347": {
+      "canonical": "40 U.S.C. 3141 / 29 CFR 5.5 (Davis-Bacon & WH-347)",
+      "patterns": [
+        "40\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3141\\b",
+        "29\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?5(?:\\.5)?\\b",
+        "WH-?347"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "sfaa_surety_underwriting": {
+      "canonical": "SFAA Surety Underwriting Benchmarks",
+      "patterns": [
+        "SFAA",
+        "Treasury\\s*Circular\\s*570"
+      ],
+      "allowed_slug_patterns": [
+        ".*bond.*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "ncci_emr_manual": {
+      "canonical": "NCCI Experience Rating Plan Manual / Basic Manual",
+      "patterns": [
+        "NCCI\\s*(?:Experience\\s*Rating\\s*Plan|Basic)\\s*Manual"
+      ],
+      "allowed_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_3111": {
+      "canonical": "IRC Section 3111 (Employer FICA Tax - Allowed on Davis-Bacon Payroll, Forbidden on Workers Comp / EMR)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*3111\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*3111\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*davis-bacon.*",
+        ".*prevailing-wage.*",
+        ".*wh-?347.*",
+        ".*payroll.*"
+      ],
+      "forbidden_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ]
+    },
+    "osha_29_cfr_1904": {
+      "canonical": "29 CFR Part 1904 (OSHA Recordkeeping - Forbidden on Workers Comp / EMR Class-Code Tools)",
+      "patterns": [
+        "29\\s*CFR\\s*(?:Part\\s*)?1904"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": [
+        ".*workers-comp.*",
+        ".*emr.*",
+        ".*class-code.*"
+      ]
+    },
+    "ftc_16_cfr_255": {
+      "canonical": "16 CFR Part 255 (FTC Endorsement Guides)",
+      "patterns": [
+        "16\\s*CFR\\s*(?:Part\\s*)?255(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "erisa_29usc1112": {
+      "canonical": "29 U.S.C. Section 1112 (ERISA Section 412 Fidelity Bonding)",
+      "patterns": [
+        "29\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?1112",
+        "ERISA\\s*(?:Section|Sec\\.?)?\\s*412",
+        "29\\s*CFR\\s*2580\\.412"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "treasury_31cfr223": {
+      "canonical": "31 CFR Part 223 (Treasury Circular 570 Surety Companies)",
+      "patterns": [
+        "31\\s*CFR\\s*(?:Part\\s*)?223(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "far_48cfr28": {
+      "canonical": "48 CFR Part 28 (FAR Bonds and Insurance)",
+      "patterns": [
+        "48\\s*CFR\\s*(?:Part\\s*)?28(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_460": {
+      "canonical": "IRC Section 460 (Long-Term Construction Contracts)",
+      "patterns": [
+        "IRC\\s*(?:Section|Sec\\.?)?\\s*460",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?460"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "prompt_payment_31usc3903": {
+      "canonical": "31 U.S.C. 3903 (Federal Prompt Payment Act)",
+      "patterns": [
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3903\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "far_48cfr52_232": {
+      "canonical": "48 CFR 52.232 (FAR Contract Financing & Prompt Payment Clauses)",
+      "patterns": [
+        "48\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?52\\.232\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "far_48cfr31": {
+      "canonical": "48 CFR Part 31 (FAR Contract Cost Principles & Procedures)",
+      "patterns": [
+        "48\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?31(?:\\.\\d+)?\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "sba_15usc694": {
+      "canonical": "15 U.S.C. 694a-694c (SBA Surety Bond Guarantee Program)",
+      "patterns": [
+        "15\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*|§\\s*)?694[a-c]?(?:-694[a-c])?\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "fmcsa_49usc13906": {
+      "canonical": "49 U.S.C. 13906 (FMCSA BMC-84 Freight Broker Surety Bond)",
+      "patterns": [
+        "49\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?13906\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "sba_13cfr115": {
+      "canonical": "13 CFR Part 115 (SBA Surety Bond Guarantee Regulations)",
+      "patterns": [
+        "13\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?115(?:\\.\\d+)?\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    },
+    "surety_31usc3102": {
+      "canonical": "31 U.S.C. 3102 (Federal Surety Corporation Authority)",
+      "patterns": [
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*|§\\s*)?3102\\b"
+      ],
+      "allowed_slug_patterns": [],
+      "forbidden_slug_patterns": []
+    }
+  },
+  "disclosures": [
+    {
+      "disclosure_id": "non_legal_underwriting_disclaimer",
+      "required_text_patterns": [
+        "not\\s+(?:a\\s+)?(?:licensed\\s+)?(?:attorney|law\\s+firm|surety\\s+underwriter|insurance\\s+producer)",
+        "(?:underwriting\\s+)?(?:estimates?|informational)"
+      ],
+      "applies_to_slug_patterns": [
+        ".*"
+      ],
+      "canonical_text": "Underwriting & Statutory Notice: LienBond is not a licensed attorney, law firm, admitted surety underwriter, or licensed insurance producer. Bond premiums, EMR impacts, and statutory lien calculations are informational underwriting estimates only; consult qualified legal counsel and a licensed surety broker before binding coverage or recording liens."
+    }
+  ],
+  "banned_claims": [
+    {
+      "pattern": "licensed\\s+surety\\s+underwriter",
+      "reason": "Unauthorized surety carrier/producer claim"
+    },
+    {
+      "pattern": "guaranteed\\s+mechanics\\s+lien\\s+foreclosure\\s+recovery",
+      "reason": "Prohibited legal outcome guarantee"
+    }
+  ],
+  "cross_tenant_brand_tokens": [
+    "profithelm",
+    "profithelm.com",
+    "prexvo",
+    "prexvo.com",
+    "gainhelm",
+    "gainhelm.com",
+    "section 1031",
+    "section 179",
+    "qsbs",
+    "title iv",
+    "pslf",
+    "repayment assistance plan",
+    "cmmc",
+    "c3pao",
+    "sprs",
+    "splash_financial",
+    "vanta_security",
+    "coinledger"
+  ],
+  "allowed_shared_legal_tokens": [
+    "40 u.s.c.",
+    "29 cfr",
+    "far 28",
+    "ncci",
+    "16 cfr part 255"
+  ]
+}

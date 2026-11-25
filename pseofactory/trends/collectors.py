@@ -467,6 +467,29 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
         """Builds longitudinal statutory and macroeconomic time-series records (2024 to 2030)."""
         from pseofactory.trends.models import StatutoryEconomicTimeseriesRecord
 
+        from pseofactory.truth_pack import load_truth_pack
+
+        def _tp_val(prop_id: str, key: str, default_val: float) -> float:
+            try:
+                pack = load_truth_pack(prop_id, allow_expired=True)
+                entry = pack.entries.get(key)
+                if entry is not None and isinstance(entry.value, (int, float)):
+                    return float(entry.value)
+            except Exception:
+                pass
+            return float(default_val)
+
+        sec179_cap_2025 = _tp_val("profithelm", "section_179_cap_2025", 2500000.0)
+        sec179_cap_2026 = _tp_val("profithelm", "section_179_cap_2026", 2560000.0)
+        sec179_phase_2025 = _tp_val("profithelm", "section_179_phaseout_2025", 4000000.0)
+        sec179_phase_2026 = _tp_val("profithelm", "section_179_phaseout_2026", 4090000.0)
+        bonus_2026 = _tp_val("profithelm", "bonus_depreciation_pct_2026", 100.0)
+        oasdi_2026 = _tp_val("profithelm", "oasdi_wage_base_2026", 184500.0)
+        fpl_2026 = _tp_val("prexvo", "hhs_poverty_2026_1person", 15960.0)
+        hipaa_t4_2026 = _tp_val("gainhelm", "hipaa_tier4_annual_cap_2026", 2190294.0)
+        infosec_hr_2026 = _tp_val("gainhelm", "bls_infosec_hourly_loaded_2026", 121.67)
+        miller_2026 = _tp_val("lienbond", "miller_act_threshold_usd", 150000.0)
+
         now = datetime.now(timezone.utc).isoformat()
         specs = [
             (
@@ -478,7 +501,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "IRC Section 179 Maximum Deduction Cap",
                 "USD",
                 "IRS",
-                {2024: 1220000.0, 2025: 2500000.0, 2026: 2560000.0, 2027: 2620000.0, 2028: 2690000.0, 2029: 2760000.0, 2030: 2830000.0},
+                {2024: 1220000.0, 2025: sec179_cap_2025, 2026: sec179_cap_2026, 2027: 2620000.0, 2028: 2690000.0, 2029: 2760000.0, 2030: 2830000.0},
             ),
             (
                 "irs_sec179_phaseout",
@@ -489,18 +512,18 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "IRC Section 179 Investment Phaseout Threshold",
                 "USD",
                 "IRS",
-                {2024: 3050000.0, 2025: 4000000.0, 2026: 4090000.0, 2027: 4190000.0, 2028: 4290000.0, 2029: 4400000.0, 2030: 4510000.0},
+                {2024: 3050000.0, 2025: sec179_phase_2025, 2026: sec179_phase_2026, 2027: 4190000.0, 2028: 4290000.0, 2029: 4400000.0, 2030: 4510000.0},
             ),
             (
                 "irs_sec168k_bonus",
                 "profithelm",
                 "US-FED",
-                "26 U.S.C. 168(k)(6)",
+                "26 U.S.C. 168(k)(6) / P.L. 119-21 Sec. 70301",
                 "bonus_depreciation_pct",
                 "IRC Section 168(k) First-Year Bonus Depreciation Allowance",
                 "PCT",
                 "IRS",
-                {2024: 60.0, 2025: 40.0, 2026: 20.0, 2027: 0.0, 2028: 0.0, 2029: 0.0, 2030: 0.0},
+                {2024: 60.0, 2025: 40.0, 2026: bonus_2026, 2027: bonus_2026, 2028: bonus_2026, 2029: bonus_2026, 2030: bonus_2026},
             ),
             (
                 "irs_sec199a_qbi",
@@ -544,7 +567,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "Social Security OASDI Maximum Taxable Wage Base",
                 "USD",
                 "SSA-IRS",
-                {2024: 168600.0, 2025: 176100.0, 2026: 184500.0, 2027: 190500.0, 2028: 196500.0, 2029: 202800.0, 2030: 209300.0},
+                {2024: 168600.0, 2025: 176100.0, 2026: oasdi_2026, 2027: 190500.0, 2028: 196500.0, 2029: 202800.0, 2030: 209300.0},
             ),
             (
                 "ed_idr_discretionary_levy",
@@ -572,12 +595,12 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "hhs_fpl_single_base",
                 "prexvo",
                 "US-FED",
-                "42 U.S.C. 9902(2)",
+                "42 U.S.C. 9902(2) / 91 FR 1797",
                 "hhs_poverty_guideline_single_usd",
                 "HHS 48-State Single-Person Federal Poverty Guideline Base",
                 "USD",
                 "HHS-ASPE",
-                {2024: 15060.0, 2025: 15650.0, 2026: 16120.0, 2027: 16600.0, 2028: 17100.0, 2029: 17610.0, 2030: 18140.0},
+                {2024: 15060.0, 2025: 15650.0, 2026: fpl_2026, 2027: 16440.0, 2028: 16930.0, 2029: 17440.0, 2030: 17960.0},
             ),
             (
                 "irs_sec108f_tax_free_forgiveness",
@@ -638,12 +661,12 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "hhs_ocr_hipaa_tier4_annual_cap_usd",
                 "gainhelm",
                 "US-FED",
-                "45 CFR 160.404 / 42 U.S.C. 1320d-5",
+                "45 CFR 160.404 / 42 U.S.C. 1320d-5 / 91 FR 3665",
                 "hipaa_tier4_statutory_annual_penalty_cap_usd",
                 "HHS OCR HIPAA Tier 4 Willful Neglect Uncorrected Annual Statutory Penalty Cap",
                 "USD",
                 "HHS-OCR",
-                {2024: 2003947.0, 2025: 2067813.0, 2026: 2067813.0, 2027: 2129847.0, 2028: 2193742.0, 2029: 2259555.0, 2030: 2327341.0},
+                {2024: 2003947.0, 2025: 2067813.0, 2026: hipaa_t4_2026, 2027: 2256003.0, 2028: 2323683.0, 2029: 2393393.0, 2030: 2465195.0},
             ),
             (
                 "bls_soc_15_1212_infosec_hourly_wage_usd",
@@ -654,7 +677,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "BLS SOC 15-1212 Information Security Engineer Fully Burdened Hourly Rate",
                 "USD",
                 "BLS-OEWS",
-                {2024: 114.50, 2025: 118.00, 2026: 121.67, 2027: 125.30, 2028: 129.10, 2029: 133.00, 2030: 137.00},
+                {2024: 114.50, 2025: 118.00, 2026: infosec_hr_2026, 2027: 125.30, 2028: 129.10, 2029: 133.00, 2030: 137.00},
             ),
             (
                 "aicpa_soc2_type2_median_cpa_fee_usd",
@@ -676,12 +699,16 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "40 U.S.C. 3131 Miller Act Federal Construction Performance & Payment Bond Threshold",
                 "USD",
                 "TREASURY-CIRCULAR-570",
-                {2024: 150000.0, 2025: 150000.0, 2026: 150000.0, 2027: 150000.0, 2028: 150000.0, 2029: 150000.0, 2030: 150000.0},
+                {2024: 150000.0, 2025: 150000.0, 2026: miller_2026, 2027: 150000.0, 2028: 150000.0, 2029: 150000.0, 2030: 150000.0},
             ),
         ]
         records = []
         for series_id, prop_id, juris, citation, m_key, m_label, unit, agency, year_map in specs:
             for yr, val in sorted(year_map.items()):
+                yr_int = int(yr)
+                rec_meta: Dict[str, Any] = {"cliff_year": 2026}
+                if yr_int >= 2028:
+                    rec_meta["claim_class"] = "future_projection"
                 records.append(
                     StatutoryEconomicTimeseriesRecord(
                         series_id=series_id,
@@ -690,12 +717,12 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                         statutory_citation=citation,
                         metric_key=m_key,
                         metric_label=m_label,
-                        effective_year=int(yr),
+                        effective_year=yr_int,
                         metric_value=float(val),
                         unit=unit,
                         source_agency=agency,
                         recorded_at=now,
-                        metadata={"cliff_year": 2026},
+                        metadata=rec_meta,
                     )
                 )
         return records

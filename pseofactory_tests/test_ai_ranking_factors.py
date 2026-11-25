@@ -4417,10 +4417,10 @@ def test_statutory_tax_brackets_schedules():
     assert b_mfj[0]["rate"] == 10.0
     assert b_mfj[0]["max_income"] == 23850.0
 
-    # 2027 Post-TCJA Reversion rates check
+    # 2027 Post-OBBBA permanent 10%-37% rates check (repealed sunset stored separately)
     b_2027 = get_official_tax_brackets(2027, "single")
     rates_2027 = [b["rate"] for b in b_2027]
-    assert rates_2027 == [10.0, 15.0, 25.0, 28.0, 33.0, 35.0, 39.6]
+    assert rates_2027 == [10.0, 12.0, 22.0, 24.0, 32.0, 35.0, 37.0]
 
 
 def test_standard_deductions_schedules():
@@ -4429,8 +4429,8 @@ def test_standard_deductions_schedules():
     assert get_official_standard_deduction(2024, "mfj") == 29200.0
     assert get_official_standard_deduction(2025, "single") == 15000.0
     assert get_official_standard_deduction(2025, "mfj") == 30000.0
-    assert get_official_standard_deduction(2027, "single") == 8600.0
-    assert get_official_standard_deduction(2027, "mfj") == 17200.0
+    assert get_official_standard_deduction(2027, "single") == 16600.0
+    assert get_official_standard_deduction(2027, "mfj") == 33200.0
 
     # Additional standard deductions for 65+ or blind
     assert STATUTORY_STANDARD_DEDUCTIONS[2024]["additional_65_or_blind_single"] == 1950.0
@@ -4440,15 +4440,16 @@ def test_standard_deductions_schedules():
 def test_statutory_limits_schedules():
     """Verifies official statutory limits across key tax and corporate provisions."""
     assert get_official_statutory_limit("section_179_max_deduction", 2024) == 1220000.0
-    assert get_official_statutory_limit("section_179_max_deduction", 2025) == 1250000.0
+    assert get_official_statutory_limit("section_179_max_deduction", 2025) == 2500000.0
     assert get_official_statutory_limit("section_179_phaseout_threshold", 2024) == 3050000.0
-    assert get_official_statutory_limit("section_179_phaseout_threshold", 2025) == 3130000.0
+    assert get_official_statutory_limit("section_179_phaseout_threshold", 2025) == 4000000.0
 
-    # Section 1202 QSBS
+    # Section 1202 QSBS (post-OBBBA P.L. 119-21 Sec. 70431)
     qsbs = get_official_statutory_limit("section_1202_qsbs")
-    assert qsbs["asset_ceiling"] == 50000000.0
-    assert qsbs["exclusion_cap"] == 10000000.0
+    assert qsbs["asset_ceiling"] == 75000000.0
+    assert qsbs["exclusion_cap"] == 15000000.0
     assert qsbs["holding_period_years"] == 5
+    assert qsbs["holding_tiers_pct"] == {"3_yr": 50, "4_yr": 75, "5_yr": 100}
 
     # 401(k) and IRA limits
     assert get_official_statutory_limit("retirement_401k_elective_deferral", 2024) == 23000.0
@@ -4518,8 +4519,8 @@ def test_assert_cross_web_consensus_failure_modes():
     with pytest.raises(ValueError, match="Mismatched standard deduction value"):
         assert_cross_web_consensus_and_corroboration(html_bad_ded)
 
-    # 4. Mismatched Section 179 limit
-    html_bad_sec179 = "<html><body><p>Section 179 deduction limit of $2,500,000 is available this year.</p></body></html>"
+    # 4. Mismatched Section 179 limit (since $2,500,000 is the valid 2025 OBBBA limit, test an invalid $9,500,000 limit)
+    html_bad_sec179 = "<html><body><p>Section 179 deduction limit of $9,500,000 is available this year.</p></body></html>"
     with pytest.raises(ValueError, match="Mismatched Section 179 expensing limit"):
         assert_cross_web_consensus_and_corroboration(html_bad_sec179)
 
@@ -4559,15 +4560,23 @@ def test_detect_uncorroborated_statutory_claims_boundary_conditions():
     issues = detect_uncorroborated_statutory_claims(bad_mfj)
     assert any("Mismatched MFJ standard deduction value" in i for i in issues)
 
-    # Structured manifest invalid Section 1202 exclusion cap
+    # Structured manifest invalid Section 1202 exclusion cap and invalid 2-year holding period
+    # (3, 4, 5 years are valid post-OBBBA holding tiers under P.L. 119-21)
     bad_manifest = (
         '<script type="application/json" id="statutory-manifest">'
-        '{"topic": "QSBS", "gain_exclusion_cap_usd": 25000000, "holding_period_years": 3}'
+        '{"topic": "QSBS", "gain_exclusion_cap_usd": 25000000, "holding_period_years": 2}'
         '</script>'
     )
     issues_m = detect_uncorroborated_statutory_claims(bad_manifest)
     assert any("invalid Section 1202 exclusion cap" in i for i in issues_m)
     assert any("invalid Section 1202 holding period" in i for i in issues_m)
+
+    valid_3yr_manifest = (
+        '<script type="application/json" id="statutory-manifest">'
+        '{"topic": "QSBS", "max_asset_issuance_usd": 75000000, "gain_exclusion_cap_usd": 15000000, "holding_period_years": 3}'
+        '</script>'
+    )
+    assert detect_uncorroborated_statutory_claims(valid_3yr_manifest) == []
 
     # Structured manifest invalid bracket rate
     bad_brackets = (

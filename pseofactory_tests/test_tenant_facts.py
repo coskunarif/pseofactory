@@ -103,11 +103,11 @@ def test_statutory_limits_and_citations():
     ph = store.get_profile("profithelm").statutory_truth
     assert ph.statutory_citations["irs_rev_proc_2024_40"] == "IRS Rev Proc 2024-40"
     assert ph.limits_and_thresholds["section_179_expense_limit_2024"] == 1220000.0
-    assert ph.limits_and_thresholds["section_179_expense_limit_2025"] == 1250000.0
+    assert ph.limits_and_thresholds["section_179_expense_limit_2025"] == 2500000.0
     assert ph.limits_and_thresholds["section_179_heavy_vehicle_2024"] == 30500.0
     assert ph.limits_and_thresholds["section_179_heavy_vehicle_2025"] == 31300.0
-    assert ph.limits_and_thresholds["section_1202_qsbs_asset_ceiling"] == 50000000.0
-    assert ph.limits_and_thresholds["section_1202_qsbs_exclusion_cap"] == 10000000.0
+    assert ph.limits_and_thresholds["section_1202_qsbs_asset_ceiling"] == 75000000.0
+    assert ph.limits_and_thresholds["section_1202_qsbs_exclusion_cap"] == 15000000.0
     assert ph.limits_and_thresholds["section_1202_qsbs_exclusion_multiple"] == 10.0
     assert ph.limits_and_thresholds["section_1202_qsbs_holding_period_years"] == 5
     assert ph.limits_and_thresholds["retirement_401k_elective_deferral_2024"] == 23000.0
@@ -134,8 +134,8 @@ def test_statutory_limits_and_citations():
     assert poverty[2024]["additional_person"] == 5380.0
     assert poverty[2025]["individual"] == 15650.0
     assert poverty[2025]["additional_person"] == 5440.0
-    assert poverty[2026]["individual"] == 15650.0
-    assert poverty[2026]["additional_person"] == 5500.0
+    assert poverty[2026]["individual"] == 15960.0
+    assert poverty[2026]["additional_person"] == 5680.0
 
 
 def test_banned_claims_detection():

@@ -81,16 +81,115 @@ class TenantStatutoryTruth:
     tenant_id: str
     statutory_citations: Dict[str, str] = field(default_factory=dict)
     limits_and_thresholds: Dict[str, Any] = field(default_factory=dict)
+    regulator_name: str = ""
+    controlling_statute: str = ""
+    effective_tax_year: str = "2026"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "tenant_id": self.tenant_id,
             "statutory_citations": dict(self.statutory_citations),
             "limits_and_thresholds": dict(self.limits_and_thresholds),
+            "regulator_name": self.regulator_name,
+            "controlling_statute": self.controlling_statute,
+            "effective_tax_year": self.effective_tax_year,
         }
 
 
 StatutoryTruthRule = TenantStatutoryTruth
+
+
+def _load_truth_pack_safe(
+    property_id: str,
+    workspace_root: Optional[Path] = None,
+) -> Optional[Any]:
+    """Loads a TruthPack if present without falling back to any other tenant."""
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        return load_truth_pack(property_id, workspace_root=workspace_root, allow_expired=True)
+    except Exception:
+        return None
+
+
+def _tp_entry_value(pack: Optional[Any], key: str, default: Any) -> Any:
+    """Reads an entry value from a loaded TruthPack or returns default."""
+    if pack is None:
+        return default
+    entry = getattr(pack, "entries", {}).get(key)
+    if entry is None:
+        return default
+    return entry.value
+
+
+def _build_statutory_truth_from_truth_pack(pack: Any) -> TenantStatutoryTruth:
+    """Synthesizes a TenantStatutoryTruth directly from a TruthPack (for 50+ dynamic sites)."""
+    citations: Dict[str, str] = {}
+    limits: Dict[str, Any] = {}
+    publishers: List[str] = []
+    cit_list: List[str] = []
+    max_year = 2026
+
+    for key, entry in getattr(pack, "entries", {}).items():
+        limits[key] = entry.value
+        if entry.citation:
+            citations[key] = entry.citation
+            if entry.citation not in cit_list:
+                cit_list.append(entry.citation)
+        if entry.publisher and entry.publisher not in publishers:
+            publishers.append(entry.publisher)
+        if getattr(entry, "effective_year", 0):
+            try:
+                yr = int(entry.effective_year)
+                if yr > max_year:
+                    max_year = yr
+            except (TypeError, ValueError):
+                pass
+
+    reg_name = ", ".join(publishers[:3]) if publishers else str(getattr(pack, "brand_name", "") or pack.property_id)
+    ctrl_stat = "; ".join(cit_list[:4]) if cit_list else str(getattr(pack, "brand_name", "") or pack.property_id)
+    eff_yr = "2026" if 2026 in {getattr(e, "effective_year", 0) for e in getattr(pack, "entries", {}).values()} else str(max_year)
+    return TenantStatutoryTruth(
+        tenant_id=pack.property_id,
+        statutory_citations=citations,
+        limits_and_thresholds=limits,
+        regulator_name=reg_name,
+        controlling_statute=ctrl_stat,
+        effective_tax_year=eff_yr,
+    )
+
+
+def _build_profile_from_truth_pack(pack: Any) -> "TenantTruthProfile":
+    """Builds a TenantTruthProfile dynamically from a TruthPack for 5th+ sites."""
+    pricing: Dict[str, PricingTier] = {}
+    for tier_key, tier_obj in (getattr(pack, "pricing_tiers", None) or {}).items():
+        if isinstance(tier_obj, dict):
+            pricing[str(tier_key)] = PricingTier(
+                name=str(tier_obj.get("label") or tier_obj.get("name") or tier_key),
+                price_usd=float(tier_obj.get("price_usd") or 0.0),
+                billing_period="one_time" if str(tier_obj.get("billing_mode") or "") != "free" else "free",
+                features=[],
+            )
+    statutory = _build_statutory_truth_from_truth_pack(pack)
+    disclosures = [d.canonical_text for d in (getattr(pack, "disclosures", None) or []) if getattr(d, "canonical_text", "")]
+    banned = [
+        str(b.get("pattern") or "").strip()
+        for b in (getattr(pack, "banned_claims", None) or [])
+        if isinstance(b, dict) and b.get("pattern")
+    ]
+    forbidden_tokens = {str(t).lower() for t in (getattr(pack, "cross_tenant_brand_tokens", None) or []) if str(t).strip()}
+    return TenantTruthProfile(
+        tenant_id=pack.property_id,
+        brand_name=pack.brand_name,
+        canonical_domain=pack.canonical_domain,
+        pricing_tiers=pricing,
+        features={},
+        statutory_truth=statutory,
+        claims_allowlist=[],
+        claims_banned=banned,
+        mandatory_disclosures=disclosures,
+        cross_tenant_forbidden_tokens=forbidden_tokens,
+    )
 
 
 @dataclass(frozen=True)
@@ -166,7 +265,8 @@ def _build_canonical_pricing_tiers(
 
 
 def _build_profithelm_profile() -> TenantTruthProfile:
-    """Builds the canonical truth profile for ProfitHelm."""
+    """Builds the canonical truth profile for ProfitHelm backed by TruthPack."""
+    pack = _load_truth_pack_safe("profithelm")
     pricing = _build_canonical_pricing_tiers(
         audience_tier="business",
         free_features=["Core Calculators", "Section 179 Optimizer"],
@@ -189,63 +289,96 @@ def _build_profithelm_profile() -> TenantTruthProfile:
         "Entity Tax Modeling": FeatureContract(
             name="Entity Tax Modeling",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="Comprehensive pass-through and C-corp entity tax scenario modeling.",
         ),
         "Section 1031 Exchange Matching": FeatureContract(
             name="Section 1031 Exchange Matching",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="Section 1031 like-kind exchange identification and timeline tracking.",
         ),
         "Section 179 Optimizer": FeatureContract(
             name="Section 179 Optimizer",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Asset depreciation and first-year expense deduction maximization.",
         ),
         "QSBS Stacking Analysis": FeatureContract(
             name="QSBS Stacking Analysis",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="Section 1202 Qualified Small Business Stock tax exemption analysis.",
         ),
         "Multi-Entity Consolidation": FeatureContract(
             name="Multi-Entity Consolidation",
             enabled=True,
-            tier_availability=["enterprise"],
+            tier_availability=["full", "partner_slot"],
             description="Multi-entity corporate structure tax consolidation and reporting.",
         ),
     }
 
+    sec179_2025 = float(_tp_entry_value(pack, "section_179_cap_2025", 2500000.0))
+    sec179_phase_2025 = float(_tp_entry_value(pack, "section_179_phaseout_2025", 4000000.0))
+    sec179_2026 = float(_tp_entry_value(pack, "section_179_cap_2026", 2560000.0))
+    sec179_phase_2026 = float(_tp_entry_value(pack, "section_179_phaseout_2026", 4090000.0))
+    suv_2025 = float(_tp_entry_value(pack, "section_179_heavy_suv_cap_2025", 31300.0))
+    suv_2026 = float(_tp_entry_value(pack, "section_179_heavy_suv_cap_2026", 32000.0))
+    bonus_pct_2026 = float(_tp_entry_value(pack, "bonus_depreciation_pct_2026", 100.0))
+    bonus_mult_2026 = bonus_pct_2026 / 100.0 if bonus_pct_2026 > 1.0 else bonus_pct_2026
+    std_2026_s = float(_tp_entry_value(pack, "standard_deduction_2026_single", 16100.0))
+    std_2026_m = float(_tp_entry_value(pack, "standard_deduction_2026_mfj", 32200.0))
+    std_2026_h = float(_tp_entry_value(pack, "standard_deduction_2026_hoh", 24150.0))
+    std_2027_s = float(_tp_entry_value(pack, "standard_deduction_2027_single", 16600.0))
+    std_2027_m = float(_tp_entry_value(pack, "standard_deduction_2027_mfj", 33200.0))
+    std_2027_h = float(_tp_entry_value(pack, "standard_deduction_2027_hoh", 24925.0))
+    brackets_2026_s = _tp_entry_value(pack, "tax_brackets_2026_single", [12400, 50400, 105700, 201775, 256225, 640600])
+    brackets_2027_s = _tp_entry_value(pack, "tax_brackets_2027_single", [12800, 52025, 109125, 208325, 264550, 661375])
+    qsbs_ceiling = float(_tp_entry_value(pack, "qsbs_asset_ceiling_post_obbba", 75000000.0))
+    qsbs_excl = float(_tp_entry_value(pack, "qsbs_exclusion_cap_post_obbba", 15000000.0))
+    qsbs_tiers = _tp_entry_value(pack, "qsbs_holding_tiers", {"3_yr": 50, "4_yr": 75, "5_yr": 100})
+    ret_401k_2026 = float(_tp_entry_value(pack, "retirement_401k_2026", 24500.0))
+    oasdi_2026 = float(_tp_entry_value(pack, "oasdi_wage_base_2026", 184500.0))
+
     statutory = TenantStatutoryTruth(
         tenant_id="profithelm",
+        regulator_name="Internal Revenue Service (IRS)",
+        controlling_statute="26 U.S.C. 1(j), 168(k), 179, 1031, 1202 (P.L. 119-21 / IRS Rev. Proc. 2025-32 / 2026-35)",
+        effective_tax_year="2026",
         statutory_citations={
+            "public_law_119_21": "P.L. 119-21 (OBBBA)",
+            "irs_rev_proc_2025_32": "IRS Rev. Proc. 2025-32",
+            "irs_rev_proc_2026_35": "IRS Rev. Proc. 2026-35 / IR-2026-133",
+            "irs_notice_2025_67": "IRS Notice 2025-67",
             "irs_rev_proc_2024_40": "IRS Rev Proc 2024-40",
             "irs_rev_proc_2023_34": "IRS Rev Proc 2023-34",
             "section_179": "IRC Section 179",
-            "section_1202": "IRC Section 1202 (QSBS)",
+            "section_168k": "IRC Section 168(k) (P.L. 119-21 Sec. 70301)",
+            "section_1202": "IRC Section 1202 (QSBS, P.L. 119-21 Sec. 70431)",
             "circular_230": "Treasury Department Circular No. 230",
             "section_1031": "IRC Section 1031",
         },
         limits_and_thresholds={
             "section_179_expense_limit_2024": 1220000.0,
-            "section_179_expense_limit_2025": 1250000.0,
-            "section_179_expense_limit_2026": 2560000.0,
+            "section_179_expense_limit_2025": sec179_2025,
+            "section_179_expense_limit_2026": sec179_2026,
             "section_179_phaseout_threshold_2024": 3050000.0,
-            "section_179_phaseout_threshold_2025": 3130000.0,
-            "section_179_phaseout_threshold_2026": 4090000.0,
+            "section_179_phaseout_threshold_2025": sec179_phase_2025,
+            "section_179_phaseout_threshold_2026": sec179_phase_2026,
             "section_179_heavy_vehicle_2024": 30500.0,
-            "section_179_heavy_vehicle_2025": 31300.0,
-            "section_179_heavy_vehicle_2026": 30500.0,
-            "bonus_depreciation_pct_2026": 0.20,
-            "section_1202_qsbs_asset_ceiling": 50000000.0,
-            "section_1202_qsbs_exclusion_cap": 10000000.0,
+            "section_179_heavy_vehicle_2025": suv_2025,
+            "section_179_heavy_vehicle_2026": suv_2026,
+            "bonus_depreciation_pct_2026": bonus_mult_2026,
+            "section_1202_qsbs_asset_ceiling": qsbs_ceiling,
+            "section_1202_qsbs_exclusion_cap": qsbs_excl,
+            "section_1202_qsbs_holding_tiers": dict(qsbs_tiers) if isinstance(qsbs_tiers, dict) else {"3_yr": 50, "4_yr": 75, "5_yr": 100},
+            "section_1202_qsbs_legacy_pre_july_4_2025_asset_ceiling": 50000000.0,
+            "section_1202_qsbs_legacy_pre_july_4_2025_exclusion_cap": 10000000.0,
             "section_1202_qsbs_exclusion_multiple": 10.0,
             "section_1202_qsbs_holding_period_years": 5,
             "retirement_401k_elective_deferral_2024": 23000.0,
             "retirement_401k_elective_deferral_2025": 23500.0,
-            "retirement_401k_elective_deferral_2026": 24500.0,
+            "retirement_401k_elective_deferral_2026": ret_401k_2026,
             "hsa_single_2024": 4150.0,
             "hsa_single_2025": 4300.0,
             "hsa_single_2026": 4400.0,
@@ -255,31 +388,36 @@ def _build_profithelm_profile() -> TenantTruthProfile:
             "standard_deduction_2025_single": 15000.0,
             "standard_deduction_2025_mfj": 30000.0,
             "standard_deduction_2025_hoh": 22500.0,
-            "standard_deduction_2026_single": 16100.0,
-            "standard_deduction_2026_mfj": 32200.0,
-            "standard_deduction_2026_hoh": 24150.0,
-            "standard_deduction_2027_obbba_single": 16500.0,
-            "standard_deduction_2027_obbba_mfj": 33000.0,
-            "standard_deduction_2027_obbba_hoh": 24750.0,
-            "standard_deduction_2027_sunset_single": 8600.0,
-            "standard_deduction_2027_sunset_mfj": 17200.0,
-            "standard_deduction_2027_sunset_hoh": 12900.0,
+            "standard_deduction_2026_single": std_2026_s,
+            "standard_deduction_2026_mfj": std_2026_m,
+            "standard_deduction_2026_hoh": std_2026_h,
+            "tax_brackets_2026_single": brackets_2026_s,
+            "standard_deduction_2027_single": std_2027_s,
+            "standard_deduction_2027_mfj": std_2027_m,
+            "standard_deduction_2027_hoh": std_2027_h,
+            "standard_deduction_2027_obbba_single": std_2027_s,
+            "standard_deduction_2027_obbba_mfj": std_2027_m,
+            "standard_deduction_2027_obbba_hoh": std_2027_h,
+            "tax_brackets_2027_single": brackets_2027_s,
+            "standard_deduction_2027_repealed_sunset_single": 8600.0,
+            "standard_deduction_2027_repealed_sunset_mfj": 17200.0,
+            "standard_deduction_2027_repealed_sunset_hoh": 12900.0,
             "tcja_vs_sunset_single_125k_tcja_tax": 19181.0,
             "tcja_vs_sunset_single_125k_sunset_tax": 23530.0,
             "tcja_vs_sunset_single_125k_delta": 4349.0,
             "obbba_2026_single_125k_fed_tax": 18734.0,
-            "obbba_2027_single_125k_fed_tax": 18638.0,
+            "obbba_2027_single_125k_fed_tax": 18389.50,
             "ca_sdi_rate_2026_pct": 1.3,
             "ca_top_marginal_rate_2026_pct": 14.6,
             "ssa_oasdi_wage_base_2025": 176100.0,
-            "ssa_oasdi_wage_base_2026": 184500.0,
+            "ssa_oasdi_wage_base_2026": oasdi_2026,
             "saas_runway_baseline_monthly_revenue": 33000.0,
             "saas_runway_baseline_monthly_burn": 45000.0,
             "saas_runway_baseline_net_monthly_burn": 12000.0,
             "scorp_155k_95k_salary_fica_savings": 7366.0,
             "scorp_220k_95k_salary_fica_savings": 14235.0,
             "section_301_tariff_120k_fob_landed_cost": 160966.0,
-            "section_179_heavy_suv_85k_80pct_first_year_deduction": 38000.0,
+            "section_179_heavy_suv_85k_80pct_first_year_deduction": 68000.0,
         },
     )
 
@@ -349,7 +487,8 @@ def _build_profithelm_profile() -> TenantTruthProfile:
 
 
 def _build_prexvo_profile() -> TenantTruthProfile:
-    """Builds the canonical truth profile for Prexvo."""
+    """Builds the canonical truth profile for Prexvo backed by TruthPack."""
+    pack = _load_truth_pack_safe("prexvo")
     pricing = _build_canonical_pricing_tiers(
         audience_tier="consumer",
         free_features=["RAP vs IBR Modeling", "Tiered Standard Calculation", "ICR Repayment Modeling"],
@@ -372,60 +511,74 @@ def _build_prexvo_profile() -> TenantTruthProfile:
         "RAP vs IBR Modeling": FeatureContract(
             name="RAP vs IBR Modeling",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Repayment Assistance Plan vs Income-Based Repayment schedule comparison.",
         ),
         "Tiered Standard Calculation": FeatureContract(
             name="Tiered Standard Calculation",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Tiered fixed repayment schedule calculation for direct loans.",
         ),
         "PAYE Sunset Analysis": FeatureContract(
             name="PAYE Sunset Analysis",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="Analysis of Pay As You Earn plan phasing out pursuant to 34 CFR 685.209.",
         ),
         "ICR Repayment Modeling": FeatureContract(
             name="ICR Repayment Modeling",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Income-Contingent Repayment plan calculation and discretionary income modeling.",
         ),
         "PSLF Buyback Estimator": FeatureContract(
             name="PSLF Buyback Estimator",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="Public Service Loan Forgiveness buyback payment estimation under 34 CFR 685.219.",
         ),
     }
 
+    fpl_2026 = float(_tp_entry_value(pack, "hhs_poverty_2026_1person", 15960.0))
+    fpl_add_2026 = float(_tp_entry_value(pack, "hhs_poverty_2026_per_additional", 5680.0))
+    rap_months = int(_tp_entry_value(pack, "rap_forgiveness_months", 360))
+    rap_sub_pct = float(_tp_entry_value(pack, "rap_unpaid_interest_subsidy_pct", 100.0))
+    rap_match = float(_tp_entry_value(pack, "rap_principal_match_monthly_cap", 50.0))
+    pslf_payments = int(_tp_entry_value(pack, "pslf_qualifying_payments", 120))
+
     statutory = TenantStatutoryTruth(
         tenant_id="prexvo",
+        regulator_name="U.S. Department of Education (Federal Student Aid)",
+        controlling_statute="Title IV Higher Education Act; 34 CFR Part 685; P.L. 119-21 Section 82001; 91 FR 1797",
+        effective_tax_year="2026",
         statutory_citations={
             "title_iv": "Title IV Higher Education Act",
             "34_cfr_685": "34 CFR Part 685",
             "paye_regulations": "34 CFR 685.209",
             "pslf_regulations": "34 CFR 685.219",
+            "rap_statute": "P.L. 119-21 Section 82001 (360-Month RAP Forgiveness)",
+            "hhs_poverty_2026": "91 FR 1797 (2026 HHS Poverty Guidelines)",
         },
         limits_and_thresholds={
             "rap_discretionary_percentage": 0.10,
             "rap_poverty_guideline_threshold": 2.25,
+            "rap_forgiveness_months": rap_months,
+            "rap_unpaid_interest_subsidy_pct": rap_sub_pct,
             "ibr_pre_2014_percentage": 0.15,
             "ibr_post_2014_percentage": 0.10,
             "ibr_poverty_guideline_threshold": 1.50,
-            "pslf_qualifying_payments": 120,
+            "pslf_qualifying_payments": pslf_payments,
             "poverty_guidelines": {
                 2024: {"individual": 15060.0, "additional_person": 5380.0},
                 2025: {"individual": 15650.0, "additional_person": 5440.0},
-                2026: {"individual": 15650.0, "additional_person": 5500.0},
+                2026: {"individual": fpl_2026, "additional_person": fpl_add_2026},
             },
-            "poverty_guidelines_2026_hhs_contiguous": 15650.0,
-            "poverty_guidelines_2026_hhs_per_additional": 5500.0,
-            "rap_exemption_2026_single_contiguous": 35212.50,
-            "ibr_exemption_2026_single_contiguous": 23475.00,
-            "icr_exemption_2026_single_contiguous": 15650.00,
+            "poverty_guidelines_2026_hhs_contiguous": fpl_2026,
+            "poverty_guidelines_2026_hhs_per_additional": fpl_add_2026,
+            "rap_exemption_2026_single_contiguous": round(fpl_2026 * 2.25, 2),
+            "ibr_exemption_2026_single_contiguous": round(fpl_2026 * 1.50, 2),
+            "icr_exemption_2026_single_contiguous": fpl_2026,
             "icr_poverty_guideline_threshold": 1.00,
             "grad_plus_unsubsidized_annual_cap": 20500.00,
             "grad_plus_unsubsidized_aggregate_cap": 138500.00,
@@ -472,7 +625,7 @@ def _build_prexvo_profile() -> TenantTruthProfile:
             "rap_50k_agi_monthly": 82.50,
             "rap_55k_agi_monthly": 164.90,
             "refi_break_even_monthly_savings": 82.50,
-            "rap_principal_match_monthly": 50.0,
+            "rap_principal_match_monthly": rap_match,
             "rap_minimum_payment_monthly": 10.0,
         },
     )
@@ -560,7 +713,8 @@ def _build_prexvo_profile() -> TenantTruthProfile:
 
 
 def _build_gainhelm_profile() -> TenantTruthProfile:
-    """Builds the canonical truth profile for GainHelm (Enterprise Cyber Compliance & GRC Governance)."""
+    """Builds the canonical truth profile for GainHelm backed by TruthPack."""
+    pack = _load_truth_pack_safe("gainhelm")
     pricing = _build_canonical_pricing_tiers(
         audience_tier="business",
         free_features=[
@@ -587,51 +741,63 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
         "SOC 2 Audit Cost & CPA Scoping": FeatureContract(
             name="SOC 2 Audit Cost & CPA Scoping",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="AICPA SSAE 18 (AT-C Section 205) Trust Services Criteria Type I and Type II CPA audit cost and readiness modeling.",
         ),
         "DoD CMMC 2.0 & NIST 800-171 SPRS Scoring": FeatureContract(
             name="DoD CMMC 2.0 & NIST 800-171 SPRS Scoring",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="32 CFR Part 170 and DFARS 252.204-7012 / 7019 / 7020 NIST SP 800-171 Rev 2 110-control SPRS score and C3PAO budget modeling.",
         ),
         "ISO 27001 Auditor-Day Calculation": FeatureContract(
             name="ISO 27001 Auditor-Day Calculation",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="ISO/IEC 27006-1:2024 mandatory Stage 1, Stage 2, and 3-year surveillance auditor-day calculation for ISO/IEC 27001:2022 ISMS.",
         ),
         "HHS OCR HIPAA Penalty Tier Modeling": FeatureContract(
             name="HHS OCR HIPAA Penalty Tier Modeling",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="45 CFR 160.404 and 42 U.S.C. 1320d-5 inflation-adjusted 4-Tier civil money penalty exposure and HITECH breach notification cost modeling.",
         ),
         "PCI DSS 4.0 QSA & ROC Scoping": FeatureContract(
             name="PCI DSS 4.0 QSA & ROC Scoping",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="PCI SSC PCI DSS v4.0.1 Merchant Level 1-4 SAQ vs QSA Report on Compliance (ROC) and ASV scan cost modeling.",
         ),
     }
 
+    hipaa_t4_2026 = float(_tp_entry_value(pack, "hipaa_tier4_annual_cap_2026", 2190294.0))
+    sprs_max = int(_tp_entry_value(pack, "sprs_max_score", 110))
+    sprs_min = int(_tp_entry_value(pack, "sprs_min_score", -203))
+    sprs_ded = int(_tp_entry_value(pack, "sprs_max_deduction", 313))
+    sprs_counts = _tp_entry_value(pack, "sprs_control_counts", {"5_pt": 44, "3_pt": 14, "1_pt": 51, "0_pt": 1})
+    bls_hourly = float(_tp_entry_value(pack, "bls_infosec_hourly_loaded_2026", 121.67))
+
     statutory = TenantStatutoryTruth(
         tenant_id="gainhelm",
+        regulator_name="AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+        controlling_statute="AICPA SSAE 18; 32 CFR Part 170; NIST SP 800-171; 45 CFR 160.404 (91 FR 3665 / 91 FR 66566)",
+        effective_tax_year="2026",
         statutory_citations={
             "aicpa_ssae_18_atc_205": "AICPA SSAE 18 (AT-C Section 205) & TSP Section 100",
             "dod_32_cfr_part_170": "32 CFR Part 170 (DoD CMMC 2.0 Final Rule)",
             "dfars_252_204_7012": "DFARS 252.204-7012 / 252.204-7019 / 252.204-7020",
             "nist_sp_800_171_rev2": "NIST SP 800-171 Rev 2 (110 Security Requirements)",
             "iso_iec_27006_1_2024": "ISO/IEC 27006-1:2024 & ISO/IEC 27001:2022",
-            "hipaa_45_cfr_160_404": "45 CFR 160.404 & 42 U.S.C. 1320d-5 (HITECH Act)",
+            "hipaa_45_cfr_160_404": "45 CFR 160.404 & 42 U.S.C. 1320d-5 (91 FR 3665 / 91 FR 66566)",
             "pci_dss_v4_0_1": "PCI DSS v4.0.1 Merchant & Service Provider Scoping",
             "fedramp_44_usc_3607": "44 U.S.C. 3607 (FedRAMP Authorization Act) & NIST SP 800-53 Rev 5",
             "gdpr_art_83_eu_ai_act_art_99": "GDPR Article 83 (EU 2016/679) & EU AI Act Article 99 (EU 2024/1689)",
         },
         limits_and_thresholds={
-            "sprs_max_score": 110,
-            "sprs_min_score": -203,
+            "sprs_max_score": sprs_max,
+            "sprs_min_score": sprs_min,
+            "sprs_max_deduction": sprs_ded,
+            "sprs_control_counts": dict(sprs_counts) if isinstance(sprs_counts, dict) else {"5_pt": 44, "3_pt": 14, "1_pt": 51, "0_pt": 1},
             "sprs_total_controls": 110,
             "cmmc_conditional_min_sprs": 88,
             "cmmc_poam_closeout_days": 180,
@@ -639,7 +805,8 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
             "hipaa_tier2_min_per_violation": 1424.0,
             "hipaa_tier3_min_per_violation": 13795.0,
             "hipaa_tier4_min_per_violation": 71162.0,
-            "hipaa_statutory_annual_cap_tier4": 2067813.0,
+            "hipaa_tier4_annual_cap_2026": hipaa_t4_2026,
+            "hipaa_statutory_annual_cap_tier4": hipaa_t4_2026,
             "hipaa_ocr_enforcement_discretion_tier1_cap": 25000.0,
             "hipaa_ocr_enforcement_discretion_tier2_cap": 100000.0,
             "hipaa_ocr_enforcement_discretion_tier3_cap": 250000.0,
@@ -659,13 +826,13 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
             "eu_ai_act_high_risk_turnover_pct": 0.03,
             "sec_form_8k_item_1_05_disclosure_business_days": 4,
             "bls_soc_15_1212_median_annual_wage": 120360.0,
-            "bls_soc_15_1212_mean_hourly_loaded_rate": 121.67,
+            "bls_soc_15_1212_mean_hourly_loaded_rate": bls_hourly,
             "soc2_baseline_type2_75emp_total_cost": 78100.40,
             "cmmc_level2_baseline_75emp_total_cost": 132000.0,
             "cmmc_level2_baseline_85emp_total_cost": 132000.0,
             "iso27001_baseline_75emp_total_cost": 67000.40,
             "iso27001_baseline_120emp_3yr_tco": 67000.40,
-            "hipaa_baseline_1500rec_total_exposure": 2455313.0,
+            "hipaa_baseline_1500rec_total_exposure": 2577794.0,
             "pci_dss_baseline_level1_total_cost": 94800.0,
             "fedramp_moderate_baseline_total_cost": 500000.0,
             "hitrust_i1_baseline_total_cost": 115000.0,
@@ -767,7 +934,8 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
 
 
 def _build_lienbond_profile() -> TenantTruthProfile:
-    """Builds the canonical truth profile for LienBond (lienbond.com)."""
+    """Builds the canonical truth profile for LienBond (lienbond.com) backed by TruthPack."""
+    pack = _load_truth_pack_safe("lienbond")
     pricing = _build_canonical_pricing_tiers(
         audience_tier="business",
         free_features=[
@@ -794,44 +962,57 @@ def _build_lienbond_profile() -> TenantTruthProfile:
         "50-State Mechanics Lien Deadline Matrix": FeatureContract(
             name="50-State Mechanics Lien Deadline Matrix",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Statutory preliminary notice, mechanics lien recording, and enforcement deadline calculation under Cal. Civ. Code 8132-8416, Tex. Prop. Code Ch. 53, Fla. Stat. Ch. 713, and N.Y. Lien Law.",
         ),
         "Contractor Surety Bond & Underwriting Readiness Dossier": FeatureContract(
             name="Contractor Surety Bond & Underwriting Readiness Dossier",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="Federal Miller Act (40 U.S.C. 3131), state Little Miller Act, and CSLB contractor license surety bond premium and working-capital capacity modeling.",
         ),
         "NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet": FeatureContract(
             name="NCCI Workers Comp Experience Modification Rate (EMR) Audit Worksheet",
             enabled=True,
-            tier_availability=["free", "pro", "enterprise"],
+            tier_availability=["free", "quick", "full", "partner_slot"],
             description="NCCI Basic Manual and state rating bureau trade class code (5403, 5183, 5190, 5551) manual premium and Experience Modification Rate (EMR) split-point calculation.",
         ),
         "DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet": FeatureContract(
             name="DOL Form WH-347 Davis-Bacon Certified Payroll & Fringe Benefit Packet",
             enabled=True,
-            tier_availability=["pro", "enterprise"],
+            tier_availability=["quick", "full", "partner_slot"],
             description="40 U.S.C. 3141 Davis-Bacon Act and 29 CFR Part 5 prevailing wage, annualized bona fide fringe credit, and WH-347 statement of compliance preparation.",
         ),
     }
 
+    miller_threshold = float(_tp_entry_value(pack, "miller_act_threshold_usd", 150000.0))
+    miller_alt_min = float(_tp_entry_value(pack, "miller_act_alt_protection_min_usd", 35000.0))
+    bid_bond_range = _tp_entry_value(pack, "bid_bond_penal_sum_pct_range", [5.0, 20.0])
+    lic_bond_range = _tp_entry_value(pack, "contractor_license_bond_rate_range_pct", [0.75, 10.0])
+    ncci_manual = str(_tp_entry_value(pack, "ncci_workers_comp_emr", "NCCI Experience Rating Plan Manual / Basic Manual"))
+    davis_bacon = str(_tp_entry_value(pack, "davis_bacon_wh347", "40 U.S.C. 3141 / 29 CFR 5.5"))
+
     statutory = TenantStatutoryTruth(
         tenant_id="lienbond",
+        regulator_name="U.S. Department of Labor (WHD), U.S. Treasury Circular 570, and State Contractors Boards",
+        controlling_statute="40 U.S.C. 3131 (Miller Act); FAR 28.101; 40 U.S.C. 3141; NCCI Experience Rating Plan",
+        effective_tax_year="2026",
         statutory_citations={
-            "federal_miller_act_40_usc_3131": "40 U.S.C. 3131-3134 (Federal Miller Act) & FAR 28.102",
-            "davis_bacon_act_40_usc_3141": "40 U.S.C. 3141-3148 (Davis-Bacon Act) & 29 CFR Part 5",
+            "federal_miller_act_40_usc_3131": "40 U.S.C. 3131-3134 (Federal Miller Act) & FAR 28.102-1",
+            "far_28_101_bid_bond": "FAR 28.101 (Bid Bond Penal Sum 5%-20%)",
+            "davis_bacon_act_40_usc_3141": f"{davis_bacon} (Davis-Bacon Act & WH-347)",
             "erisa_sec_412_29_usc_1112": "29 U.S.C. 1112 (ERISA Section 412) & 29 CFR 2580.412",
             "prompt_payment_act_31_usc_3902": "31 U.S.C. 3902 (Federal Prompt Payment Act) & State Retainage Statutes",
             "ca_mechanics_lien_civ_code_8132_8416": "Cal. Civ. Code Sections 8132-8138, 8200-8216 & 8412-8416",
             "tx_mechanics_lien_prop_code_53": "Tex. Prop. Code Sections 53.052, 53.056, 53.101 & 53.284",
             "fl_construction_lien_stat_713": "Fla. Stat. Sections 713.06, 713.08 & 713.20",
-            "ncci_experience_rating_plan": "NCCI Basic Manual & Experience Rating Plan Manual (Primary/Excess Split Point)",
+            "ncci_experience_rating_plan": ncci_manual,
         },
         limits_and_thresholds={
-            "miller_act_federal_bond_threshold_usd": 150000.0,
-            "miller_act_alternative_payment_protection_min_usd": 35000.0,
+            "miller_act_federal_bond_threshold_usd": miller_threshold,
+            "miller_act_alternative_payment_protection_min_usd": miller_alt_min,
+            "bid_bond_penal_sum_pct_range": list(bid_bond_range) if isinstance(bid_bond_range, (list, tuple)) else [5.0, 20.0],
+            "contractor_license_bond_rate_range_pct": list(lic_bond_range) if isinstance(lic_bond_range, (list, tuple)) else [0.75, 10.0],
             "erisa_fidelity_bond_statutory_rate_pct": 10.0,
             "erisa_fidelity_bond_min_floor_usd": 1000.0,
             "erisa_fidelity_bond_standard_cap_usd": 500000.0,
@@ -1304,8 +1485,8 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
             llms_manifest_title="ProfitHelm: Complete Machine Knowledge Base & Statutory Calculation Manifest",
             llms_statutory_summary_block=(
                 "## Key Statutory Authorities\n"
-                "- TCJA Sunset: Federal marginal rates revert to 10%-39.6% on December 31, 2025 under IRC Section 1(j).\n"
-                "- Section 179: Maximum deduction cap $2,560,000 with $4,090,000 equipment phase-out under IRC Section 179 and IRC Section 168(k).\n"
+                "- OBBBA (P.L. 119-21) & IRS Rev. Proc. 2025-32 / 2026-35: Permanently extends the 10%-37% federal marginal tax brackets (repealing the 39.6% sunset) with Single standard deductions of $16,100 (2026) and $16,600 (2027) under IRC Section 1(j).\n"
+                "- Section 179 & 168(k): Maximum deduction cap $2,560,000 ($4,090,000 phase-out), $32,000 Heavy SUV cap (2026), and 100% permanent bonus depreciation under P.L. 119-21.\n"
                 "- Section 1031: 45-day replacement identification and 180-day closing deadlines under 26 U.S.C. Section 1031.\n"
                 "- GAAP ASC 205-40: Going-concern cash runway forecasting benchmarked to monthly net burn and liquid reserves.\n"
             ),
@@ -1470,7 +1651,7 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
             llms_manifest_title="Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest",
             llms_statutory_summary_block=(
                 "## Title IV Statutory Parameter Specifications & Formula Definitions\n"
-                "- Repayment Assistance Plan (RAP): Discretionary income calculated at 225% of HHS Poverty Guidelines (42 U.S.C. 9902(2)). Statutory rate is 10% of discretionary income. 100% unpaid interest subsidy applies to undergraduate balances.\n"
+                "- Repayment Assistance Plan (RAP): Governed by P.L. 119-21 Section 82001. Discretionary income calculated at 225% of 2026 HHS Poverty Guidelines ($15,960 single + $5,680 per additional person under 91 FR 1797). Statutory rate is 10% of discretionary income, 100% unpaid interest subsidy, up to $50/month principal match, and 360-month (30-year) forgiveness.\n"
                 "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of HHS Poverty Guidelines under 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
                 "- Pay As You Earn (PAYE): Governed by 34 CFR 685.209. 150% poverty exemption, 10% discretionary income rate, 20-year forgiveness horizon, capped at 10-year standard repayment payment.\n"
                 "- Income-Contingent Repayment (ICR): Governed by 34 CFR 685.209(b). Lesser of: 20% discretionary income over 100% poverty line, or 12-year income-adjusted payment formula. Sole direct IDR option for consolidated Parent PLUS loans.\n"
@@ -2084,15 +2265,42 @@ def resolve_canonical_property_id(
 ) -> str:
     """
     Resolves a property_id, repo_dir_name, domain, URL, or filesystem path
-    to a registered tenant property_id in CANONICAL_TENANT_DECLARATIONS or SPAWNED_TENANT_DECLARATIONS.
+    to a registered tenant property_id, a TruthPack property_id, or the raw non-empty
+    tenant identifier. NEVER silently collapses an unknown real tenant ID to 'profithelm'.
     """
+    if repo_root is not None:
+        try:
+            marker_file = Path(repo_root) / ".pseofactory.json"
+            if marker_file.is_file():
+                marker_data = json.loads(marker_file.read_text(encoding="utf-8"))
+                if isinstance(marker_data, dict):
+                    marker_pid = str(marker_data.get("property_id") or "").strip().lower()
+                    if marker_pid:
+                        if marker_pid in ("profithelm-platform", "factory"):
+                            return "profithelm"
+                        return marker_pid
+        except Exception:
+            pass
+
     raw = str(tenant_or_context or "").strip().lower()
+    if raw in ("profithelm-platform", "factory"):
+        return "profithelm"
     if raw in CANONICAL_TENANT_DECLARATIONS:
         return raw
     if raw in SPAWNED_TENANT_DECLARATIONS:
         return raw
     if raw in REPO_DIR_TO_PROPERTY_ID:
         return REPO_DIR_TO_PROPERTY_ID[raw]
+
+    try:
+        from pseofactory.truth_pack import discover_truth_pack_ids
+
+        tp_ids = set(discover_truth_pack_ids())
+        if raw in tp_ids:
+            return raw
+    except Exception:
+        tp_ids = set()
+
     combined = f"{raw} {repo_root or ''}".lower()
     all_decls = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
     # Check non-default tenants first so specific substrings win over default fallback
@@ -2105,6 +2313,10 @@ def resolve_canonical_property_id(
             or (contract.domain and contract.domain.lower() in combined)
         ):
             return pid
+    for tp_pid in sorted(tp_ids):
+        if tp_pid != default and tp_pid in combined:
+            return tp_pid
+
     if default in all_decls:
         def_c = all_decls[default]
         if (
@@ -2113,6 +2325,10 @@ def resolve_canonical_property_id(
             or (def_c.domain and def_c.domain.lower() in combined)
         ):
             return default
+
+    # Never collapse a real unknown tenant ID (e.g. 'synthetic_fifth_site' or 'site_05') to 'profithelm'
+    if raw and raw not in ("default", "pseofactory", "factory") and "/" not in raw and "\\" not in raw and " " not in raw:
+        return raw
     return default
 
 
@@ -2121,13 +2337,32 @@ def get_tenant_contract(
     repo_root: Optional[Any] = None,
     default: str = "profithelm",
 ) -> DeclarativeTenantContract:
-    """Returns the DeclarativeTenantContract for a tenant ID, domain, or repo path."""
+    """
+    Returns the DeclarativeTenantContract for a tenant ID, domain, or repo path.
+    Supports 50+ sites dynamically via TruthPack synthesis; fails closed for unknown sites.
+    """
     pid = resolve_canonical_property_id(tenant_or_context, repo_root=repo_root, default=default)
-    return (
-        CANONICAL_TENANT_DECLARATIONS.get(pid)
-        or SPAWNED_TENANT_DECLARATIONS.get(pid)
-        or CANONICAL_TENANT_DECLARATIONS["profithelm"]
-    )
+    existing = CANONICAL_TENANT_DECLARATIONS.get(pid) or SPAWNED_TENANT_DECLARATIONS.get(pid)
+    if existing is not None:
+        return existing
+
+    pack = _load_truth_pack_safe(pid, workspace_root=Path(repo_root).parent if repo_root else None)
+    if pack is not None:
+        profile = _build_profile_from_truth_pack(pack)
+        domain = re.sub(r"^https?://", "", str(pack.canonical_domain or f"{pid}.com")).strip("/")
+        return DeclarativeTenantContract(
+            property_id=pack.property_id,
+            repo_dir_name=pack.property_id,
+            domain=domain,
+            canonical_base=pack.canonical_domain or f"https://{domain}",
+            brand_name=pack.brand_name,
+            package_name=pack.property_id,
+            truth_profile=profile,
+            statutory_truth=profile.statutory_truth,
+            audience_tier=pack.audience_tier or "business",
+        )
+
+    raise KeyError(f"TRUTH_PACK_MISSING: Unknown tenant contract '{pid}' (no registration or Truth Pack found)")
 
 
 def match_tenant_statutory_intent(query: str, include_spawned: bool = False) -> Dict[str, bool]:
@@ -2334,11 +2569,61 @@ class TenantFactStore:
         """Resets singleton instance for test isolation."""
         cls._instance = None
 
-    def get_profile(self, tenant: str) -> Optional[TenantTruthProfile]:
-        """Retrieves tenant profile by identifier (case-insensitive)."""
+    @classmethod
+    def get_statutory_truth(
+        cls,
+        tenant_id: str,
+        workspace_root: Optional[Path] = None,
+    ) -> TenantStatutoryTruth:
+        """
+        Returns TenantStatutoryTruth backed by TruthPack (or registered tenant profile).
+        Exposes .regulator_name, .controlling_statute, and .effective_tax_year.
+        Fails closed with TruthPackMissingError for unknown tenants without a TruthPack.
+        """
+        from pseofactory.truth_pack import TruthPackMissingError
+
+        pid = resolve_canonical_property_id(tenant_id, default=str(tenant_id or "").strip().lower())
+        store = cls.get_instance()
+        pack = _load_truth_pack_safe(pid, workspace_root=workspace_root)
+        prof = store.get_profile(pid, workspace_root=workspace_root)
+        if prof is not None and prof.statutory_truth is not None:
+            if prof.statutory_truth.regulator_name and prof.statutory_truth.controlling_statute:
+                return prof.statutory_truth
+            if pack is not None:
+                tp_truth = _build_statutory_truth_from_truth_pack(pack)
+                return TenantStatutoryTruth(
+                    tenant_id=pid,
+                    statutory_citations={**tp_truth.statutory_citations, **prof.statutory_truth.statutory_citations},
+                    limits_and_thresholds={**tp_truth.limits_and_thresholds, **prof.statutory_truth.limits_and_thresholds},
+                    regulator_name=prof.statutory_truth.regulator_name or tp_truth.regulator_name,
+                    controlling_statute=prof.statutory_truth.controlling_statute or tp_truth.controlling_statute,
+                    effective_tax_year=prof.statutory_truth.effective_tax_year or tp_truth.effective_tax_year,
+                )
+            return prof.statutory_truth
+        if pack is not None:
+            return _build_statutory_truth_from_truth_pack(pack)
+        raise TruthPackMissingError(
+            f"TRUTH_PACK_MISSING: No Truth Pack or registered profile found for tenant '{tenant_id}'"
+        )
+
+    def get_profile(
+        self,
+        tenant: str,
+        workspace_root: Optional[Path] = None,
+    ) -> Optional[TenantTruthProfile]:
+        """Retrieves tenant profile by identifier, dynamically loading TruthPack for 5th+ sites."""
         if not tenant:
             return None
-        return self._profiles.get(str(tenant).lower().strip())
+        pid = str(tenant).lower().strip()
+        existing = self._profiles.get(pid)
+        if existing is not None:
+            return existing
+        pack = _load_truth_pack_safe(pid, workspace_root=workspace_root)
+        if pack is not None:
+            built = _build_profile_from_truth_pack(pack)
+            self._profiles[pid] = built
+            return built
+        return None
 
     def verify_price(self, tenant: str, price_usd: float) -> bool:
         """
@@ -2374,21 +2659,25 @@ class TenantFactStore:
         spec_disclosures: Optional[List[str]] = None,
     ) -> Tuple[bool, List[str]]:
         """
-        Inspects text against tenant truth profile:
-        1. Banned marketing claims
-        2. Unverified pricing numbers ($XX/mo)
+        Inspects text against tenant truth profile and TruthPack:
+        0. Fail closed when tenant has neither TruthPack nor registered profile
+        1. Banned marketing claims (profile + TruthPack regexes)
+        2. Unverified pricing numbers ($XX/mo AND one-time offer/checkout strings)
         3. Cross-tenant boundary contamination
-        4. Mandatory regulatory disclosures
-        5. Statutory threshold limit boundaries & ground-truth benchmark figures
+        4. Mandatory regulatory disclosures (including GainHelm non-bare-c3pao and full LienBond)
+        5. Statutory threshold limit boundaries, TruthPack citation allowlists, & ground-truth figures
         Returns (is_valid, violations_list).
         Zero em-dashes. Zero en-dashes.
         """
         assert_no_forbidden_dashes(text, context=context or f"verify_claim({tenant})")
-        profile = self.get_profile(tenant)
-        if not profile:
-            return False, [f"Unknown tenant '{tenant}'"]
+        tenant_norm = str(tenant or "").lower().strip()
+        pack = _load_truth_pack_safe(tenant_norm)
+        profile = self.get_profile(tenant_norm)
+        if not profile and pack is None:
+            return False, [
+                f"TRUTH_PACK_MISSING: No Truth Pack or registered profile found for tenant '{tenant}'"
+            ]
 
-        tenant_norm = str(tenant).lower().strip()
         cache_key: Optional[Tuple[str, str, str]] = None
         if not spec_disclosures and len(text) >= 256:
             text_digest = hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest()
@@ -2400,28 +2689,52 @@ class TenantFactStore:
         violations: List[str] = []
         text_lower = text.lower()
 
-        # 1. Banned claims check
+        # 1. Banned claims check (profile substrings + TruthPack regex patterns)
         for banned in profile.claims_banned:
             if banned.lower() in text_lower:
                 violations.append(
                     f"Banned claim detected for {profile.brand_name}: '{banned}'"
                 )
+        if pack is not None:
+            for b_rule in getattr(pack, "banned_claims", []) or []:
+                b_pat = str(b_rule.get("pattern") or "").strip() if isinstance(b_rule, dict) else ""
+                b_reason = str(b_rule.get("reason") or "Banned TruthPack claim").strip() if isinstance(b_rule, dict) else "Banned TruthPack claim"
+                if b_pat:
+                    try:
+                        if re.search(b_pat, text, re.IGNORECASE):
+                            msg = f"Banned TruthPack claim detected for {profile.brand_name}: {b_reason}"
+                            if msg not in violations:
+                                violations.append(msg)
+                    except re.error:
+                        pass
 
-        # 2. Pricing verification (distinguishing SaaS tier pricing claims from domain calculation figures)
-        if "$" in text and ("/mo" in text_lower or "per mo" in text_lower):
-            valid_prices = {tier.price_usd for tier in profile.pricing_tiers.values()}
+        # 2. Pricing verification (/mo AND one-time offer/checkout pricing strings)
+        if "$" in text or "offer_price_usd" in text_lower or "price_usd" in text_lower or "data-offer-price" in text_lower:
+            valid_prices = {float(tier.price_usd) for tier in profile.pricing_tiers.values()}
+            if pack is not None and isinstance(getattr(pack, "pricing_tiers", None), dict):
+                for t_obj in pack.pricing_tiers.values():
+                    if isinstance(t_obj, dict) and t_obj.get("price_usd") is not None:
+                        try:
+                            valid_prices.add(float(t_obj["price_usd"]))
+                        except (TypeError, ValueError):
+                            pass
+
             allowed_statutory_monthly = {
                 float(v)
                 for k, v in profile.statutory_truth.limits_and_thresholds.items()
                 if isinstance(v, (int, float)) and ("monthly" in k or "subsidy" in k)
             }
             calc_output_markers = (
-                "payment", "rap", "ibr", "icr", "save", "pslf", "loan", "agi",
-                "borrower", "forbearance", "subsidy", "discretionary", "tax",
-                "savings", "/yr", "annual", "lease", "burn", "mrr", "premium", "retainage",
+                "payment", "repayment", "installment", "rap", "ibr", "icr", "save",
+                "pslf", "loan", "debt", "student", "agi", "borrower", "forbearance",
+                "subsidy", "discretionary", "tax", "interest", "savings", "deduction",
+                "bond", "premium", "retainage", "salary", "payroll", "breach",
+                "penalty", "cost", "/yr", "annual", "lease", "burn", "mrr",
             )
             explicit_saas_tier_markers = (
-                "pricing", "tier", "subscription", "membership", "plan:", "upgrade",
+                "pricing", "pricing tier", "pro tier", "enterprise tier", "starter tier",
+                "quick tier", "full tier", "subscription", "membership", "upgrade to",
+                "pro plan", "starter plan", "paid plan", "monthly plan",
             )
             for m_price in re.finditer(
                 r'\$(\d+(?:\.\d{1,2})?)\s*(?:/|\s*per\s*)(?:mo|month)',
@@ -2439,8 +2752,55 @@ class TenantFactStore:
                 if has_calc_marker and not has_saas_marker:
                     continue
                 violations.append(
-                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {valid_prices}"
+                    f"Unverified price claim '${price_val}' contradicts {profile.brand_name} pricing tiers {sorted(valid_prices)}"
                 )
+
+            # One-time pricing / offer / checkout strings (e.g. $49, $99, $999)
+            for m_offer_kv in re.finditer(
+                r'(?:offer_price_usd|checkout_price|tier_price|data-offer-price)\s*(?:["\']?\s*[:=]\s*["\']?|\|\|\s*)\$?(\d+(?:\.\d{1,2})?)',
+                text,
+                re.IGNORECASE,
+            ):
+                p_val = float(m_offer_kv.group(1))
+                if p_val not in valid_prices:
+                    msg = f"Unverified one-time offer/checkout price '${p_val:g}' contradicts {profile.brand_name} pricing tiers {sorted(valid_prices)}"
+                    if msg not in violations:
+                        violations.append(msg)
+
+            onetime_offer_markers = (
+                "one-time", "one time", "unlock", "checkout", "pricing tier",
+                "full workpaper", "quick worksheet", "partner slot", "upgrade to",
+                "pro plan", "pro tier", "enterprise tier", "starter tier",
+                "buy now", "order summary", "paywall", "get instant access",
+                "instant worksheet", "data pack", "playbook",
+            )
+            statutory_or_calc_skip_markers = (
+                "bond", "miller act", "cslb", "min_premium", "minimum premium",
+                "principal match", "deduction", "section 179", "section 1202",
+                "poverty", "loan", "agi", "penalty", "forensic", "c3pao", "cpa fee",
+                "audit cost", "payroll", "salary", "fob", "tariff", "cap", "limit",
+                "annual", "/yr", "per year", "per month", "/mo",
+            )
+            if any(om in text_lower for om in onetime_offer_markers):
+                for m_ot in re.finditer(r'(?<![0-9.])\$(\d{1,4}(?:\.\d{1,2})?)\b(?![,\d])', text):
+                    p_val = float(m_ot.group(1))
+                    if p_val in valid_prices or p_val == 0.0:
+                        continue
+                    win_start = max(0, m_ot.start() - 80)
+                    win_end = min(len(text_lower), m_ot.end() + 80)
+                    win = text_lower[win_start:win_end]
+                    has_offer_ctx = any(om in win for om in onetime_offer_markers)
+                    has_stat_skip = any(sm in win for sm in statutory_or_calc_skip_markers)
+                    # Only flag when offer/checkout context is tightly paired without statutory calc context
+                    # OR when explicit checkout/one-time/pro-tier phrasing is adjacent
+                    strong_checkout_ctx = any(
+                        cm in win
+                        for cm in ("one-time", "one time", "checkout", "pricing tier", "pro plan", "pro tier", "enterprise tier", "buy now", "order summary", "unlock", "partner slot")
+                    )
+                    if has_offer_ctx and (strong_checkout_ctx or not has_stat_skip):
+                        msg = f"Unverified one-time pricing claim '${p_val:g}' contradicts {profile.brand_name} pricing tiers {sorted(valid_prices)}"
+                        if msg not in violations:
+                            violations.append(msg)
 
         # 3. Cross-tenant boundary isolation (exempting verified parent-entity Zoho mailbox & Stripe legal name)
         boundary_scan_lower = text_lower
@@ -2495,16 +2855,74 @@ class TenantFactStore:
                 or "attestation scenario modeling" in text_lower
             )
             if has_audit_modeling:
-                has_attestation_disc = (
-                    "licensed cpa" in text_lower
-                    or "c3pao" in text_lower
-                    or "statutory compliance audit disclaimer" in text_lower
+                # Never auto-pass just because 'c3pao' or 'licensed cpa' appears anywhere on the page;
+                # require explicit non-CPA / non-C3PAO / planning-estimate disclaimer wording.
+                has_tp_disc = False
+                if pack is not None and getattr(pack, "disclosures", None):
+                    for disc in pack.disclosures:
+                        pats = getattr(disc, "required_text_patterns", []) or []
+                        if pats and all(re.search(p, text, re.IGNORECASE) for p in pats):
+                            has_tp_disc = True
+                            break
+                has_attestation_disc = has_tp_disc or (
+                    "statutory compliance audit disclaimer" in text_lower
                     or "does not constitute a formal cpa" in text_lower
+                    or "not a licensed cpa" in text_lower
+                    or "not a c3pao" in text_lower
+                    or "non-cpa / non-c3pao" in text_lower
+                    or ("planning estimate" in text_lower and "not a" in text_lower)
                 )
                 if not has_attestation_disc:
                     violations.append(
                         "Missing mandatory GainHelm attestation disclosure: 'Statutory compliance audit disclaimer: Cost, penalty, and control-scoping figures are deterministic computational models and do not constitute a formal CPA attestation opinion, DoD C3PAO certification, QSA Report on Compliance, or legal counsel.'"
                     )
+        elif tenant_norm == "lienbond":
+            ctx_low_lb = str(context or "").lower()
+            is_lb_modeling = (
+                "<html" in text_lower
+                or "surety scenario modeling" in text_lower
+                or "underwriting scenario modeling" in text_lower
+                or "lien scenario modeling" in text_lower
+                or "emr scenario modeling" in text_lower
+                or "/tools/" in ctx_low_lb
+                or "tools/" in ctx_low_lb
+            )
+            if is_lb_modeling:
+                has_tp_lb_disc = False
+                if pack is not None and getattr(pack, "disclosures", None):
+                    for disc in pack.disclosures:
+                        pats = getattr(disc, "required_text_patterns", []) or []
+                        if pats and all(re.search(p, text, re.IGNORECASE) for p in pats):
+                            has_tp_lb_disc = True
+                            break
+                has_lb_disc = has_tp_lb_disc or (
+                    (
+                        "do not constitute legal advice" in text_lower
+                        or "does not constitute legal advice" in text_lower
+                        or "non-attorney" in text_lower
+                        or "not a licensed attorney" in text_lower
+                        or "not a licensed surety" in text_lower
+                    )
+                    and (
+                        "underwriting estimate" in text_lower
+                        or "informational" in text_lower
+                        or "non-licensed producer" in text_lower
+                    )
+                )
+                if not has_lb_disc:
+                    violations.append(
+                        "Missing mandatory LienBond underwriting/non-legal disclaimer: 'LienBond is not a licensed attorney, surety underwriter, or insurance producer; outputs are informational underwriting estimates only and do not constitute legal advice.'"
+                    )
+        elif pack is not None and getattr(pack, "disclosures", None) and "<html" in text_lower:
+            slug_ctx_dyn = str(context or "").lower()
+            for disc in pack.disclosures:
+                applies_pats = getattr(disc, "applies_to_slug_patterns", []) or [".*"]
+                if any(re.search(ap, slug_ctx_dyn, re.IGNORECASE) for ap in applies_pats):
+                    req_pats = getattr(disc, "required_text_patterns", []) or []
+                    if req_pats and not all(re.search(rp, text, re.IGNORECASE) for rp in req_pats):
+                        violations.append(
+                            f"Missing mandatory {profile.brand_name} disclosure '{disc.disclosure_id}': '{disc.canonical_text}'"
+                        )
 
         if spec_disclosures:
             for disclosure_phrase in spec_disclosures:
@@ -2539,10 +2957,39 @@ class TenantFactStore:
                 flags=re.IGNORECASE,
             )
 
+        # Dynamic TruthPack citations_allowlist forbidden_slug_patterns enforcement (works for 50+ sites)
+        if pack is not None and getattr(pack, "citations_allowlist", None):
+            canon_m_cit = re.search(r'rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']', text_lower)
+            eff_slug_ctx = f"{context or ''} {canon_m_cit.group(1) if canon_m_cit else ''}".lower().strip()
+            if eff_slug_ctx:
+                cit_prose = re.sub(r"<nav\b[^>]*>[\s\S]*?</nav\s*>", " ", prose_scan_text, flags=re.IGNORECASE)
+                cit_prose = re.sub(
+                    r'<a\b[^>]*href=["\'](?:/tools/|https?://[^"\']+/tools/)[^"\']*["\'][^>]*>[\s\S]*?</a\s*>',
+                    " ",
+                    cit_prose,
+                    flags=re.IGNORECASE,
+                )
+                cit_prose = re.sub(r"<[^>]+>", " ", cit_prose)
+                for c_key, c_meta in pack.citations_allowlist.items():
+                    if not isinstance(c_meta, dict):
+                        continue
+                    forb_pats = c_meta.get("forbidden_slug_patterns") or []
+                    cit_pats = c_meta.get("patterns") or []
+                    if forb_pats and cit_pats and any(re.search(fp, eff_slug_ctx, re.IGNORECASE) for fp in forb_pats):
+                        for cp in cit_pats:
+                            if re.search(cp, cit_prose, re.IGNORECASE):
+                                msg = (
+                                    f"Forbidden statutory citation '{c_meta.get('canonical', c_key)}' "
+                                    f"used on disallowed slug context '{eff_slug_ctx}'"
+                                )
+                                if msg not in violations:
+                                    violations.append(msg)
+                                break
+
         if tenant_norm == "profithelm":
             prose_lower = prose_scan_text.lower()
             from pseofactory.contracts import _extract_anchor_windows
-            # Section 179 SUV / heavy vehicle cap ($30,500 for 2024/2026 / $31,300 for 2025)
+            # Section 179 SUV / heavy vehicle cap ($30,500 for 2024 / $31,300 for 2025 / $32,000 for 2026 Rev. Proc. 2025-32)
             if ("suv" in prose_lower or "vehicle" in prose_lower) and "$" in prose_scan_text:
                 suv_win = _extract_anchor_windows(prose_scan_text, prose_lower, ("suv", "vehicle"), pre=260, post=260)
                 suv_clause_matches = re.finditer(
@@ -2553,18 +3000,19 @@ class TenantFactStore:
                 for m_obj in suv_clause_matches:
                     raw_val = m_obj.group(1) or m_obj.group(2)
                     clause_low = m_obj.group(0).lower()
-                    # Check a tight window around the match for explicit 2025 qualification
                     win_start = max(0, m_obj.start() - 60)
                     win_end = min(len(suv_win), m_obj.end() + 80)
                     window_low = suv_win[win_start:win_end].lower()
                     try:
                         val = float(raw_val.replace(",", ""))
+                        has_2024_qual = "2024" in window_low and "in 2026" not in clause_low
                         has_2025_qual = "2025" in window_low and "in 2026" not in clause_low
-                        suv_cap = 31300.0 if has_2025_qual else 30500.0
+                        suv_cap = 30500.0 if has_2024_qual else (31300.0 if has_2025_qual else 32000.0)
                         is_general_s179_contrast = (
-                            val in (1220000.0, 1250000.0, 2560000.0)
+                            val in (1220000.0, 1250000.0, 2500000.0, 2560000.0)
                             and (
-                                "30,500" in window_low
+                                "32,000" in window_low
+                                or "30,500" in window_low
                                 or "31,300" in window_low
                                 or "qualifying equipment" in clause_low
                                 or "179(b)(1)" in clause_low
@@ -2572,7 +3020,11 @@ class TenantFactStore:
                         )
                         if val > suv_cap and not is_general_s179_contrast:
                             violations.append(
-                                f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $30,500 for 2024/2026 ($31,300 for 2025)"
+                                f"Section 179 heavy vehicle/SUV limit contradiction: claimed ${val:,.0f} exceeds statutory cap of $32,000 for 2026 ($31,300 for 2025, $30,500 for 2024)"
+                            )
+                        elif val in (30500.0, 31300.0) and "2026" in window_low and not (has_2024_qual or has_2025_qual):
+                            violations.append(
+                                f"Stale 2026 Heavy SUV Section 179 cap '${val:,.0f}' detected: 2026 statutory SUV cap under IRS Rev. Proc. 2025-32 is $32,000"
                             )
                     except ValueError:
                         pass
@@ -2588,14 +3040,17 @@ class TenantFactStore:
                 "$31,300 statutory section 179 cap ($30,500 prior-year",
                 "capped at a $31,300 section 179 deduction in 2026",
                 "allowance of up to $31,300 plus 60% bonus depreciation",
+                "capped at a $30,500 section 179 deduction in 2026",
+                "2026 heavy suv cap is $30,500",
+                "2026 statutory suv cap is $30,500",
             )
             for st_suv in stale_suv_tokens:
                 if st_suv in text_lower:
                     violations.append(
-                        f"Stale 2026 Heavy SUV Section 179 cap '{st_suv}' detected: 2026 statutory SUV cap is $30,500 ($31,300 for 2025 inflation-adjusted schedules)"
+                        f"Stale 2026 Heavy SUV Section 179 cap '{st_suv}' detected: 2026 statutory SUV cap under IRS Rev. Proc. 2025-32 is $32,000 ($31,300 for 2025, $30,500 for 2024)"
                     )
 
-            # Section 179 overall expense limit ($1,220,000 for 2024 / $1,250,000 for 2025 / $2,560,000 for 2026 OBBBA)
+            # Section 179 overall expense limit ($1,220,000 for 2024 / $2,500,000 for 2025 OBBBA / $2,560,000 for 2026 Rev. Proc. 2025-32)
             if "179" in prose_lower and "$" in prose_scan_text:
                 s179_win = _extract_anchor_windows(prose_scan_text, prose_lower, ("179",), pre=260, post=260)
                 s179_matches = re.findall(
@@ -2610,12 +3065,12 @@ class TenantFactStore:
                         if "2026" in text_lower or "obbba" in text_lower:
                             s179_cap = 2560000.0
                         elif "2025" in text_lower:
-                            s179_cap = 1250000.0
+                            s179_cap = 2500000.0
                         else:
                             s179_cap = 1220000.0
                         if val > s179_cap:
                             violations.append(
-                                f"Section 179 expense limit contradiction: claimed ${val:,.0f} exceeds statutory limit of $1,220,000 for 2024 ($1,250,000 for 2025, $2,560,000 for 2026)"
+                                f"Section 179 expense limit contradiction: claimed ${val:,.0f} exceeds statutory limit of $1,220,000 for 2024 ($2,500,000 for 2025 OBBBA, $2,560,000 for 2026)"
                             )
                     except ValueError:
                         pass
@@ -2655,23 +3110,23 @@ class TenantFactStore:
                     "Stale 2027 Sunset Head of Household standard deduction '12700' detected in calculation logic: ground-truth statutory baseline is $12,900"
                 )
 
-            # Stale 80% bonus depreciation in runtime sync script or 2026 prose
-            if "rembasis * 0.80" in text_lower or "rem179 * 0.80" in text_lower:
+            # Stale pre-OBBBA bonus depreciation (20%, 60%, 80% claimed for 2026 instead of 100% P.L. 119-21 Sec. 70301)
+            if "rembasis * 0.20" in text_lower or "rem179 * 0.20" in text_lower or "rembasis * 0.80" in text_lower or "rem179 * 0.80" in text_lower:
                 violations.append(
-                    "Stale 80% bonus depreciation multiplier ('* 0.80') detected in workbench calculation logic: 2026 statutory IRC 168(k) bonus depreciation rate is 20% ('* 0.20')"
+                    "Stale bonus depreciation multiplier detected in workbench calculation logic: P.L. 119-21 Section 70301 permanently restored 100% (1.0) IRC 168(k) bonus depreciation"
                 )
             if (
                 "bonus" in text_lower
                 and "depreciation" in text_lower
-                and ("60%" in text_lower or "80%" in text_lower)
+                and any(pct in text_lower for pct in ("20%", "40%", "60%", "80%"))
                 and "2026" in text_lower
                 and re.search(
-                    r"(?:(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation[^\.\n]{0,80}?2026|bonus\s+depreciation\s+(?:is|rate\s+is)\s+(?:60|80)%[^\.\n]{0,80}?2026|in\s+2026[^\.\n]{0,80}?(?:60|80)%\s+(?:first-year\s+)?bonus\s+depreciation)",
+                    r"(?:(?:20|40|60|80)%\s+(?:first-year\s+)?bonus\s+depreciation[^\.\n]{0,80}?2026|bonus\s+depreciation\s+(?:is|at|of|rate\s+is)\s+(?:20|40|60|80)%[^\.\n]{0,80}?2026|in\s+2026[^\.\n]{0,80}?(?:20|40|60|80)%\s+(?:first-year\s+)?bonus\s+depreciation)",
                     text_lower,
                 )
             ):
                 violations.append(
-                    "Stale 2026 bonus depreciation rate (60%/80%) detected: 2026 statutory IRC 168(k) bonus depreciation rate is 20%"
+                    "Stale 2026 bonus depreciation rate (20%/40%/60%/80%) detected: P.L. 119-21 Section 70301 permanently restored 100% IRC 168(k) bonus depreciation for 2026"
                 )
 
             # Unverified legacy $49/$79/$199 offer fallback in JS
@@ -2714,7 +3169,7 @@ class TenantFactStore:
             # Stale 2026 Single $125k OBBBA federal tax ($18,918 instead of $18,734 under Rev. Proc. 2025-32)
             if "$18,918" in text and ("2026" in text_lower or "obbba" in text_lower or "rev. proc. 2025-32" in text_lower):
                 violations.append(
-                    "Contradictory 2026 federal tax figure '$18,918' detected: under OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32 ($16,100 standard deduction), Single $125,000 federal income tax is $18,734 in 2026 ($18,638 in 2027 at $16,500 standard deduction)"
+                    "Contradictory 2026 federal tax figure '$18,918' detected: under OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32 ($16,100 standard deduction), Single $125,000 federal income tax is $18,734 in 2026 ($18,389.50 in 2027 at $16,600 standard deduction)"
                 )
 
             # Rounded Section 301 tariff landed cost ($161,000 instead of $160,966 when MPF/HMF are $528.40/$237.50)
@@ -2734,7 +3189,7 @@ class TenantFactStore:
                     "Zero-income-tax state year-label or 2027 post-sunset contradiction: '$10,539' uses repealed 2027 post-sunset brackets (10%/15%/25%) instead of enacted OBBBA (P.L. 119-21) permanent 10%-37% brackets"
                 )
 
-            # Year- and status-bound OBBBA (P.L. 119-21) & IRS Rev. Proc. 2025-32 / Notice 2025-67 enforcement
+            # Year- and status-bound OBBBA (P.L. 119-21) & IRS Rev. Proc. 2025-32 / 2026-35 / Notice 2025-67 enforcement
             repealed_sunset_claims = (
                 "under irc section 1(j) sunset reversion",
                 "tcja sunset: federal marginal rates revert to 10%-39.6% on december 31, 2025",
@@ -2755,7 +3210,7 @@ class TenantFactStore:
             for r_claim in repealed_sunset_claims:
                 if r_claim in text_lower:
                     violations.append(
-                        f"Repealed pre-OBBBA TCJA sunset claim '{r_claim}' presented as active 2026/2027 law: OBBBA (P.L. 119-21) permanently extended the 10%-37% brackets, 20% Section 199A QBI deduction, and enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,500 / $33,000 for 2027)"
+                        f"Repealed pre-OBBBA TCJA sunset claim '{r_claim}' presented as active 2026/2027 law: OBBBA (P.L. 119-21) permanently extended the 10%-37% brackets, 20% Section 199A QBI deduction, and enhanced standard deduction ($16,100 Single / $32,200 MFJ for 2026; $16,600 / $33,200 for 2027)"
                     )
 
             # In HTML/table/manifest contexts, reject pre-OBBBA $23,530 / +$4,349 / $19,941 sunset calculations
@@ -2799,7 +3254,7 @@ class TenantFactStore:
             for st_25 in stale_2025_in_2026_tokens:
                 if st_25 in text_lower:
                     violations.append(
-                        f"Stale 2025 or contradictory statutory limit '{st_25}' presented in 2026/2027 schedule: 2026 law requires $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32), $24,500 401(k) cap (Notice 2025-67), $184,500 OASDI wage base, 1.3% CA SDI (14.6% top CA rate), 20% Section 168(k) bonus depreciation, and $14,235 S-Corp FICA savings"
+                        f"Stale 2025 or contradictory statutory limit '{st_25}' presented in 2026/2027 schedule: 2026 law requires $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32), $24,500 401(k) cap (Notice 2025-67), $184,500 OASDI wage base, 1.3% CA SDI (14.6% top CA rate), 100% Section 168(k) bonus depreciation, and $14,235 S-Corp FICA savings"
                     )
 
             # Equipment Lease vs Section 179 capital expensing misattribution
@@ -2850,28 +3305,34 @@ class TenantFactStore:
                     try:
                         payments = int(p_str)
                         if payments != 120:
-                            # Allow sentences that explicitly pair 120-payment PSLF with 240/300-payment IDR forgiveness
+                            # Allow sentences that explicitly pair 120-payment PSLF with 240/300/360-payment IDR/RAP forgiveness
                             has_explicit_120_pslf = bool(
                                 re.search(
                                     r"(?:120[-\s]+(?:qualifying\s+|monthly\s+|certified\s+)?(?:payment|month)[^\.\n]{0,60}?(?:pslf|public\s+service)|(?:pslf|public\s+service)[^\.\n]{0,60}?120[-\s]+(?:qualifying\s+|monthly\s+|certified\s+)?(?:payment|month)|pslf\s*\(120)",
                                     span_low,
                                 )
                             )
-                            if not (payments in (240, 300) and has_explicit_120_pslf):
+                            if not (payments in (240, 300, 360) and has_explicit_120_pslf):
                                 violations.append(
                                     f"PSLF payment requirement contradiction: claimed {payments} payments contradicts statutory requirement of 120 qualifying monthly payments under 34 CFR 685.219"
                                 )
                     except ValueError:
                         pass
 
+            # Stale / erroneous 2026 HHS Poverty Guideline ($16,120) or RAP forgiveness term (120 to 240 months instead of 360)
+            if "$16,120" in text and ("poverty" in text_lower or "fpl" in text_lower or "hhs" in text_lower):
+                violations.append(
+                    "Erroneous 2026 HHS Poverty Guideline '$16,120' detected: 91 FR 1797 sets 2026 1-person contiguous guideline at $15,960 ($5,680 per additional person)"
+                )
+
             # Stale RAP Scenario A ($244.58 / $58,700) and Scenario B ($494.58 / $118,700) detection
             if "$244.58" in text or "$58,700" in text:
                 violations.append(
-                    "Stale RAP Scenario A calculation detected ($244.58 or $58,700): ground-truth 2026 HHS poverty guideline ($15,650) yields $248.23/mo and $59,575.20 over 240 months"
+                    "Stale RAP Scenario A calculation detected ($244.58 or $58,700): contradicts 2026 HHS poverty guideline under 91 FR 1797 ($15,960)"
                 )
             if "$494.58" in text or "$118,700" in text:
                 violations.append(
-                    "Stale RAP Scenario B calculation detected ($494.58 or $118,700): ground-truth 2026 HHS poverty guideline ($15,650) yields $498.23/mo"
+                    "Stale RAP Scenario B calculation detected ($494.58 or $118,700): contradicts 2026 HHS poverty guideline under 91 FR 1797 ($15,960)"
                 )
             if "784.12" in text:
                 violations.append(
@@ -2879,15 +3340,15 @@ class TenantFactStore:
                 )
             if "48212.5" in text:
                 violations.append(
-                    "Invalid 225% FPL poverty exemption '48212.50' detected: ground-truth 2026 HHS 225% exemption is $35,212.50 (single) or $47,587.50 (family size 2)"
+                    "Invalid 225% FPL poverty exemption '48212.50' detected: ground-truth 2026 HHS 225% exemption is $35,910.00 (single at $15,960 FPL) or $48,690.00 (family size 2 at $21,640 FPL)"
                 )
             if "family size 2 ($47,587.50" in text_lower and ("$248.23" in text or "$223.23" in text):
                 violations.append(
-                    "Prexvo RAP family-size contradiction: pairs 'family size 2 ($47,587.50 RAP exemption)' with single-filer ($35,212.50 exemption) $248.23/mo or $223.23/mo RAP payment"
+                    "Prexvo RAP family-size contradiction: pairs family size 2 exemption with single-filer RAP payment"
                 )
             if "$164.90/mo" in text and "$65,000" in text:
                 violations.append(
-                    "Prexvo RAP AGI contradiction: $164.90/mo RAP payment corresponds to $55,000 AGI (($55,000 - $35,212.50) * 0.10 / 12), not $65,000 AGI ($248.23/mo)"
+                    "Prexvo RAP AGI contradiction: $164.90/mo RAP payment corresponds to $55,000 AGI, not $65,000 AGI"
                 )
 
             # Unhydrated SSR calculator metric placeholders ($0.00 in primary repayment metrics)
@@ -2920,7 +3381,7 @@ class TenantFactStore:
                 text_lower,
             ):
                 violations.append(
-                    "Prexvo plan-threshold contradiction: non-RAP plan (IBR, PAYE, ICR, Tiered Standard, Grad PLUS, Parent PLUS, or Refinance) misattributed to RAP 225% HHS Poverty Guideline ($35,212.50)"
+                    "Prexvo plan-threshold contradiction: non-RAP plan (IBR, PAYE, ICR, Tiered Standard, Grad PLUS, Parent PLUS, or Refinance) misattributed to RAP 225% HHS Poverty Guideline"
                 )
             if re.search(
                 r"calculate\s+(?:tools\s+directory|disclaimers|methodology|privacy|about)\s+under\s+title\s+iv",
@@ -2957,7 +3418,7 @@ class TenantFactStore:
                 violations.append(
                     "Unhydrated SSR calculator placeholder '$0.00' detected in primary GainHelm compliance metric card; SSR output must reflect ground-truth engine evaluation"
                 )
-            # NIST SP 800-171 SPRS score bounds [-203, 110]
+            # NIST SP 800-171 SPRS score bounds [-203, 110] and erroneous -196 minimum
             if "sprs" in text_lower:
                 for sprs_m in re.finditer(
                     r"sprs\s+score\s+(?:of\s+)?([+-]?\d{1,4})\b",
@@ -2971,6 +3432,11 @@ class TenantFactStore:
                             )
                     except ValueError:
                         pass
+                if re.search(r"(?:min(?:imum)?(?:\s+score)?|-196\s+to\s*\+?110|sprs[^\.\n]{0,40}-196\b)", text_lower):
+                    if "-196" in text_lower:
+                        violations.append(
+                            "NIST SP 800-171 SPRS minimum score contradiction: '-196' is erroneous; official DoD Methodology v1.2.1 minimum is -203 (44 5-pt, 14 3-pt, 51 1-pt, 1 0-pt)"
+                        )
             # BLS SOC 15-1212 wage rate contradiction ($95/hr or $61.40/hr vs signed $121.67/hr loaded rate)
             if (
                 "$95/hr" in text_lower
@@ -2991,17 +3457,20 @@ class TenantFactStore:
                 violations.append(
                     "ISO/IEC 27006-1:2024 auditor-day contradiction: 75-employee baseline requires 11.0 Stage 1+2 auditor days ($21,450.00 registrar fee, $67,000.40 total cost) per signed AICPA/ISO dataset, not 9.0 auditor days ($16,200)"
                 )
-            # HIPAA 45 CFR 160.404 penalty cap & baseline exposure contradictions
+            # HIPAA 45 CFR 160.404 penalty cap & baseline exposure contradictions (2026 Tier 4 cap is $2,190,294 under 91 FR 3665 / 91 FR 66566)
             if (
                 "$2,134,831" in text
                 or "2134831" in text
+                or "$2,067,813" in text
+                or "2067813" in text
                 or "$622,500" in text
                 or '"published_output": 622500' in text
                 or '<td class="td-plan-name">hipaa hitech tier 2 breach</td>' in text_lower
             ):
-                violations.append(
-                    "HIPAA 45 CFR 160.404 statutory contradiction: contradicts signed HHS OCR dataset ($2,067,813.00 annual cap, $2,455,313.00 Tier 3 baseline exposure for 1,500 ePHI records)"
-                )
+                if not any(hq in text_lower for hq in ("2023 cap", "2024 cap", "2025 cap", "historical")):
+                    violations.append(
+                        "HIPAA 45 CFR 160.404 statutory contradiction: contradicts 2026 HHS OCR Tier 4 annual cap ($2,190,294.00 under 91 FR 3665 / 91 FR 66566)"
+                    )
             # SOC 2 / CMMC / PCI DSS / Cyber Insurance component & sum contradictions
             if (
                 "cpa audit fee ($28,500)" in text_lower
@@ -3023,7 +3492,7 @@ class TenantFactStore:
                 or "2,500 records *" in text_lower
             ):
                 violations.append(
-                    "HIPAA 45 CFR 160.404 benchmark contradiction: canonical Tier 3 baseline uses 1,500 ePHI records ($387,500.00 remediation + $2,067,813.00 Tier 3 cap = $2,455,313.00), not 2,500 records ($512,500 / $525,500)"
+                    "HIPAA 45 CFR 160.404 benchmark contradiction: canonical Tier 3 baseline uses 1,500 ePHI records ($387,500.00 remediation + $2,190,294.00 2026 cap = $2,577,794.00), not 2,500 records ($512,500 / $525,500)"
                 )
             if (
                 "c3pao fee ($47,000)" in text_lower
@@ -3070,6 +3539,44 @@ class TenantFactStore:
                 violations.append(
                     "GainHelm statutory authority misattribution: generic SOC 2 / CMMC / ISO 27006 template copy injected onto specialized compliance tool"
                 )
+        elif tenant_norm == "lienbond":
+            ctx_low_lb = f"{context or ''} {text_lower[:1200]}".lower()
+            is_wc_or_emr_ctx = any(k in ctx_low_lb for k in ("workers-comp", "workers comp", "class-code", "class code", "emr"))
+            if is_wc_or_emr_ctx:
+                if re.search(r"\b(?:irc\s*(?:section|sec\.?)?\s*3111|26\s*u\.s\.c\.?\s*3111)\b", prose_scan_text, re.IGNORECASE):
+                    msg = "LienBond statutory misattribution: IRC Section 3111 (employer FICA payroll tax) is forbidden on NCCI workers compensation class-code / EMR tools"
+                    if msg not in violations:
+                        violations.append(msg)
+                if re.search(r"\b29\s*cfr\s*(?:part\s*)?1904\b", prose_scan_text, re.IGNORECASE):
+                    msg = "LienBond statutory misattribution: 29 CFR 1904 (OSHA recordkeeping) is forbidden on NCCI workers compensation class-code / EMR calculation tools"
+                    if msg not in violations:
+                        violations.append(msg)
+
+            is_license_bond_ctx = ("license-bond" in ctx_low_lb or "license bond" in ctx_low_lb) and "bid-bond" not in ctx_low_lb and "bid bond" not in ctx_low_lb
+            is_bid_bond_ctx = ("bid-bond" in ctx_low_lb or "bid bond" in ctx_low_lb) and "license-bond" not in ctx_low_lb and "license bond" not in ctx_low_lb
+            if is_license_bond_ctx and re.search(r"\b(?:far\s*28\.101|5%\s*(?:to|-)\s*20%\s*penal\s*sum|bid\s+bond\s+penal\s+sum)\b", prose_scan_text, re.IGNORECASE):
+                violations.append(
+                    "LienBond bond-type misattribution: FAR 28.101 Bid Bond penal sum (5%-20%) applied to a Contractor License Bond page"
+                )
+            if is_bid_bond_ctx and re.search(r"\b(?:0\.75%\s*(?:to|-)\s*10%\s*(?:annual\s+)?license\s+bond|cslb\s+\$25,000\s+license\s+bond\s+rate)\b", prose_scan_text, re.IGNORECASE):
+                violations.append(
+                    "LienBond bond-type misattribution: Contractor License Bond annual underwriting rate applied to a FAR 28.101 Bid Bond penal sum page"
+                )
+
+            if "miller act" in text_lower:
+                for m_ma in re.finditer(
+                    r"miller\s+act[^\.\n]{0,140}?(?:threshold(?:\s+(?:of|is|exceeding|over|above|at))?|contracts?\s+(?:exceeding|over|above)|requires?\s+bonds?\s+(?:above|over|at))\s+\$([0-9,]+)",
+                    prose_scan_text,
+                    re.IGNORECASE,
+                ):
+                    try:
+                        ma_val = float(m_ma.group(1).replace(",", ""))
+                        if ma_val not in (150000.0, 35000.0):
+                            violations.append(
+                                f"LienBond Miller Act threshold contradiction: claimed ${ma_val:,.0f}; 40 U.S.C. 3131 / FAR 28.102-1 threshold is $150,000 ($35,000 alternative payment protection floor)"
+                            )
+                    except ValueError:
+                        pass
 
         is_valid = len(violations) == 0
         if cache_key is not None:
@@ -3143,73 +3650,68 @@ class TruthReconciliationEngine:
         ("High-Cap Scenario ($1.25M Statutory Limit)", "High-Cap Scenario ($2.56M Statutory Limit)"),
         ("&quot;cost&quot;: 1250000,", "&quot;cost&quot;: 2560000,"),
         ('"cost": 1250000,', '"cost": 2560000,'),
-        ("IRC 179 ($1.29M Cap) / 168(k) 20% Bonus", "IRC 179 ($2.56M Cap) / 168(k) 20% Bonus"),
+        ("IRC 179 ($1.29M Cap) / 168(k) 20% Bonus", "IRC 179 ($2.56M Cap) / 168(k) 100% Bonus"),
         ("Full Cap ($1.29M)", "Full Cap ($2.56M)"),
-        # Stale 2026 Heavy SUV cap ($31,300 -> $30,500) and 2024 60% bonus depreciation in 2026 SUV calculators/tables
+        # Stale 2026 Heavy SUV cap ($31,300 / $30,500 -> $32,000) and pre-OBBBA bonus depreciation (20%/60%/80% -> 100%)
         (
             "capped at a $31,300 Section 179 deduction in 2026",
-            "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
+            "capped at a $32,000 statutory Section 179 deduction (IRS Rev. Proc. 2025-32)",
         ),
         (
             "$31,300 statutory Section 179 cap ($30,500 prior-year inflation baseline)",
-            "$30,500 statutory Section 179 cap ($31,300 for 2025 inflation-adjusted schedule)",
+            "$32,000 statutory Section 179 cap (IRS Rev. Proc. 2025-32; $31,300 for 2025)",
         ),
-        ("Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)", "Heavy SUV 6,000 to 14,000 lbs ($110k / $30,500 SUV Cap)"),
-        ("Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)", "Heavy SUV 6,000 to 14,000 lbs GVWR ($30,500 IRC 179(b)(5) Cap + Bonus)"),
-        ("Heavy SUVs (6,000-14,000 lbs, $31,300 Cap + Bonus)", "Heavy SUVs (6,000-14,000 lbs, $30,500 Cap + Bonus)"),
-        ("Heavy SUV Tax Savings ($31,300 Cap + Bonus)", "Heavy SUV Tax Savings ($30,500 Cap + Bonus)"),
-        ("<td>$31,300 + Bonus Depr.</td>", "<td>$30,500 + Bonus Depr.</td>"),
-        ("<td>$31,300 (IRC §179(b)(5))</td>", "<td>$30,500 (IRC §179(b)(5))</td>"),
-        ("IRC §179(b)(5) $31,300 cap", "IRC §179(b)(5) $30,500 cap"),
-        ("IRC \\u00a7179(b)(5) $31,300 cap", "IRC \\u00a7179(b)(5) $30,500 cap"),
-        ("60% on balance (2024-2026 phase-down)", "20% on balance (2026 statutory rate)"),
-        ("<td>60% on balance</td>", "<td>20% on balance</td>"),
-        ("<td>$53,320 on $85,000 basis</td>", "<td>$38,000 on $85,000 basis</td>"),
-        ("and 60% bonus depreciation under Section 168(k)", "and 20% bonus depreciation under Section 168(k)"),
+        ("Heavy SUV 6,000 to 14,000 lbs ($110k / $31,300 SUV Cap)", "Heavy SUV 6,000 to 14,000 lbs ($110k / $32,000 SUV Cap)"),
+        ("Heavy SUV 6,000 to 14,000 lbs GVWR ($31,300 IRC 179(b)(5) Cap + Bonus)", "Heavy SUV 6,000 to 14,000 lbs GVWR ($32,000 IRC 179(b)(5) Cap + 100% Bonus)"),
+        ("Heavy SUVs (6,000-14,000 lbs, $31,300 Cap + Bonus)", "Heavy SUVs (6,000-14,000 lbs, $32,000 Cap + 100% Bonus)"),
+        ("Heavy SUV Tax Savings ($31,300 Cap + Bonus)", "Heavy SUV Tax Savings ($32,000 Cap + 100% Bonus)"),
+        ("<td>$31,300 + Bonus Depr.</td>", "<td>$32,000 + 100% Bonus Depr.</td>"),
+        ("<td>$31,300 (IRC §179(b)(5))</td>", "<td>$32,000 (IRC §179(b)(5))</td>"),
+        ("IRC §179(b)(5) $31,300 cap", "IRC §179(b)(5) $32,000 cap"),
+        ("IRC \\u00a7179(b)(5) $31,300 cap", "IRC \\u00a7179(b)(5) $32,000 cap"),
+        ("60% on balance (2024-2026 phase-down)", "100% on balance (P.L. 119-21 Sec. 70301)"),
+        ("<td>60% on balance</td>", "<td>100% on balance</td>"),
+        ("<td>$53,320 on $85,000 basis</td>", "<td>$68,000 on $85,000 basis</td>"),
+        ("and 60% bonus depreciation under Section 168(k)", "and 100% bonus depreciation under Section 168(k)"),
         (
             "qualifies for an immediate first-year Section 179 expense allowance of up to $31,300 plus 60% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $53,320, reducing net income tax liability by $19,728 at the 37% marginal rate.",
-            "qualifies for an immediate first-year Section 179 expense allowance of up to $30,500 plus 20% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $38,000, reducing net income tax liability by $14,060 at the 37% marginal rate.",
+            "qualifies for an immediate first-year Section 179 expense allowance of up to $32,000 plus 100% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $68,000, reducing net income tax liability by $25,160 at the 37% marginal rate.",
         ),
         (
             "qualifies for the IRC Section 280F heavy SUV allowance of up to $31,300 plus 60% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $53,320, reducing net income tax liability by $19,728 at a 37% marginal tax bracket.",
-            "qualifies for the IRC Section 280F heavy SUV allowance of up to $30,500 plus 20% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $38,000, reducing net income tax liability by $14,060 at a 37% marginal tax bracket.",
+            "qualifies for the IRC Section 280F heavy SUV allowance of up to $32,000 plus 100% bonus depreciation on the remaining basis. At 80% business use ($68,000 basis), your total first-year deduction reaches $68,000, reducing net income tax liability by $25,160 at a 37% marginal tax bracket.",
         ),
         (
             'id="val-first_year_deduction">$53,320<',
-            'id="val-first_year_deduction">$38,000<',
+            'id="val-first_year_deduction">$68,000<',
         ),
         (
             'id="val-tax_savings">$19,728<',
-            'id="val-tax_savings">$14,060<',
+            'id="val-tax_savings">$25,160<',
         ),
         (
             'id="val-effective_cost">$65,272<',
-            'id="val-effective_cost">$70,940<',
-        ),
-        (
-            'id="val-heavy_suv_capped_savings">$21,895<',
-            'id="val-heavy_suv_capped_savings">$14,525<',
-        ),
-        (
-            "<td>$62,556</td><td>$21,895</td>",
-            "<td>$41,500</td><td>$14,525</td>",
+            'id="val-effective_cost">$59,840<',
         ),
         # Inline calculator JS parity
-        ("var suv179 = Math.min(cost, 31300);", "var suv179 = Math.min(cost, 30500);"),
+        ("var suv179 = Math.min(cost, 31300);", "var suv179 = Math.min(cost, 32000);"),
+        ("var suv179 = Math.min(cost, 30500);", "var suv179 = Math.min(cost, 32000);"),
         (
             "const suvCap = 31300 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.60;",
-            "const suvCap = 30500 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.20;",
+            "const suvCap = 32000 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 1.0;",
         ),
         (
             "Math.min(basis, 31300) + Math.max(0, basis - 31300) * 0.60",
-            "Math.min(basis, 30500) + Math.max(0, basis - 30500) * 0.20",
+            "Math.min(basis, 32000) + Math.max(0, basis - 32000) * 1.0",
         ),
-        # 2027 Sunset Head of Household standard deduction ($12,700 -> $12,900) & runtime bonus depreciation (80% -> 20%)
+        # 2027 Sunset Head of Household standard deduction ($12,700 -> $12,900) & runtime bonus depreciation (100% OBBBA)
         ("head_of_household: 12700", "head_of_household: 12900"),
         ("hoh: 12700", "hoh: 12900"),
         ("(status === 'head_of_household' ? 12700 : 8600)", "(status === 'head_of_household' ? 12900 : 8600)"),
-        ("remBasis * 0.80", "remBasis * 0.20"),
-        ("rem179 * 0.80", "rem179 * 0.20"),
+        ("remBasis * 0.80", "remBasis * 1.0"),
+        ("rem179 * 0.80", "rem179 * 1.0"),
+        ("remBasis * 0.20", "remBasis * 1.0"),
+        ("rem179 * 0.20", "rem179 * 1.0"),
         (
             "data.offer_price_usd || 49",
             'data.offer_price_usd || ((window.location && window.location.hostname && String(window.location.hostname).slice(0, 3) === "pre") ? 19 : 29)',
@@ -3342,16 +3844,7 @@ class TruthReconciliationEngine:
         # Equipment Lease Tax Deduction overlay misattribution of Section 179 purchase caps
         (
             "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
-            "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
-        ),
-        # Zero-income-tax state spoke quick-answer federal tax label reconciliation
-        (
-            "owes $10,539 in 2026 federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
-            "owes $10,539 in federal income tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
-        ),
-        (
-            "owes $10,539 in 2027 post-sunset federal tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j) sunset rules, only federal brackets (10% to 39.6%) and standard deductions apply.",
-            "owes $10,539 in federal income tax (14.4% effective rate) and keeps $62,461 in net take-home pay. Under IRC Section 1(j), only federal brackets (10% to 37%) and standard deductions apply.",
+            "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($32,000 Heavy SUV cap) and 100% Section 168(k) bonus depreciation ($68,000 first-year write-off on $85,000 at 80% business use).",
         ),
         (
             "or default to First-In, First-Out (FIFO) on Form 8949.",
@@ -3543,18 +4036,20 @@ class TruthReconciliationEngine:
             '<td class="td-plan-name">HIPAA HITECH Tier 2 Breach</td>',
             '<td class="td-plan-name">HIPAA HITECH Tier 3 Breach</td>',
         ),
-        ("$2,134,831", "$2,067,813"),
-        ("2134831", "2067813"),
+        ("$2,134,831", "$2,190,294"),
+        ("2134831", "2190294"),
+        ("$2,067,813", "$2,190,294"),
+        ("2067813", "2190294"),
         ("$94,799.80", "$94,800.00"),
         ("94799.80", "94800.00"),
         ("$23,500.00 in remediation", "$23,300.00 in remediation"),
         ("$23,500.00 CDE remediation labor", "$23,300.00 CDE remediation labor"),
         ("$95.00/hr", "$121.67/hr"),
-        ("$622,500 Breach", "$2,455,313 Breach"),
-        ("$622,500 HHS OCR Tier 2 Breach Exposure", "$2,455,313 HHS OCR Tier 3 Breach Exposure"),
-        ("$622,500 HIPAA Breach", "$2,455,313 HIPAA Breach"),
-        ("$622,500 Unshielded Breach Liability", "$2,455,313 Unshielded Breach Liability"),
-        ("$622,500 / $115,000", "$2,455,313 / $115,000"),
+        ("$622,500 Breach", "$2,577,794 Breach"),
+        ("$622,500 HHS OCR Tier 2 Breach Exposure", "$2,577,794 HHS OCR Tier 3 Breach Exposure"),
+        ("$622,500 HIPAA Breach", "$2,577,794 HIPAA Breach"),
+        ("$622,500 Unshielded Breach Liability", "$2,577,794 Unshielded Breach Liability"),
+        ("$622,500 / $115,000", "$2,577,794 / $115,000"),
     )
 
     @classmethod
@@ -3577,7 +4072,7 @@ class TruthReconciliationEngine:
 
         updated = html_content
         repairs: List[str] = []
-        tenant_norm = resolve_canonical_property_id(tenant)
+        tenant_norm = resolve_canonical_property_id(tenant, default=str(tenant or "").strip().lower() or "profithelm")
         combined_slug = f"{rel_path.lower()} {slug.lower()}"
 
         # 1. Strip speculative filler phrases across prose
@@ -3595,11 +4090,11 @@ class TruthReconciliationEngine:
                     if "profithelm_statutory_truth_reconciled" not in repairs:
                         repairs.append("profithelm_statutory_truth_reconciled")
             suv_cap_pat = re.compile(
-                r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
+                r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300|30,500)',
                 re.IGNORECASE,
             )
             if suv_cap_pat.search(updated):
-                updated = suv_cap_pat.sub(r'\1$30,500', updated)
+                updated = suv_cap_pat.sub(r'\1$32,000', updated)
                 if "profithelm_statutory_truth_reconciled" not in repairs:
                     repairs.append("profithelm_statutory_truth_reconciled")
         elif tenant_norm == "prexvo":
@@ -3783,11 +4278,16 @@ class TruthReconciliationEngine:
             from pseofactory.audit import _titles_match
             if not _titles_match(cur_title, h1_title):
                 from pseofactory.gsc_remediation import _normalize_title_50_60
-                brand_sfx = (
-                    "ProfitHelm"
-                    if tenant_norm == "profithelm"
-                    else ("Prexvo" if tenant_norm == "prexvo" else ("LienBond" if tenant_norm == "lienbond" else "GainHelm"))
-                )
+                prof_for_brand = TenantFactStore.get_instance().get_profile(tenant_norm)
+                if prof_for_brand is not None and prof_for_brand.brand_name:
+                    brand_sfx = prof_for_brand.brand_name
+                else:
+                    decl_for_brand = CANONICAL_TENANT_DECLARATIONS.get(tenant_norm) or SPAWNED_TENANT_DECLARATIONS.get(tenant_norm)
+                    brand_sfx = (
+                        decl_for_brand.brand_name
+                        if decl_for_brand is not None and decl_for_brand.brand_name
+                        else tenant_norm.replace("_", " ").replace("-", " ").title()
+                    )
                 cand_title = _normalize_title_50_60(h1_title, brand_sfx, tenant_norm)
                 if cand_title and cand_title != cur_title:
                     new_t_tag = f"<title>{cand_title}</title>"
@@ -3936,71 +4436,6 @@ class TruthReconciliationEngine:
                             curr_man["published_output"] = 18734.0
                             m_changed = True
 
-                    # Reconcile irs-2027-tax-brackets state leaves
-                    elif (
-                        (rel_path.startswith("tools/irs-2027-tax-brackets/") and rel_path != "tools/irs-2027-tax-brackets/index.html")
-                        or (slug.startswith("irs-2027-tax-brackets/") and slug != "irs-2027-tax-brackets")
-                        or slug.startswith("irs-2027-tax-brackets-")
-                    ):
-                        m_in = curr_man.get("inputs", {})
-                        if "state_income_tax" in m_in:
-                            inc_val_m = float(m_in.get("gross_income", 150000.0))
-                            out_dom_m = re.search(r'data-baseline-output=["\']([0-9.]+)["\']', updated)
-                            dom_pub = float(out_dom_m.group(1)) if out_dom_m else 0.0
-                            man_pub = float(curr_man.get("published_output", 0))
-                            cur_pub = (
-                                man_pub
-                                if (dom_pub in (0.0, 76000.0) and man_pub > 0)
-                                else (dom_pub if dom_pub > 0 else man_pub)
-                            )
-                            if dom_pub == 76000.0 and cur_pub != 76000.0:
-                                updated = updated.replace(
-                                    'data-baseline-output="76000.0">76,000<',
-                                    f'data-baseline-output="{cur_pub:.1f}">{cur_pub:,.0f}<',
-                                )
-                                updated = updated.replace(
-                                    '<strong class="scenario-baseline">76,000</strong>',
-                                    f'<strong class="scenario-baseline">{cur_pub:,.0f}</strong>',
-                                )
-                                updated = updated.replace(
-                                    '<strong class="scenario-ast-eval" data-tier="baseline">76,000</strong>',
-                                    f'<strong class="scenario-ast-eval" data-tier="baseline">{cur_pub:,.0f}</strong>',
-                                )
-                                if "profithelm_statutory_truth_reconciled" not in repairs:
-                                    repairs.append("profithelm_statutory_truth_reconciled")
-                            taxable_26 = max(0.0, inc_val_m - 16100.0)
-                            fed_26 = (
-                                min(taxable_26, 12400.0) * 0.10
-                                + min(max(0.0, taxable_26 - 12400.0), 38000.0) * 0.12
-                                + min(max(0.0, taxable_26 - 50400.0), 55300.0) * 0.22
-                                + max(0.0, taxable_26 - 105700.0) * 0.24
-                            )
-                            st_tax_m = max(0.0, round(cur_pub - fed_26, 2))
-                            target_f = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
-                            target_in = {
-                                "gross_income": inc_val_m,
-                                "standard_deduction": 16100.0,
-                                "state_income_tax": st_tax_m,
-                            }
-                            target_sc = f"For ${inc_val_m:,.0f} state median single-filer income under enacted OBBBA brackets (${fed_26:,.0f} federal plus ${st_tax_m:,.0f} state tax), combined income tax is ${cur_pub:,.0f}."
-                            if (
-                                curr_man.get("formula") != target_f
-                                or curr_man.get("inputs") != target_in
-                                or "post-sunset" in str(curr_man.get("sample_calculation") or "").lower()
-                            ):
-                                curr_man["formula"] = target_f
-                                curr_man["inputs"] = target_in
-                                curr_man["sample_calculation"] = target_sc
-                                m_changed = True
-                            from pseofactory.contracts import safe_eval_mathematical_formula
-                            try:
-                                eval_tot = safe_eval_mathematical_formula(target_f, target_in)
-                                if abs(eval_tot - float(curr_man.get("published_output", 0))) > 0.01:
-                                    curr_man["published_output"] = eval_tot
-                                    m_changed = True
-                            except Exception:
-                                pass
-
                     # Reconcile section-179-calculator vehicle leaves
                     elif (
                         (rel_path.startswith("tools/section-179-calculator/") and rel_path != "tools/section-179-calculator/index.html")
@@ -4018,7 +4453,7 @@ class TruthReconciliationEngine:
                             )
                             is_heavy_suv = any(k in combined_slug for k in suv_slugs)
                             if is_heavy_suv:
-                                target_f = "round(30500.0 + ((vehicle_cost - 30500.0) * 0.20), 0)"
+                                target_f = "round(min(vehicle_cost, 32000.0) + max(0.0, vehicle_cost - 32000.0) * 1.0, 0)"
                                 target_in = {"vehicle_cost": float(cost_v)}
                                 target_out = safe_eval_mathematical_formula(target_f, target_in)
                             else:
@@ -4042,33 +4477,17 @@ class TruthReconciliationEngine:
             except Exception:
                 pass
         if not man_stat_val:
-            man_stat_val = (
-                "Title IV Higher Education Act (34 CFR Part 685)"
-                if tenant_norm == "prexvo"
-                else (
-                    "NIST SP 800-171 and DoD CMMC 2.0"
-                    if tenant_norm == "gainhelm"
-                    else (
-                        "40 U.S.C. 3131 (Miller Act) and State Mechanics Lien Statutes"
-                        if tenant_norm == "lienbond"
-                        else "IRC Section 179 and Form 4562"
-                    )
-                )
-            )
+            try:
+                st_dynamic = TenantFactStore.get_statutory_truth(tenant_norm)
+                man_stat_val = st_dynamic.controlling_statute or f"{tenant_norm} Statutory Schedule"
+            except Exception:
+                man_stat_val = f"{tenant_norm} Statutory Schedule"
         if not man_econ_val:
-            man_econ_val = (
-                "HHS Poverty Guidelines and Department of Education Federal Student Aid"
-                if tenant_norm == "prexvo"
-                else (
-                    "DoD Cyber Exchange Defense Industrial Base Statistics"
-                    if tenant_norm == "gainhelm"
-                    else (
-                        "NCCI Workers Compensation Class Rate Benchmarks and Surety Association Schedules"
-                        if tenant_norm == "lienbond"
-                        else "Federal Reserve Financial Accounts Series B.101.e"
-                    )
-                )
-            )
+            decl_econ = CANONICAL_TENANT_DECLARATIONS.get(tenant_norm) or SPAWNED_TENANT_DECLARATIONS.get(tenant_norm)
+            if decl_econ is not None and decl_econ.economic_dataset_label:
+                man_econ_val = decl_econ.economic_dataset_label
+            else:
+                man_econ_val = "Published Federal & Macroeconomic Reference Series"
 
         if "multi-dataset-join" in updated:
             mdj_m = re.search(r'<(?:div|section|aside)[^>]*class=["\'][^"\']*multi-dataset-join[^"\']*["\'][^>]*>', updated, re.I)
@@ -4320,7 +4739,7 @@ class TruthReconciliationEngine:
         if not isinstance(raw_ov, dict):
             return raw_ov, False
         ov_slug = str(raw_ov.get("slug") or slug or "").lower()
-        tenant_norm = resolve_canonical_property_id(tenant)
+        tenant_norm = resolve_canonical_property_id(tenant, default=str(tenant or "").strip().lower() or "profithelm")
         serialized = _json_lib.dumps(raw_ov, ensure_ascii=False)
         updated_str = serialized
 
@@ -4337,11 +4756,11 @@ class TruthReconciliationEngine:
                 ('"cost": 1250000', '"cost": 2560000'),
                 (
                     "capped at a $31,300 Section 179 deduction in 2026",
-                    "capped at a $30,500 statutory Section 179 deduction ($31,300 for 2025 inflation-adjusted schedules)",
+                    "capped at a $32,000 statutory Section 179 deduction (IRS Rev. Proc. 2025-32)",
                 ),
                 (
                     "In 2026, Equipment Lease Tax Deduction under IRC Section 179 and Section 168(k) allows businesses to expense up to $2,560,000 in qualifying commercial equipment placed in service, phasing out dollar-for-dollar above $4,090,000 in total asset purchases. Remaining basis qualifies for 20% first-year bonus depreciation and MACRS recovery on IRS Form 4562.",
-                    "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($30,500 Heavy SUV cap) and 20% Section 168(k) bonus depreciation ($38,000 first-year write-off on $85,000 at 80% business use).",
+                    "Under IRC Section 162(a)(3) and GAAP ASC 842, operating equipment lease payments are 100% deductible as ordinary business expenses in the period incurred without upfront capital expenditure, whereas financed equipment purchases utilize IRC Section 179 ($32,000 Heavy SUV cap) and 100% Section 168(k) bonus depreciation ($68,000 first-year write-off on $85,000 at 80% business use).",
                 ),
                 ("$27,713 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
                 ("$27,728 Schedule C Self-Employment Tax", "$28,770 Schedule C Self-Employment Tax"),
@@ -4469,7 +4888,7 @@ class TruthReconciliationEngine:
         intra-page statutory contradictions, inline JS cap mismatches, or speculative filler.
         Returns a list of violation descriptions (empty list == PASS).
         """
-        tenant_norm = resolve_canonical_property_id(tenant)
+        tenant_norm = resolve_canonical_property_id(tenant, default=str(tenant or "").strip().lower() or "profithelm")
         h_digest: Optional[str] = None
         cache_key: Optional[Tuple[str, str, str, str, bool]] = None
         if html_content and len(html_content) >= 256:
@@ -4515,10 +4934,10 @@ class TruthReconciliationEngine:
                         msg = f"Unreconciled ProfitHelm statutory figure or JS cap: '{old_str[:60]}'"
                         if msg not in scan_violations:
                             scan_violations.append(msg)
-                if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content:
-                    scan_violations.append("Inline calculator JS uses stale 31300 Heavy SUV cap instead of 2026 statutory 30500 cap")
-                if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content:
-                    scan_violations.append("Stale 60% bonus depreciation rate in 2026 Section 179 comparison table (2026 statutory rate is 20%)")
+                if "Math.min(cost, 31300)" in html_content or "Math.min(basis, 31300)" in html_content or "const suvCap = 31300" in html_content or "Math.min(cost, 30500)" in html_content or "Math.min(basis, 30500)" in html_content or "const suvCap = 30500" in html_content:
+                    scan_violations.append("Inline calculator JS uses stale 30500/31300 Heavy SUV cap instead of 2026 statutory 32000 cap (IRS Rev. Proc. 2025-32)")
+                if "<td>60% on balance</td>" in html_content or "60% on balance (2024-2026 phase-down)" in html_content or "<td>20% on balance</td>" in html_content:
+                    scan_violations.append("Stale 20%/60% bonus depreciation rate in 2026 Section 179 comparison table (P.L. 119-21 Sec. 70301 rate is 100%)")
             elif tenant_norm == "prexvo":
                 for old_str, _ in cls.PREXVO_ALL_HTML_REPLACEMENTS:
                     if old_str in html_content:
@@ -4575,7 +4994,7 @@ class TruthReconciliationEngine:
         Zero em-dashes. Zero en-dashes.
         """
         import json as _json_lib
-        tenant_norm = resolve_canonical_property_id(property_id)
+        tenant_norm = resolve_canonical_property_id(property_id, default=str(property_id or "").strip().lower() or "profithelm")
         d = Path(dist_dir).resolve()
         r_root = Path(repo_root).resolve() if repo_root else (d.parent if d.parent.is_dir() else None)
         repaired_paths: List[str] = []
@@ -4590,7 +5009,7 @@ class TruthReconciliationEngine:
                     changed = False
                     if tenant_norm == "profithelm":
                         if "2,560,000" in raw_txt and ("suv" in man_f.name.lower() or "vehicle" in man_f.name.lower()):
-                            raw_txt = raw_txt.replace("2,560,000", "30,500")
+                            raw_txt = raw_txt.replace("2,560,000", "32,000")
                             man_d = _json_lib.loads(raw_txt)
                             changed = True
                         if man_f.name == "s-corp-reasonable-salary-tax-calculator.json" and (
@@ -4611,24 +5030,6 @@ class TruthReconciliationEngine:
                             man_d["published_output"] = 18734.0
                             man_d["statutory_authority"] = "26 U.S.C. Section 1(j); OBBBA (P.L. 119-21); IRS Rev. Proc. 2025-32"
                             man_d["sample_calculation"] = "For a $125,000 Single filer in 2026-2027 under permanent OBBBA (P.L. 119-21) brackets ($16,100 standard deduction under Rev. Proc. 2025-32), federal income tax is $18,734.00 (saving $4,796 vs repealed pre-OBBBA sunset)."
-                            changed = True
-                        elif man_f.name.startswith("irs-2027-tax-brackets-") and (
-                            "sunset_standard_deduction" in raw_txt or "post-sunset" in raw_txt.lower()
-                        ):
-                            m_in = man_d.get("inputs", {})
-                            inc_v = float(m_in.get("gross_income", 150000.0))
-                            cur_pub = float(man_d.get("published_output", 0.0))
-                            taxable_26 = max(0.0, inc_v - 16100.0)
-                            fed_26 = (
-                                min(taxable_26, 12400.0) * 0.10
-                                + min(max(0.0, taxable_26 - 12400.0), 38000.0) * 0.12
-                                + min(max(0.0, taxable_26 - 50400.0), 55300.0) * 0.22
-                                + max(0.0, taxable_26 - 105700.0) * 0.24
-                            )
-                            st_tax_m = max(0.0, round(cur_pub - fed_26, 2))
-                            man_d["formula"] = "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)"
-                            man_d["inputs"] = {"gross_income": inc_v, "standard_deduction": 16100.0, "state_income_tax": st_tax_m}
-                            man_d["sample_calculation"] = f"For ${inc_v:,.0f} state median single-filer income under enacted OBBBA brackets (${fed_26:,.0f} federal plus ${st_tax_m:,.0f} state tax), combined income tax is ${cur_pub:,.0f}."
                             changed = True
                     elif tenant_norm == "prexvo":
                         if "refinanc" in man_f.name.lower():
@@ -4820,8 +5221,8 @@ class TruthReconciliationEngine:
                     updated_txt = txt.replace("IRC Sections ", "IRC Section ")
                     if tenant_norm == "profithelm":
                         updated_txt = re.sub(
-                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
-                            r'\1$30,500',
+                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300|30,500)',
+                            r'\1$32,000',
                             updated_txt,
                             flags=re.IGNORECASE,
                         )
@@ -4838,8 +5239,8 @@ class TruthReconciliationEngine:
                     updated_txt = txt.replace("IRC Sections ", "IRC Section ")
                     if tenant_norm == "profithelm":
                         updated_txt = re.sub(
-                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300)',
-                            r'\1$30,500',
+                            r'((?:qualifying\s+)?(?:heavy\s+SUVs?|commercial\s+vehicles?|passenger\s+vehicles?)\s+(?:capped\s+at|cap\s+at(?:\s+a)?|limit\s+of|deduction\s+of)\s+)\$(?:2,560,000|2\.56M|31,300|30,500)',
+                            r'\1$32,000',
                             updated_txt,
                             flags=re.IGNORECASE,
                         )
@@ -5105,23 +5506,26 @@ class TruthReconciliationEngine:
             gh_repls = [
                 (
                     "(2,500 ePHI records * $165 forensic/notification cost) + $100,000 45 CFR 160.404 Tier 2 reasonable cause penalty = $512,500 total HIPAA breach exposure",
-                    "(1,500 ePHI records * $165 forensic/notification cost) + $140,000 legal/PR crisis defense + $2,067,813 45 CFR 160.404 Tier 3 penalty cap = $2,455,313 total HIPAA breach exposure",
+                    "(1,500 ePHI records * $165 forensic/notification cost) + $140,000 legal/PR crisis defense + $2,190,294 45 CFR 160.404 Tier 3 penalty cap = $2,577,794 total HIPAA breach exposure",
                 ),
                 (
                     "(2,500 ePHI records * $165 per-record forensic/notification cost) + $113,000 45 CFR 160.404 Tier 2 penalty = $525,500 total HIPAA breach exposure",
-                    "(1,500 ePHI records * $165 per-record forensic/notification cost) + $140,000 legal/PR crisis defense + $2,067,813 45 CFR 160.404 Tier 3 penalty cap = $2,455,313 total HIPAA breach exposure",
+                    "(1,500 ePHI records * $165 per-record forensic/notification cost) + $140,000 legal/PR crisis defense + $2,190,294 45 CFR 160.404 Tier 3 penalty cap = $2,577,794 total HIPAA breach exposure",
                 ),
                 ("2,500 ePHI records", "1,500 ePHI records"),
-                ("$512,500 total HIPAA breach exposure", "$2,455,313 total HIPAA breach exposure"),
-                ("$525,500 total HIPAA breach exposure", "$2,455,313 total HIPAA breach exposure"),
-                ("$512,500.00", "$2,455,313.00"),
-                ("$525,500.00", "$2,455,313.00"),
-                ("$512,500", "$2,455,313"),
-                ("$525,500", "$2,455,313"),
-                ("512500.0", "2455313.0"),
-                ("525500.0", "2455313.0"),
-                ("512500", "2455313"),
-                ("525500", "2455313"),
+                ("$512,500 total HIPAA breach exposure", "$2,577,794 total HIPAA breach exposure"),
+                ("$525,500 total HIPAA breach exposure", "$2,577,794 total HIPAA breach exposure"),
+                ("$2,455,313 total HIPAA breach exposure", "$2,577,794 total HIPAA breach exposure"),
+                ("$512,500.00", "$2,577,794.00"),
+                ("$525,500.00", "$2,577,794.00"),
+                ("$512,500", "$2,577,794"),
+                ("$525,500", "$2,577,794"),
+                ("512500.0", "2577794.0"),
+                ("525500.0", "2577794.0"),
+                ("512500", "2577794"),
+                ("525500", "2577794"),
+                ("$2,067,813", "$2,190,294"),
+                ("2067813", "2190294"),
             ]
             gh_targets: List[Path] = []
             for sub_rel in ("syndication", "ai-benchmarks", "dist/ai-benchmarks", "dist/videos"):

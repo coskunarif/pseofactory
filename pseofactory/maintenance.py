@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import sys
 import re
+import html as _html_lib
 import collections
 import concurrent.futures
 import inspect
@@ -30,7 +31,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional, Union, Iterator, Callable, Tuple, Collection
+from typing import Dict, Any, FrozenSet, List, Set, Optional, Union, Iterator, Callable, Tuple, Collection
 
 from pseofactory.contracts import is_non_tool_or_governance_route, normalize_statutory_acronym_casing
 
@@ -54,6 +55,63 @@ def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "ut
 
 _LIVE_PROJECTS_ROOT = Path("/home/ubuntuadmin/projects").resolve()
 _WORKTREES_ROOT = (_LIVE_PROJECTS_ROOT / ".agy" / "worktrees").resolve()
+
+
+_NON_BYPASSABLE_TRUTH_DRIFT_REASONS: FrozenSet[str] = frozenset(
+    {
+        "TRUTH_CONTRADICTION",
+        "STATUTORY_DRIFT",
+        "PROPERTY_CONTAMINATION",
+        "CONTENT_ACCURACY",
+        "TRUTH_GATE_FAIL",
+    }
+)
+
+
+def _has_non_bypassable_truth_drift(
+    record: Optional[AssetDriftRecord] = None,
+    q_entry: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Returns True if a drift record or DLQ entry includes any factual, statutory, or contamination reason."""
+    reasons_to_check: List[Any] = []
+    if record is not None:
+        reasons_to_check.extend(getattr(record, "reasons", []) or [])
+    if isinstance(q_entry, dict):
+        reasons_to_check.extend(q_entry.get("reasons", []) or [])
+    for r in reasons_to_check:
+        rv = r.value if isinstance(r, DriftReason) else str(r)
+        if rv in _NON_BYPASSABLE_TRUTH_DRIFT_REASONS:
+            return True
+    return False
+
+
+def _detect_vp_issues_for_property(
+    html_content: str,
+    rel_path: str = "index.html",
+    require_primitives: Optional[bool] = None,
+    property_id: Optional[str] = None,
+) -> List[str]:
+    """
+    Runs detect_visual_and_ux_contract_issues while honoring tenant-scoped external
+    pseo-runtime-sync.<sha10>.js tags verified by has_current_external_runtime_sync_tag(..., property_id).
+    """
+    from pseofactory.visual_primitives import (
+        VISUAL_PRIMITIVES_VERSION,
+        detect_visual_and_ux_contract_issues,
+        has_current_external_runtime_sync_tag,
+    )
+
+    vp_issues = detect_visual_and_ux_contract_issues(
+        html_content,
+        rel_path=rel_path,
+        require_primitives=require_primitives,
+    )
+    if vp_issues and property_id and has_current_external_runtime_sync_tag(html_content, property_id=property_id):
+        sync_msg_suffix = (
+            f"Missing or corrupted <script id='pseo-runtime-sync' data-version='{VISUAL_PRIMITIVES_VERSION}'> calculator synchronizer."
+        )
+        vp_issues = [msg for msg in vp_issues if not msg.endswith(sync_msg_suffix)]
+    return vp_issues
 
 
 def _is_live_repo_mutation_blocked(path: Optional[Union[str, Path]]) -> bool:
@@ -356,17 +414,32 @@ class CrossPropertyContaminationScanner:
     def __init__(self, custom_foreign_tokens: Optional[Dict[str, Set[str]]] = None):
         self._tokens: Dict[str, Set[str]] = {}
         try:
+            from pseofactory.truth_pack import load_all_truth_packs
+            from pseofactory.truth_gate import _collect_foreign_tokens, _to_plain_dict
+
+            packs = load_all_truth_packs(allow_expired=True)
+            registry_dicts = {pid.lower(): _to_plain_dict(pack) for pid, pack in packs.items()}
+            for pid_l, pack_d in registry_dicts.items():
+                foreign_pairs = _collect_foreign_tokens(pack_d, registry_dicts)
+                if foreign_pairs:
+                    self._tokens[pid_l] = {tok.lower() for _, tok in foreign_pairs if tok}
+        except Exception:
+            pass
+        try:
             from pseofactory.tenant_facts import TenantFactStore
             fact_store = TenantFactStore.get_instance()
             for prop in list(CANONICAL_TENANT_IDS):
                 prof = fact_store.get_profile(prop)
                 if prof and prof.cross_tenant_forbidden_tokens:
-                    self._tokens[prop] = {t.lower() for t in prof.cross_tenant_forbidden_tokens}
+                    p_low = prop.lower()
+                    existing = self._tokens.get(p_low, set())
+                    self._tokens[p_low] = existing | {t.lower() for t in prof.cross_tenant_forbidden_tokens}
         except Exception:
             pass
         for k, v in self.DEFAULT_FOREIGN_TOKENS.items():
-            if k.lower() not in self._tokens or not self._tokens[k.lower()]:
-                self._tokens[k.lower()] = {t.lower() for t in v}
+            k_low = k.lower()
+            existing = self._tokens.get(k_low, set())
+            self._tokens[k_low] = existing | {t.lower() for t in v}
         if custom_foreign_tokens:
             for k, v in custom_foreign_tokens.items():
                 k_norm = k.lower()
@@ -422,7 +495,7 @@ class CrossPropertyContaminationScanner:
             return {}
         results: Dict[str, List[str]] = {}
         for f in d.glob("**/*"):
-            if f.is_file() and f.suffix in (".html", ".xml", ".txt", ".json", ".js"):
+            if f.is_file() and f.suffix.lower() in (".html", ".xml", ".txt", ".json", ".js", ".md", ".vtt"):
                 rel = f.relative_to(d).as_posix()
                 matched = self.scan_file(f, property_id)
                 if matched:
@@ -2199,7 +2272,7 @@ LIENBOND_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "short_title": "Workers Comp Class Code Rate",
         "description": "Calculate construction and commercial workers compensation manual premium by state NCCI class code, field trade payroll per $100 of remuneration, and Experience Modification Rate (EMR) multiplier.",
         "primary_keyword": "workers compensation class code rate calculator by state",
-        "quick_answer": "Under IRC Section 3111, 29 CFR Part 1904 OSHA recordkeeping rules, and NCCI Basic Manual classification standards, construction workers compensation premium equals field trade payroll divided by $100, multiplied by the state class-code manual rate and Experience Modification Rate (EMR) factor.",
+        "quick_answer": "Under NCCI Basic Manual Class Codes and NCCI Experience Rating Plan Manual, construction workers compensation premium equals field trade payroll divided by $100, multiplied by the state class-code manual rate and Experience Modification Rate (EMR) factor.",
         "category": "Workers Compensation & EMR",
     },
     {
@@ -2568,13 +2641,11 @@ class LiveTruthAuditEngine:
     ) -> List[str]:
         """
         Audits raw HTML content for truth contradictions against tenant facts,
-        official statutory rules, embedded calculation manifests, calculator outputs,
-        and table arithmetic.
-        Returns a list of violation detail strings.
+        TruthPack via UnifiedTruthGate, official statutory rules, embedded calculation
+        manifests, calculator outputs, and table arithmetic.
+        Returns a list of violation detail strings. Fails closed on missing profiles or runtime errors.
         Zero em-dashes. Zero en-dashes.
         """
-        if not self.fact_store.get_profile(property_id):
-            return []
         violations: List[str] = []
         ctx_label = context or "LiveTruthAuditEngine.audit_html"
         dash_neutral_html = html_content.replace("\u2014", "-").replace("\u2013", "-")
@@ -2587,22 +2658,42 @@ class LiveTruthAuditEngine:
             detect_uncorroborated_statutory_claims,
             safe_eval_mathematical_formula,
         )
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        # Fail-closed UnifiedTruthGate verification (works for 50+ sites & fails closed if TruthPack missing)
+        try:
+            tg_report = UnifiedTruthGate().audit_html_content(
+                html_content,
+                property_id=property_id,
+                file_path=ctx_label,
+                run_js_parity=True,
+            )
+            for tv in tg_report.violations:
+                tv_msg = f"[{tv.gate}:{tv.code}] {tv.message}"
+                if tv_msg not in violations:
+                    violations.append(tv_msg)
+        except Exception as tg_exc:
+            violations.append(f"TRUTH_AUDIT_RUNTIME_ERROR: UnifiedTruthGate failed in {ctx_label}: {tg_exc}")
+
         auditable_html = _fast_strip_style_and_js(dash_neutral_html)
         claim_scan_html = (
             re.sub(r"<style\b[^>]*>[\s\S]*?</style>", " ", dash_neutral_html, flags=re.IGNORECASE)
             if "<style" in dash_neutral_html.lower()
             else dash_neutral_html
         )
-        try:
-            is_valid, claim_violations = self.fact_store.verify_claim(
-                tenant=property_id,
-                text=claim_scan_html,
-                context=ctx_label,
-            )
-            if not is_valid:
-                violations.extend(claim_violations)
-        except ValueError:
-            return []
+        if self.fact_store.get_profile(property_id) is not None:
+            try:
+                is_valid, claim_violations = self.fact_store.verify_claim(
+                    tenant=property_id,
+                    text=claim_scan_html,
+                    context=ctx_label,
+                )
+                if not is_valid:
+                    for cv in claim_violations:
+                        if cv not in violations:
+                            violations.append(cv)
+            except Exception as vc_exc:
+                violations.append(f"TRUTH_AUDIT_RUNTIME_ERROR: verify_claim failed in {ctx_label}: {vc_exc}")
 
         try:
             stat_issues = detect_uncorroborated_statutory_claims(auditable_html, rel_path=ctx_label)
@@ -2662,8 +2753,10 @@ class LiveTruthAuditEngine:
                             violations.append(
                                 f"Calculation manifest formula evaluation ({eval_val}) diverges from published_output ({baseline_output}) in {ctx_label}"
                             )
-                except Exception:
-                    pass
+                except Exception as man_exc:
+                    violations.append(
+                        f"TRUTH_AUDIT_RUNTIME_ERROR: calculation-manifest parse/eval error in {ctx_label}: {man_exc}"
+                    )
 
             if baseline_output is not None:
                 ssr_issues = verify_manifest_ssr_metric_parity(
@@ -2803,8 +2896,10 @@ class LiveTruthAuditEngine:
             for rv in recon_violations:
                 if rv not in violations:
                     violations.append(rv)
-        except Exception:
-            pass
+        except Exception as audit_exc:
+            violations.append(
+                f"TRUTH_AUDIT_RUNTIME_ERROR: audit_html execution error in {ctx_label}: {audit_exc}"
+            )
 
         return violations
 
@@ -2891,6 +2986,24 @@ class LiveTruthAuditEngine:
                     violations.append(
                         f"Missing mandatory YMYL refinancing forfeiture disclaimer in Prexvo asset {p_name}"
                     )
+
+        # 7. UnifiedTruthGate fail-closed verification across .vtt, .json, .txt, .md, .xml, .js
+        try:
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            tg_non_html = UnifiedTruthGate().audit_non_html_file(
+                p,
+                prop_norm,
+                content=content,
+            )
+            for tv in tg_non_html.violations:
+                tv_msg = f"[{tv.gate}:{tv.code}] {tv.message}"
+                if tv_msg not in violations:
+                    violations.append(tv_msg)
+        except Exception as tg_exc:
+            violations.append(
+                f"TRUTH_AUDIT_RUNTIME_ERROR: UnifiedTruthGate non-HTML audit failed for {p_name}: {tg_exc}"
+            )
 
         return violations
 
@@ -3115,6 +3228,16 @@ class AssetIntegrityEvaluator:
             except Exception:
                 pass
 
+        tp_dir = pkg_root / "truth_packs"
+        if tp_dir.is_dir():
+            for tp_json in sorted(tp_dir.glob("*.json")):
+                if tp_json.is_file():
+                    try:
+                        h = cls._hash_engine_fp_file(tp_json)
+                        sig_parts.append(f"truth_packs/{tp_json.name}:{h}")
+                    except Exception:
+                        pass
+
         projects_root = Path("/home/ubuntuadmin/projects")
         tenant_entries: List[Tuple[str, Path]] = discover_active_tenants(projects_root)
         seen_repos: Set[Path] = set()
@@ -3159,15 +3282,28 @@ class AssetIntegrityEvaluator:
             engine_dir = pkg_dir / "engine"
             if engine_dir.is_dir():
                 candidates.extend(sorted(engine_dir.glob("*.py")))
+            for data_dir_cand in (pkg_dir / "data", repo_dir / "data"):
+                if data_dir_cand.is_dir():
+                    candidates.extend(sorted(data_dir_cand.glob("*.json")))
+            overlays_dir = repo_dir / "content" / "overlays"
+            if overlays_dir.is_dir():
+                candidates.extend(sorted(overlays_dir.glob("*.json")))
 
+            seen_cands: Set[Path] = set()
             for fc in candidates:
-                if fc.is_file():
+                if fc in seen_cands or not fc.is_file():
+                    continue
+                seen_cands.add(fc)
+                try:
+                    h = cls._hash_engine_fp_file(fc)
                     try:
-                        h = cls._hash_engine_fp_file(fc)
-                        label = f"{pid}/{fc.name}" if fc.parent == pkg_dir else f"{pid}/{fc.parent.name}/{fc.name}"
-                        sig_parts.append(f"{label}:{h}")
-                    except Exception:
-                        pass
+                        rel_lbl = fc.relative_to(repo_dir).as_posix()
+                        label = f"{pid}/{rel_lbl}"
+                    except ValueError:
+                        label = f"{pid}/{fc.name}"
+                    sig_parts.append(f"{label}:{h}")
+                except Exception:
+                    pass
 
         return "|".join(sig_parts)
 
@@ -3336,13 +3472,13 @@ class AssetIntegrityEvaluator:
 
         # 6b. Visual Primitives & UX Contracts (Theme Tokens, Table Containment, Tap Targets, Hierarchy, Calculator Controls)
         if p.suffix == ".html":
-            from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
             from pseofactory.porcelain_shell import audit_porcelain_shell_page, get_porcelain_css_audit_sets
 
-            visual_issues = detect_visual_and_ux_contract_issues(
+            visual_issues = _detect_vp_issues_for_property(
                 content,
                 rel_path=rel_key,
                 require_primitives=None,
+                property_id=adapter.property_id,
             )
             is_dist_html = (
                 p.resolve().is_relative_to(adapter.dist_dir.resolve())
@@ -4507,7 +4643,11 @@ class RefactorCascadeEngine:
                                     dist_dir=adapter.dist_dir,
                                 )
                             raw_h_fast = normalize_html_callout_message_match(raw_h_fast, property_id=adapter.property_id)
-                            raw_h_fast, _ = normalize_html_visual_primitives(raw_h_fast)
+                            raw_h_fast, _ = normalize_html_visual_primitives(
+                                raw_h_fast,
+                                dist_dir=adapter.dist_dir,
+                                property_id=adapter.property_id,
+                            )
                             target_path.write_text(raw_h_fast, encoding="utf-8")
                             self.evaluator._audit_cache.clear()
                         except Exception:
@@ -4570,12 +4710,16 @@ class RefactorCascadeEngine:
                         target_path, adapter.dist_dir, raw_html
                     )
                     if (
-                        detect_visual_and_ux_contract_issues(raw_html, rel_path=rel_target)
+                        _detect_vp_issues_for_property(
+                            raw_html,
+                            rel_path=rel_target,
+                            property_id=adapter.property_id,
+                        )
                         or (
                             is_tool_page
                             and (
                                 _needs_page_structure_geo_normalization(raw_html)
-                                or bool(RetroReflectionEngine.audit_html_mechanics(raw_html))
+                                or bool(RetroReflectionEngine.audit_html_mechanics(raw_html, property_id=adapter.property_id))
                             )
                         )
                     ):
@@ -4589,7 +4733,11 @@ class RefactorCascadeEngine:
                             if retro_html != raw_html:
                                 target_path.write_text(retro_html, encoding="utf-8")
                                 raw_html = retro_html
-                        norm_html, _ = normalize_html_visual_primitives(raw_html)
+                        norm_html, _ = normalize_html_visual_primitives(
+                            raw_html,
+                            dist_dir=adapter.dist_dir,
+                            property_id=adapter.property_id,
+                        )
                         if norm_html != raw_html:
                             target_path.write_text(norm_html, encoding="utf-8")
                             raw_html = norm_html
@@ -4606,7 +4754,11 @@ class RefactorCascadeEngine:
                         from pseofactory.affiliates import normalize_html_callout_message_match
                         callout_html = normalize_html_callout_message_match(raw_html, property_id=adapter.property_id)
                         if callout_html != raw_html:
-                            callout_html, _ = normalize_html_visual_primitives(callout_html)
+                            callout_html, _ = normalize_html_visual_primitives(
+                                callout_html,
+                                dist_dir=adapter.dist_dir,
+                                property_id=adapter.property_id,
+                            )
                             target_path.write_text(callout_html, encoding="utf-8")
                     except Exception:
                         pass
@@ -5145,7 +5297,7 @@ class MaintenanceLifecycle:
                         r == "ENGINE_HASH_DRIFT" or r == DriftReason.ENGINE_HASH_DRIFT.value
                         for r in q_reasons
                     )
-                    if is_only_engine_drift or force:
+                    if _has_non_bypassable_truth_drift(rec, q_entry) or is_only_engine_drift or force:
                         actionable_drifted.append(rec)
                     else:
                         quarantined_drifted.append((rec, q_entry))
@@ -5201,16 +5353,27 @@ class MaintenanceLifecycle:
                     self.cascade_engine.replay_quarantine(property_id=adapter.property_id)
                 lingering_drifted = [
                     rec for rec in retrofit_report.drifted_assets
-                    if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
+                    if _has_non_bypassable_truth_drift(
+                        rec,
+                        self.cascade_engine.get_quarantine_entry(rec, adapter.property_id),
+                    )
+                    or not self.cascade_engine.is_quarantined(rec, adapter.property_id)
                 ]
                 # Gate new candidate generation: Do NOT compile new candidate pages from trends
                 # if existing assets remain drifted or fail the integrity audit.
                 if len(lingering_drifted) > 0 and not dry_run:
                     duration = time.time() - start_time
+                    has_truth_drift = any(
+                        _has_non_bypassable_truth_drift(
+                            rec,
+                            self.cascade_engine.get_quarantine_entry(rec, adapter.property_id),
+                        )
+                        for rec in lingering_drifted
+                    )
                     status = (
-                        "PARTIAL_SUCCESS"
-                        if len(lingering_drifted) < len(actionable_drifted)
-                        else "FAILED"
+                        "FAILED"
+                        if (has_truth_drift or len(lingering_drifted) >= len(actionable_drifted))
+                        else "PARTIAL_SUCCESS"
                     )
                     return MaintenanceResult(
                         property_id=adapter.property_id,
@@ -5305,6 +5468,28 @@ class MaintenanceLifecycle:
                 trend_status_val = "DRY_RUN" if dry_run else "FAILED"
 
             # Recalibrated Early-Exit Gate:
+            # NEVER allow SKIPPED_NO_CHANGES when any quarantined or drifted asset carries
+            # factual/truth/statutory/contamination failures; fail closed with engine_hash=None.
+            non_bypassable_quarantined = [
+                rec for rec, q_entry in quarantined_drifted
+                if _has_non_bypassable_truth_drift(rec, q_entry)
+            ]
+            if non_bypassable_quarantined:
+                duration = time.time() - start_time
+                return MaintenanceResult(
+                    property_id=adapter.property_id,
+                    status="FAILED",
+                    assets_audited=report.total_assets_checked,
+                    assets_drifted=report.drifted_assets_count,
+                    assets_refactored=0,
+                    assets_failed=len(non_bypassable_quarantined),
+                    failed_records=[r.to_dict() for r in non_bypassable_quarantined],
+                    engine_hash=None,
+                    duration_seconds=duration,
+                    trend_status=trend_status_val,
+                    partner_readiness_status="EVALUATED",
+                )
+
             # Exit with SKIPPED_NO_CHANGES strictly when no pre-existing drift, no opportunity actions,
             # and no unexecuted downstream stages on built assets
             if (
@@ -5499,7 +5684,7 @@ class MaintenanceLifecycle:
                 cascade_res["refactored"] += overlay_res.get("refactored", 0)
                 cascade_res["failed"] += overlay_res.get("failed", 0)
 
-            # Stage 6: Fail-Closed Post-Build Verification Gate
+            # Stage 6: Fail-Closed Post-Build Verification Gate (ZERO quarantine-and-ship bypass for truth/contamination)
             post_report = self.evaluator.audit_all(
                 adapter=adapter,
                 check_engine_drift=False,
@@ -5508,16 +5693,27 @@ class MaintenanceLifecycle:
 
             post_actionable_drifted = [
                 rec for rec in post_report.drifted_assets
-                if not self.cascade_engine.is_quarantined(rec, adapter.property_id)
+                if _has_non_bypassable_truth_drift(
+                    rec,
+                    self.cascade_engine.get_quarantine_entry(rec, adapter.property_id),
+                )
+                or not self.cascade_engine.is_quarantined(rec, adapter.property_id)
             ]
 
-            # In live mode, lingering drifted assets fail the gate
+            # In live mode, lingering drifted assets fail the gate (truth/contamination failures ALWAYS return FAILED)
             if len(post_actionable_drifted) > 0 and not dry_run:
                 duration = time.time() - start_time
+                has_truth_failure = any(
+                    _has_non_bypassable_truth_drift(
+                        r,
+                        self.cascade_engine.get_quarantine_entry(r, adapter.property_id),
+                    )
+                    for r in post_actionable_drifted
+                )
                 status = (
-                    "PARTIAL_SUCCESS"
-                    if len(post_actionable_drifted) < (len(actionable_drifted) + len(overlay_drifted))
-                    else "FAILED"
+                    "FAILED"
+                    if (has_truth_failure or len(post_actionable_drifted) >= (len(actionable_drifted) + len(overlay_drifted)))
+                    else "PARTIAL_SUCCESS"
                 )
                 return MaintenanceResult(
                     property_id=adapter.property_id,
@@ -5527,6 +5723,29 @@ class MaintenanceLifecycle:
                     assets_refactored=cascade_res["refactored"],
                     assets_failed=post_report.drifted_assets_count,
                     failed_records=[r.to_dict() for r in post_report.drifted_assets],
+                    engine_hash=None,
+                    duration_seconds=duration,
+                    trend_status=trend_status_val,
+                )
+
+            # Stage 6: UnifiedTruthGate Fail-Closed Estate Verification
+            from pseofactory.truth_gate import UnifiedTruthGate
+
+            stage6_truth_report = UnifiedTruthGate().audit_estate(
+                adapter.dist_dir,
+                adapter.property_id,
+                repo_root=getattr(adapter, "repo_path", None),
+            )
+            if not stage6_truth_report.passed:
+                duration = time.time() - start_time
+                return MaintenanceResult(
+                    property_id=adapter.property_id,
+                    status="FAILED",
+                    assets_audited=max(post_report.total_assets_checked, len(stage6_truth_report.files_audited)),
+                    assets_drifted=len(stage6_truth_report.violations),
+                    assets_refactored=cascade_res["refactored"],
+                    assets_failed=len(stage6_truth_report.violations),
+                    failed_records=[v.to_dict() for v in stage6_truth_report.violations],
                     engine_hash=None,
                     duration_seconds=duration,
                     trend_status=trend_status_val,
@@ -8916,7 +9135,10 @@ def _normalize_page_structure_and_geo_parity(
                     changed = True
 
     if '"@graph"' in updated:
+        page_has_related_to = '"isRelatedTo"' in updated
+
         def _normalize_aeo_geo_jsonld_graph(m_ld: re.Match) -> str:
+            nonlocal page_has_related_to
             o_tag, raw_j, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
             try:
                 parsed_j = json.loads(raw_j.strip())
@@ -9141,9 +9363,27 @@ def _normalize_page_structure_and_geo_parity(
                             }
                             has_speakable = True
                             mod_g = True
-                        if is_tool_route and related_apps and not n.get("isRelatedTo"):
-                            n["isRelatedTo"] = related_apps
-                            mod_g = True
+                        if is_tool_route and related_apps:
+                            existing_rel = n.get("isRelatedTo")
+                            if not existing_rel and not page_has_related_to:
+                                n["isRelatedTo"] = related_apps
+                                page_has_related_to = True
+                                mod_g = True
+                            elif isinstance(existing_rel, list) and existing_rel:
+                                deduped_rel: List[Any] = []
+                                seen_rel_keys: Set[str] = set()
+                                for rel_item in existing_rel:
+                                    if isinstance(rel_item, dict):
+                                        r_key = str(rel_item.get("url") or rel_item.get("@id") or rel_item.get("name") or "").strip().lower()
+                                    else:
+                                        r_key = str(rel_item).strip().lower()
+                                    if r_key and r_key not in seen_rel_keys:
+                                        seen_rel_keys.add(r_key)
+                                        deduped_rel.append(rel_item)
+                                if len(deduped_rel) != len(existing_rel):
+                                    n["isRelatedTo"] = deduped_rel
+                                    mod_g = True
+                                page_has_related_to = True
                     if "HowTo" in nt_list:
                         ht_name = str(n.get("name") or "")
                         if re.search(r"^How to Calculate\s+.+\bCalculator(?:\s+202\d|\s+Engine|\s+Model|\s+Analysis\s+Model)?\s*$", ht_name, re.IGNORECASE):
@@ -10336,7 +10576,7 @@ class RetroReflectionEngine:
                 "emr_modification_factor": 1.0,
             },
             "published_output": 44200.0,
-            "statutory_authority": "IRC Section 3111 Payroll Burden, 29 CFR Part 1904 OSHA Recordkeeping, and NCCI Basic Manual Class Codes",
+            "statutory_authority": "NCCI Basic Manual Class Codes and NCCI Experience Rating Plan Manual",
             "economic_dataset": "BLS Employer Costs for Employee Compensation (ECEC Construction Series) and NCCI Loss Cost Filings",
             "sample_calculation": "Field construction payroll of $650,000 classified at $6.80 per $100 of remuneration with a 1.00 unity EMR modifier yields $44,200.00 in annual workers compensation manual premium.",
         },
@@ -10911,6 +11151,7 @@ class RetroReflectionEngine:
         cls,
         html_content: str,
         allow_rolled_back_zero_tax_title: bool = False,
+        property_id: Optional[str] = None,
     ) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
         from pseofactory.visual_primitives import (
@@ -10919,7 +11160,7 @@ class RetroReflectionEngine:
             has_current_external_runtime_sync_tag,
             render_runtime_synchronizer_script_stripped,
         )
-        has_ext_rt_sync = has_current_external_runtime_sync_tag(html_content)
+        has_ext_rt_sync = has_current_external_runtime_sync_tag(html_content, property_id=property_id)
         missing: List[str] = []
         has_manifest = (
             'id="calculation-manifest"' in html_content
@@ -11413,12 +11654,18 @@ class RetroReflectionEngine:
                         not has_ext_rt_sync
                         and (
                             "primaryCalcIds" not in html_content
-                            or render_runtime_synchronizer_script_stripped() not in html_content
+                            or render_runtime_synchronizer_script_stripped(property_id) not in html_content
                         )
                     )
                 )
             )
-            or bool(detect_visual_and_ux_contract_issues(html_content, require_primitives=True))
+            or bool(
+                _detect_vp_issues_for_property(
+                    html_content,
+                    require_primitives=True,
+                    property_id=property_id,
+                )
+            )
             or len(
                 re.findall(
                     r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b',
@@ -12193,13 +12440,14 @@ class RetroReflectionEngine:
                 out_html, out_rep = cached_res
                 if not runtime_sync_asset_written and dist_dir is not None and "/static/js/pseo-runtime-sync." in out_html:
                     from pseofactory.visual_primitives import write_runtime_synchronizer_asset
-                    write_runtime_synchronizer_asset(Path(dist_dir))
+                    write_runtime_synchronizer_asset(Path(dist_dir), property_id=property_id)
                 if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json", out_html):
                     return out_html, list(out_rep)
 
         missing = cls.audit_html_mechanics(
             html_content,
             allow_rolled_back_zero_tax_title=eff_preserve_title,
+            property_id=property_id,
         )
         if not missing and isinstance(manifest_override, dict):
             try:
@@ -12284,8 +12532,12 @@ class RetroReflectionEngine:
                     write_runtime_synchronizer_asset,
                 )
 
-                if not has_current_external_runtime_sync_tag(html_content):
-                    ext_html, _ = normalize_html_visual_primitives(html_content, dist_dir=dist_dir)
+                if not has_current_external_runtime_sync_tag(html_content, property_id=property_id):
+                    ext_html, _ = normalize_html_visual_primitives(
+                        html_content,
+                        dist_dir=dist_dir,
+                        property_id=property_id,
+                    )
                     if ext_html != html_content:
                         if cache_key is not None:
                             cls._retrofit_cache_set(cache_key, (ext_html, ["deterministic_visual_primitives"]))
@@ -12305,7 +12557,7 @@ class RetroReflectionEngine:
                             )
                         return ext_html, ["deterministic_visual_primitives"]
                 elif not runtime_sync_asset_written:
-                    write_runtime_synchronizer_asset(Path(dist_dir))
+                    write_runtime_synchronizer_asset(Path(dist_dir), property_id=property_id)
             if cache_key is not None:
                 cls._retrofit_cache_set(cache_key, (html_content, []))
             return html_content, []
@@ -12904,7 +13156,11 @@ class RetroReflectionEngine:
         )
 
         from pseofactory.visual_primitives import normalize_html_visual_primitives
-        updated, vp_repaired = normalize_html_visual_primitives(updated, dist_dir=dist_dir)
+        updated, vp_repaired = normalize_html_visual_primitives(
+            updated,
+            dist_dir=dist_dir,
+            property_id=property_id,
+        )
         if "deterministic_visual_primitives" in missing or vp_repaired or geo_norm_changed:
             if "deterministic_visual_primitives" not in repaired:
                 repaired.append("deterministic_visual_primitives")
@@ -13796,9 +14052,36 @@ class RetroReflectionEngine:
         )
 
         def _clean_non_math_dashes(val_str: str) -> str:
-            s = val_str.replace("\u2014", ": ").replace("\u2013", " to ")
+            s = _html_lib.unescape(str(val_str or ""))
+            s = s.replace("\u2014", ": ").replace("\u2013", " to ")
             s = re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", s).strip()
+            s = re.sub(r"\b([A-Za-z]{2,})\s+\1\b", r"\1", s, flags=re.IGNORECASE)
             return normalize_statutory_acronym_casing(s)
+
+        def _llms_route_exists_in_dist(url_str: str, base_root: Path, canonical_origin: str) -> bool:
+            raw_u = str(url_str or "").strip()
+            if not raw_u:
+                return False
+            parsed_u = urllib.parse.urlparse(raw_u)
+            if parsed_u.scheme in ("http", "https"):
+                canon_host = (urllib.parse.urlparse(canonical_origin).hostname or "").lower().lstrip("www.")
+                u_host = (parsed_u.hostname or "").lower().lstrip("www.")
+                if canon_host and u_host and u_host != canon_host:
+                    return True
+                path_part = parsed_u.path
+            elif raw_u.startswith("/"):
+                path_part = raw_u.split("#", 1)[0].split("?", 1)[0]
+            else:
+                return True
+            clean_rel = path_part.strip("/")
+            if not clean_rel:
+                return (base_root / "index.html").is_file()
+            cand_dir = base_root / clean_rel
+            return (
+                cand_dir.is_file()
+                or (cand_dir / "index.html").is_file()
+                or (base_root / f"{clean_rel}.html").is_file()
+            )
 
         updated_files: List[str] = []
         d_res = Path(dist_dir).resolve()
@@ -13808,18 +14091,32 @@ class RetroReflectionEngine:
         if not tools_dir.is_dir():
             return updated_files
 
-        canon = (
-            canonical_base
-            or (
-                "https://prexvo.com"
-                if property_id.lower() == "prexvo"
-                else (
-                    "https://gainhelm.com"
-                    if property_id.lower() == "gainhelm"
-                    else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
+        if canonical_base:
+            canon = str(canonical_base).rstrip("/")
+        else:
+            tp_domain = ""
+            try:
+                from pseofactory.truth_pack import load_truth_pack
+
+                tp_domain = str(load_truth_pack(property_id, allow_expired=True).canonical_domain or "").strip()
+            except Exception:
+                tp_domain = ""
+            if tp_domain:
+                canon = tp_domain.rstrip("/")
+            else:
+                canon = (
+                    "https://prexvo.com"
+                    if property_id.lower() == "prexvo"
+                    else (
+                        "https://gainhelm.com"
+                        if property_id.lower() == "gainhelm"
+                        else (
+                            "https://lienbond.com"
+                            if property_id.lower() == "lienbond"
+                            else f"https://{property_id.lower()}.com"
+                        )
+                    )
                 )
-            )
-        ).rstrip("/")
 
         # Extract metadata from every root tool HTML page in dist_dir / "tools"
         tool_meta: Dict[str, Dict[str, Any]] = {}
@@ -13981,10 +14278,12 @@ class RetroReflectionEngine:
 
                 def _fix_llms_bullet(m: re.Match) -> str:
                     b_title, b_url, b_sum = (
-                        normalize_statutory_acronym_casing(m.group(1).strip()),
+                        _clean_non_math_dashes(m.group(1).strip()),
                         m.group(2).strip(),
-                        normalize_statutory_acronym_casing(m.group(3).strip()),
+                        _clean_non_math_dashes(m.group(3).strip()),
                     )
+                    if not _llms_route_exists_in_dist(b_url, dist_dir, canon):
+                        return ""
                     slug_m = re.search(r"/tools/([^/?#]+)/?$", b_url)
                     if slug_m:
                         s_key = slug_m.group(1)
@@ -14003,6 +14302,7 @@ class RetroReflectionEngine:
                     "Deterministic mathematical model and planning calculator for ",
                     "Deterministic statutory financial model and compliance calculator for ",
                 )
+                new_llms = re.sub(r"\n{3,}", "\n\n", new_llms)
 
 
                 # Ensure any missing root tool is listed under the primary calculator heading
@@ -14170,6 +14470,32 @@ class RetroReflectionEngine:
                         "- GAAP ASC 205-40: Going-concern cash runway forecasting benchmarked to monthly net burn and liquid reserves.\n"
                     )
 
+                try:
+                    from pseofactory.truth_pack import load_truth_pack
+
+                    _llms_tp = load_truth_pack(property_id, allow_expired=True)
+                    _current_full_txt = "\n".join(sections_out)
+                    _missing_disclosures: List[str] = []
+                    for _disc in getattr(_llms_tp, "disclosures", []) or []:
+                        _canon_txt = str(getattr(_disc, "canonical_text", "") or "").strip()
+                        if not _canon_txt:
+                            continue
+                        _req_pats = [str(p) for p in (getattr(_disc, "required_text_patterns", []) or []) if p]
+                        _matched_disc = any(
+                            re.search(pat, _current_full_txt, re.IGNORECASE)
+                            for pat in _req_pats
+                        )
+                        if not _matched_disc and _canon_txt not in _missing_disclosures:
+                            _missing_disclosures.append(_canon_txt)
+                    if _missing_disclosures:
+                        sections_out.append(
+                            "## Mandatory Regulatory Disclosures\n"
+                            + "\n".join(f"- {d_txt}" for d_txt in _missing_disclosures)
+                            + "\n"
+                        )
+                except Exception:
+                    pass
+
                 new_full = _clean_non_math_dashes("\n".join(sections_out))
                 if new_full != orig_full:
                     llms_full_path.write_text(new_full, encoding="utf-8")
@@ -14225,7 +14551,7 @@ class RetroReflectionEngine:
                     ][:2]
                     if len(comp_tools) < 2:
                         for p_s, p_lbl in default_comp_peers:
-                            if p_s != s_key and all(c["slug"] != p_s for c in comp_tools):
+                            if p_s != s_key and (dist_dir / "tools" / p_s / "index.html").is_file() and all(c["slug"] != p_s for c in comp_tools):
                                 comp_tools.append(
                                     {
                                         "slug": p_s,
@@ -15102,6 +15428,7 @@ class RetroReflectionEngine:
             get_runtime_synchronizer_js_sha10,
             has_current_external_runtime_sync_tag,
             render_runtime_synchronizer_js,
+            render_runtime_synchronizer_script_stripped,
         )
         from pseofactory.tenant_facts import TruthReconciliationEngine
 
@@ -15122,10 +15449,11 @@ class RetroReflectionEngine:
         def _audit_estate_page(item: Tuple[str, Path, str]) -> Tuple[str, bool, Optional[List[str]]]:
             rel, html_file, content = item
             if not cls.is_tool_or_calculator_page(html_file, d, content):
-                non_tool_issues = detect_visual_and_ux_contract_issues(
+                non_tool_issues = _detect_vp_issues_for_property(
                     content,
                     rel_path=rel,
                     require_primitives=True,
+                    property_id=property_id,
                 )
                 if (
                     non_tool_issues
@@ -15154,14 +15482,8 @@ class RetroReflectionEngine:
                     )
                     or (
                         'id="pseo-runtime-sync"' in content
-                        and not has_current_external_runtime_sync_tag(content)
-                        and (
-                            "resolveBlueprintStatusNode" not in content
-                            or "appendActionLink" not in content
-                            or '["input-med_school_loan_balance", "serp-loan-balance"]' not in content
-                            or '["input-bond_amount", "serp-b2b-gross"]' not in content
-                            or ('id="cg-ordinary-income"' in content and "cgTaxGrossEl" not in content)
-                        )
+                        and not has_current_external_runtime_sync_tag(content, property_id=property_id)
+                        and render_runtime_synchronizer_script_stripped(property_id) not in content
                     )
                 ):
                     return (rel, False, ["deterministic_visual_primitives"])
@@ -15171,6 +15493,7 @@ class RetroReflectionEngine:
             missing = cls.audit_html_mechanics(
                 content,
                 allow_rolled_back_zero_tax_title=bool(tool_slug_key and tool_slug_key in degraded_overlays),
+                property_id=property_id,
             )
             if rel.startswith("tools/") and rel.endswith("/index.html"):
                 tool_slug_rel = rel[len("tools/") : -len("/index.html")]
@@ -15256,8 +15579,8 @@ class RetroReflectionEngine:
             stale_pages["llms.txt"] = ["llms_manifest_parity"]
 
         if any("/static/js/pseo-runtime-sync." in txt for txt in html_cache.values()):
-            expected_rt_sha10 = get_runtime_synchronizer_js_sha10()
-            expected_rt_bytes = render_runtime_synchronizer_js().encode("utf-8")
+            expected_rt_sha10 = get_runtime_synchronizer_js_sha10(property_id=property_id)
+            expected_rt_bytes = render_runtime_synchronizer_js(property_id=property_id).encode("utf-8")
             expected_rt_name = f"pseo-runtime-sync.{expected_rt_sha10}.js"
             rt_js_dir = d / "static" / "js"
             expected_rt_path = rt_js_dir / expected_rt_name
@@ -15823,7 +16146,7 @@ class RetroReflectionEngine:
             overlay_snapshot=overlay_snapshot,
         )
         try:
-            write_runtime_synchronizer_asset(d)
+            write_runtime_synchronizer_asset(d, property_id=property_id)
         except Exception:
             pass
         from pseofactory.affiliates import (
@@ -16166,6 +16489,7 @@ class RetroReflectionEngine:
                     content,
                     is_tenant_porcelain=True,
                     dist_dir=d,
+                    property_id=property_id,
                 )
                 if norm_rep and norm_html != content:
                     html_file.write_text(norm_html, encoding="utf-8")
@@ -16440,7 +16764,11 @@ class RetroReflectionEngine:
                         or post_callout_heal
                     ):
                         norm_tool_html = normalize_statutory_acronym_casing(norm_tool_html)
-                        norm_tool_html, vp_rep = normalize_html_visual_primitives(norm_tool_html, dist_dir=d)
+                        norm_tool_html, vp_rep = normalize_html_visual_primitives(
+                            norm_tool_html,
+                            dist_dir=d,
+                            property_id=property_id,
+                        )
                         if norm_tool_html != updated_html:
                             updated_html = norm_tool_html
                             if callout_changed and not ran_callout_via_reposition and "callout_message_match" not in repaired:
@@ -18951,59 +19279,8 @@ def reflect_and_recompile_all_assets(
                             '            }',
                         ),
                         (
-                            '    stats_list = tool_meta.get("quotable_statistics")\n'
-                            '    if not stats_list:\n'
-                            '        stats_list = [\n'
-                            '            {\n'
-                            '                "metric": "30.6% Average Capital Efficiency Lift",\n'
-                            '                "context": f"First-party empirical modeling across multi-tier entities utilizing {tool_meta[\'short_title\']} demonstrates an average 30.6% reduction in statutory capital drag.",\n'
-                            '                "source": "ProfitHelm Quantitative Research (2026)",\n'
-                            '                "citation": "IRC Title 26 & FRED Economic Series",\n'
-                            '            },\n'
-                            '            {\n'
-                            '                "metric": "40.9% Regulatory Variance Mitigation",\n'
-                            '                "context": "Deterministic scenario modeling eliminates statutory estimation discrepancies across progressive marginal tax brackets.",\n'
-                            '                "source": "ProfitHelm Tax Intelligence Benchmarks",\n'
-                            '                "citation": "U.S. Department of the Treasury (2026)",\n'
-                            '            },\n'
-                            '        ]',
-                            '    stats_list = tool_meta.get("quotable_statistics")\n'
-                            '    is_surety_tool = "surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower()\n'
-                            '    if not stats_list:\n'
-                            '        if is_surety_tool:\n'
-                            '            stats_list = [\n'
-                            '                {\n'
-                            '                    "metric": "0.5% to 3.0% Tiered Surety Rate Range",\n'
-                            '                    "context": f"First-party underwriting modeling via {tool_meta[\'short_title\']} reflects preferred vs. standard contractor surety bond premium spreads.",\n'
-                            '                    "source": "ProfitHelm Quantitative Research (2026)",\n'
-                            '                    "citation": "40 U.S.C. Section 3131 (Miller Act) & Treasury Circular 570",\n'
-                            '                },\n'
-                            '                {\n'
-                            '                    "metric": "100% Penal Sum Coverage Mandate",\n'
-                            '                    "context": "Federal Miller Act contracts exceeding $150,000 require both performance and payment surety bonds equal to 100% of contract price.",\n'
-                            '                    "source": "ProfitHelm Surety Underwriting Benchmarks",\n'
-                            '                    "citation": "48 CFR Part 28 & SBA 13 CFR Part 115",\n'
-                            '                },\n'
-                            '            ]\n'
-                            '        else:\n'
-                            '            stats_list = [\n'
-                            '                {\n'
-                            '                    "metric": "30.6% Average Capital Efficiency Lift",\n'
-                            '                    "context": f"First-party empirical modeling across multi-tier entities utilizing {tool_meta[\'short_title\']} demonstrates an average 30.6% reduction in statutory capital drag.",\n'
-                            '                    "source": "ProfitHelm Quantitative Research (2026)",\n'
-                            '                    "citation": "IRC Title 26 & FRED Economic Series",\n'
-                            '                },\n'
-                            '                {\n'
-                            '                    "metric": "40.9% Regulatory Variance Mitigation",\n'
-                            '                    "context": "Deterministic scenario modeling eliminates statutory estimation discrepancies across progressive marginal tax brackets.",\n'
-                            '                    "source": "ProfitHelm Tax Intelligence Benchmarks",\n'
-                            '                    "citation": "U.S. Department of the Treasury (2026)",\n'
-                            '                },\n'
-                            '            ]',
-                        ),
-                        (
                             '<strong>Citation Authority:</strong> All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series.',
-                            '<strong>Citation Authority:</strong> {"All surety metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with 40 U.S.C. Section 3131 (Miller Act), 48 CFR Part 28, and U.S. Treasury Circular 570 surety benchmarks." if is_surety_tool else "All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series."}',
+                            '<strong>Citation Authority:</strong> {"All surety metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with 40 U.S.C. Section 3131 (Miller Act), 48 CFR Part 28, and U.S. Treasury Circular 570 surety benchmarks." if ("surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower()) else "All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series."}',
                         ),
                     ):
                         ph_b_src = ph_b_src.replace(old_b, new_b)
