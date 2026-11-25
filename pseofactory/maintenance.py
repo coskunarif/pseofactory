@@ -18947,24 +18947,19 @@ def reflect_and_recompile_all_assets(
                 pass
 
         source_sync_changed = any(
-            f in porc_sync_updated
-            for f in (
-                "profithelm/interactive_calculator.py",
-                "profithelm/data/prediction_markets.json",
-                "profithelm/builder.py",
-                "profithelm/matrix.py",
-                "prexvo/builder.py",
-                "prexvo/interactive_calculator.py",
-                "gainhelm/builder.py",
-                "gainhelm/interactive_calculator.py",
-                "gainhelm/_pseo_substrate/pseofactory/compiler.py",
-                "gainhelm/_pseo_substrate/pseofactory/gainhelm_estate.py",
-                "gainhelm/_pseo_substrate/pseofactory/estate_common.py",
-                "lienbond/builder.py",
-                "lienbond/cli.py",
-                "lienbond/_pseo_substrate/pseofactory/compiler.py",
-                "lienbond/_pseo_substrate/pseofactory/estate_common.py",
+            (
+                "_pseo_substrate/pseofactory/" in str(f).replace("\\", "/")
+                or str(f).replace("\\", "/").endswith(
+                    (
+                        "/builder.py",
+                        "/interactive_calculator.py",
+                        "/matrix.py",
+                        "/cli.py",
+                        "/prediction_markets.json",
+                    )
+                )
             )
+            for f in porc_sync_updated
         )
         if (
             getattr(adapter, "repo_path", None)

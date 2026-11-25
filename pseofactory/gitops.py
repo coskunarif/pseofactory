@@ -3755,17 +3755,28 @@ class LiveEdgeVerifier:
                 f"Forbidden spaced hyphen 'divided by (1 - 0.133)' present on live {rel_path}"
             )
 
-        manifest_re = re.compile(
-            r'<script[^>]*type=["\']application/json["\'][^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>([\s\S]*?)</script>',
+        manifest_tag_re = re.compile(
+            r'<script\b([^>]*)>([\s\S]*?)</script>',
             re.IGNORECASE,
         )
-        live_man_m = manifest_re.search(live_html)
+
+        def _extract_manifest_json_body(html_text: str) -> Optional[str]:
+            for m_tag in manifest_tag_re.finditer(html_text):
+                attrs = m_tag.group(1) or ""
+                if re.search(r'type=["\']application/json["\']', attrs, re.IGNORECASE) and (
+                    re.search(r'id=["\']calculation-manifest["\']', attrs, re.IGNORECASE)
+                    or re.search(r'class=["\'][^"\']*calculation-manifest[^"\']*["\']', attrs, re.IGNORECASE)
+                ):
+                    return m_tag.group(2)
+            return None
+
+        live_man_body = _extract_manifest_json_body(live_html)
         live_pub: Optional[float] = None
         live_formula = ""
         live_inputs: Dict[str, Any] = {}
-        if live_man_m:
+        if live_man_body is not None:
             try:
-                live_man = json.loads(live_man_m.group(1).strip())
+                live_man = json.loads(live_man_body.strip())
                 if isinstance(live_man, dict):
                     if live_man.get("published_output") is not None:
                         live_pub = float(live_man["published_output"])
@@ -3784,7 +3795,11 @@ class LiveEdgeVerifier:
                     violations.append(ti)
 
         ssr_target_pub = live_pub
-        if ssr_target_pub is None and "metric-soc2_total_cost" in live_html:
+        if (
+            ssr_target_pub is None
+            and "metric-soc2_total_cost" in live_html
+            and slug_hint in ("", "index", "soc-2-audit-cost-calculator")
+        ):
             ssr_target_pub = 78100.40
         if ssr_target_pub is not None:
             for si in verify_manifest_ssr_metric_parity(
@@ -3805,10 +3820,10 @@ class LiveEdgeVerifier:
                     f"Live-vs-local dateModified mismatch on {rel_path}: live='{live_dm}' != local='{local_dm}'"
                 )
 
-            local_man_m = manifest_re.search(local_html)
-            if local_man_m:
+            local_man_body = _extract_manifest_json_body(local_html)
+            if local_man_body is not None:
                 try:
-                    local_man = json.loads(local_man_m.group(1).strip())
+                    local_man = json.loads(local_man_body.strip())
                     if isinstance(local_man, dict):
                         local_pub = local_man.get("published_output")
                         local_formula = str(local_man.get("formula") or "")
