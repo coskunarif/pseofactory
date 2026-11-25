@@ -1458,6 +1458,16 @@ def _field_bounds(field_id: str, default_val: float) -> Tuple[float, float, floa
         return 120.0, 360.0, 12.0
     if "multiplier" in fid:
         return 1.0, 3.0, 0.25
+    if "year" in fid:
+        return 0.0, max(20.0, default_val * 4.0), 1.0
+    if "count" in fid or "depend" in fid or "family" in fid or "months" in fid:
+        return 0.0, max(120.0, default_val * 4.0), 1.0
+    if 0.0 < abs(default_val) < 1.0:
+        return 0.0, max(1.0, default_val * 4.0), 0.01
+    if 0.0 < abs(default_val) <= 50.0:
+        return 0.0, max(50.0, default_val * 4.0), 1.0
+    if "fpl" in fid or "poverty" in fid:
+        return 0.0, max(500000.0, default_val * 3.0), 10.0
     if abs(default_val) <= 1000.0:
         return 0.0, max(2000.0, default_val * 4.0), 10.0
     return 0.0, max(500000.0, default_val * 3.0), 500.0
@@ -1538,6 +1548,40 @@ def _render_manifest_driven_widget(
 
     # Keep the widget focused on the primary manifest output + RAP/IBR reference cards
     # without emitting metric IDs exclusively claimed by unrelated TruthPack FormulaSpecs.
+    extra_cards_html: List[str] = []
+    if "fpl_1person" in inputs_dict and "fpl_per_add" in inputs_dict:
+        fpl_2person_ref = float(inputs_dict["fpl_1person"]) + float(inputs_dict["fpl_per_add"])
+        extra_cards_html.append(
+            f'        <div class="calc-metric-card">\n'
+            f'          <div class="metric-label">2-Person Household FPL Reference (2026 HHS)</div>\n'
+            f'          <div class="metric-value" id="metric-fpl_2person_reference">${fpl_2person_ref:,.2f}</div>\n'
+            f'        </div>\n'
+        )
+    if "cost_of_attendance" in inputs_dict and "institutional_aid" in inputs_dict:
+        net_coa_ref = max(0.0, float(inputs_dict["cost_of_attendance"]) - float(inputs_dict["institutional_aid"]))
+        extra_cards_html.append(
+            f'        <div class="calc-metric-card">\n'
+            f'          <div class="metric-label">Net Remaining COA After Institutional Aid</div>\n'
+            f'          <div class="metric-value" id="metric-net_remaining_coa">${net_coa_ref:,.2f}</div>\n'
+            f'        </div>\n'
+        )
+    if (
+        "agi" in inputs_dict
+        and "poverty_guideline" in inputs_dict
+        and "discretionary_rate" in inputs_dict
+    ):
+        icr_uncapped_ref = (
+            max(0.0, float(inputs_dict["agi"]) - float(inputs_dict["poverty_guideline"]))
+            * float(inputs_dict["discretionary_rate"])
+            / 12.0
+        )
+        extra_cards_html.append(
+            f'        <div class="calc-metric-card">\n'
+            f'          <div class="metric-label">Uncapped 20% Discretionary Monthly</div>\n'
+            f'          <div class="metric-value" id="metric-icr_uncapped_monthly">${icr_uncapped_ref:,.2f}</div>\n'
+            f'        </div>\n'
+        )
+
     var_readers = "\n".join(
         f'    const {k} = parseFloat((document.getElementById("field-{k}") || {{}}).value);'
         f' const _safe_{k} = Number.isFinite({k}) ? {k} : {json.dumps(v)};'
@@ -1585,7 +1629,7 @@ def _render_manifest_driven_widget(
           <div class="metric-label">RAP Monthly Interest Subsidy (100%)</div>
           <div class="metric-value" id="metric-rap_subsidy_reference">${rap_res['interest_subsidy']:,.2f}</div>
         </div>
-      </div>
+{''.join(extra_cards_html)}      </div>
 
       <div class="calc-geo-answer-box">
         <h4 class="calc-geo-answer-title">Key Statutory Rule Summary (Title IV)</h4>
@@ -1612,12 +1656,17 @@ def _render_manifest_driven_widget(
     return ({js_expr});
   }}
 
+  function formatUsd(val) {{
+    const n = Number.isFinite(val) ? val : 0;
+    return '$' + n.toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',');
+  }}
+
   function formatOut(val) {{
     const n = Number.isFinite(val) ? val : 0;
     if (IS_MONTHS) {{
       return n.toFixed(1) + ' months';
     }}
-    return '$' + n.toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',');
+    return formatUsd(n);
   }}
 
   let replaceStateTimer = null;
@@ -1658,15 +1707,27 @@ def _render_manifest_driven_widget(
       const ibrEl = document.getElementById('metric-ibr_reference');
       if (ibrEl) {{
         const ibrVal = Math.min(681.29, Math.max(0, (_safe_agi - 1.5 * fpl) * 0.10 / 12));
-        ibrEl.textContent = '$' + ibrVal.toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',');
+        ibrEl.textContent = formatUsd(ibrVal);
       }}
       if (rapEl && PRIMARY_METRIC_ID !== 'metric-rap_payment') {{
         const a = Math.max(0, _safe_agi);
         const deps = typeof _safe_dependents !== 'undefined' ? _safe_dependents : 0;
         const rate = a <= 20000 ? 0.01 : a <= 30000 ? 0.02 : a <= 40000 ? 0.03 : a <= 50000 ? 0.04 : a <= 60000 ? 0.05 : a <= 70000 ? 0.06 : a <= 80000 ? 0.07 : a <= 90000 ? 0.08 : a <= 100000 ? 0.09 : 0.10;
         const rapV = a > 10000 ? Math.max(10.0, (a * rate / 12.0) - deps * 50.0) : 10.0;
-        rapEl.textContent = '$' + (Math.round(rapV * 100) / 100).toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',');
+        rapEl.textContent = formatUsd(Math.round(rapV * 100) / 100);
       }}
+    }}
+    const fpl2El = document.getElementById('metric-fpl_2person_reference');
+    if (fpl2El && typeof _safe_fpl_1person !== 'undefined' && typeof _safe_fpl_per_add !== 'undefined') {{
+      fpl2El.textContent = formatUsd(Math.max(0, _safe_fpl_1person + _safe_fpl_per_add));
+    }}
+    const netCoaEl = document.getElementById('metric-net_remaining_coa');
+    if (netCoaEl && typeof _safe_cost_of_attendance !== 'undefined' && typeof _safe_institutional_aid !== 'undefined') {{
+      netCoaEl.textContent = formatUsd(Math.max(0, _safe_cost_of_attendance - _safe_institutional_aid));
+    }}
+    const icrUncapEl = document.getElementById('metric-icr_uncapped_monthly');
+    if (icrUncapEl && typeof _safe_agi !== 'undefined' && typeof _safe_poverty_guideline !== 'undefined' && typeof _safe_discretionary_rate !== 'undefined') {{
+      icrUncapEl.textContent = formatUsd(Math.max(0, _safe_agi - _safe_poverty_guideline) * _safe_discretionary_rate / 12.0);
     }}
     syncUrl();
   }}

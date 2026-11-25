@@ -917,30 +917,30 @@ class ProfitHelmBrowserAdapter(TenantBrowserAdapter):
             InteractiveWidgetSpec(
                 route="/tools/irs-2027-tax-brackets/",
                 widget_id="irs-2027-tax-brackets",
-                precondition_selector="#field-gross_income, #tax-income",
-                input_selector="#field-gross_income, #tax-income",
+                precondition_selector="#input-gross_income, #field-gross_income, #tax-income",
+                input_selector="#input-gross_income, #field-gross_income, #tax-income",
                 input_value="250000",
-                output_selector="#val-total_federal_tax, #res-total-tax",
+                output_selector="#estimated-federal-tax, #estimated-federal-tax-2027, #val-total_federal_tax, #res-total-tax",
                 trigger_event="input",
                 verify_popstate=True,
             ),
             InteractiveWidgetSpec(
                 route="/tools/crypto-tax-calculator/",
                 widget_id="crypto-tax-calculator",
-                precondition_selector="#crypto-short-term",
-                input_selector="#crypto-short-term",
+                precondition_selector="#input-short_term_gains, #crypto-short-term",
+                input_selector="#input-short_term_gains, #crypto-short-term",
                 input_value="50000",
-                output_selector="#res-crypto-tax",
+                output_selector="#val-total-crypto-tax, #res-crypto-tax",
                 trigger_event="input",
                 verify_popstate=False,
             ),
             InteractiveWidgetSpec(
                 route="/tools/saas-runway-calculator/",
                 widget_id="saas-runway-calculator",
-                precondition_selector="#runway-cash",
-                input_selector="#runway-cash",
+                precondition_selector="#input-cash_balance, #runway-cash",
+                input_selector="#input-cash_balance, #runway-cash",
                 input_value="100000",
-                output_selector="#res-runway-months",
+                output_selector="#val-runway-months, #res-runway-months",
                 trigger_event="input",
                 verify_popstate=False,
             ),
@@ -971,7 +971,7 @@ class PrexvoBrowserAdapter(TenantBrowserAdapter):
                 precondition_selector="#field-agi",
                 input_selector="#field-agi",
                 input_value="95000",
-                output_selector="#metric-rap_payment",
+                output_selector="#metric-primary_output, #metric-rap_payment",
                 trigger_event="input",
                 verify_popstate=True,
             ),
@@ -2177,18 +2177,38 @@ class UnifiedBrowserAuditor:
                     minNum,
                 ].filter((v, idx, arr) => !isNaN(v) && arr.indexOf(v) === idx);
             }
-            const curNum = parseFloat(String(ctrl.value).replace(/,/g, '')) || 10000;
+            const parsedCur = parseFloat(String(ctrl.value).replace(/,/g, ''));
+            const curNum = Number.isFinite(parsedCur) ? parsedCur : 10000;
             const maxAttr = ctrl.getAttribute('max');
             const minAttr = ctrl.getAttribute('min');
+            const stepAttr = ctrl.getAttribute('step');
+            const parsedStep = (stepAttr && stepAttr !== 'any') ? parseFloat(stepAttr) : NaN;
+            const step = (Number.isFinite(parsedStep) && parsedStep > 0) ? parsedStep : 1;
             const maxNum = (maxAttr !== null && maxAttr !== '' && !isNaN(parseFloat(maxAttr))) ? parseFloat(maxAttr) : Math.max(10000000, Math.abs(curNum) * 3 + 1000);
             const minNum = (minAttr !== null && minAttr !== '' && !isNaN(parseFloat(minAttr))) ? parseFloat(minAttr) : 0;
-            let upNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
-            if (upNum > maxNum || upNum === curNum) {
-                upNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
+            let candidates = [];
+            if (curNum !== 0) {
+                let upNum = curNum < 100 ? Math.min(maxNum, curNum + 2) : Math.round(curNum * 1.35 + 50);
+                if (upNum > maxNum || upNum === curNum) {
+                    upNum = Math.max(minNum, curNum > minNum + 1 ? Math.round(curNum * 0.65) : curNum + 1);
+                }
+                if (upNum === curNum) upNum = curNum + 1;
+                const downNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
+                candidates = [upNum, downNum, curNum + 1].filter((v, idx, arr) => Number.isFinite(v) && v !== curNum && v >= minNum && v <= maxNum && arr.indexOf(v) === idx);
             }
-            if (upNum === curNum) upNum = curNum + 1;
-            const downNum = Math.max(minNum, curNum > 10 ? Math.round(curNum * 0.3) : Math.max(minNum, curNum - 2));
-            return [upNum, downNum, curNum + 1].filter((v, idx, arr) => !isNaN(v) && v >= minNum && v <= maxNum && arr.indexOf(v) === idx);
+            if (curNum === 0 || candidates.length === 0) {
+                const rangeCandidates = [
+                    minNum + step,
+                    curNum + step,
+                    curNum + (step * 2),
+                    Math.min(maxNum, curNum + (step * 3)),
+                    Math.max(minNum, curNum - step),
+                    maxNum,
+                    minNum,
+                ];
+                candidates = candidates.concat(rangeCandidates).filter((v, idx, arr) => Number.isFinite(v) && v !== curNum && v >= minNum && v <= maxNum && arr.indexOf(v) === idx);
+            }
+            return candidates;
         };
         const testNumericWithSiblingGate = (ctrl, allControls, candidateVals, readSnap) => {
             const origVal = ctrl.value;
@@ -2938,7 +2958,7 @@ class UnifiedBrowserAuditor:
         // 3b. Clean 3-Step Funnel Discipline & /partners/ Contract
         const isPartnersRoute = (curPath === '/partners/' || curPath === '/partners' || curPath === '/partners/index.html');
         const hasPorcelainCss = Boolean(document.querySelector('link#pseo-visual-primitives'));
-        const isRestrictedYmylPath = /(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness)/i.test(curPath);
+        const isRestrictedYmylPath = /(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness|ibr-hardship|hardship-cap)/i.test(curPath);
         const allForms = Array.from(document.querySelectorAll('form'));
         const unlockCards = Array.from(document.querySelectorAll('#workpaper-unlock-card'));
         const refCards = Array.from(document.querySelectorAll('.contextual-referral-card'));

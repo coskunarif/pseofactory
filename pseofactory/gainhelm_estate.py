@@ -2559,7 +2559,7 @@ def _build_methodology_html(css_text: str) -> str:
       </section>
       <section class="card">
         <h2 class="section-title">2. 32 CFR Part 170 CMMC 2.0 &amp; NIST SP 800-171 DoD SPRS Scoring</h2>
-        <p>Under 32 CFR Part 170 and DFARS 252.204-7019 / 252.204-7020, defense contractors start at a maximum Supplier Performance Risk System (SPRS) score of +110 across all 110 NIST SP 800-171 Rev 2 controls. Under NIST SP 800-171 DoD Assessment Methodology v1.2.1, unimplemented controls deduct 5 points (44 foundational architectural controls), 3 points (14 medium-impact controls), or 1 point (51 procedural controls), plus 1 zero-point SSP control (3.12.4), establishing an exact statutory floor of -203 (110 - 313).</p>
+        <p>Under 32 CFR Part 170 and DFARS 252.204-7019 / 252.204-7020, defense contractors start at a maximum Supplier Performance Risk System (SPRS) score of +110 across all 110 NIST SP 800-171 Rev 2 controls. Under NIST SP 800-171 DoD Assessment Methodology v1.2.1, unimplemented controls deduct 5 points (44 foundational architectural controls), 3 points (14 medium-impact controls), or 1 point (51 procedural controls), plus 1 zero-point SSP control (3.12.4), establishing an exact statutory floor of -203 (110 minus 313).</p>
       </section>
       <section class="card">
         <h2 class="section-title">3. ISO/IEC 27006-1:2024 Mandatory ISMS Auditor-Day Schedule</h2>

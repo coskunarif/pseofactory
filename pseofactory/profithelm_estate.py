@@ -75,7 +75,7 @@ PROFITHELM_PROPERTY_ID = "profithelm"
 PROFITHELM_DOMAIN = "profithelm.com"
 CANONICAL_BASE = "https://profithelm.com"
 SITE_NAME = "ProfitHelm"
-SITE_TITLE = "ProfitHelm - Deterministic US Tax & Capital Strategy Calculators"
+SITE_TITLE = "ProfitHelm: Deterministic US Tax & Capital Strategy Calculators"
 SITE_DESCRIPTION = (
     "Deterministic US calculators for 2026-2027 federal tax brackets, capital expensing, "
     "like-kind swaps, QSBS exclusions, crypto gains, and Treasury yields."
@@ -840,7 +840,7 @@ def _build_formula_js(
     formula: str,
     input_names: Sequence[str],
     primary_metric_id: str,
-    secondary_metrics: Optional[Dict[str, str]] = None,
+    secondary_metrics: Optional[Dict[str, Union[str, Tuple[str, str]]]] = None,
     unit_hint: str = "currency",
     js_override: Optional[str] = None,
     extra_setup_js: str = "",
@@ -857,11 +857,17 @@ def _build_formula_js(
     sec_updates = ""
     if secondary_metrics:
         lines = []
-        for mid, mexpr in secondary_metrics.items():
+        for mid, mspec in secondary_metrics.items():
+            if isinstance(mspec, tuple):
+                mexpr, fmt_kind = mspec
+            else:
+                mexpr, fmt_kind = mspec, "default"
+            fmt_fn = "fmtPct" if fmt_kind == "percent" else "fmtVal"
+            safe_var = re.sub(r"[^a-zA-Z0-9_]", "_", mid)
             lines.append(
-                f'var el_{re.sub(r"[^a-zA-Z0-9_]", "_", mid)} = document.getElementById({json.dumps(mid)}); '
-                f'if (el_{re.sub(r"[^a-zA-Z0-9_]", "_", mid)}) '
-                f'el_{re.sub(r"[^a-zA-Z0-9_]", "_", mid)}.textContent = fmtVal({mexpr});'
+                f'var el_{safe_var} = document.getElementById({json.dumps(mid)}); '
+                f'if (el_{safe_var}) '
+                f'el_{safe_var}.textContent = {fmt_fn}({mexpr});'
             )
         sec_updates = "\n    " + "\n    ".join(lines)
 
@@ -881,9 +887,14 @@ def _build_formula_js(
             'var s = v < 0 ? "-" : ""; '
             'return s + "$" + Math.abs(v).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}); }'
         )
+    fmt_pct_body = (
+        'function fmtPct(n) { var v = Number(n); if (!isFinite(v)) v = 0; '
+        'return String(Math.round(v * 100) / 100) + "%"; }'
+    )
 
     return f"""(function() {{
   {fmt_body}
+  {fmt_pct_body}
   function readNum(name) {{
     var el = document.getElementById("input-" + name) || document.querySelector('[name="' + name + '"]');
     if (!el) return 0;
@@ -926,6 +937,106 @@ def _build_formula_js(
     bindEvents();
   }}
 }})();"""
+
+
+def _section_1031_secondary_breakdown(
+    inputs: Dict[str, Any],
+    recognized_gain: float,
+) -> Tuple[List[CalculatorMetric], Dict[str, Union[str, Tuple[str, str]]]]:
+    """Builds reactive secondary breakdown metrics (Realized Gain & Deferred Gain) for Section 1031 calculators."""
+    sale_price = float(inputs.get("relinquished_sale_price", 0.0))
+    selling_exp = float(inputs.get("selling_expenses", 0.0))
+    orig_basis = float(inputs.get("original_basis", 0.0))
+    cap_imp = float(inputs.get("capital_improvements", 0.0))
+    accum_dep = float(inputs.get("accumulated_depreciation", 0.0))
+    realized_gain = round((sale_price - selling_exp) - (orig_basis + cap_imp - accum_dep), 2)
+    deferred_gain = round(max(0.0, realized_gain - float(recognized_gain)), 2)
+    realized_js = (
+        "((relinquished_sale_price - selling_expenses) - "
+        "((original_basis + capital_improvements) - accumulated_depreciation))"
+    )
+    metrics = [
+        CalculatorMetric(
+            id="realized-gain",
+            label="Total Realized Gain",
+            default_display=_format_currency(realized_gain),
+            is_primary=False,
+        ),
+        CalculatorMetric(
+            id="deferred-capital-gain",
+            label="Deferred Capital Gain",
+            default_display=_format_currency(deferred_gain),
+            is_primary=False,
+        ),
+    ]
+    secondary_js: Dict[str, Union[str, Tuple[str, str]]] = {
+        "realized-gain": realized_js,
+        "deferred-capital-gain": f"Math.max(0.0, {realized_js} - result)",
+    }
+    return metrics, secondary_js
+
+
+def _section_179_secondary_breakdown(
+    inputs: Dict[str, Any],
+) -> Tuple[List[CalculatorMetric], Dict[str, Union[str, Tuple[str, str]]]]:
+    """Builds reactive secondary breakdown metrics (Sec 179 portion, 168(k) bonus, elected rate) for Sec 179 calculators."""
+    cost = float(inputs.get("equipment_cost", 0.0))
+    use_pct = float(inputs.get("business_use_pct", 0.0))
+    is_suv = float(inputs.get("is_heavy_suv", 0.0))
+    b_pct = float(inputs.get("bonus_pct", 0.0))
+    business_basis = cost * use_pct
+    cap = 32000.0 if is_suv == 1.0 else max(0.0, 2560000.0 - max(0.0, cost - 4090000.0))
+    sec179_portion = round(min(business_basis, cap), 2)
+    bonus_portion = round(max(0.0, business_basis - sec179_portion) * (b_pct / 100.0), 2)
+    rate_disp = f"{int(b_pct) if b_pct.is_integer() else round(b_pct, 2)}%"
+    cap_js = "((is_heavy_suv === 1) ? 32000.0 : Math.max(0.0, (2560000.0 - Math.max(0.0, (equipment_cost - 4090000.0)))))"
+    sec179_js = f"Math.min((equipment_cost * business_use_pct), {cap_js})"
+    bonus_js = f"(Math.max(0.0, ((equipment_cost * business_use_pct) - {sec179_js})) * (bonus_pct / 100.0))"
+    metrics = [
+        CalculatorMetric(
+            id="sec179-expensing-portion",
+            label="Section 179 Expensing Portion",
+            default_display=_format_currency(sec179_portion),
+            is_primary=False,
+        ),
+        CalculatorMetric(
+            id="bonus-depreciation-portion",
+            label="Section 168(k) Bonus Portion",
+            default_display=_format_currency(bonus_portion),
+            is_primary=False,
+        ),
+        CalculatorMetric(
+            id="elected-bonus-rate",
+            label="Elected Bonus Rate",
+            default_display=rate_disp,
+            is_primary=False,
+        ),
+    ]
+    secondary_js: Dict[str, Union[str, Tuple[str, str]]] = {
+        "sec179-expensing-portion": sec179_js,
+        "bonus-depreciation-portion": bonus_js,
+        "elected-bonus-rate": ("bonus_pct", "percent"),
+    }
+    return metrics, secondary_js
+
+
+def _qsbs_1202_secondary_breakdown(
+    inputs: Dict[str, Any],
+) -> Tuple[List[CalculatorMetric], Dict[str, Union[str, Tuple[str, str]]]]:
+    """Builds reactive secondary breakdown readout (10x Stock Basis Cap) for QSBS Section 1202 calculators."""
+    cap_10x = round(10.0 * float(inputs.get("stock_basis", 0.0)), 2)
+    metrics = [
+        CalculatorMetric(
+            id="qsbs-10x-basis-cap",
+            label="10x Stock Basis Cap",
+            default_display=_format_currency(cap_10x),
+            is_primary=False,
+        ),
+    ]
+    secondary_js: Dict[str, Union[str, Tuple[str, str]]] = {
+        "qsbs-10x-basis-cap": "(10.0 * stock_basis)",
+    }
+    return metrics, secondary_js
 
 
 # ---------------------------------------------------------------------------
@@ -1861,6 +1972,7 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
     f179 = pack.formulas["section_179_heavy_suv_plus_bonus_2026"]
 
     baseline = float(manifest["published_output"])
+    sec179_sec_metrics, sec179_sec_js = _section_179_secondary_breakdown(manifest["inputs"])
     spec = InteractiveCalculatorSpec(
         slug=tool_meta["slug"],
         title="2026 Section 179 & 100% Bonus Depreciation Calculator",
@@ -1878,7 +1990,7 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
                 label="Asset Classification",
                 field_type="select",
                 default=int(manifest["inputs"]["is_heavy_suv"]),
-                options=[("1", "Heavy SUV (6,001-14,000 lbs GVWR - $32,000 cap)"), ("0", "General Business Equipment / Truck")],
+                options=[("1", "Heavy SUV (6,001-14,000 lbs GVWR, $32,000 cap)"), ("0", "General Business Equipment / Truck")],
             ),
             CalculatorField(name="bonus_pct", label="2026 Bonus Depreciation (%)", default=float(manifest["inputs"]["bonus_pct"]), min_val=0.0, max_val=100.0, step=5.0),
         ],
@@ -1889,12 +2001,14 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
                 default_display=_format_currency(baseline),
                 is_primary=True,
             ),
+            *sec179_sec_metrics,
         ],
         formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=f179.expression,
             input_names=list(manifest["inputs"].keys()),
             primary_metric_id="total-first-year-deduction",
+            secondary_metrics=sec179_sec_js,
             js_override=f179.js_expression,
         ),
         primary_output_selector="#total-first-year-deduction",
@@ -1955,6 +2069,7 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
     f1031 = pack.formulas["section_1031_boot_recognized_gain"]
 
     baseline = float(manifest["published_output"])
+    sec1031_sec_metrics, sec1031_sec_js = _section_1031_secondary_breakdown(manifest["inputs"], baseline)
     field_defs = [
         ("relinquished_sale_price", "Relinquished Sale Price ($)"),
         ("selling_expenses", "Qualified Selling Expenses ($)"),
@@ -1981,12 +2096,14 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
                 default_display=_format_currency(baseline),
                 is_primary=True,
             ),
+            *sec1031_sec_metrics,
         ],
         formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=f1031.expression,
             input_names=list(manifest["inputs"].keys()),
             primary_metric_id="recognized-gain",
+            secondary_metrics=sec1031_sec_js,
             js_override=f1031.js_expression,
         ),
         primary_output_selector="#recognized-gain",
@@ -2370,17 +2487,50 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
         for f in custom_fields_meta
         if isinstance(f, dict) and f.get("name") and f.get("label")
     }
+    formula_id = str(manifest.get("formula_id") or (matched_spec.formula_id if matched_spec else "") or "")
     fields: List[CalculatorField] = []
     for k, v in manifest["inputs"].items():
-        fields.append(
-            CalculatorField(
-                name=k,
-                label=field_label_map.get(k, k.replace("_", " ").title()),
-                default=v,
-                min_val=0.0 if isinstance(v, (int, float)) else None,
-                step=0.01 if isinstance(v, float) and abs(v) < 10 else 1.0,
+        if k == "is_heavy_suv":
+            fields.append(
+                CalculatorField(
+                    name=k,
+                    label=field_label_map.get(k, "Asset Classification"),
+                    field_type="select",
+                    default=int(float(v)),
+                    options=[
+                        ("1", "Heavy SUV (6,001-14,000 lbs GVWR, $32,000 cap)"),
+                        ("0", "General Business Equipment / Truck"),
+                    ],
+                )
             )
-        )
+        else:
+            max_v: Optional[float] = None
+            step_v: Optional[float] = 0.01 if isinstance(v, float) and abs(v) < 10 else 1.0
+            if k == "business_use_pct":
+                max_v = 1.0
+                step_v = 0.05
+            elif k == "bonus_pct":
+                max_v = 100.0
+                step_v = 5.0
+            fields.append(
+                CalculatorField(
+                    name=k,
+                    label=field_label_map.get(k, k.replace("_", " ").title()),
+                    default=v,
+                    min_val=0.0 if isinstance(v, (int, float)) else None,
+                    max_val=max_v,
+                    step=step_v,
+                )
+            )
+
+    sec_metrics: List[CalculatorMetric] = []
+    sec_js: Optional[Dict[str, Union[str, Tuple[str, str]]]] = None
+    if formula_id == "section_1031_boot_recognized_gain":
+        sec_metrics, sec_js = _section_1031_secondary_breakdown(manifest["inputs"], published_out)
+    elif formula_id == "section_179_heavy_suv_plus_bonus_2026":
+        sec_metrics, sec_js = _section_179_secondary_breakdown(manifest["inputs"])
+    elif formula_id == "qsbs_1202_excluded_gain":
+        sec_metrics, sec_js = _qsbs_1202_secondary_breakdown(manifest["inputs"])
 
     spec = InteractiveCalculatorSpec(
         slug=slug,
@@ -2393,13 +2543,15 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
                 label=str(tool_meta.get("metric_label") or f"{title} Result"),
                 default_display=_format_metric_display(published_out, slug=slug, unit_hint=unit_hint),
                 is_primary=True,
-            )
+            ),
+            *sec_metrics,
         ],
         formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=manifest["formula"],
             input_names=list(manifest["inputs"].keys()),
             primary_metric_id=primary_metric_id,
+            secondary_metrics=sec_js,
             unit_hint=unit_hint,
             js_override=js_override,
         ),
@@ -3567,6 +3719,7 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         "entity_type": "Exchange1031DeferralRule",
         "primary_metric_id": "recognized-gain",
     }
+    sec1031_sec_metrics, sec1031_sec_js = _section_1031_secondary_breakdown(inputs, baseline)
     spec = InteractiveCalculatorSpec(
         slug=f"section-1031-{s_slug}",
         title=f"{s_name} ({state['code']}) Section 1031 Exchange Calculator",
@@ -3577,9 +3730,16 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         ],
         metrics=[
             CalculatorMetric(id="recognized-gain", label="Recognized Taxable Gain (Boot)", default_display=_format_currency(baseline), is_primary=True),
+            *sec1031_sec_metrics,
         ],
         formula_label=f1031.model_name,
-        js_logic=_build_formula_js(f1031.expression, list(inputs.keys()), "recognized-gain", js_override=f1031.js_expression),
+        js_logic=_build_formula_js(
+            f1031.expression,
+            list(inputs.keys()),
+            "recognized-gain",
+            secondary_metrics=sec1031_sec_js,
+            js_override=f1031.js_expression,
+        ),
         primary_output_selector="#recognized-gain",
     )
     neighbors_html = "".join(
@@ -3673,14 +3833,9 @@ def _build_vehicle_179_spoke_page(
     equip_cap = float(c["sec179_cap_2026"])
     canonical_path = f"/tools/section-179-calculator/{v_slug}/"
 
-    formula = (
-        "round(min(equipment_cost * business_use_pct, "
-        "(is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) + "
-        "max(0.0, equipment_cost * business_use_pct - "
-        "min(equipment_cost * business_use_pct, "
-        "(is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))))) * "
-        "(bonus_pct / 100.0), 2)"
-    )
+    pack = load_profithelm_truth_pack()
+    f179 = pack.formulas["section_179_heavy_suv_plus_bonus_2026"]
+    formula = f179.expression
     inputs = {
         "equipment_cost": msrp,
         "business_use_pct": 1.0,
@@ -3708,6 +3863,7 @@ def _build_vehicle_179_spoke_page(
         if is_suv
         else f"${int(equip_cap):,} commercial work-vehicle cap + {int(bonus_pct)}% bonus depreciation"
     )
+    sec179_sec_metrics, sec179_sec_js = _section_179_secondary_breakdown(inputs)
     spec = InteractiveCalculatorSpec(
         slug=f"section-179-{v_slug}",
         title=f"2026 {v_name} Section 179 Tax Deduction Calculator",
@@ -3726,9 +3882,16 @@ def _build_vehicle_179_spoke_page(
         ],
         metrics=[
             CalculatorMetric(id="total-first-year-deduction", label="Total Year-1 Federal Write-Off", default_display=_format_currency(baseline), is_primary=True),
+            *sec179_sec_metrics,
         ],
         formula_label=manifest["model_name"],
-        js_logic=_build_formula_js(formula, list(inputs.keys()), "total-first-year-deduction"),
+        js_logic=_build_formula_js(
+            formula,
+            list(inputs.keys()),
+            "total-first-year-deduction",
+            secondary_metrics=sec179_sec_js,
+            js_override=f179.js_expression,
+        ),
         primary_output_selector="#total-first-year-deduction",
     )
 
@@ -4393,11 +4556,23 @@ def _post_process_estate_invariants(
             flags=re.IGNORECASE,
         )
 
+        dark_disclosure_style = "color:#cbd5e1;background:#0f172a;padding:12px 16px;margin:0;border-top:1px solid #334155;"
+        is_dark_page = (
+            rel_p.startswith("signal/")
+            or rel_p.startswith("static/signal/")
+            or bool(re.search(r"body\s*\{[^}]*background(?:-color)?\s*:\s*#000(?:000)?\b", cleaned, re.IGNORECASE))
+        )
         if "Circular 230" not in cleaned and "</body>" in cleaned:
+            style_attr = f' style="{dark_disclosure_style}"' if is_dark_page else ""
             cleaned = cleaned.replace(
                 "</body>",
-                f'<p class="compliance-disclosure-inline">{html_lib.escape(notice)}</p></body>',
+                f'<p class="compliance-disclosure-inline"{style_attr}>{html_lib.escape(notice)}</p></body>',
                 1,
+            )
+        elif is_dark_page and '<p class="compliance-disclosure-inline">' in cleaned:
+            cleaned = cleaned.replace(
+                '<p class="compliance-disclosure-inline">',
+                f'<p class="compliance-disclosure-inline" style="{dark_disclosure_style}">',
             )
         assert_no_forbidden_dashes(cleaned, str(html_file))
         if cleaned != raw:
