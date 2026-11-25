@@ -578,7 +578,8 @@ def audit_rendered_asset(
 
         from pseofactory.competitor import _format_safe_heading_topic
         safe_model_h2 = _format_safe_heading_topic(model_name, "")
-        spaced_model = re.sub(r'([a-z])([A-Z])', r'\1 \2', model_name)
+        spaced_model = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', model_name)
+        spaced_model = re.sub(r'([a-z])([A-Z])', r'\1 \2', spaced_model)
         spaced_model = re.sub(r'([A-Za-z])([0-9])', r'\1 \2', spaced_model)
         spaced_model = re.sub(r'([0-9])([A-Za-z])', r'\1 \2', spaced_model)
         model_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', spaced_model.lower()) if len(w) > 3}

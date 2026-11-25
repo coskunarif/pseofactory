@@ -4443,7 +4443,7 @@ def _build_vehicle_179_spoke_page(
     manifest = {
         "slug": v_slug,
         "formula_id": "section_179_heavy_suv_plus_bonus_2026",
-        "model_name": f"{re.sub(r'[^A-Za-z0-9]', '', v_name)}Section179Model",
+        "model_name": f"{v_name} Section 179 Model",
         "statutory_authority": "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32",
         "economic_dataset": "BEA Private Equipment Investment & IRS Form 4562 Vehicle Series",
         "formula": formula,
