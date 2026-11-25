@@ -582,7 +582,7 @@ def audit_rendered_asset(
         spaced_model = re.sub(r'([a-z])([A-Z])', r'\1 \2', spaced_model)
         spaced_model = re.sub(r'([A-Za-z])([0-9])', r'\1 \2', spaced_model)
         spaced_model = re.sub(r'([0-9])([A-Za-z])', r'\1 \2', spaced_model)
-        model_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', spaced_model.lower()) if len(w) > 3}
+        model_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', (model_name + " " + spaced_model).lower()) if len(w) > 3}
         header_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', above_fold_text.lower()) if len(w) > 3}
 
         model_in_header = (
