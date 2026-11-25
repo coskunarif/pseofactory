@@ -58,8 +58,8 @@
           "label": "Pre-OBBBA 2025 Section 179 cap ($1,250,000)",
           "reason": "Superseded retroactively for tax years beginning after Dec 31, 2024 by P.L. 119-21 Section 70306.",
           "patterns": [
-            "\\$?1,250,000",
-            "1\\.25\\s*M(?:illion)?\\b"
+            "(?<![0-9,])\\$?1,250,000(?![0-9]|(?:,[0-9]))",
+            "(?<![0-9.])1\\.25\\s*M(?:illion)?\\b"
           ]
         }
       ],
@@ -89,7 +89,7 @@
           "label": "Pre-OBBBA 2025 Section 179 phaseout ($3,130,000)",
           "reason": "Superseded by P.L. 119-21 Section 70306 ($4,000,000 phaseout threshold).",
           "patterns": [
-            "\\$?3,130,000"
+            "(?<![0-9,])\\$?3,130,000(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
@@ -118,7 +118,7 @@
           "label": "2024 Section 179 cap ($1,220,000)",
           "reason": "Outdated 2024 limit superseded for 2026 by IRS Rev. Proc. 2025-32.",
           "patterns": [
-            "\\$?1,220,000"
+            "(?<![0-9,])\\$?1,220,000(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -126,7 +126,7 @@
           "label": "Pre-OBBBA 2025 Section 179 cap ($1,250,000)",
           "reason": "Superseded by P.L. 119-21 and IRS Rev. Proc. 2025-32.",
           "patterns": [
-            "\\$?1,250,000"
+            "(?<![0-9,])\\$?1,250,000(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -134,14 +134,12 @@
           "label": "Pre-OBBBA projected 2026 Section 179 cap ($1,290,000)",
           "reason": "Superseded by P.L. 119-21 Section 70306 and IRS Rev. Proc. 2025-32 ($2,560,000).",
           "patterns": [
-            "\\$?1,290,000"
+            "(?<![0-9,])\\$?1,290,000(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
       "required_qualifier_patterns": [],
-      "applies_to_slugs": [
-        "section-179-calculator"
-      ],
+      "applies_to_slugs": [],
       "forbidden_on_slugs": [
         "commercial-heavy-vehicle-section-179-weight-calculator"
       ]
@@ -165,7 +163,7 @@
           "label": "2024 Section 179 phaseout ($3,050,000)",
           "reason": "Outdated 2024 threshold superseded by $4,090,000 for 2026.",
           "patterns": [
-            "\\$?3,050,000"
+            "(?<![0-9,])\\$?3,050,000(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -173,14 +171,12 @@
           "label": "Pre-OBBBA 2025 Section 179 phaseout ($3,130,000)",
           "reason": "Superseded by $4,090,000 for 2026 under IRS Rev. Proc. 2025-32.",
           "patterns": [
-            "\\$?3,130,000"
+            "(?<![0-9,])\\$?3,130,000(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
       "required_qualifier_patterns": [],
-      "applies_to_slugs": [
-        "section-179-calculator"
-      ],
+      "applies_to_slugs": [],
       "forbidden_on_slugs": []
     },
     "section_179_heavy_suv_cap_2025": {
@@ -222,7 +218,7 @@
           "label": "2024 Heavy SUV Section 179 cap ($30,500)",
           "reason": "Outdated 2024 SUV cap; 2026 cap is $32,000.",
           "patterns": [
-            "\\$?30,500"
+            "(?<![0-9,])\\$?30,500(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -230,7 +226,7 @@
           "label": "2025 Heavy SUV Section 179 cap ($31,300)",
           "reason": "2025 SUV cap superseded for 2026 by $32,000 under IRS Rev. Proc. 2025-32.",
           "patterns": [
-            "\\$?31,300"
+            "(?<![0-9,])\\$?31,300(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -238,15 +234,12 @@
           "label": "General Equipment Cap ($2,560,000) misapplied to Heavy SUVs",
           "reason": "Heavy SUVs (6,000-14,000 lbs GVWR) are capped at $32,000 under IRC Section 179(b)(5)(A), not $2,560,000.",
           "patterns": [
-            "(?i)heavy\\s+suvs?[^.\\n]{0,50}\\$?2,560,000|\\$?2,560,000[^.\\n]{0,50}heavy\\s+suvs?"
+            "(?i)heavy\\s+suvs?[^.\\n]{0,50}(?<![0-9,])\\$?2,560,000(?![0-9]|(?:,[0-9]))|(?<![0-9,])\\$?2,560,000(?![0-9]|(?:,[0-9]))[^.\\n]{0,50}heavy\\s+suvs?"
           ]
         }
       ],
       "required_qualifier_patterns": [],
-      "applies_to_slugs": [
-        "commercial-heavy-vehicle-section-179-weight-calculator",
-        "section-179-calculator"
-      ],
+      "applies_to_slugs": [],
       "forbidden_on_slugs": []
     },
     "bonus_depreciation_pct_2026": {
@@ -296,7 +289,7 @@
           "label": "Pre-OBBBA 2025 Single Standard Deduction ($15,000)",
           "reason": "2025 pre-OBBBA figure superseded by $16,100 for 2026.",
           "patterns": [
-            "\\$?15,000\\s*standard\\s*deduction"
+            "(?<![0-9,])\\$?15,000\\s*standard\\s*deduction"
           ]
         },
         {
@@ -304,7 +297,7 @@
           "label": "Pre-OBBBA 2026 projected Single Standard Deduction ($15,350)",
           "reason": "Superseded by P.L. 119-21 and IRS Rev. Proc. 2025-32 ($16,100).",
           "patterns": [
-            "\\$?15,350"
+            "(?<![0-9,])\\$?15,350(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -312,7 +305,7 @@
           "label": "Repealed TCJA Sunset Single Standard Deduction ($8,600)",
           "reason": "TCJA sunset was repealed by P.L. 119-21.",
           "patterns": [
-            "\\$?8,600"
+            "(?<![0-9,])\\$?8,600(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
@@ -339,7 +332,7 @@
           "label": "Pre-OBBBA 2025 MFJ Standard Deduction ($30,000)",
           "reason": "Superseded by $32,200 for 2026 under IRS Rev. Proc. 2025-32.",
           "patterns": [
-            "\\$?30,000\\s*standard\\s*deduction"
+            "(?<![0-9,])\\$?30,000\\s*standard\\s*deduction"
           ]
         }
       ],
@@ -424,9 +417,9 @@
           "label": "Pre-OBBBA / 2025 bracket thresholds ($12,050 / $48,900 / $104,400)",
           "reason": "Superseded by IRS Rev. Proc. 2025-32 2026 thresholds.",
           "patterns": [
-            "\\$?12,050",
-            "\\$?48,900",
-            "\\$?104,400"
+            "(?<![0-9,])\\$?12,050(?![0-9]|(?:,[0-9]))",
+            "(?<![0-9,])\\$?48,900(?![0-9]|(?:,[0-9]))",
+            "(?<![0-9,])\\$?104,400(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -434,7 +427,7 @@
           "label": "Repealed 39.6% TCJA sunset top rate",
           "reason": "P.L. 119-21 permanently enacted the 37% top rate and repealed the 39.6% sunset.",
           "patterns": [
-            "39\\.6%"
+            "(?<![0-9.])39\\.6%"
           ]
         }
       ],
@@ -461,7 +454,7 @@
           "label": "Repealed TCJA Sunset Single Standard Deduction ($8,600)",
           "reason": "TCJA sunset was repealed by P.L. 119-21; 2027 single standard deduction is $16,600.",
           "patterns": [
-            "\\$?8,600"
+            "(?<![0-9,])\\$?8,600(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
@@ -560,7 +553,7 @@
           "label": "Repealed 39.6% TCJA sunset rate",
           "reason": "P.L. 119-21 repealed the 2026-2027 TCJA sunset and made 37% permanent.",
           "patterns": [
-            "39\\.6%"
+            "(?<![0-9.])39\\.6%"
           ]
         },
         {
@@ -568,7 +561,7 @@
           "label": "Repealed CA sunset figure ($30,416)",
           "reason": "Derived from repealed TCJA sunset schedule.",
           "patterns": [
-            "\\$?30,416"
+            "(?<![0-9,])\\$?30,416(?![0-9]|(?:,[0-9]))"
           ]
         },
         {
@@ -576,7 +569,7 @@
           "label": "2025 $15k standard deduction tax figure ($19,181)",
           "reason": "Computed under superseded 2025 $15,000 standard deduction and 2025 brackets.",
           "patterns": [
-            "\\$?19,181"
+            "(?<![0-9,])\\$?19,181(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
@@ -697,12 +690,137 @@
           "label": "2025 OASDI wage base ($176,100)",
           "reason": "2025 wage base superseded by $184,500 for 2026.",
           "patterns": [
-            "\\$?176,100"
+            "(?<![0-9,])\\$?176,100(?![0-9]|(?:,[0-9]))"
           ]
         }
       ],
       "required_qualifier_patterns": [],
       "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "ltcg_statutory_brackets_2026": {
+      "key": "ltcg_statutory_brackets_2026",
+      "value": [
+        0.0,
+        15.0,
+        20.0
+      ],
+      "claim_class": "enacted_law",
+      "unit": "percent_tiers",
+      "effective_year": 2026,
+      "citation": "26 U.S.C. 1(h) / IRS Rev. Proc. 2025-32 Section 4.01",
+      "primary_source_url": "https://www.irs.gov/pub/irs-drop/rp-25-32.pdf",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 26 U.S.C. 1(h) and IRS Rev. Proc. 2025-32, long-term capital gains are taxed at statutory marginal tiers of 0%, 15%, and 20%.",
+      "source_quote_sha256": "bf35b03b1d7cacde683ad71708be00c065d590703600085b865e588c9b968ec9",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "section_41_asc_rate": {
+      "key": "section_41_asc_rate",
+      "value": 14.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "26 U.S.C. 41(c)(4)(A) (Alternative Simplified Credit)",
+      "primary_source_url": "https://www.irs.gov/forms-pubs/about-form-6765",
+      "publisher": "Internal Revenue Service",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 26 U.S.C. 41(c)(4)(A), the Alternative Simplified Credit equals 14 percent of qualified research expenses exceeding 50 percent of the average qualified research expenses for the 3 preceding taxable years.",
+      "source_quote_sha256": "6eef81c33e2b5f19531940f428884a8df719e88b8410e4bca21a8fb66b508168",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "section_199a_qbi_deduction_pct": {
+      "key": "section_199a_qbi_deduction_pct",
+      "value": 20.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "P.L. 119-21 Section 70105 / 26 U.S.C. 199A(a)",
+      "primary_source_url": "https://www.congress.gov/bill/119th-congress/house-bill/1",
+      "publisher": "U.S. Congress",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 26 U.S.C. 199A(a), as made permanent by P.L. 119-21 Section 70105, eligible pass-through taxpayers may deduct 20 percent of qualified business income.",
+      "source_quote_sha256": "f397aad6ab7ef156aec8f6614c2fac71167595f46f053e80672009df185ba21a",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": [
+        "1031-exchange-capital-gains-calculator",
+        "qsbs-section-1202-state-conformity-tax-calculator",
+        "section-1031-calculator"
+      ]
+    },
+    "state_ca_top_income_tax_rate": {
+      "key": "state_ca_top_income_tax_rate",
+      "value": 13.3,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "Cal. Rev. & Tax. Code Sections 17041 & 17043",
+      "primary_source_url": "https://www.ftb.ca.gov/forms/2025/2025-540-tax-rate-schedules.pdf",
+      "publisher": "California Franchise Tax Board",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "California personal income tax reaches a top combined statutory marginal rate of 13.3% (12.3% top bracket under R&TC Section 17041 plus the 1.0% Mental Health Services Tax under R&TC Section 17043).",
+      "source_quote_sha256": "77e0aaaec4388515e7454df9d9cbe6a93aaef2b0b4adcf479fe99c8523381145",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "state_mi_income_tax_rate": {
+      "key": "state_mi_income_tax_rate",
+      "value": 4.25,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2026,
+      "citation": "Mich. Comp. Laws Section 206.51",
+      "primary_source_url": "https://www.michigan.gov/taxes/iit",
+      "publisher": "Michigan Department of Treasury",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under MCL 206.51, Michigan levies a flat statutory individual income tax rate of 4.25 percent on taxable income.",
+      "source_quote_sha256": "721506c2effbdde8e9a089a986f724b5c68fc82316b66d8d7996ec2cd1c77182",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [],
+      "forbidden_on_slugs": []
+    },
+    "section_1256_blended_top_rate": {
+      "key": "section_1256_blended_top_rate",
+      "value": {
+        "blended_top_rate_pct": 26.8,
+        "ordinary_top_rate_pct": 37.0,
+        "rate_spread_pct": 10.2,
+        "ltcg_weight_pct": 60.0,
+        "stcg_weight_pct": 40.0,
+        "ltcg_top_rate_pct": 20.0
+      },
+      "claim_class": "enacted_law",
+      "unit": "percent_map",
+      "effective_year": 2026,
+      "citation": "26 U.S.C. Section 1256(a)(3) & Section 1(h) / 1(j)",
+      "primary_source_url": "https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1256&num=0&edition=prelim",
+      "publisher": "Office of the Law Revision Counsel, U.S. House of Representatives",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 26 U.S.C. Section 1256(a)(3), 60 percent of gain or loss from a Section 1256 contract is treated as long-term capital gain or loss (20% top rate) and 40 percent as short-term capital gain or loss (37.0% top ordinary rate), yielding a 26.8% top blended capital-gains rate (0.60 * 20% + 0.40 * 37%) and a 10.2% rate spread versus the 37.0% ordinary top rate.",
+      "source_quote_sha256": "d6ec9758f8236073daa24ded98dca10a168872a222cb9bad99f65c502e822f4d",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "prediction-market-odds"
+      ],
       "forbidden_on_slugs": []
     }
   },
@@ -1166,6 +1284,17 @@
       "patterns": [
         "IRC\\s*(?:Section|Sec\\.?)?\\s*1(?:\\(j\\))?(?![0-9A-Za-z(])",
         "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?1(?:\\(j\\))?(?![0-9A-Za-z(])"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_63": {
+      "canonical": "IRC Section 63 / 26 U.S.C. Section 63(c)(7) (Standard Deduction)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*63(?:\\([a-zA-Z0-9]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*)?63(?:\\([a-zA-Z0-9]+\\))*"
       ],
       "allowed_slug_patterns": [
         ".*"

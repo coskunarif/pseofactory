@@ -420,7 +420,7 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers(tmp_path):
             shutil.copytree(src_dist / "tools", dst_dist / "tools")
         else:
             (dst_dist / "tools").mkdir(parents=True, exist_ok=True)
-        write_runtime_synchronizer_asset(dst_dist)
+        write_runtime_synchronizer_asset(dst_dist, property_id=prop)
         for html_p in (dst_dist / "tools").rglob("index.html"):
             if html_p == dst_dist / "tools" / "index.html":
                 continue
@@ -428,6 +428,7 @@ def test_monetization_and_datapack_ui_ux_surfaces_and_button_handlers(tmp_path):
                 html_p.read_text(encoding="utf-8", errors="ignore"),
                 is_tenant_porcelain=True,
                 dist_dir=dst_dist,
+                property_id=prop,
             )
             html_p.write_text(norm_p, encoding="utf-8")
         dist_dirs[prop] = dst_dist / "tools"

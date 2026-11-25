@@ -199,7 +199,7 @@ def test_gainhelm_datapack_edge_metadata_and_ci_temp_build_parity(tmp_path: Path
     assert "effective_tax_year" not in dp
 
     ph_spec = resolve_post_calculation_upgrade_spec("profithelm", "section-179-calculator")
-    assert ph_spec is not None and ph_spec["effective_tax_year"] == "2026"
+    assert ph_spec is not None and ph_spec["effective_tax_year"] == "2027"
 
     edge_file = tmp_path / "lead-capture.mjs"
     edge_file.write_text(generate_edge_lead_capture_function("gainhelm"), encoding="utf-8")
@@ -442,11 +442,11 @@ def test_gainhelm_subsidy_meter_framework_parity_and_recompute(tmp_path: Path) -
 
     expected_ssr = {
         "soc-2-audit-cost-calculator": ("soc2", "$37,000.00", "$8,030.22", "$14,600.40"),
-        "cmmc-2-0-compliance-cost-calculator": ("cmmc", "$48,500.00", "$15,295.00", "$43,700.00"),
-        "nist-800-171-sprs-score-calculator": ("sprs", "$48,500.00", "$15,295.00", "$43,700.00"),
-        "iso-27001-certification-cost-calculator": ("iso27001", "$21,450.00", "$11,275.20", "$22,550.40"),
-        "hipaa-violation-penalty-breach-cost-calculator": ("hipaa", "$2,067,813.00", "$620,343.90", "$387,500.00"),
-        "pci-dss-4-0-compliance-cost-calculator": ("pci_dss", "$42,000.00", "$17,460.00", "$38,800.00"),
+        "cmmc-2-0-compliance-cost-calculator": ("cmmc", "$48,500.00", "$16,182.11", "$46,234.60"),
+        "nist-800-171-sprs-score-calculator": ("sprs", "$48,500.00", "$16,182.11", "$46,234.60"),
+        "iso-27001-certification-cost-calculator": ("iso27001", "$21,450.00", "$10,950.30", "$21,900.60"),
+        "hipaa-violation-penalty-breach-cost-calculator": ("hipaa", "$2,190,294.00", "$657,088.20", "$387,500.00"),
+        "pci-dss-4-0-compliance-cost-calculator": ("pci_dss", "$42,000.00", "$16,830.27", "$37,400.60"),
         "fedramp-authorization-3pao-cost-calculator": ("fedramp", "$210,000.00", "$125,000.00", "$210,000.00"),
         "hitrust-csf-e1-i1-r2-certification-cost-calculator": ("hitrust", "$57,500.00", "$34,500.00", "$36,800.00"),
         "penetration-testing-scoping-cost-calculator": ("pentest", "$14,446.00", "$6,990.00", "$4,660.00"),
@@ -519,7 +519,7 @@ function runCalc(html, hcVal, recVal, modeAttr) {
 }
 const pen = runCalc(%s, 250, 1500, "pentest");
 const hip = runCalc(%s, 75, 100, "hipaa");
-if (pen.pay === "$14,446.00" || hip.pay === "$2,067,813.00") {
+if (pen.pay === "$14,446.00" || hip.pay === "$2,190,294.00") {
   throw new Error("Meter JS did not recompute: " + JSON.stringify({ pen, hip }));
 }
 console.log(JSON.stringify({ pen, hip }));
@@ -657,8 +657,8 @@ def test_gainhelm_full_page_chromium_script1_and_script2_parity(tmp_path: Path) 
                 page.click("#calc-submit-btn")
                 after_submit = _assert_parity("submit_400")
                 if slug == "iso-27001-certification-cost-calculator":
-                    assert after_submit[0] == "$114,077.92"
-                    assert after_submit[1] == "114,077.92"
+                    assert after_submit[0] == "$112,577.27"
+                    assert after_submit[1] == "112,577.27"
                 if slug == "nist-800-171-sprs-score-calculator":
                     assert after_submit[0] == "42 pts"
                     assert after_submit[1] == "42"
@@ -733,7 +733,7 @@ def test_runtime_sync_tenant_neutral_and_head_tenant_inference() -> None:
         '<script type="application/ld+json">{"@context":"https://schema.org","@type":"WebPage",'
         '"@id":"https://profithelm.com/tools/section-1031-calculator/#webpage",'
         '"url":"https://profithelm.com/tools/section-1031-calculator/"}</script>'
-        '<p>Coordinate IRC Section 179 and Section 1031 like-kind exchange schedules with Mercury treasury accounts.</p>'
+        '<p>Coordinate Section 1031 like-kind exchange and Form 8824 schedules with Mercury treasury accounts.</p>'
         f'<script>var legacyHook = window.{legacy_sync_hook};</script>'
         '</main></body></html>'
     )
@@ -747,7 +747,7 @@ def test_runtime_sync_tenant_neutral_and_head_tenant_inference() -> None:
         '<!DOCTYPE html><html lang="en"><head>'
         '<title>Section 179 Equipment Calculator | ProfitHelm</title>'
         '</head><body><main>'
-        '<p>Model IRC Section 179 and Section 1031 depreciation alongside Mercury accounts; see gainhelm.com for SOC 2.</p>'
+        '<p>Model IRC Section 179 and Section 168(k) bonus depreciation alongside Mercury accounts; see gainhelm.com for SOC 2.</p>'
         '</main></body></html>'
     )
     ph_xref_res = verify_html_cross_web_consensus_and_corroboration(
@@ -838,8 +838,8 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
 
     engine_root = Path(__file__).resolve().parents[1]
     base_env = {"PATH": os.environ.get("PATH", "")}
-    expected_sync_src = get_runtime_synchronizer_script_src()
-    expected_sync_tag = render_external_runtime_synchronizer_tag().strip()
+    expected_sync_src = get_runtime_synchronizer_script_src(property_id=tenant)
+    expected_sync_tag = render_external_runtime_synchronizer_tag(property_id=tenant).strip()
 
     if tenant == "prexvo":
         live_px = Path("/home/ubuntuadmin/projects/prexvo")
@@ -876,13 +876,14 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
             legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
             px_sample = (px_dist / "tools" / "student-loan-repayment-calculator" / "index.html").read_text(encoding="utf-8")
             assert legacy_sync_hook not in px_sample
-            assert has_current_external_runtime_sync_tag(px_sample)
+            assert has_current_external_runtime_sync_tag(px_sample, property_id="prexvo")
             assert expected_sync_tag in px_sample
             px_sync_js_path = px_dist / expected_sync_src.lstrip("/")
             assert px_sync_js_path.is_file(), f"Missing external runtime sync JS at {px_sync_js_path}"
             px_sync_js = px_sync_js_path.read_text(encoding="utf-8")
             assert legacy_sync_hook not in px_sync_js
-            assert "__complianceSyncWorkspaceOutputs" in px_sync_js
+            assert "__complianceSyncWorkspaceOutputs" not in px_sync_js
+            assert "resolveActiveScenarioAmount" in px_sync_js
         return
 
     live_ph = Path("/home/ubuntuadmin/projects/profithelm-platform")
@@ -919,10 +920,11 @@ def test_prexvo_and_profithelm_temp_archive_build_and_seo_audit_parity(tmp_path:
         legacy_sync_hook = "__" + "gainhelm" + "SyncWorkspaceOutputs"
         ph_sample = (ph_dist / "tools" / "section-179-calculator" / "index.html").read_text(encoding="utf-8")
         assert legacy_sync_hook not in ph_sample
-        assert has_current_external_runtime_sync_tag(ph_sample)
+        assert has_current_external_runtime_sync_tag(ph_sample, property_id="profithelm")
         assert expected_sync_tag in ph_sample
         ph_sync_js_path = ph_dist / expected_sync_src.lstrip("/")
         assert ph_sync_js_path.is_file(), f"Missing external runtime sync JS at {ph_sync_js_path}"
         ph_sync_js = ph_sync_js_path.read_text(encoding="utf-8")
         assert legacy_sync_hook not in ph_sync_js
-        assert "__complianceSyncWorkspaceOutputs" in ph_sync_js
+        assert "__complianceSyncWorkspaceOutputs" not in ph_sync_js
+        assert "resolveActiveScenarioAmount" in ph_sync_js

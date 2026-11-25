@@ -111,16 +111,12 @@
           "label": "Incorrect SPRS minimum score (-196)",
           "reason": "Derived from erroneous 42*5 + 14*3 + 54*1 = 306 deduction; official Methodology v1.2.1 has 44 five-point, 14 three-point, 51 one-point, and 1 zero-point control (313 max deduction, -203 min).",
           "patterns": [
-            "(?<![0-9])-196(?![0-9,.])"
+            "(?<![0-9])-196(?![0-9]|(?:[.,][0-9]))"
           ]
         }
       ],
       "required_qualifier_patterns": [],
-      "applies_to_slugs": [
-        "sprs",
-        "nist-800-171",
-        "cmmc"
-      ],
+      "applies_to_slugs": [],
       "forbidden_on_slugs": []
     },
     "sprs_max_deduction": {
@@ -435,6 +431,104 @@
       "output_selectors": [
         "#soc2-total-budget",
         "[data-output='total_budget']"
+      ]
+    },
+    "cmmc_level2_total_budget": {
+      "formula_id": "cmmc_level2_total_budget",
+      "model_name": "DoD CMMC 2.0 Level 2 Total Readiness Budget Estimate (BLS Loaded Rate)",
+      "expression": "round(c3pao_assessment_fee + enclave_licensing_annual + (remediation_hours * 121.67) + rpo_advisory_fee, 2)",
+      "js_expression": "(Math.round(((((c3pao_assessment_fee + enclave_licensing_annual) + (remediation_hours * 121.67)) + rpo_advisory_fee)) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "c3pao_assessment_fee": 48500.0,
+        "enclave_licensing_annual": 26400.0,
+        "remediation_hours": 380.0,
+        "rpo_advisory_fee": 13400.0
+      },
+      "expected_baseline_output": 134534.6,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "75-employee defense contractor CMMC Level 2 baseline estimate",
+          "inputs": {
+            "c3pao_assessment_fee": 48500.0,
+            "enclave_licensing_annual": 26400.0,
+            "remediation_hours": 380.0,
+            "rpo_advisory_fee": 13400.0
+          },
+          "expected": 134534.6
+        },
+        {
+          "label": "Small CUI enclave contractor estimate",
+          "inputs": {
+            "c3pao_assessment_fee": 35000.0,
+            "enclave_licensing_annual": 18000.0,
+            "remediation_hours": 200.0,
+            "rpo_advisory_fee": 8000.0
+          },
+          "expected": 85334.0
+        }
+      ],
+      "citation_keys": [
+        "dod_sprs_v121",
+        "bls_oews_15_1212"
+      ],
+      "allowed_slug_patterns": [
+        ".*cmmc.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#cmmc-total-budget",
+        "[data-output='cmmc_total_budget']"
+      ]
+    },
+    "iso27001_total_budget": {
+      "formula_id": "iso27001_total_budget",
+      "model_name": "ISO/IEC 27001:2022 Certification Total Budget Estimate (BLS Loaded Rate)",
+      "expression": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * 121.67), 2)",
+      "js_expression": "(Math.round((((((auditor_days * daily_auditor_rate) + isms_platform_cost) + internal_audit_fee) + (remediation_hours * 121.67))) * Math.pow(10, 2)) / Math.pow(10, 2))",
+      "variables": {
+        "auditor_days": 11.0,
+        "daily_auditor_rate": 1950.0,
+        "isms_platform_cost": 14500.0,
+        "internal_audit_fee": 8500.0,
+        "remediation_hours": 180.0
+      },
+      "expected_baseline_output": 66350.6,
+      "tolerance": 0.01,
+      "test_vectors": [
+        {
+          "label": "75-employee SaaS ISMS (11 auditor days) baseline estimate",
+          "inputs": {
+            "auditor_days": 11.0,
+            "daily_auditor_rate": 1950.0,
+            "isms_platform_cost": 14500.0,
+            "internal_audit_fee": 8500.0,
+            "remediation_hours": 180.0
+          },
+          "expected": 66350.6
+        },
+        {
+          "label": "25-employee startup ISMS (6.5 auditor days) estimate",
+          "inputs": {
+            "auditor_days": 6.5,
+            "daily_auditor_rate": 1950.0,
+            "isms_platform_cost": 10000.0,
+            "internal_audit_fee": 6000.0,
+            "remediation_hours": 100.0
+          },
+          "expected": 40842.0
+        }
+      ],
+      "citation_keys": [
+        "bls_oews_15_1212"
+      ],
+      "allowed_slug_patterns": [
+        ".*iso-27001.*"
+      ],
+      "forbidden_slug_patterns": [],
+      "output_selectors": [
+        "#iso27001-total-budget",
+        "[data-output='iso27001_total_budget']"
       ]
     }
   },

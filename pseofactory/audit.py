@@ -97,7 +97,7 @@ BANNED_TAUTOLOGICAL_FORMULA_PATTERNS: Tuple[Tuple[str, str], ...] = (
     ),
     (
         "4880.0",
-        "Fabricated additive constant '4880.0' in Section 179 formula (must use $30,500 SUV cap + 20% bonus depreciation)",
+        "Fabricated additive constant '4880.0' in Section 179 formula (must use $32,000 SUV cap + 100% bonus depreciation under P.L. 119-21)",
     ),
     (
         "48212.5",
@@ -145,11 +145,11 @@ def _resolve_gainhelm_hipaa_tier4_cap() -> float:
 
 GAINHELM_CANONICAL_BASELINE_OUTPUTS: Dict[str, float] = {
     "soc-2-audit-cost-calculator": 78100.40,
-    "cmmc-2-0-compliance-cost-calculator": 132000.00,
+    "cmmc-2-0-compliance-cost-calculator": 134534.60,
     "nist-800-171-sprs-score-calculator": 87.0,
-    "iso-27001-certification-cost-calculator": 67000.40,
+    "iso-27001-certification-cost-calculator": 66350.60,
     "hipaa-violation-penalty-breach-cost-calculator": round(_resolve_gainhelm_hipaa_tier4_cap() + 387500.0, 2),
-    "pci-dss-4-0-compliance-cost-calculator": 94800.00,
+    "pci-dss-4-0-compliance-cost-calculator": 93400.60,
     "fedramp-authorization-3pao-cost-calculator": 500000.00,
     "hitrust-csf-e1-i1-r2-certification-cost-calculator": 115000.00,
     "penetration-testing-scoping-cost-calculator": 23300.00,
@@ -269,7 +269,7 @@ def verify_manifest_ssr_metric_parity(
             gt_expected = GAINHELM_CANONICAL_BASELINE_OUTPUTS[slug_leaf]
             if abs(float(published_output) - gt_expected) > 0.05:
                 issues.append(
-                    f"Gate 5 (SSR Metric Parity): GainHelm manifest/output-value ({published_output}) for '{slug_leaf}' diverges from compliance_formulas ground truth ({gt_expected})"
+                    f"Gate 5 (SSR Metric Parity): GainHelm manifest/output-value ({published_output}) for '{slug_leaf}' diverges from GAINHELM_CANONICAL_BASELINE_OUTPUTS / TruthPack ground truth ({gt_expected})"
                 )
 
     # Plan-specific Prexvo and GainHelm SSR metric binding
@@ -1456,6 +1456,7 @@ def _audit_schema_and_fact_gates(
         html_content,
         rel_path=slug or "index.html",
         require_primitives=None,
+        property_id=tenant,
     )
     if visual_ux_issues:
         g10_ok = False
@@ -1597,6 +1598,7 @@ def audit_visual_ui_quality_contract(
     html_content: str,
     rel_path: str = "index.html",
     require_primitives: Optional[bool] = None,
+    property_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Audits a rendered HTML page against its classified screen archetype contract
@@ -1616,6 +1618,7 @@ def audit_visual_ui_quality_contract(
         html_content,
         rel_path=rel_path,
         require_primitives=require_primitives,
+        property_id=property_id,
     )
     return {
         "passed": len(issues) == 0,

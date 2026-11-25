@@ -185,6 +185,150 @@ def assert_three_sentence_spoken_precision(
     }
 
 
+def _load_profithelm_video_truth_constants() -> Dict[str, Any]:
+    """Loads verified statutory constants from the ProfitHelm TruthPack dynamically."""
+    bonus_pct = 100
+    suv_cap = 32000
+    top_rate = 37
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+
+        pack = load_truth_pack("profithelm")
+        entries = pack.get("entries") or {}
+        if isinstance(entries, dict):
+            bonus_val = (entries.get("bonus_depreciation_pct_2026") or {}).get("value")
+            if isinstance(bonus_val, (int, float)):
+                bonus_pct = int(round(float(bonus_val)))
+            suv_val = (entries.get("section_179_heavy_suv_cap_2026") or {}).get("value")
+            if isinstance(suv_val, (int, float)):
+                suv_cap = int(round(float(suv_val)))
+            brackets = (entries.get("tax_brackets_2026_single") or {}).get("value")
+            if isinstance(brackets, list) and brackets:
+                rates = [
+                    int(round(float(b.get("rate", 0)) * (100.0 if float(b.get("rate", 0)) <= 1.0 else 1.0)))
+                    for b in brackets
+                    if isinstance(b, dict) and b.get("rate") is not None
+                ]
+                if rates:
+                    top_rate = max(rates)
+    except Exception:
+        pass
+    return {
+        "bonus_pct": bonus_pct,
+        "suv_cap": suv_cap,
+        "suv_cap_formatted": f"${suv_cap:,}",
+        "top_rate": top_rate,
+    }
+
+
+def _sanitize_profithelm_video_text(text: str, constants: Optional[Dict[str, Any]] = None) -> str:
+    """Normalizes ProfitHelm video text against TruthPack constants and strips stale/cross-tenant tokens."""
+    if not text:
+        return text
+    consts = constants or _load_profithelm_video_truth_constants()
+    bonus_pct = consts["bonus_pct"]
+    suv_cap = consts["suv_cap"]
+    suv_cap_formatted = consts["suv_cap_formatted"]
+    top_rate = consts["top_rate"]
+
+    out = text.replace("\u2014", "-").replace("\u2013", "-")
+    out = re.sub(
+        r"40\s+U\.?S\.?C\.?\s*(?:Sections?|§§?)\s*3131\s*(?:-|to)\s*3134",
+        "applicable contractor bond rules",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"40\s+U\.?S\.?C\.?\s*(?:Section|§)?\s*3131\b",
+        "applicable contractor bond rules",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(r"\bMiller\s+Act\b", "federal surety rules", out, flags=re.IGNORECASE)
+    out = re.sub(r"\bFAR\s+Part\s+28\b", "federal surety rules", out, flags=re.IGNORECASE)
+    out = re.sub(r"(?i)\bfederal\s+(?:contractor\s+)?federal\b", "federal", out)
+    out = re.sub(r"\$30,500(?:\.0+)?\b", suv_cap_formatted, out)
+    out = re.sub(r"\b30,500(?:\.0+)?\b", f"{suv_cap:,}", out)
+    out = re.sub(r"\b30500(?:\.0+)?\b", str(suv_cap), out)
+    out = re.sub(r"(?<!pre-2018 )(?<!2017 )\b39\.6\s*%", f"{top_rate}%", out, flags=re.IGNORECASE)
+    out = re.sub(r"(?<!pre-2018 )(?<!2017 )\b39\.6\b", str(top_rate), out, flags=re.IGNORECASE)
+    out = re.sub(
+        r"(?i)\b20(?:\.0+)?%(?=\s*(?:first[- ]year\s+)?(?:bonus|depreciation|under\s+(?:IRC\s+)?(?:section|§)?\s*168))",
+        f"{bonus_pct}%",
+        out,
+    )
+    out = re.sub(
+        r"(?i)((?:bonus|depreciation|168\(k\)|Section\s+179)[^.\n]{0,80}?)\b20(?:\.0+)?%",
+        rf"\g<1>{bonus_pct}%",
+        out,
+    )
+    out = re.sub(
+        r"(?i)\b20(?:\.0+)?%([^.\n]{0,80}?(?:bonus|depreciation|168\(k\)|Section\s+179))",
+        rf"{bonus_pct}%\g<1>",
+        out,
+    )
+    lower_out = out.lower()
+    if any(tok in lower_out for tok in ("bonus depreciation", "section 179", "168(k)")):
+        out = re.sub(r"\b20(?:\.0+)?%", f"{bonus_pct}%", out)
+    return out
+
+
+def _sanitize_profithelm_video_payload(
+    payload: Any,
+    constants: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Recursively sanitizes ProfitHelm video metadata dicts/lists/strings against TruthPack."""
+    consts = constants or _load_profithelm_video_truth_constants()
+    if isinstance(payload, str):
+        return _sanitize_profithelm_video_text(payload, consts)
+    if isinstance(payload, list):
+        has_depreciation_ctx = any(
+            isinstance(x, str) and any(k in x.lower() for k in ("179", "bonus", "depreciation"))
+            for x in payload
+        )
+        cleaned_list = [_sanitize_profithelm_video_payload(item, consts) for item in payload]
+        if has_depreciation_ctx:
+            cleaned_list = [
+                re.sub(r"\b20(?:\.0+)?%", f"{consts['bonus_pct']}%", item)
+                if isinstance(item, str)
+                else item
+                for item in cleaned_list
+            ]
+        return cleaned_list
+    if isinstance(payload, dict):
+        return {k: _sanitize_profithelm_video_payload(v, consts) for k, v in payload.items()}
+    return payload
+
+
+def sanitize_profithelm_video_catalog(videos_dir: Union[str, Path]) -> int:
+    """
+    Sanitizes `batch_seo_catalog.json` and `uploaded_log.json` under `videos_dir`
+    against the ProfitHelm TruthPack. Returns number of JSON files updated.
+    """
+    vdir = Path(videos_dir)
+    if not vdir.is_dir():
+        return 0
+    consts = _load_profithelm_video_truth_constants()
+    updated_files = 0
+    for fname in ("batch_seo_catalog.json", "uploaded_log.json"):
+        fpath = vdir / fname
+        if not fpath.is_file():
+            continue
+        try:
+            raw_text = fpath.read_text(encoding="utf-8")
+            parsed = json.loads(raw_text)
+        except Exception:
+            continue
+        cleaned_obj = _sanitize_profithelm_video_payload(parsed, consts)
+        new_text = json.dumps(cleaned_obj, indent=2) + "\n"
+        if new_text != raw_text:
+            tmp_f = fpath.with_suffix(".tmp")
+            tmp_f.write_text(new_text, encoding="utf-8")
+            tmp_f.replace(fpath)
+            updated_files += 1
+    return updated_files
+
+
 def extract_and_verify_three_sentence_script(
     tool: Union[str, Dict[str, Any]],
     property_id: str = "profithelm",
@@ -208,6 +352,8 @@ def extract_and_verify_three_sentence_script(
     slug = str(yt_pack.get("slug") or resolved_tool.get("slug"))
     if "calculation_proof" not in yt_pack or not isinstance(yt_pack.get("calculation_proof"), dict):
         yt_pack["calculation_proof"] = _resolve_tool_calculation_proof(resolved_tool, property_id=prop)
+    if prop == "profithelm":
+        yt_pack = _sanitize_profithelm_video_payload(yt_pack)
 
     assert_youtube_title(yt_pack["title"], context=f"{prop}:{slug}:title")
     assert_youtube_description(yt_pack["description"])
@@ -2547,6 +2693,12 @@ def sync_video_catalog_and_metadata(
         except Exception:
             catalog = []
 
+    if prop == "profithelm":
+        consts = _load_profithelm_video_truth_constants()
+        youtube_pack = _sanitize_profithelm_video_payload(youtube_pack, consts)
+        spoken_script = _sanitize_profithelm_video_text(spoken_script, consts)
+        catalog = _sanitize_profithelm_video_payload(catalog, consts)
+
     content_hash = hashlib.sha256(
         f"{prop}:{slug}:{youtube_pack.get('title', '')}:{spoken_script}".encode("utf-8")
     ).hexdigest()
@@ -2588,6 +2740,8 @@ def sync_video_catalog_and_metadata(
         "youtube_url": video_url,
         "updated_at": preserved_updated_at or datetime.now(timezone.utc).isoformat(),
     }
+    if prop == "profithelm":
+        entry = _sanitize_profithelm_video_payload(entry)
     catalog.append(entry)
     catalog.sort(key=lambda x: str(x.get("slug") or ""))
 
@@ -2596,6 +2750,8 @@ def sync_video_catalog_and_metadata(
         tmp_cat = cat_file.with_suffix(".tmp")
         tmp_cat.write_text(new_cat_text, encoding="utf-8")
         tmp_cat.replace(cat_file)
+    if prop == "profithelm":
+        sanitize_profithelm_video_catalog(videos_dir)
 
     # Sync syndication/<slug>/youtube_metadata.json in tenant repo and central pseofactory syndication dir
     synd_dirs = [repo_root / "syndication" / slug]
@@ -2621,6 +2777,8 @@ def sync_video_catalog_and_metadata(
                         yt_meta["video_id"] = video_id
                     if video_url:
                         yt_meta["youtube_url"] = video_url
+                    if prop == "profithelm":
+                        yt_meta = _sanitize_profithelm_video_payload(yt_meta)
                     yt_meta_file.write_text(json.dumps(yt_meta, indent=2) + "\n", encoding="utf-8")
             except Exception:
                 pass
@@ -3867,6 +4025,7 @@ __all__ = [
     "synthesize_voiceover_and_vtt",
     "generate_video_thumbnail",
     "compose_and_verify_mp4",
+    "sanitize_profithelm_video_catalog",
     "sync_video_catalog_and_metadata",
     "synthesize_tool_video_asset",
     "check_youtube_cli_diagnostics",

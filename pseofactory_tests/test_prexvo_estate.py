@@ -2,8 +2,9 @@
 Targeted verification suite for pseofactory.prexvo_estate (Truth-Pack-driven Prexvo compiler).
 Proves 2026 HHS Poverty Guidelines ($15,960 / $5,680), P.L. 119-21 Section 82001 RAP
 (360-month forgiveness, 100% interest subsidy, $50/mo principal match), $9/$19 workpaper
-CTAs on all tool pages, YMYL disclosures, clean llms.txt, single SoftwareApplication JSON-LD,
-zero forbidden dashes, and UnifiedTruthGate pass (including live Node.js math parity).
+CTAs on commercial tool pages (omitted on restricted public-service YMYL slugs), YMYL
+disclosures, clean llms.txt, single SoftwareApplication JSON-LD, zero forbidden dashes,
+and UnifiedTruthGate pass (including live Node.js math parity).
 Zero em-dashes (U+2014). Zero en-dashes (U+2013).
 """
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from pseofactory.affiliates import is_restricted_public_service_slug
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.prexvo_estate import (
     CALCULATION_MANIFESTS,
@@ -120,7 +122,7 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
     """
     Compiles full Prexvo estate to temp dist_dir and verifies:
     - 2026 FPL ($15,960 / $5,680) and 360-month RAP in Python SSR & inline JS
-    - Workpaper CTA blocks ($9 / $19) on ALL tool pages including the 4 previously missing ones
+    - Workpaper CTA blocks ($9 / $19) on commercial tool pages, omitted on restricted public-service YMYL pages
     - YMYL forfeiture disclosure ('permanently forfeits') on every tool page and llms-full.txt
     - Clean llms.txt & llms-full.txt (no duplicate words, no query stubs, no dead links)
     - Single SoftwareApplication JSON-LD node per page
@@ -150,23 +152,34 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
     tool_pages = sorted((dist_dir / "tools").glob("*/index.html"))
     assert len(tool_pages) >= 20
 
-    required_workpaper_slugs = {
+    restricted_public_service_slugs = {
         "ibr-hardship-cap-calculator",
         "pslf-buyback-months-reconsideration-student-loan-calculator",
         "pslf-qualifying-payment-simulator",
         "save-plan-litigation-transition",
     }
+    commercial_sample_slugs = {
+        "student-loan-refinance-break-even-calculator",
+        "rap-vs-ibr-calculator",
+    }
     found_slugs = {p.parent.name for p in tool_pages}
-    assert required_workpaper_slugs.issubset(found_slugs)
+    assert restricted_public_service_slugs.issubset(found_slugs)
+    assert commercial_sample_slugs.issubset(found_slugs)
 
     for page_path in tool_pages:
+        slug = page_path.parent.name
         raw = page_path.read_text(encoding="utf-8")
         assert_no_forbidden_dashes(raw, context=str(page_path))
 
-        # Workpaper CTA ($9 / $19) on EVERY tool page
-        assert 'id="workpaper-unlock-card"' in raw, f"Missing workpaper CTA on {page_path.parent.name}"
-        assert f"(${quick_price})" in raw
-        assert f"(${full_price})" in raw
+        if is_restricted_public_service_slug(slug):
+            # Restricted public-service YMYL slugs (pslf-*, save-*, buyback, ibr-hardship) must omit paid checkout CTAs
+            assert 'id="workpaper-unlock-card"' not in raw, f"Unexpected workpaper CTA on restricted slug {slug}"
+            assert 'data-checkout-trigger="1"' not in raw, f"Unexpected checkout trigger on restricted slug {slug}"
+        else:
+            # Commercial Prexvo slugs render #workpaper-unlock-card ($9 / $19)
+            assert 'id="workpaper-unlock-card"' in raw, f"Missing workpaper CTA on {slug}"
+            assert f"(${quick_price})" in raw
+            assert f"(${full_price})" in raw
 
         # Mandatory YMYL federal-refinance disclosure
         assert "permanently forfeits" in raw.lower(), f"Missing YMYL forfeiture notice on {page_path.parent.name}"

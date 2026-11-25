@@ -904,21 +904,493 @@ def strip_cross_framework_leaks_from_overlay(overlay_data: Dict[str, Any], slug:
     return cleaned
 
 
+def _build_truth_pack_overlay_replacements(pack: Any) -> Tuple[List[Tuple[re.Pattern, str]], Dict[str, str]]:
+    """Builds dynamic string replacement rules from a TruthPack's superseded_values."""
+    if pack is None:
+        return [], {}
+    entries = getattr(pack, "entries", None) or {}
+    current_year = datetime.now(timezone.utc).year
+    canonical_nums: Set[str] = set()
+    for entry in entries.values():
+        eff_y = getattr(entry, "effective_year", None)
+        if eff_y is not None and int(eff_y) < current_year:
+            continue
+        c_val = getattr(entry, "value", getattr(entry, "canonical_value", None))
+        if isinstance(c_val, (int, float)) and not isinstance(c_val, bool):
+            canonical_nums.add(str(int(c_val)) if float(c_val).is_integer() else f"{float(c_val):.2f}")
+
+    regex_rules: List[Tuple[re.Pattern, str]] = []
+    exact_float_rules: Dict[str, str] = {}
+
+    for entry_id, entry in entries.items():
+        c_val = getattr(entry, "value", getattr(entry, "canonical_value", None))
+        unit = str(getattr(entry, "unit", "") or "").lower()
+        sup_list = getattr(entry, "superseded_values", None) or []
+        if not sup_list:
+            continue
+
+        if unit == "usd" and isinstance(c_val, (int, float)) and not isinstance(c_val, bool):
+            c_is_int = float(c_val).is_integer()
+            c_int = int(round(float(c_val)))
+            c_fmt = f"{c_int:,}" if c_is_int else f"{float(c_val):,.2f}"
+            c_plain = str(c_int) if c_is_int else f"{float(c_val):.2f}"
+            for sup in sup_list:
+                s_val = sup.get("value") if isinstance(sup, dict) else getattr(sup, "value", None)
+                if not isinstance(s_val, (int, float)) or isinstance(s_val, bool):
+                    continue
+                s_is_int = float(s_val).is_integer()
+                s_plain = str(int(round(float(s_val)))) if s_is_int else f"{float(s_val):.2f}"
+                if s_plain in canonical_nums:
+                    continue
+                if not s_is_int:
+                    s_fmt = f"{float(s_val):,.2f}"
+                    regex_rules.append((re.compile(rf"\${re.escape(s_fmt)}(?!\d)"), f"${c_fmt}"))
+                    regex_rules.append((re.compile(rf"(?<!\d){re.escape(s_plain)}(?!\d)"), c_plain))
+                elif int(round(float(s_val))) >= 1000:
+                    s_int = int(round(float(s_val)))
+                    s_fmt = f"{s_int:,}"
+                    regex_rules.append((re.compile(rf"\${re.escape(s_fmt)}(?!\d)"), f"${c_fmt}"))
+                    regex_rules.append((re.compile(rf"(?<![\d.]){re.escape(s_fmt)}(?!\d)"), c_fmt))
+                    regex_rules.append((re.compile(rf"(?<![\d.]){re.escape(str(s_int))}(?!\d)"), c_plain))
+
+        elif unit == "percent" and isinstance(c_val, (int, float)) and not isinstance(c_val, bool):
+            c_pct = int(round(float(c_val))) if float(c_val).is_integer() else float(c_val)
+            eid_low = str(entry_id).lower()
+            if "bonus" in eid_low and int(round(float(c_val))) == 100:
+                regex_rules.append(
+                    (
+                        re.compile(r"\b(?:20|40|60)%\s*(first-year\s+)?bonus\s+depreciation\b", re.IGNORECASE),
+                        f"{c_pct}% \\1bonus depreciation",
+                    )
+                )
+                regex_rules.append(
+                    (re.compile(r"\b(?:20|40|60)%\s+Bonus\b"), f"{c_pct}% Bonus")
+                )
+            for sup in sup_list:
+                s_val = sup.get("value") if isinstance(sup, dict) else getattr(sup, "value", None)
+                if isinstance(s_val, (int, float)) and not isinstance(s_val, bool) and not float(s_val).is_integer():
+                    s_str = str(s_val)
+                    if s_str not in canonical_nums:
+                        regex_rules.append((re.compile(rf"(?<!\d){re.escape(s_str)}%"), f"{c_pct}%"))
+                        regex_rules.append((re.compile(rf"(?<![\d.]){re.escape(s_str)}(?![\d.])"), str(c_pct)))
+
+        elif unit == "months" and "rap" in str(entry_id).lower() and isinstance(c_val, (int, float)):
+            c_mo = int(round(float(c_val)))
+            regex_rules.append(
+                (
+                    re.compile(r"\b120\s+to\s+240\s+certified\s+monthly\s+payments\b", re.IGNORECASE),
+                    f"{c_mo} qualifying monthly payments",
+                )
+            )
+            regex_rules.append(
+                (
+                    re.compile(r"(RAP[^.]{0,80}?)\b240\b(\s*(?:monthly payments|months))", re.IGNORECASE),
+                    rf"\g<1>{c_mo}\g<2>",
+                )
+            )
+
+    return regex_rules, exact_float_rules
+
+
+def _apply_truth_text_rules(val: Any, regex_rules: Sequence[Tuple[re.Pattern, str]]) -> Any:
+    """Recursively normalizes dashes and TruthPack superseded constants across overlay JSON."""
+    if isinstance(val, str):
+        out = val.replace("\u2014", " - ").replace("\u2013", "-")
+        for pat, repl in regex_rules:
+            if callable(repl):
+                out = pat.sub(repl, out)
+            else:
+                out = pat.sub(lambda m, r=repl: m.expand(r) if "\\" in r else r, out)
+        return out
+    if isinstance(val, list):
+        return [_apply_truth_text_rules(item, regex_rules) for item in val]
+    if isinstance(val, dict):
+        return {k: _apply_truth_text_rules(v, regex_rules) for k, v in val.items()}
+    return val
+
+
+def _extract_flagged_tokens_from_violations(violations: Sequence[Any]) -> Tuple[Set[str], Set[str], List[str]]:
+    """Extracts unlisted citations, quoted offenders, and excerpts from UnifiedTruthGate violations."""
+    unlisted_citations: Set[str] = set()
+    quoted_tokens: Set[str] = set()
+    excerpts: List[str] = []
+    for v in violations:
+        code = str(getattr(v, "code", "") or "")
+        msg = str(getattr(v, "message", "") or "")
+        exc = str(getattr(v, "excerpt", "") or "").strip()
+        if exc:
+            excerpts.append(exc)
+        for m in re.finditer(r"'([^']{2,140})'", msg):
+            tok = m.group(1).strip()
+            if not tok:
+                continue
+            if code == "UNLISTED_CITATION":
+                unlisted_citations.add(tok)
+            else:
+                quoted_tokens.add(tok)
+        if code == "UNGROUNDED_STATISTIC":
+            for pm in re.finditer(r"\b\d+(?:\.\d+)?%", exc or msg):
+                quoted_tokens.add(pm.group(0))
+    return unlisted_citations, quoted_tokens, excerpts
+
+
+def _strip_offending_tokens_or_sentences(
+    text: str,
+    unlisted_citations: Set[str],
+    quoted_tokens: Set[str],
+    excerpts: Sequence[str],
+    needs_benchmark_qualifier: bool,
+) -> str:
+    """Heals a prose string in-place by removing unlisted citations or offending sentences."""
+    out = text
+    if needs_benchmark_qualifier and "$121.67" in out and not re.search(
+        r"\b(estimate|benchmark|loaded|average|typical)\b", out, re.IGNORECASE
+    ):
+        out = out.replace("$121.67", "$121.67 BLS benchmark estimate")
+
+    for cit in sorted(unlisted_citations, key=len, reverse=True):
+        if cit in out:
+            out = re.sub(
+                rf"(?:,\s*)?(?:under|per|pursuant to)?\s*{re.escape(cit)}(?:\s*\([^)]{{1,60}}\))?",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+
+    offenders = [t for t in quoted_tokens if t and t.lower() in out.lower()]
+    if not offenders and excerpts:
+        for exc in excerpts:
+            if len(exc) >= 12 and exc in out:
+                offenders.append(exc)
+
+    if offenders:
+        sentences = re.split(r"(?<=[.!?])\s+", out.strip())
+        if len(sentences) > 1:
+            kept = [
+                s for s in sentences
+                if not any(off.lower() in s.lower() for off in offenders)
+            ]
+            out = " ".join(kept).strip()
+        else:
+            for off in sorted(offenders, key=len, reverse=True):
+                if re.search(re.escape(off), out, re.IGNORECASE):
+                    out = ""
+                    break
+
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    out = re.sub(r"\s+([,.;:])", r"\1", out)
+    return out
+
+
+def _prune_or_heal_overlay_node(
+    node: Any,
+    unlisted_citations: Set[str],
+    quoted_tokens: Set[str],
+    excerpts: Sequence[str],
+    needs_benchmark_qualifier: bool,
+    key_name: str = "",
+) -> Any:
+    """Recursively heals or prunes overlay nodes flagged by UnifiedTruthGate."""
+    if isinstance(node, str):
+        return _strip_offending_tokens_or_sentences(
+            node, unlisted_citations, quoted_tokens, excerpts, needs_benchmark_qualifier
+        )
+    if isinstance(node, list):
+        kept_items = []
+        for item in node:
+            item_dump = json.dumps(item, ensure_ascii=False)
+            healed = _prune_or_heal_overlay_node(
+                item, unlisted_citations, quoted_tokens, excerpts, needs_benchmark_qualifier
+            )
+            if isinstance(healed, str) and not healed.strip():
+                continue
+            if isinstance(healed, dict):
+                # Drop FAQ / structured row if any mandatory string field became empty
+                had_nonempty = any(isinstance(v, str) and bool(v.strip()) for v in item.values()) if isinstance(item, dict) else False
+                has_empty_cleared = isinstance(item, dict) and any(
+                    isinstance(item.get(k), str) and bool(item.get(k, "").strip()) and not str(healed.get(k, "")).strip()
+                    for k in item
+                )
+                if had_nonempty and has_empty_cleared:
+                    continue
+            # Also drop item if raw serialized form still hits an unrepairable quoted offender
+            healed_dump = json.dumps(healed, ensure_ascii=False).lower()
+            if any(tok.lower() in healed_dump for tok in quoted_tokens) and item_dump:
+                continue
+            kept_items.append(healed)
+        return kept_items
+    if isinstance(node, dict):
+        new_dict: Dict[str, Any] = {}
+        for k, v in node.items():
+            if k == "slug":
+                new_dict[k] = v
+                continue
+            healed_v = _prune_or_heal_overlay_node(
+                v, unlisted_citations, quoted_tokens, excerpts, needs_benchmark_qualifier, key_name=k
+            )
+            if isinstance(healed_v, str) and not healed_v.strip():
+                if k in ("title", "short_title"):
+                    new_dict[k] = v
+                continue
+            if isinstance(healed_v, list) and isinstance(v, list) and not healed_v:
+                continue
+            new_dict[k] = healed_v
+        return new_dict
+    return node
+
+
+def _reconcile_and_heal_overlay_against_truth_pack(
+    ov_data: Dict[str, Any],
+    ov_file: Path,
+    property_id: str,
+    gate: Any = None,
+    pack: Any = None,
+    regex_rules: Sequence[Tuple[re.Pattern, str]] = (),
+) -> Optional[Dict[str, Any]]:
+    """Applies TruthPack replacements and UnifiedTruthGate healing to one overlay dict."""
+    cleaned = copy.deepcopy(ov_data)
+    if regex_rules:
+        cleaned = _apply_truth_text_rules(cleaned, regex_rules)
+    else:
+        cleaned = _apply_truth_text_rules(cleaned, ())
+
+    if gate is None or pack is None:
+        return cleaned
+
+    for _ in range(4):
+        cand_json = json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n"
+        rep = gate.audit_non_html_file(
+            ov_file,
+            property_id,
+            content=cand_json,
+            truth_pack=pack,
+        )
+        if rep.passed:
+            return cleaned
+
+        non_pack_violations = [
+            v for v in rep.violations
+            if str(getattr(v, "gate", "")) != "GATE_TRUTH_PACK"
+        ]
+        if not non_pack_violations:
+            return cleaned
+
+        unlisted_cits, quoted_toks, excerpts = _extract_flagged_tokens_from_violations(non_pack_violations)
+        needs_bench = any(
+            str(getattr(v, "code", "")) == "MISSING_BENCHMARK_QUALIFIER"
+            for v in non_pack_violations
+        )
+
+        # Strip unrepairable ai_repair_prompt metadata immediately if flagged
+        if "ai_repair_prompt" in cleaned:
+            prompt_str = str(cleaned.get("ai_repair_prompt") or "")
+            if any(c in prompt_str for c in unlisted_cits) or any(
+                t.lower() in prompt_str.lower() for t in quoted_toks
+            ):
+                cleaned.pop("ai_repair_prompt", None)
+                continue
+
+        next_cleaned = _prune_or_heal_overlay_node(
+            cleaned, unlisted_cits, quoted_toks, excerpts, needs_bench
+        )
+        if not isinstance(next_cleaned, dict) or next_cleaned == cleaned:
+            break
+        cleaned = next_cleaned
+
+    final_json = json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n"
+    final_rep = gate.audit_non_html_file(
+        ov_file,
+        property_id,
+        content=final_json,
+        truth_pack=pack,
+    )
+    if any(str(getattr(v, "gate", "")) != "GATE_TRUTH_PACK" for v in final_rep.violations):
+        return None
+    return cleaned
+
+
+def _scrub_tenant_specific_overlay_defects(
+    ov_data: Dict[str, Any],
+    property_id: str,
+    slug: str,
+) -> Dict[str, Any]:
+    """
+    Deterministically scrubs legacy query stubs, superseded 225% RAP / PSLF overlay claims,
+    and cross-topic ProfitHelm Form 8824 / Miller Act / 20% bonus depreciation leaks on disk.
+    """
+    norm_prop = str(property_id or "").strip().lower()
+    slug_low = str(slug or "").strip().lower()
+    is_1031_slug = any(k in slug_low for k in ("1031", "like-kind", "exchange", "ftb-3840"))
+
+    def _scrub_str(val: str) -> str:
+        out = val.replace("\u2014", " - ").replace("\u2013", "-")
+        if norm_prop == "prexvo":
+            out = out.replace(
+                "Calculate How Do You obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+                "Calculate Title IV student loan repayment obligations under 34 CFR Part 685, P.L. 119-21 Section 82001 RAP, and 91 FR 1797 $15,960 guidelines.",
+            )
+            out = re.sub(r"\bCalculate\s+How\s+Do\s+You\b", "Calculate Title IV", out, flags=re.IGNORECASE)
+            out = re.sub(
+                r"\bHow\s+Do\s+You\s+Calculate\s+Student\s+Loan\s+2026\s+Calculator\b",
+                "Student Loan Repayment Calculation Guide 2026",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(r"\bHow\s+Do\s+You\s+Calculate\b", "Calculate", out, flags=re.IGNORECASE)
+            out = re.sub(r"\bHow\s+Do\s+You\b", "Student Loan Repayment", out, flags=re.IGNORECASE)
+            out = out.replace(
+                "36 remaining RAP payments at $273.23/mo unlocking $65,164 tax-free principal forgiveness.",
+                "36 remaining RAP payments at $340.00/mo toward $62,760 tax-free PSLF discharge under 34 CFR 685.219.",
+            )
+            out = out.replace(
+                "$9,836 Remaining RAP Outflow + $65,164 Forgiven",
+                "$12,240 Remaining RAP Outflow + $62,760 Forgiven",
+            )
+            out = out.replace(
+                "$80,794 Net Tax-Free Statutory Relief",
+                "$78,390 Net Tax-Free Statutory Relief",
+            )
+            out = re.sub(r"\$273\.23/mo\s+unlocking\b", "$340.00/mo toward", out, flags=re.IGNORECASE)
+            out = out.replace("$273.23", "$340.00").replace("273.23", "340.00")
+            out = re.sub(r"unlocking\s+\$65,164\b", "toward $62,760", out, flags=re.IGNORECASE)
+            out = out.replace("$65,164", "$62,760")
+            out = out.replace(
+                "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
+                "Single borrower at $65,000 AGI in the 6% P.L. 119-21 Section 82001 tier ($325.00/mo RAP payment, 100% unpaid interest waived).",
+            )
+            out = out.replace("$248.23 / mo (225% Poverty Exemption)", "$325.00 / mo (P.L. 119-21 6% AGI Tier)")
+            out = out.replace("$248.23 / mo Separate RAP Payment ($2,979 / yr)", "$325.00 / mo Separate RAP Payment ($3,900 / yr)")
+            out = out.replace("$1,105.73 / mo Joint RAP Payment ($13,269 / yr)", "$1,500.00 / mo Joint RAP Payment ($18,000 / yr)")
+            out = out.replace("$306.56 / mo (10% RAP 225% Poverty Exemption)", "$433.33 / mo (P.L. 119-21 Section 82001 RAP)")
+            out = out.replace("$35,212.50 Single RAP Baseline", "P.L. 119-21 Section 82001 Tiered AGI")
+            out = out.replace("$35,212.50", "$23,940.00")
+            out = out.replace("$248.23", "$325.00").replace("248.23", "325.00")
+            out = out.replace("$242.42", "$325.00").replace("242.42", "325.00")
+            if "685.209(f)" not in out.lower() and "2024 save plan" not in out.lower():
+                out = re.sub(
+                    r"\b150%\s+to\s+225%\s+of\s+the\s+federal\s+poverty\s+guideline\b",
+                    "150% of the 2026 federal poverty guideline (IBR) and P.L. 119-21 Section 82001 tiered AGI percentages (RAP)",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+                out = re.sub(
+                    r"\b225%\s*(?:of\s+the\s+|HHS\s*)?(?:Federal\s*)?(?:Poverty\s*)?(?:Guidelines?|Exemption|FPL(?:\s+Exemption)?|Floor)\b",
+                    "P.L. 119-21 Section 82001 Tiered AGI RAP",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+                out = re.sub(
+                    r"\b225\s+percent\s+of\s+(?:the\s+)?(?:applicable\s+)?(?:HHS\s+|Federal\s+)?Poverty\s+Guidelines?\b",
+                    "P.L. 119-21 Section 82001 tiered AGI percentages (1% to 10%)",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+                out = out.replace("225%", "P.L. 119-21 6% AGI tier").replace("225 percent", "P.L. 119-21 6% AGI tier")
+        elif norm_prop == "profithelm":
+            out = re.sub(
+                r"\b20%\s*(first-year\s+)?bonus\s+depreciation\b",
+                r"100% \1bonus depreciation",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r"\b(?:Federal\s+)?Miller\s+Act\s*\(40\s*U\.S\.C\.?\s*(?:Section\s*|Sec\.?\s*)?3131\)\s*(?:and|&)\s*(?:FAR\s*Part\s*28|48\s*CFR\s*Part\s*28)",
+                "31 U.S.C. Section 9304 and IRC Section 162(a)",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r"\bfederal\s+Miller\s+Act\s+40\s*U\.S\.C\.?\s*(?:Section\s*|Sec\.?\s*)?3131\b",
+                "31 U.S.C. Section 9304 commercial surety rules",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r"\b40\s*U\.S\.C\.?\s*(?:Section\s*|Sec\.?\s*)?3131\s*\(Miller\s+Act\)",
+                "31 U.S.C. Section 9304",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(r"\b40\s*U\.S\.C\.?\s*(?:Section\s*|Sec\.?\s*)?3131\b", "31 U.S.C. Section 9304", out, flags=re.IGNORECASE)
+            out = re.sub(r"\b(?:FAR\s*Part\s*28|FAR\s*28\.102-2|48\s*CFR\s*Part\s*28)\b", "IRC Section 162(a)", out, flags=re.IGNORECASE)
+            out = re.sub(r"\b(?:Federal\s+)?Miller\s+Act\b", "Commercial Surety Bond", out, flags=re.IGNORECASE)
+            if not is_1031_slug:
+                if "crypto" in slug_low or "1099-da" in slug_low or "8949" in slug_low:
+                    sched_repl = "reconciled federal schedules (Form 8949 and Form 1099-DA) for audit verification."
+                elif any(k in slug_low for k in ("179", "vehicle", "equipment", "4562", "gmc", "porsche", "tesla", "ford", "chevy", "chevrolet", "cadillac", "lincoln", "bmw", "mercedes", "rivian", "ram", "audi", "lexus", "land-rover", "jeep", "toyota", "nissan", "volvo", "sprinter", "transit", "yukon", "escalade", "tahoe", "suburban", "navigator", "cayenne", "cybertruck", "defender", "wagoneer")):
+                    sched_repl = "reconciled federal Form 4562 depreciation schedules and placed-in-service invoices for audit verification."
+                else:
+                    sched_repl = "contemporaneous business accounting logs and reconciled IRS statutory schedules for audit verification."
+                out = out.replace(
+                    "reconciled federal schedules (Form 4562, Form 8824, or Form 8949) for audit verification.",
+                    sched_repl,
+                )
+                out = re.sub(r",?\s*Form\s*8824\b", "", out, flags=re.IGNORECASE)
+                out = re.sub(r"\b(?:IRC\s*)?Section\s*1031\b(?:\([a-z0-9]+\))?", "Internal Revenue Code", out, flags=re.IGNORECASE)
+        return out
+
+    def _walk(node: Any, key_name: str = "") -> Any:
+        if isinstance(node, str):
+            return _scrub_str(node)
+        if isinstance(node, list):
+            new_list = []
+            for item in node:
+                if (
+                    norm_prop == "profithelm"
+                    and not is_1031_slug
+                    and key_name == "internal_links"
+                    and isinstance(item, dict)
+                ):
+                    href_low = str(item.get("href") or "").lower()
+                    anch_low = str(item.get("anchor") or "").lower()
+                    if "1031" in href_low or "1031" in anch_low or "8824" in anch_low:
+                        continue
+                new_list.append(_walk(item))
+            return new_list
+        if isinstance(node, dict):
+            return {k: _walk(v, key_name=k) for k, v in node.items()}
+        return node
+
+    return _walk(ov_data)
+
+
 def sanitize_tenant_overlays(
     repo_root: Path,
-    tools_dir: Path,
+    tools_dir: Optional[Path],
     extra_bad_tokens: Sequence[str] = (),
     property_id: str = "",
 ) -> None:
-    """Removes orphaned, cross-tenant contaminated, or cross-framework leaked overlay JSON files."""
+    """Removes orphaned, cross-tenant contaminated, or TruthPack-violating overlay JSON files."""
     norm_prop = str(property_id or "").strip().lower()
+    if norm_prop:
+        try:
+            from pseofactory.contracts import resolve_canonical_property_id
+            norm_prop = resolve_canonical_property_id(norm_prop, default=norm_prop).lower()
+        except Exception:
+            pass
     is_gainhelm = norm_prop == "gainhelm"
     is_lienbond = norm_prop == "lienbond"
+
+    pack = None
+    gate = None
+    regex_rules: List[Tuple[re.Pattern, str]] = []
+    if norm_prop:
+        try:
+            from pseofactory.truth_pack import load_truth_pack
+            from pseofactory.truth_gate import UnifiedTruthGate
+            pack = load_truth_pack(norm_prop, allow_expired=True)
+            regex_rules, _ = _build_truth_pack_overlay_replacements(pack)
+            gate = UnifiedTruthGate()
+        except Exception:
+            pack = None
+            gate = None
+
+    has_built_tools = bool(tools_dir is not None and Path(tools_dir).is_dir())
     for ov_dir in (repo_root / "content" / "overlays", repo_root / ".agy" / "overlays"):
         if not ov_dir.is_dir():
             continue
         for ov_file in list(ov_dir.glob("*.json")):
-            if not (tools_dir / ov_file.stem / "index.html").is_file():
+            if has_built_tools and not (Path(tools_dir) / ov_file.stem / "index.html").is_file():
                 ov_file.unlink(missing_ok=True)
                 continue
             try:
@@ -928,37 +1400,43 @@ def sanitize_tenant_overlays(
             if extra_bad_tokens and any(bad_tok in raw_text.lower() for bad_tok in extra_bad_tokens):
                 ov_file.unlink(missing_ok=True)
                 continue
+            try:
+                ov_data = json.loads(raw_text)
+            except Exception:
+                ov_file.unlink(missing_ok=True)
+                continue
+            if not isinstance(ov_data, dict):
+                ov_file.unlink(missing_ok=True)
+                continue
+
+            cleaned = ov_data
             if is_gainhelm:
-                try:
-                    ov_data = json.loads(raw_text)
-                except Exception:
-                    ov_file.unlink(missing_ok=True)
-                    continue
-                if not isinstance(ov_data, dict):
-                    ov_file.unlink(missing_ok=True)
-                    continue
-                cleaned = strip_cross_framework_leaks_from_overlay(ov_data, ov_file.stem)
-                has_content = any(bool(cleaned.get(k)) for k in _OVERLAY_CONTENT_KEYS)
-                if not has_content:
-                    ov_file.unlink(missing_ok=True)
-                elif cleaned != ov_data:
-                    ov_file.write_text(
-                        json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
-                    )
+                cleaned = strip_cross_framework_leaks_from_overlay(cleaned, ov_file.stem)
             elif is_lienbond and _is_lienbond_wc_slug(ov_file.stem):
-                try:
-                    ov_data = json.loads(raw_text)
-                except Exception:
+                cleaned = _scrub_lienbond_wc_citations(cleaned)
+
+            if norm_prop:
+                cleaned = _scrub_tenant_specific_overlay_defects(cleaned, norm_prop, ov_file.stem)
+                reconciled = _reconcile_and_heal_overlay_against_truth_pack(
+                    cleaned,
+                    ov_file,
+                    norm_prop,
+                    gate=gate,
+                    pack=pack,
+                    regex_rules=regex_rules,
+                )
+                if reconciled is None:
+                    ov_file.unlink(missing_ok=True)
                     continue
-                if not isinstance(ov_data, dict):
-                    continue
-                cleaned = _scrub_lienbond_wc_citations(ov_data)
-                if cleaned != ov_data:
-                    ov_file.write_text(
-                        json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
-                        encoding="utf-8",
-                    )
+                cleaned = reconciled
+
+            has_content = any(bool(cleaned.get(k)) for k in _OVERLAY_CONTENT_KEYS)
+            if not has_content:
+                ov_file.unlink(missing_ok=True)
+            elif cleaned != ov_data:
+                out_text = json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n"
+                assert_no_forbidden_dashes(out_text, context=f"overlay {ov_file.name}")
+                ov_file.write_text(out_text, encoding="utf-8")
 
 
 def finalize_estate_build(

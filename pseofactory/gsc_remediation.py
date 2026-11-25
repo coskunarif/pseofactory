@@ -542,18 +542,23 @@ def _resolve_contextual_internal_links(
         else:
             cluster = [
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
-                {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
+                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
                 {"anchor": "CA Tax Brackets 2026-2027 & California Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
-                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
+                {"anchor": "R&D Tax Credit & Section 174 Amortization Calculator", "href": "/tools/r-and-d-tax-credit-section-174-amortization-calculator/"},
                 {"anchor": "GMC Yukon XL Section 179 Heavy SUV Deduction Calculator", "href": "/tools/section-179-calculator/gmc-yukon-xl/"},
             ]
 
+    for_forbid_1031 = eff_tenant == "profithelm" and any(
+        tok in s_norm for tok in ("qsbs", "1202", "179", "vehicle", "equipment", "crypto", "8949", "1099-da", "runway")
+    )
     selected = [base_hub]
     seen_hrefs = {base_hub["href"].rstrip("/")}
     for item in cluster:
         norm_h = item["href"].rstrip("/")
+        if for_forbid_1031 and ("1031" in norm_h or "1031" in item["anchor"].lower() or "8824" in item["anchor"].lower()):
+            continue
         if norm_h != self_href.rstrip("/") and norm_h not in seen_hrefs and len(selected) < 7:
             seen_hrefs.add(norm_h)
             selected.append({
@@ -1922,7 +1927,7 @@ def _resolve_secondary_title_modifier(
     if any(k in primary_low for k in ("burn", "runway", "saas", "cac")):
         return "2026 Model"
     if any(k in primary_low for k in ("surety", "miller act", "miller-act", "license bond", "performance bond", "fidelity bond")):
-        return "Miller Act" if "miller" in primary_low else "Surety Rules"
+        return "Miller Act" if (tenant_id == "lienbond" and "miller" in primary_low) else "Surety Rules"
     if any(k in primary_low for k in ("workers comp", "workers-comp", "payroll burden", "emr")):
         return "NCCI Rate"
     if any(k in primary_low for k in ("factoring", "tariff", "301")):
@@ -2245,8 +2250,10 @@ def _normalize_title_50_60(
         vertical_paren_mod = "Title IV" if "rap" in base_low else "IDR & RAP"
     elif tenant_id == "gainhelm":
         vertical_paren_mod = "GRC Audit"
-    elif tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller", "workers comp", "emr")):
+    elif tenant_id == "lienbond":
         vertical_paren_mod = "Miller Act" if "miller" in base_low else ("Surety Rules" if ("surety" in base_low or "bond" in base_low) else "50-State Law" if ("lien" in base_low or "preliminary" in base_low or "retainage" in base_low) else "Surety & Lien")
+    elif any(k in base_low for k in ("surety", "bond")):
+        vertical_paren_mod = "Surety Rules"
     elif "crypto" in base_low:
         vertical_paren_mod = "Form 8949"
     elif "179" in base_low:
@@ -2293,11 +2300,19 @@ def _normalize_title_50_60(
                         if tenant_id == "gainhelm"
                         else (
                             [mod_clean, "Surety Rate", "50-State", "2026 Bond", "2026"]
-                            if (tenant_id == "lienbond" or any(k in base_low for k in ("surety", "bond", "miller")))
+                            if tenant_id == "lienbond"
                             else (
-                                [mod_clean, "2026 Model", "2026 Cost", "2026"]
-                                if is_non_tax_commercial
-                                else [mod_clean, vertical_paren_mod, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                                [mod_clean, "Surety Rules", "IRC 162", "2026"]
+                                if any(k in base_low for k in ("surety", "bond"))
+                                else (
+                                    [mod_clean, "2026 Model", "2026 Cost", "2026"]
+                                    if is_non_tax_commercial
+                                    else (
+                                        [mod_clean, vertical_paren_mod, "IRC Rules", "Form 8824", "Tax Guide", "2026 Tax", "2026"]
+                                        if ("1031" in base_low or "8824" in base_low)
+                                        else [mod_clean, vertical_paren_mod, "IRC Rules", "Tax Guide", "2026 Tax", "2026"]
+                                    )
+                                )
                             )
                         )
                     )
@@ -3156,10 +3171,16 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in IRC Section 1(j) federal statutory schedules.",
             )
         if "surety" in q_low or ("bond" in q_low and "280g" not in slug_low):
+            if tenant_id == "lienbond":
+                return (
+                    "Estimate commercial contractor surety bond costs under federal Miller Act "
+                    "40 U.S.C. Section 3131, state penal sums, and credit-tier underwriting rates.",
+                    " Grounded in U.S. Treasury Circular 570 surety schedules.",
+                )
             return (
-                "Estimate commercial contractor surety bond costs under federal Miller Act "
-                "40 U.S.C. Section 3131, state penal sums, and credit-tier underwriting rates.",
-                " Grounded in U.S. Treasury Circular 570 surety schedules.",
+                "Estimate commercial contractor surety bond costs, state penal sums, "
+                "credit-tier rates, and IRC Section 162(a) deductibility.",
+                " Grounded in 31 U.S.C. Section 9304 and IRC Section 162 rules.",
             )
         return (
             f"Calculate {lbl} using deterministic IRC statutory formulas, federal "
@@ -3239,8 +3260,8 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
             base_words = (
                 "Under PCI DSS v4.0.1, Level 1 merchants processing over 6 million annual Visa or Mastercard "
                 "transactions must complete an annual Report on Compliance (ROC) led by a Qualified Security Assessor "
-                "(QSA). Total Level 1 compliance cost across 6 CDE systems reaches $94,800.00, comprising $42,000.00 "
-                "in QSA fees, $3,800.00 in ASV scans, $13,200.00 in CDE system scoping, $12,500.00 in pentesting, and $23,300.00 in remediation."
+                "(QSA). Total Level 1 compliance cost across 6 CDE systems reaches $93,400.60, comprising $42,000.00 "
+                "in QSA fees, $3,800.00 in ASV scans, $13,200.00 in CDE system scoping, $12,500.00 in pentesting, and $21,900.60 in remediation."
             ).split()
         elif any(k in combined_low for k in ("fedramp", "3pao", "3607")):
             base_words = (
@@ -3592,14 +3613,15 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
         ]
     elif any(k in combined_low for k in ("surety", "bond", "contractor-surety")):
         base_words = (
-            f"Under the federal Miller Act (40 U.S.C. 3131) and state licensing statutes, {short_q} "
-            f"estimates annual commercial and contract surety bond premiums by multiplying the required "
+            f"Under 31 U.S.C. Section 9304 and IRC Section 162(a), {short_q} "
+            f"estimates annual commercial and contractor surety bond premiums by multiplying the required "
             f"statutory bond penalty ($10,000 to $1,000,000+) by credit-tiered underwriting rates "
-            f"ranging from 0.5 percent (preferred tier) to 10 percent (high-risk tier)."
+            f"ranging from 0.5 percent (preferred tier) to 10 percent (high-risk tier), deductible "
+            f"as ordinary business expenses."
         ).split()
         filler_pool = [
-            "Benchmarked", "against", "Treasury", "Circular", "570", "surety",
-            "underwriting", "tiers", "and", "indemnity", "standards.",
+            "Benchmarked", "against", "31", "U.S.C.", "9304", "surety",
+            "underwriting", "tiers", "and", "IRC", "Section", "162", "rules.",
         ]
     elif any(k in combined_low for k in ("factoring", "line-of-credit")):
         base_words = (
@@ -3837,7 +3859,7 @@ def _build_vertical_profithelm_overlay_blocks(
             "comparison_rows": [
                 {
                     "scenario": "$2.5M Sale ($650k Basis, $400k Sec. 1250 Recapture, CA to TX)",
-                    "baseline": "$706,350 Immediate Tax Outflow (28.25% Drag)",
+                    "baseline": "$706,350 Immediate Tax Outflow on $2.5M Sale",
                     "optimized": "$0 Current Tax via Qualified Intermediary Roll",
                     "delta": "+$706,350 Reinvested Equity Shield",
                     "authority": "IRC Section 1031(a)(3) & IRS Form 8824",
@@ -4301,7 +4323,7 @@ def _build_vertical_profithelm_overlay_blocks(
                     "scenario": "First Sale for Export Valuation Election (19 U.S.C. 1401a)",
                     "baseline": "28.5% Stacked Duty on Middleman Markup Invoice",
                     "optimized": "28.5% Duty Assessed on Factory First-Sale Price",
-                    "delta": "Saves 15% to 25% of Dutiable Customs Basis",
+                    "delta": "Reduces Dutiable Customs Value to Factory First-Sale Price",
                     "authority": "19 U.S.C. 1401a & CBP First Sale Rule",
                 },
             ],
@@ -4327,8 +4349,8 @@ def _build_vertical_profithelm_overlay_blocks(
     if any(k in comb for k in ("surety", "bond", "contractor-surety", "miller-act")):
         return {
             "h2_headings": [
-                f"{heading_label}: Federal Miller Act (40 U.S.C. 3131) & Underwriting Tiers",
-                f"Audit-Ready {heading_label} Credit Tier & Indemnity Scenarios",
+                f"{heading_label}: 31 U.S.C. Section 9304 & Surety Underwriting Tiers",
+                f"Audit-Ready {heading_label} Credit Tier & IRC Section 162 Deductibility Scenarios",
             ],
             "preset_scenarios": [
                 {
@@ -4342,14 +4364,14 @@ def _build_vertical_profithelm_overlay_blocks(
                     "description": "Preferred underwriting tier (0.5% to 1.5% rate) for contractors with strong CPA working capital and 700+ credit.",
                 },
                 {
-                    "id": "preset-bond-miller",
-                    "label": f"{heading_label} Public Works Performance Bond ($250k Contract, 1.5% Rate)",
+                    "id": "preset-bond-commercial",
+                    "label": f"{heading_label} Commercial Performance Bond ($250k Contract, 1.5% Rate)",
                     "query": query_clean,
                     "target_position": pos,
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"bond_amount": 250000, "premium_rate_pct": 1.5, "term_years": 1},
-                    "description": "Federal Miller Act (40 U.S.C. 3131) 100% performance and payment bond requirement on public contracts over $150,000.",
+                    "description": "Commercial contract performance and payment bond underwriting under 31 U.S.C. Section 9304 and state licensing rules.",
                 },
             ],
             "comparison_rows": [
@@ -4358,14 +4380,14 @@ def _build_vertical_profithelm_overlay_blocks(
                     "baseline": "$5,000 to $10,000 Specialty High-Risk Tier (5%-10%)",
                     "optimized": "$750 to $1,500 Preferred Standard Tier (0.75%-1.5%)",
                     "delta": "+$4,250 to $8,500 Annual Underwriting Savings",
-                    "authority": "40 U.S.C. 3131 (Miller Act) & Treasury Circular 570",
+                    "authority": "31 U.S.C. Section 9304 & IRC Section 162(a)",
                 },
                 {
                     "scenario": "Multi-Year License Bond Continuation vs Annual Renewal",
                     "baseline": "100% Full Annual Renewal Premium Outlay",
                     "optimized": "15% to 25% Prepaid Multi-Year Continuation Discount",
                     "delta": "Prevents State License Lapse & Lowers Effective Rate",
-                    "authority": "FAR Part 28 & SBA Surety Bond Guarantee Rules",
+                    "authority": "IRC Section 162(a) & Commercial Surety Underwriting Rules",
                 },
             ],
             "faq_entries": [
@@ -4378,10 +4400,10 @@ def _build_vertical_profithelm_overlay_blocks(
                     ),
                 },
                 {
-                    "question": "When does the Federal Miller Act (40 U.S.C. 3131) require 100% performance and payment bonds?",
+                    "question": "Are commercial contractor surety bond premiums tax-deductible under IRC Section 162?",
                     "answer": (
-                        "Under 40 U.S.C. 3131 and FAR Part 28, prime contractors on federal construction contracts exceeding "
-                        "$150,000 must furnish 100% Performance and Payment Bonds issued by a carrier listed on U.S. Treasury Circular 570."
+                        "Yes. Under IRC Section 162(a), premiums paid for contractor license, bid, and commercial performance "
+                        "bonds under 31 U.S.C. Section 9304 and state licensing codes are deductible as ordinary and necessary business expenses."
                     ),
                 },
             ],
@@ -4463,7 +4485,7 @@ def _build_vertical_profithelm_overlay_blocks(
         wc_faq_answer = (
             "Fully burdened employer cost stacks mandatory statutory payroll taxes (7.65% FICA under IRC Section 3111, "
             "0.6% net FUTA on the first $7,000 under IRC Section 3301, and state SUTA), NCCI Workers' Compensation "
-            "(manual rate per $100 payroll times EMR), and employer health/401(k) contributions, typically adding 18% to 38%."
+            "(manual rate per $100 payroll times EMR), and employer health/401(k) contributions above base gross wages."
             if is_payroll_burden
             else "Workers' compensation premium equals auditable trade payroll divided by $100, multiplied by the governing "
             "NCCI Basic Manual (or state rating bureau) class-code rate and your Experience Modification Rate (EMR) under the NCCI Experience Rating Plan Manual."
@@ -4718,8 +4740,16 @@ def _build_vertical_profithelm_overlay_blocks(
             {
                 "question": f"What documentation is required to substantiate {query_clean}?",
                 "answer": (
-                    "Taxpayers must retain contemporaneous placed-in-service logs, closing statements, and "
-                    "reconciled federal schedules (Form 4562, Form 8824, or Form 8949) for audit verification."
+                    "Taxpayers must retain contemporaneous placed-in-service logs, purchase invoices, and "
+                    + (
+                        "reconciled federal Form 4562 depreciation schedules for audit verification."
+                        if is_179_comb
+                        else (
+                            "reconciled federal Form 8949 and Form 1099-DA basis logs for audit verification."
+                            if any(k in comb for k in ("crypto", "8949", "1099-da"))
+                            else "contemporaneous business accounting logs and reconciled IRS statutory schedules for audit verification."
+                        )
+                    )
                 ),
             },
         ],
@@ -5005,14 +5035,14 @@ def _append_query_subintent_blocks(
                 _add_h2(f"{heading_label}: Partial 1031 Exchange Cash & Mortgage Boot Calculation (IRC Section 1031(b))")
         elif is_179:
             if any(k in joined_low for k in ("how to", "software", "vehicle", "gvwr", "bonus", "for businesses")):
-                _add_h2(f"{heading_label}: How to Calculate Section 179 vs 20% Bonus Depreciation (Form 4562)")
+                _add_h2(f"{heading_label}: How to Calculate Section 179 & 100% Bonus Depreciation (Form 4562)")
                 _add_faq(
-                    "How do businesses calculate Section 179 expensing alongside 20% bonus depreciation on Form 4562?",
+                    "How do businesses calculate Section 179 expensing alongside 100% bonus depreciation on Form 4562?",
                     (
-                        "Under IRC Section 179 and Section 168(k), businesses first apply the Section 179 dollar-for-dollar "
-                        "deduction (up to $2,560,000, phasing out above $4,090,000) to qualifying equipment, off-the-shelf "
-                        "software, and 6,000+ lb GVWR commercial vehicles, then apply 20% first-year bonus depreciation "
-                        "to remaining adjusted basis before MACRS recovery."
+                        "Under IRC Section 179 and P.L. 119-21 Section 70301 (Section 168(k)), businesses first apply the Section 179 dollar-for-dollar "
+                        "deduction (up to $2,560,000 for qualifying equipment, off-the-shelf software, and 6,000+ lb GVWR commercial work vehicles, "
+                        "phasing out above $4,090,000). Heavy SUVs are separately capped at $32,000 under IRC Section 179(b)(5)(A). "
+                        "Businesses then apply 100% first-year bonus depreciation to remaining adjusted basis before MACRS recovery."
                     ),
                 )
 
@@ -5649,14 +5679,14 @@ def _build_autonomous_citation_assertions_and_matrix(
             assertions = [
                 f"In 2026, {heading_label} models Level 1 Report on Compliance (ROC) and SAQ costs under PCI DSS v4.0.1 for merchants processing over 6,000,000 annual Visa or Mastercard transactions.",
                 "Under PCI DSS v4.0.1 Requirements 11.3 and 11.4, compliant entities must complete quarterly Approved Scanning Vendor (ASV) external scans ($3,800.00/yr) and internal/external network segmentation penetration testing ($12,500.00).",
-                "For a 6-system Level 1 Cardholder Data Environment (CDE), combining a $42,000.00 QSA ROC assessment, $3,800.00 ASV scanning, $13,200.00 CDE system scoping, $12,500.00 segmentation pentesting, and $23,300.00 CDE remediation labor yields $94,800.00.",
+                "For a 6-system Level 1 Cardholder Data Environment (CDE), combining a $42,000.00 QSA ROC assessment, $3,800.00 ASV scanning, $13,200.00 CDE system scoping, $12,500.00 segmentation pentesting, and $21,900.60 CDE remediation labor (180 hours at $121.67/hr) yields $93,400.60.",
             ]
             matrix = [
                 {
                     "profile": "Level 1 E-Commerce / Enterprise Merchant (>6M Transactions)",
                     "statutory_threshold": "PCI DSS v4.0.1 Mandatory Annual QSA Report on Compliance (ROC)",
                     "optimal_path": "Tokenized Payment Iframe + Strict CDE Network Segmentation",
-                    "net_dollar_impact": "$94,800.00 Total Level 1 ROC Cost ($42,000 QSA + $52,800.00 Scoping/Testing/Labor)",
+                    "net_dollar_impact": "$93,400.60 Total Level 1 ROC Cost ($42,000 QSA + $51,400.60 Scoping/Testing/Labor)",
                     "next_action": "Calculate QSA ROC, ASV & CDE Hardening Budget",
                 },
                 {
@@ -5728,7 +5758,7 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "profile": "Early-Stage Healthcare SaaS Startup (Low Technical Risk)",
                     "statutory_threshold": "HITRUST CSF v11 e1 Essentials (44 Foundational Cyber Controls)",
                     "optimal_path": "Start With e1 Validated Assessment + GRC Evidence Automation",
-                    "net_dollar_impact": "50%+ Lower Assessor & Remediation Cost vs Full r2 Scope",
+                    "net_dollar_impact": "Streamlines Foundational 44-Control Validation Scope vs Full r2 Assessment",
                     "next_action": "Evaluate e1 Essentials Readiness Timeline",
                 },
             ]
@@ -5794,21 +5824,21 @@ def _build_autonomous_citation_assertions_and_matrix(
             assertions = [
                 f"In 2026, {heading_label} calculates accredited Stage 1 and Stage 2 certification costs under ISO/IEC 27001:2022 (93 Annex A controls) and ISO/IEC 27006-1:2024 mandatory auditor-day tables.",
                 "Under ISO/IEC 27006-1:2024 Annex B and IAF MD 5, an organization in the 66-to-85 employee bracket requires 11.0 accredited Stage 1 and Stage 2 auditor days ($21,450.00 registrar fee at $1,950.00/day) plus annual surveillance audits at 33% of initial audit time.",
-                "Combining $21,450.00 in accredited registrar fees, $14,500.00 in ISMS platform licensing, $8,500.00 for Clause 9.2 internal audit, and $22,550.40 in Annex A gap remediation (180 hours at $125.28/hr) yields a verified $67,000.40 first-year total.",
+                "Combining $21,450.00 in accredited registrar fees, $14,500.00 in ISMS platform licensing, $8,500.00 for Clause 9.2 internal audit, and $21,900.60 in Annex A gap remediation (180 hours at $121.67/hr) yields a verified $66,350.60 first-year total.",
             ]
             matrix = [
                 {
                     "profile": "Mid-Market SaaS (75 Employees, ISO/IEC 27001:2022 Initial Audit)",
                     "statutory_threshold": "ISO/IEC 27006-1:2024 Mandatory 11.0 Stage 1+2 Auditor Days",
                     "optimal_path": "ANAB/UKAS Registrar ($21,450) + ISMS Platform ($14,500) + Clause 9.2 Audit ($8,500)",
-                    "net_dollar_impact": "$67,000.40 Total Year-1 Certification Cost (Including $22,550.40 Remediation)",
+                    "net_dollar_impact": "$66,350.60 Total Year-1 Certification Cost (Including $21,900.60 Remediation)",
                     "next_action": "Calculate Stage 1/2 Registrar & 3-Year Surveillance TCO",
                 },
                 {
                     "profile": "Organization Holding Existing SOC 2 Type II Report",
                     "statutory_threshold": "82% Control Overlap Between SOC 2 TSC and ISO 27001:2022 Annex A",
                     "optimal_path": "Reuse Automated GRC Evidence for Statement of Applicability (SoA)",
-                    "net_dollar_impact": "Reduces Internal Annex A Gap Remediation Hours by 50%+",
+                    "net_dollar_impact": "Streamlines Internal Annex A Gap Remediation and Audit Evidence Collection",
                     "next_action": "Model Dual SOC 2 + ISO 27001 Cross-Mapped Budget",
                 },
                 {
@@ -5823,14 +5853,14 @@ def _build_autonomous_citation_assertions_and_matrix(
             assertions = [
                 f"In 2026, {heading_label} enforces DoD 32 CFR Part 170 (CMMC 2.0 Final Rule), DFARS 252.204-7012 / 7019 / 7020 / 7021, and the NIST SP 800-171 Rev 2 DoD Assessment Methodology across 110 security requirements.",
                 "Under DFARS 252.204-7019 and 32 CFR 170.21, Supplier Performance Risk System (SPRS) scores span [-203, +110]; contractors missing three 5-point, two 3-point, and two 1-point controls score 87.00 (1 point below the 88-point conditional POA&M floor).",
-                "For a 75-employee Defense Industrial Base contractor, CMMC 2.0 Level 2 certification totals $132,000.00, combining $48,500.00 in C3PAO assessment fees, $26,400.00 in FedRAMP enclave licensing, $43,700.00 in remediation labor (380 hours at $115.00/hr), and $13,400.00 in RPO advisory.",
+                "For a 75-employee Defense Industrial Base contractor, CMMC 2.0 Level 2 certification totals $134,534.60, combining $48,500.00 in C3PAO assessment fees, $26,400.00 in FedRAMP enclave licensing, $46,234.60 in remediation labor (380 hours at $121.67/hr), and $13,400.00 in RPO advisory.",
             ]
             matrix = [
                 {
                     "profile": "Defense Contractor Handling CUI (75 Employees, CMMC Level 2)",
                     "statutory_threshold": "32 CFR Part 170 Triennial C3PAO Assessment (110 NIST 800-171 Controls)",
                     "optimal_path": "Isolate CUI in FedRAMP Moderate Enclave ($26,400/yr) + C3PAO ($48,500)",
-                    "net_dollar_impact": "$132,000.00 Total Level 2 Certification Cost (Including $43,700 Labor & $13,400 RPO)",
+                    "net_dollar_impact": "$134,534.60 Total Level 2 Certification Cost (Including $46,234.60 Labor & $13,400 RPO)",
                     "next_action": "Model C3PAO Fee, Enclave Licensing & Remediation Labor",
                 },
                 {
@@ -6608,8 +6638,8 @@ def _build_autonomous_citation_assertions_and_matrix(
                     "next_action": "Compare Effective APR of Factoring Fees vs Revolving Credit",
                 },
                 {
-                    "profile": "Federal/Public Works Contractor Sizing Miller Act Surety Bond",
-                    "statutory_threshold": "40 U.S.C. 3131 (Miller Act) 100% Performance & Payment Bond Requirement",
+                    "profile": "Commercial Contractor Sizing License & Performance Surety Bond",
+                    "statutory_threshold": "31 U.S.C. Section 9304 & IRC Section 162(a) Bond Premium Deductibility",
                     "optimal_path": "Maintain CPA-Reviewed Working Capital >= 10% of Bonded Backlog",
                     "net_dollar_impact": "Qualifies for Tier-1 Sliding Scale Surety Rate (0.75% to 1.20% of Contract)",
                     "next_action": "Calculate Surety Bond Premium & Working Capital Capacity",
@@ -6777,7 +6807,7 @@ def _build_vertical_prexvo_overlay_blocks(
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"loan_balance": 75000, "agi": 68000, "family_size": 1, "qualifying_months": 84},
-                    "description": "36 remaining RAP payments at $273.23/mo unlocking $65,164 tax-free principal forgiveness.",
+                    "description": "36 remaining RAP payments at $340.00/mo toward $62,760 tax-free PSLF discharge under 34 CFR 685.219.",
                 },
                 {
                     "id": "preset-pslf-buyback",
@@ -6794,8 +6824,8 @@ def _build_vertical_prexvo_overlay_blocks(
                 {
                     "scenario": "501(c)(3) Borrower ($75,000 Direct Loan, $68,000 AGI, 84 Credits)",
                     "baseline": "$90,630 Standard 10-Year Cumulative Outflow",
-                    "optimized": "$9,836 Remaining RAP Outflow + $65,164 Forgiven",
-                    "delta": "$80,794 Net Tax-Free Statutory Relief",
+                    "optimized": "$12,240 Remaining RAP Outflow + $62,760 Forgiven",
+                    "delta": "$78,390 Net Tax-Free Statutory Relief",
                     "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
                 },
                 {
@@ -6864,9 +6894,9 @@ def _build_vertical_prexvo_overlay_blocks(
                 {
                     "scenario": "Completed Double Consolidation Before Statutory Sunset",
                     "baseline": "$847.50 / mo (20% ICR Discretionary Rate)",
-                    "optimized": "$306.56 / mo (10% RAP 225% Poverty Exemption)",
-                    "delta": "-$540.94 / mo (-63.8% Monthly Payment)",
-                    "authority": "34 CFR 685.209 & 34 CFR 685.220",
+                    "optimized": "$433.33 / mo (P.L. 119-21 Section 82001 RAP)",
+                    "delta": "-$414.17 / mo (-48.9% Monthly Payment)",
+                    "authority": "P.L. 119-21 Section 82001 & 34 CFR 685.220",
                 },
             ],
             "faq_entries": [
@@ -6903,7 +6933,7 @@ def _build_vertical_prexvo_overlay_blocks(
                     "baseline_ctr": ctr,
                     "impressions": impr,
                     "params": {"loan_balance": 90000, "agi": 65000, "spouse_agi": 115000, "family_size": 2},
-                    "description": "Filing separately excludes $115,000 spousal AGI, cutting annual IDR payments by $9,583 vs $1,840 MFS tax cost.",
+                    "description": "Filing separately excludes $115,000 spousal AGI, cutting annual RAP payments by $14,100 vs $1,840 MFS tax cost.",
                 },
                 {
                     "id": "preset-mfs-community-property",
@@ -6919,10 +6949,10 @@ def _build_vertical_prexvo_overlay_blocks(
             "comparison_rows": [
                 {
                     "scenario": "Household $180,000 Combined AGI ($65k Borrower + $115k Spouse)",
-                    "baseline": "$1,105.73 / mo Joint RAP Payment ($13,269 / yr)",
-                    "optimized": "$248.23 / mo Separate RAP Payment ($2,979 / yr)",
-                    "delta": "+$8,450 Net Annual Savings (After $1,840 MFS Tax Drag)",
-                    "authority": "34 CFR 685.209(e) & IRC Section 1(j)",
+                    "baseline": "$1,500.00 / mo Joint RAP Payment ($18,000 / yr)",
+                    "optimized": "$325.00 / mo Separate RAP Payment ($3,900 / yr)",
+                    "delta": "+$12,260 Net Annual Savings (After $1,840 MFS Tax Drag)",
+                    "authority": "P.L. 119-21 Section 82001 & IRC Section 1(j)",
                 },
                 {
                     "scenario": "Forfeited IRC Section 221 Student Loan Interest & Child Care Credits",
@@ -7215,7 +7245,7 @@ def _build_vertical_prexvo_overlay_blocks(
                 "baseline_ctr": ctr,
                 "impressions": impr,
                 "params": {"loan_balance": 60000, "agi": 65000, "family_size": 1, "interest_rate": 6.5},
-                "description": "Single borrower at $65,000 AGI with 225% HHS poverty exemption ($248.23/mo RAP payment).",
+                "description": "Single borrower at $65,000 AGI in the 6% P.L. 119-21 Section 82001 tier ($325.00/mo RAP payment, 100% unpaid interest waived).",
             },
             {
                 "id": "preset-accelerated",
@@ -7232,15 +7262,15 @@ def _build_vertical_prexvo_overlay_blocks(
             {
                 "scenario": "Single Filer ($60,000 Loan, $65,000 AGI)",
                 "baseline": "$519.06 / mo (15% Pre-2014 Old IBR at 150% Poverty)",
-                "optimized": "$248.23 / mo (225% Poverty Exemption)",
-                "delta": "-$270.83 / mo (-52.2% Obligation)",
-                "authority": "34 CFR 685.209 & 42 U.S.C. 9902(2)",
+                "optimized": "$325.00 / mo (P.L. 119-21 6% AGI Tier)",
+                "delta": "-$194.06 / mo (-37.4% Obligation)",
+                "authority": "P.L. 119-21 Section 82001 & 34 CFR Part 685",
             },
             {
                 "scenario": "Public Service Track (120 Qualifying Payments)",
                 "baseline": "$68,100 Cumulative Standard Outflow",
-                "optimized": "$29,788 Outflow + Tax-Free Discharge",
-                "delta": "$38,312 Statutory Principal Relief",
+                "optimized": "$39,000 Outflow + Tax-Free Discharge",
+                "delta": "$29,100 Statutory Principal Relief",
                 "authority": "34 CFR 685.219 & 26 U.S.C. 108(f)(1)",
             },
         ],
@@ -7248,16 +7278,16 @@ def _build_vertical_prexvo_overlay_blocks(
             {
                 "question": f"How is {query_clean} calculated under 2026 Title IV regulations?",
                 "answer": (
-                    f"Under 34 CFR Part 685, {query_clean} subtracts 225 percent of the applicable HHS Poverty "
-                    f"Guideline from Adjusted Gross Income and assesses 10 percent of discretionary income divided "
-                    f"by 12, with 100 percent of unpaid monthly interest waived."
+                    f"Under P.L. 119-21 Section 82001 and 34 CFR Part 685, {query_clean} applies tiered AGI "
+                    f"percentages from 1 percent to 10 percent divided by 12 minus $50 per qualifying dependent "
+                    f"($10 minimum), waiving 100 percent of unpaid monthly interest with up to $50/mo principal match."
                 ),
             },
             {
                 "question": f"Does {query_clean} qualify for statutory loan forgiveness?",
                 "answer": (
                     "Yes. Qualifying monthly payments count toward 120-payment Public Service Loan Forgiveness "
-                    "under 34 CFR 685.219 or 240-payment income-driven discharge schedules."
+                    "under 34 CFR 685.219, 240-to-300-payment IBR, or 360-payment (30-year) RAP discharge schedules."
                 ),
             },
         ],
@@ -11003,6 +11033,14 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     )
                 )
                 and "225% hhs poverty" in meta_desc.lower()
+            )
+            or (
+                ov_tenant == "prexvo"
+                and (
+                    "225%" in meta_desc.lower()
+                    or "225 percent" in meta_desc.lower()
+                    or "calculate how do you" in meta_desc.lower()
+                )
             )
             or (
                 any(k in ov_slug_q.lower() for k in ("pslf-buyback", "pslf-qualifying"))

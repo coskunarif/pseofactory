@@ -126,24 +126,24 @@ def test_fail_closed_negative_checks_external_runtime_sync(tmp_path: Path):
         canonical_url="https://profithelm.com/tools/sample-calculator/",
         dist_dir=dist_dir,
     )
-    assert has_current_external_runtime_sync_tag(retro_html)
-    assert RetroReflectionEngine.audit_html_mechanics(retro_html) == []
+    assert has_current_external_runtime_sync_tag(retro_html, property_id="profithelm")
+    assert RetroReflectionEngine.audit_html_mechanics(retro_html, property_id="profithelm") == []
 
-    sha10 = get_runtime_synchronizer_js_sha10()
+    sha10 = get_runtime_synchronizer_js_sha10(property_id="profithelm")
     js_path = dist_dir / "static" / "js" / f"pseo-runtime-sync.{sha10}.js"
     assert js_path.is_file()
 
     # 1. Stale hash in <script src>
     stale_hash_html = retro_html.replace(f"pseo-runtime-sync.{sha10}.js", "pseo-runtime-sync.deadbeef00.js")
-    assert not has_current_external_runtime_sync_tag(stale_hash_html)
+    assert not has_current_external_runtime_sync_tag(stale_hash_html, property_id="profithelm")
     assert detect_visual_and_ux_contract_issues(stale_hash_html, require_primitives=True) != []
-    assert "deterministic_visual_primitives" in RetroReflectionEngine.audit_html_mechanics(stale_hash_html)
+    assert "deterministic_visual_primitives" in RetroReflectionEngine.audit_html_mechanics(stale_hash_html, property_id="profithelm")
 
     # 2. Missing defer attribute
     no_defer_html = retro_html.replace(" defer></script>", "></script>")
-    assert not has_current_external_runtime_sync_tag(no_defer_html)
+    assert not has_current_external_runtime_sync_tag(no_defer_html, property_id="profithelm")
     assert detect_visual_and_ux_contract_issues(no_defer_html, require_primitives=True) != []
-    assert "deterministic_visual_primitives" in RetroReflectionEngine.audit_html_mechanics(no_defer_html)
+    assert "deterministic_visual_primitives" in RetroReflectionEngine.audit_html_mechanics(no_defer_html, property_id="profithelm")
 
     # 3. Missing on-disk .js file -> audit_estate must mark STALE
     tool_file = dist_dir / "tools" / "sample-calculator" / "index.html"
@@ -162,7 +162,7 @@ def test_fail_closed_negative_checks_external_runtime_sync(tmp_path: Path):
     assert f"static/js/pseo-runtime-sync.{sha10}.js" in audit_tampered["stale_pages"]
 
     # 5. Restored valid bundle + extra stale bundle on disk -> audit_estate must mark STALE
-    write_runtime_synchronizer_asset(dist_dir)
+    write_runtime_synchronizer_asset(dist_dir, property_id="profithelm")
     stale_extra = dist_dir / "static" / "js" / "pseo-runtime-sync.1111111111.js"
     stale_extra.write_text("// leftover\n", encoding="utf-8")
     audit_stale_leftover = RetroReflectionEngine.audit_estate(dist_dir, "profithelm")
@@ -216,7 +216,7 @@ def test_lienbond_runtime_sync_inside_main_relocated_cleanly_before_body_close(t
     main_m = re.search(r"<main\b[^>]*>([\s\S]*?)</main>", norm_html, re.IGNORECASE)
     assert main_m is not None
     assert "pseo-runtime-sync" not in main_m.group(1), "Runtime sync script must be stripped from <main>"
-    assert has_current_external_runtime_sync_tag(norm_html)
+    assert has_current_external_runtime_sync_tag(norm_html, property_id="lienbond")
     assert norm_html.count('id="pseo-runtime-sync"') == 1
     assert "window.__pseoRuntimeSyncInitialized" not in norm_html
 
@@ -238,10 +238,10 @@ def test_porcelain_shell_content_hashed_js_versioning_headers_and_missing_asset_
     (dist_dir / "sitemap.xml").write_text("<urlset></urlset>", encoding="utf-8")
     (dist_dir / "static" / "js").mkdir(parents=True)
     (dist_dir / "static" / "js" / "app.js").write_text("console.log('ok');\n", encoding="utf-8")
-    write_runtime_synchronizer_asset(dist_dir)
+    write_runtime_synchronizer_asset(dist_dir, property_id="gainhelm")
 
     profile = get_porcelain_tenant_profile("gainhelm")
-    sha10 = get_runtime_synchronizer_js_sha10()
+    sha10 = get_runtime_synchronizer_js_sha10(property_id="gainhelm")
     src_rt = f"/static/js/pseo-runtime-sync.{sha10}.js"
     sample = (
         f'<html><body>'
@@ -467,7 +467,7 @@ def test_has_current_external_runtime_sync_tag_strict_html_parsing_edge_cases(tm
     profile = get_porcelain_tenant_profile("profithelm")
     norm_both, _ = normalize_html_to_porcelain_shell(with_both, "tools/demo/index.html", profile, dist_dir=None)
     assert 'data-id="pseo-runtime-sync"' in norm_both
-    assert has_current_external_runtime_sync_tag(norm_both)
+    assert has_current_external_runtime_sync_tag(norm_both, property_id="profithelm")
 
     # 5. Minor #5: src-before-id stale external tag upgrades cleanly even when dist_dir=None
     stale_src_first = (
@@ -476,7 +476,7 @@ def test_has_current_external_runtime_sync_tag_strict_html_parsing_edge_cases(tm
         f'data-version="{VISUAL_PRIMITIVES_VERSION}" defer></script></body></html>'
     )
     upgraded, _ = normalize_html_to_porcelain_shell(stale_src_first, "tools/demo/index.html", profile, dist_dir=None)
-    assert has_current_external_runtime_sync_tag(upgraded)
+    assert has_current_external_runtime_sync_tag(upgraded, property_id="profithelm")
     assert "pseo-runtime-sync.0123456789.js" not in upgraded
 
 

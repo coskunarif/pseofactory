@@ -33,7 +33,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, Any, FrozenSet, List, Set, Optional, Union, Iterator, Callable, Tuple, Collection
 
-from pseofactory.contracts import is_non_tool_or_governance_route, normalize_statutory_acronym_casing
+from pseofactory.contracts import (
+    is_non_tool_or_governance_route,
+    normalize_statutory_acronym_casing,
+    safe_eval_mathematical_formula,
+)
 
 
 def _atomic_write_text(path: Union[Path, str], content: str, encoding: str = "utf-8") -> None:
@@ -1863,17 +1867,17 @@ PREXVO_DEFAULT_TOOLS: List[Dict[str, Any]] = [
         "slug": "student-loan-repayment-calculator",
         "title": "Federal Student Loan Repayment Plan Calculator",
         "short_title": "Repayment Calculator",
-        "description": "Compare 2026 Federal Student Loan Repayment Plans: RAP, IBR, PAYE, ICR, and Tiered Standard under Title IV 34 CFR Part 685 statutory rules.",
+        "description": "Compare 2026 Federal Student Loan Repayment Plans: P.L. 119-21 RAP, IBR, PAYE, ICR, and Tiered Standard under Title IV 34 CFR Part 685 statutory rules.",
         "primary_keyword": "federal student loan repayment plan comparison",
-        "quick_answer": "Under Title IV Higher Education Act Section 493C and 34 CFR Part 685, the 2026 Repayment Assistance Plan (RAP) exempts 225% of the HHS Poverty Guideline and waives 100% of unpaid monthly interest.",
+        "quick_answer": "Under P.L. 119-21 Section 82001 and 34 CFR Part 685, the 2026 Repayment Assistance Plan (RAP) assesses 1% to 10% of AGI minus $50 per dependent ($10 minimum), waives 100% of unpaid monthly interest, and provides up to $50/mo principal match.",
     },
     {
         "slug": "rap-vs-ibr-calculator",
         "title": "RAP vs IBR Student Loan Plan Comparison Engine",
         "short_title": "RAP vs IBR",
-        "description": "Compare monthly obligations, 225% poverty exemption rules, interest subsidies, and statutory forgiveness schedules between the 2026 RAP and IBR plans.",
+        "description": "Compare monthly obligations, P.L. 119-21 tiered AGI rules, 100% interest subsidies, and 360-month vs 240-month forgiveness schedules between 2026 RAP and IBR.",
         "primary_keyword": "rap vs ibr",
-        "quick_answer": "Under 34 CFR Part 685 and HEA Section 493C, RAP lowers payments for moderate earners via a 225% poverty floor, while IBR caps payments at the 10-year Standard schedule for higher incomes.",
+        "quick_answer": "Under P.L. 119-21 Section 82001 and 34 CFR 685.221, RAP sets payments from 1% to 10% of AGI minus $50 per dependent with 360-month forgiveness, while IBR uses 150% of the $15,960 HHS poverty floor capped at the 10-year Standard schedule.",
     },
     {
         "slug": "tiered-standard-calculator",
@@ -1924,9 +1928,9 @@ PREXVO_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "slug": "save-plan-litigation-transition",
         "title": "SAVE Plan to RAP Repayment Transition Calculator",
         "short_title": "SAVE to RAP Transition",
-        "description": "Calculate monthly payment changes, 225% poverty line deductions, and 100% unpaid interest subsidies when transitioning from SAVE forbearance to RAP.",
+        "description": "Calculate monthly payment changes, P.L. 119-21 Section 82001 AGI tier obligations, and 100% unpaid interest subsidies when transitioning from SAVE forbearance to RAP.",
         "primary_keyword": "save plan transition to rap calculator",
-        "quick_answer": "Borrowers transitioning from administrative SAVE forbearance into the 2026 Repayment Assistance Plan under 34 CFR Part 685 retain the 225% poverty exemption and 100% unpaid monthly interest waiver.",
+        "quick_answer": "Borrowers transitioning from administrative SAVE forbearance into the 2026 Repayment Assistance Plan under P.L. 119-21 Section 82001 and 34 CFR Part 685 receive a 100% unpaid monthly interest waiver and up to $50/mo principal match.",
     },
     {
         "slug": "student-loan-refinance-break-even-calculator",
@@ -1940,9 +1944,9 @@ PREXVO_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "slug": "rap-payment-calculator",
         "title": "2026 Repayment Assistance Plan (RAP) Calculator",
         "short_title": "RAP Payment Calculator",
-        "description": "Calculate exact monthly obligations, 225% poverty line exemptions, and federal interest subsidies under the 2026 Repayment Assistance Plan (RAP).",
+        "description": "Calculate exact monthly obligations, P.L. 119-21 Section 82001 AGI tiers, $50/mo principal match, and 100% unpaid interest subsidies under 2026 RAP.",
         "primary_keyword": "repayment assistance plan calculator",
-        "quick_answer": "Under 34 CFR Part 685, the 2026 Repayment Assistance Plan assesses 10% of discretionary income above 225% of the HHS Poverty Guideline while subsidizing 100% of unpaid monthly interest.",
+        "quick_answer": "Under P.L. 119-21 Section 82001 and 34 CFR Part 685, the 2026 Repayment Assistance Plan assesses 1% to 10% of AGI minus $50 per dependent ($10 minimum) while subsidizing 100% of unpaid monthly interest across 360 months.",
     },
     {
         "slug": "grad-plus-borrowing-cap-calculator",
@@ -2071,9 +2075,9 @@ PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "slug": "contractor-surety-bond-cost-calculator",
         "title": "Contractor License & Performance Surety Bond Cost Calculator",
         "short_title": "Contractor Surety Bond",
-        "description": "Calculate annual surety bond premiums for contractor license, bid, and Miller Act performance bonds across FICO credit tiers.",
+        "description": "Calculate annual surety bond premiums for contractor license, bid, and commercial performance bonds across FICO credit tiers.",
         "primary_keyword": "contractor surety bond cost calculator",
-        "quick_answer": "Under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and 31 U.S.C. Section 9304, contractor surety bond premiums equal the statutory bond penalty multiplied by underwriting credit tier rates (0.75% to 5.0%).",
+        "quick_answer": "Under 31 U.S.C. Section 9304, 13 CFR Part 115, and IRC Section 162(a), contractor surety bond premiums equal the statutory bond penalty multiplied by underwriting credit tier rates (0.75% to 5.0%).",
         "category": "Corporate Finance",
     },
     {
@@ -2143,9 +2147,9 @@ PROFITHELM_EXTENDED_TOOLS: List[Dict[str, Any]] = [
         "slug": "section-179-vehicle-equipment-deduction",
         "title": "Section 179 Commercial Vehicle & Equipment Deduction Calculator",
         "short_title": "Section 179 Vehicle & Equip",
-        "description": "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+        "description": "Model combined IRC Section 179 expensing, 100% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
         "primary_keyword": "section 179 vehicle equipment deduction",
-        "quick_answer": "Under IRC Section 179 and Section 280F, commercial vehicles and machinery used over 50% for qualified business operations capture immediate first-year expensing (up to $2,560,000) plus 20% bonus depreciation on remaining basis.",
+        "quick_answer": "Under IRC Section 179, Section 280F, and P.L. 119-21 Section 70301, commercial vehicles and machinery used over 50% for qualified business operations capture immediate first-year expensing (up to $2,560,000 equipment or $32,000 Heavy SUV) plus 100% bonus depreciation on remaining basis.",
         "category": "Corporate Tax & CapEx",
     },
     {
@@ -2920,11 +2924,11 @@ class LiveTruthAuditEngine:
         violations: List[str] = []
         prop_norm = resolve_canonical_property_id(property_id)
 
-        # 1. Section 179 Heavy SUV cap ($30,500 vs equipment $2,560,000)
+        # 1. Section 179 Heavy SUV cap ($32,000 vs equipment $2,560,000)
         if prop_norm == "profithelm":
             if re.search(r'heavy\s+SUVs?\s+capped\s+at\s+\$(?:2,560,000|2\.56M)', content, re.IGNORECASE):
                 violations.append(
-                    f"Erroneous Section 179 Heavy SUV cap claimed as equipment limit ($2,560,000) instead of statutory $30,500 in {p_name}"
+                    f"Erroneous Section 179 Heavy SUV cap claimed as equipment limit ($2,560,000) instead of statutory $32,000 in {p_name}"
                 )
             if ("suv" in rel_str.lower() or "vehicle" in rel_str.lower() or "179" in rel_str.lower()) and "2,560,000" in content:
                 if re.search(r'(?:heavy\s+suvs?|passenger\s+vehicles?|commercial\s+vehicles?)\s+(?:deduction\s+)?(?:limit|cap|capped)\b[^\.\n;:,]*?\b(?:of|is|at(?:\s+a)?)\s*\$?2,560,000', content, re.IGNORECASE):
@@ -4719,7 +4723,13 @@ class RefactorCascadeEngine:
                             is_tool_page
                             and (
                                 _needs_page_structure_geo_normalization(raw_html)
-                                or bool(RetroReflectionEngine.audit_html_mechanics(raw_html, property_id=adapter.property_id))
+                                or bool(
+                                    RetroReflectionEngine.audit_html_mechanics(
+                                        raw_html,
+                                        property_id=adapter.property_id,
+                                        rel_path=rel_target,
+                                    )
+                                )
                             )
                         )
                     ):
@@ -6379,7 +6389,7 @@ def _resolve_profithelm_statutory_provenance(slug: str, html_content: str) -> Tu
         default_stat = "19 U.S.C. 2411 (Section 301); HTSUS Chapter 99; 19 CFR Part 141"
         default_econ = "USITC DataWeb Import Series and BLS Import/Export Price Indexes"
     elif any(k in s_low for k in ("surety", "bond", "contractor")):
-        default_stat = "40 U.S.C. 3131 (Miller Act); FAR Part 28; SBA Surety Bond Guarantee Rules"
+        default_stat = "31 U.S.C. Section 9304; IRC Section 162(a); SBA Surety Bond Guarantee Rules"
         default_econ = "U.S. Census Bureau Construction Spending (VIP) Series"
     elif any(k in s_low for k in ("factoring", "line-of-credit", "runway", "burn", "saas", "working-capital", "cash-flow", "treasury", "hysa", "yield")):
         default_stat = "UCC Article 9; 12 CFR Part 1026 (Reg Z); IRC Section 163(j)"
@@ -9997,66 +10007,66 @@ class RetroReflectionEngine:
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "rap-payment-calculator": {
             "model_name": "Repayment Assistance Plan (RAP) Monthly Payment Model",
-            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
-            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 42000.0},
-            "published_output": 248.23,
-            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (OBBBA) Title VIII Subtitle B",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
+            "published_output": 325.0,
+            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (P.L. 119-21 Section 82001)",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
-            "sample_calculation": "For $65,000 AGI with a $35,212.50 statutory exemption (225% of $15,650 HHS poverty baseline), monthly RAP payment is $248.23.",
+            "sample_calculation": "Under P.L. 119-21 Section 82001, a single borrower with $65,000 AGI and 0 dependents falls in the 6% AGI tier ($325.00/mo) with 100% unpaid interest subsidy and 360 qualifying monthly payments.",
         },
         "rap-vs-ibr-calculator": {
             "model_name": "RAP vs IBR Repayment Comparison Model",
-            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
-            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 60000.0},
-            "published_output": 248.23,
-            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (OBBBA) Title VIII Subtitle B",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
+            "published_output": 325.0,
+            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (P.L. 119-21 Section 82001)",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
-            "sample_calculation": "For $65,000 AGI with a $35,212.50 statutory exemption (225% of $15,650 HHS poverty baseline), monthly RAP payment is $248.23 vs $346.04 Post-2014 IBR.",
+            "sample_calculation": "For $65,000 AGI under P.L. 119-21 Section 82001, monthly RAP payment is $325.00 vs $342.17 Post-2014 New IBR (150% of $15,960 2026 HHS Poverty Guideline).",
         },
         "student-loan-repayment-calculator": {
             "model_name": "Income-Based Student Loan Repayment Model",
-            "formula": "round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)",
-            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 2.25, "rap_rate": 0.10, "loan_balance": 60000.0},
-            "published_output": 248.23,
-            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
+            "published_output": 325.0,
+            "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; P.L. 119-21 Section 82001",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
-            "sample_calculation": "For $65,000 AGI and $60,000 Direct Loan balance, monthly RAP payment is $248.23 and Post-2014 IBR payment is $346.04.",
+            "sample_calculation": "For $65,000 AGI and $60,000 Direct Loan balance, monthly 2026 RAP payment is $325.00 and Post-2014 IBR payment is $342.17 (150% of $15,960 2026 HHS FPL).",
         },
         "ibr-hardship-cap-calculator": {
             "model_name": "IBR Hardship Cap and Partial Financial Hardship Model",
             "formula": "round(min(loan_balance * (interest_rate / 12.0 * (1.0 + interest_rate / 12.0) ** 120) / ((1.0 + interest_rate / 12.0) ** 120 - 1.0), max(0.0, agi - (poverty_guideline * fpl_multiplier)) * ibr_levy_rate / 12.0), 2)",
-            "inputs": {"agi": 65000.0, "poverty_guideline": 15650.0, "fpl_multiplier": 1.5, "ibr_levy_rate": 0.10, "loan_balance": 60000.0, "interest_rate": 0.065},
-            "published_output": 346.04,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 42 U.S.C. 9902(2)",
+            "inputs": {"agi": 65000.0, "poverty_guideline": 15960.0, "fpl_multiplier": 1.5, "ibr_levy_rate": 0.10, "loan_balance": 60000.0, "interest_rate": 0.065},
+            "published_output": 342.17,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 42 U.S.C. 9902(2); 91 FR 1797",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "For $65,000 AGI with a $23,475.00 statutory exemption (150% of $15,650 HHS poverty baseline), monthly post-2014 IBR payment is $346.04 capped below the $681.29 10-Year Standard ceiling.",
+            "sample_calculation": "For $65,000 AGI with a $23,940.00 statutory exemption (150% of $15,960 2026 HHS poverty baseline), monthly post-2014 IBR payment is $342.17 capped below the $681.29 10-Year Standard ceiling.",
         },
         "paye-sunset-calculator": {
             "model_name": "PAYE Sunset Eligibility and Transition Model",
             "formula": "round(min(standard_cap, max(0, agi - (poverty_guideline * discretionary_multiplier)) * payment_rate / 12), 2)",
-            "inputs": {"agi": 65000, "poverty_guideline": 15650, "discretionary_multiplier": 1.5, "payment_rate": 0.1, "standard_cap": 681.0},
-            "published_output": 346.04,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 42 U.S.C. 9902(2)",
+            "inputs": {"agi": 65000, "poverty_guideline": 15960, "discretionary_multiplier": 1.5, "payment_rate": 0.1, "standard_cap": 681.0},
+            "published_output": 342.17,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 42 U.S.C. 9902(2); 91 FR 1797",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "For $65,000 AGI with 1 person household in contiguous US: poverty baseline $23,475 shields income. Discretionary income $41,525 results in $346.04 monthly payment with 20-year forgiveness.",
+            "sample_calculation": "For $65,000 AGI with 1 person household in contiguous US: 2026 poverty exemption $23,940 shields income ($15,960 FPL * 1.5). Discretionary income $41,060 results in $342.17 monthly payment with 20-year forgiveness.",
         },
         "icr-repayment-calculator": {
             "model_name": "Income-Contingent Repayment (ICR) Formula Model",
             "formula": "round(min(max(0, agi - poverty_guideline) * discretionary_rate / 12, round(base_12yr_payment, 2) * (agi / 60000.0)), 2)",
-            "inputs": {"agi": 65000, "poverty_guideline": 15650, "discretionary_rate": 0.2, "base_12yr_payment": 601.15},
+            "inputs": {"agi": 65000, "poverty_guideline": 15960, "discretionary_rate": 0.2, "base_12yr_payment": 601.15},
             "published_output": 651.25,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209(b); 42 U.S.C. 9902(2)",
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209(b); 42 U.S.C. 9902(2); 91 FR 1797",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "For a consolidated Parent PLUS borrower under 34 CFR 685.209(b) (lesser of 20% of discretionary income above $15,650 100% HHS poverty or 12-year income-adjusted schedule at $601.15 base), monthly ICR payment is $651.25.",
+            "sample_calculation": "For a consolidated Parent PLUS borrower under 34 CFR 685.209(b) (lesser of 20% of discretionary income above $15,960 100% 2026 HHS poverty or 12-year income-adjusted schedule at $601.15 base), monthly ICR payment is $651.25.",
         },
         "parent-plus-repayment-strategy": {
             "model_name": "Parent PLUS Direct Consolidation and ICR Strategy Model",
             "formula": "round(min(max(0, agi - poverty_guideline) * discretionary_rate / 12, round(base_12yr_payment, 2) * (agi / 60000.0)), 2)",
-            "inputs": {"agi": 65000, "poverty_guideline": 15650, "discretionary_rate": 0.2, "base_12yr_payment": 601.15},
+            "inputs": {"agi": 65000, "poverty_guideline": 15960, "discretionary_rate": 0.2, "base_12yr_payment": 601.15},
             "published_output": 651.25,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209(b); 42 U.S.C. 9902(2)",
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209(b); 42 U.S.C. 9902(2); 91 FR 1797",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "For a consolidated Parent PLUS balance under 34 CFR 685.209(b) (100% HHS poverty $15,650 baseline), monthly ICR payment is $651.25.",
+            "sample_calculation": "For a consolidated Parent PLUS balance under 34 CFR 685.209(b) (100% 2026 HHS poverty $15,960 baseline), monthly ICR payment is $651.25.",
         },
         "tiered-standard-calculator": {
             "model_name": "Tiered Standard Repayment Amortization Model",
@@ -10078,30 +10088,30 @@ class RetroReflectionEngine:
         },
         "married-filing-separately-student-loan-calculator": {
             "model_name": "Married Filing Separately vs Jointly IDR Optimization Model",
-            "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12), 2)",
-            "inputs": {"borrower_agi": 72000, "poverty_guideline": 15650, "discretionary_multiplier": 2.25, "rap_rate": 0.10},
-            "published_output": 306.56,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 26 U.S.C. Section 1",
+            "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * ibr_rate / 12), 2)",
+            "inputs": {"borrower_agi": 72000, "poverty_guideline": 15960, "discretionary_multiplier": 1.5, "ibr_rate": 0.10},
+            "published_output": 400.5,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 26 U.S.C. Section 1; 91 FR 1797",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "Filing MFS excludes $80,000 spouse AGI, reducing borrower RAP payment on $72,000 separate AGI above the $35,212.50 (225% FPL) exemption to $306.56/mo.",
+            "sample_calculation": "Filing MFS excludes $80,000 spouse AGI, reducing borrower New IBR payment on $72,000 separate AGI above the $23,940.00 (150% of $15,960 2026 FPL) exemption to $400.50/mo.",
         },
         "save-plan-litigation-transition": {
             "model_name": "SAVE Plan Litigation Forbearance to RAP/IBR Transition Model",
-            "formula": "round(max(0, agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12, 2)",
-            "inputs": {"agi": 65000, "poverty_guideline": 15650, "discretionary_multiplier": 2.25, "rap_rate": 0.1},
-            "published_output": 248.23,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR Part 685; 42 U.S.C. 9902(2)",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
+            "published_output": 325.0,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR Part 685; P.L. 119-21 Section 82001",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "Transitioning from SAVE litigation forbearance at $65,000 AGI to RAP yields a $248.23 monthly payment with 100% unpaid interest subsidy.",
+            "sample_calculation": "Transitioning from SAVE litigation forbearance at $65,000 AGI to 2026 RAP under P.L. 119-21 Section 82001 yields a $325.00 monthly payment with 100% unpaid interest subsidy.",
         },
         "pslf-buyback-calculator": {
             "model_name": "PSLF Buyback Lump-Sum Settlement Model",
-            "formula": "round(max(0.0, (agi - 35212.50) * 0.10 / 12) * buyback_months, 2)",
-            "inputs": {"agi": 65000, "buyback_months": 12},
-            "published_output": 2978.75,
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0) * buyback_months, 2)",
+            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0, "buyback_months": 12.0},
+            "published_output": 3900.0,
             "statutory_authority": "34 CFR 685.219(g) Public Service Loan Forgiveness Hold Harmless Buyback Rules; Title IV HEA",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and U.S. Department of Education FSA Data Center",
-            "sample_calculation": "Buying back 12 qualifying deferment or forbearance months at $248.23/mo yields $2,978.75.",
+            "sample_calculation": "Buying back 12 qualifying deferment or forbearance months at the $325.00/mo 2026 RAP rate yields $3,900.00.",
         },
         "pslf-qualifying-payment-simulator": {
             "model_name": "PSLF 120-Payment Qualifying Simulator Model",
@@ -10132,57 +10142,55 @@ class RetroReflectionEngine:
                 "state_tax_rate": 0.05,
             },
             "published_output": 10730.0,
-            "statutory_authority": "26 U.S.C. Section 108(f)(5); IRC Section 108(a)(1)(B) Form 982 Insolvency; 34 CFR 685.209",
+            "statutory_authority": "26 U.S.C. Section 108(f)(5); 34 CFR 685.209",
             "economic_dataset": "U.S. Department of Education FSA Portfolio Summary and IRS SOI Form 982 Insolvency Series",
-            "sample_calculation": "Under IRC Section 108(f)(5) post-2025 sunset and Section 108(a)(1)(B) Form 982 insolvency rules, $112,000 liabilities against $64,000 assets shields $48,000 of an $85,000 forgiven IDR balance, leaving $37,000 taxable at 29% combined federal and state rate for a $10,730.00 net tax liability.",
+            "sample_calculation": "Under 26 U.S.C. Section 108(f)(5) post-2025 expiration and Form 982 insolvency rules, $112,000 liabilities against $64,000 assets shields $48,000 of an $85,000 forgiven IDR balance, leaving $37,000 taxable at 29% combined federal and state rate for a $10,730.00 net tax liability.",
         },
         "pslf-buyback-months-reconsideration-student-loan-calculator": {
             "model_name": "PSLF Buyback Months Reconsideration Lump-Sum Settlement Model",
-            "formula": "round(round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2) * eligible_buyback_months, 2)",
+            "formula": "round(round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2) * eligible_buyback_months, 2)",
             "inputs": {
                 "agi": 65000.0,
-                "poverty_guideline": 15650.0,
-                "fpl_multiplier": 2.25,
-                "rap_rate": 0.10,
+                "rap_rate": 0.06,
+                "dependents": 0.0,
                 "eligible_buyback_months": 14.0,
             },
-            "published_output": 3475.22,
-            "statutory_authority": "34 CFR 685.219(g) Public Service Loan Forgiveness Hold Harmless Buyback Rules; Title IV HEA",
+            "published_output": 4550.0,
+            "statutory_authority": "34 CFR 685.219(g) Public Service Loan Forgiveness Hold Harmless Buyback Rules; Title IV HEA; P.L. 119-21 Section 82001",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and U.S. Department of Education FSA Data Center",
-            "sample_calculation": "Under 34 CFR 685.219(g) PSLF hold-harmless buyback reconsideration rules, 14 qualifying deferment or forbearance months evaluated at the $248.23/mo 225% FPL RAP rate require a $3,475.22 lump-sum settlement to reach 120 payments.",
+            "sample_calculation": "Under 34 CFR 685.219(g) PSLF hold-harmless buyback reconsideration rules, 14 qualifying deferment or forbearance months evaluated at the $325.00/mo 2026 RAP rate require a $4,550.00 lump-sum settlement to reach 120 payments.",
         },
         "parent-plus-double-consolidation-loophole-2026-calculator": {
             "model_name": "Parent PLUS Double Consolidation ICR-to-RAP Arbitrage Model",
-            "formula": "round((round(min(max(0.0, agi - poverty_guideline) * discretionary_rate / 12.0, round(base_12yr_payment, 2) * (agi / 60000.0)), 2) - round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2)) * 12.0, 2)",
+            "formula": "round((round(min(max(0.0, agi - poverty_guideline) * discretionary_rate / 12.0, round(base_12yr_payment, 2) * (agi / 60000.0)), 2) - round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)) * 12.0, 2)",
             "inputs": {
                 "agi": 65000.0,
-                "poverty_guideline": 15650.0,
+                "poverty_guideline": 15960.0,
                 "discretionary_rate": 0.20,
                 "base_12yr_payment": 601.15,
-                "fpl_multiplier": 2.25,
-                "rap_rate": 0.10,
+                "rap_rate": 0.06,
+                "dependents": 0.0,
             },
-            "published_output": 4836.24,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 34 CFR 685.220 Consolidation Rules",
+            "published_output": 3915.0,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 34 CFR 685.220 Consolidation Rules; P.L. 119-21 Section 82001",
             "economic_dataset": "U.S. Department of Education College Scorecard and Federal Student Aid Parent PLUS Portfolio Series",
-            "sample_calculation": "Under 34 CFR 685.209 and 685.220, completing a two-step Direct Consolidation shifts a $65,000 AGI Parent PLUS borrower from single-consolidation ICR ($651.25/mo) to double-consolidated RAP ($248.23/mo), saving $4,836.24 annually.",
+            "sample_calculation": "Under 34 CFR 685.209 and 685.220, double consolidation shifts a $65,000 AGI Parent PLUS borrower from single-consolidation ICR ($651.25/mo on $15,960 FPL) to 2026 RAP ($325.00/mo), saving $3,915.00 annually.",
         },
         "student-loan-forgiveness-2026": {
-            "model_name": "20-Year IDR Cumulative Repayment and Net Forgiven Principal Model",
-            "formula": "round(max(0.0, loan_balance + (loan_balance * interest_rate * (repayment_months / 12.0)) - (round(max(0.0, (agi - (poverty_guideline * fpl_multiplier)) * rap_rate / 12.0), 2) * repayment_months)), 2)",
+            "model_name": "30-Year RAP Cumulative Repayment and Net Forgiven Principal Model",
+            "formula": "round(max(0.0, loan_balance + (loan_balance * interest_rate * (repayment_months / 12.0)) - (round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2) * repayment_months)), 2)",
             "inputs": {
-                "loan_balance": 84000.0,
+                "loan_balance": 140000.0,
                 "interest_rate": 0.0,
                 "agi": 65000.0,
-                "poverty_guideline": 15650.0,
-                "fpl_multiplier": 2.25,
-                "rap_rate": 0.10,
-                "repayment_months": 240.0,
+                "rap_rate": 0.06,
+                "dependents": 0.0,
+                "repayment_months": 360.0,
             },
-            "published_output": 24424.8,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; 26 U.S.C. Section 108(f)",
+            "published_output": 23000.0,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR 685.209; P.L. 119-21 Section 82001",
             "economic_dataset": "U.S. Department of Education FSA IDR Portfolio Series and BLS CPI-U Inflation Dataset",
-            "sample_calculation": "On an $84,000 Direct Loan balance with 100% unpaid interest subsidy under RAP ($248.23/mo over 240 months = $59,575.20 cumulative payments), remaining forgiven principal at 20-year discharge is $24,424.80.",
+            "sample_calculation": "On a $140,000 Direct Loan balance with 100% unpaid interest subsidy under 2026 RAP ($325.00/mo over 360 qualifying monthly payments = $117,000.00 cumulative payments), remaining forgiven principal at 30-year discharge is $23,000.00.",
         },
         "student-loan-interest-deduction-phaseout-2026-calculator": {
             "model_name": "IRC Section 221 Student Loan Interest Deduction MAGI Phaseout Model",
@@ -10201,32 +10209,29 @@ class RetroReflectionEngine:
         },
         "parent-plus-double-consolidation": {
             "model_name": "Parent PLUS Double Consolidation and RAP Repayment Model",
-            "formula": "round(max(0, agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12, 2)",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
             "inputs": {
-                "loan_balance": 80000.0,
                 "agi": 65000.0,
-                "poverty_guideline": 15650.0,
-                "discretionary_multiplier": 2.25,
-                "rap_rate": 0.10,
+                "rap_rate": 0.06,
+                "dependents": 0.0,
             },
-            "published_output": 248.23,
-            "statutory_authority": "34 CFR 685.220; 34 CFR Part 685 statutory consolidation provisions",
+            "published_output": 325.0,
+            "statutory_authority": "34 CFR 685.220; 34 CFR Part 685 statutory consolidation provisions; P.L. 119-21 Section 82001",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "Borrower with $80,000 in Parent PLUS loans completing double consolidation with $65,000 AGI: protected baseline is $15,650 * 2.25 = $35,212.50. Discretionary income is $29,787.50, unlocking a 10% RAP payment of $248.23 monthly.",
+            "sample_calculation": "Borrower completing Parent PLUS double consolidation at $65,000 AGI in the 6% P.L. 119-21 Section 82001 RAP tier pays $325.00 monthly with 100% unpaid interest subsidy.",
         },
         "repayment-estimator-student-loans": {
             "model_name": "Title IV Student Loan Repayment Estimator Model",
-            "formula": "round(max(0, agi - (poverty_guideline * discretionary_multiplier)) * payment_rate / 12, 2)",
+            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
             "inputs": {
                 "agi": 65000.0,
-                "poverty_guideline": 15650.0,
-                "discretionary_multiplier": 2.25,
-                "payment_rate": 0.10,
+                "rap_rate": 0.06,
+                "dependents": 0.0,
             },
-            "published_output": 248.23,
-            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR Part 685; 42 U.S.C. 9902(2)",
+            "published_output": 325.0,
+            "statutory_authority": "Higher Education Act Section 455 (20 U.S.C. 1087e); 34 CFR Part 685; P.L. 119-21 Section 82001",
             "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",
-            "sample_calculation": "Single borrower earning $65,000 with $15,650 poverty baseline: protected threshold is $15,650 * 2.25 = $35,212.50. Discretionary income is $65,000 - $35,212.50 = $29,787.50. Multiplying by 10% and dividing by 12 produces a monthly payment of $248.23.",
+            "sample_calculation": "Single borrower earning $65,000 in the 6% P.L. 119-21 Section 82001 RAP tier pays $325.00 monthly with 100% unpaid interest subsidy and up to $50/mo principal match.",
         },
         "parent-plus-loan-payment-calculator": {
             "model_name": "ParentPLUSConsolidationRepaymentModel",
@@ -10277,25 +10282,25 @@ class RetroReflectionEngine:
     PROFITHELM_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "tax-bracket-capital-allocation-hub": {
             "model_name": "Tax Bracket and Capital Allocation Hub Model",
-            "formula": "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)",
-            "inputs": {"gross_income": 125000.0, "standard_deduction_2026": 16100.0},
+            "formula": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0), 2)",
+            "inputs": {"gross_income": 125000.0, "standard_deduction": 16100.0},
             "published_output": 18734.0,
             "statutory_authority": "26 U.S.C. Section 1(j); P.L. 119-21 (OBBBA); IRC Section 179; IRC Section 1031",
             "economic_dataset": "IRS SOI Tax Statistics and Federal Reserve Macroeconomic Series",
-            "sample_calculation": "For a $125,000 Single filer in 2026 under OBBBA P.L. 119-21 ($16,100 standard deduction), federal income tax is $18,734.00 across progressive 10%/12%/22%/24% brackets.",
+            "sample_calculation": "For a $125,000 Single filer in 2026 under OBBBA P.L. 119-21 ($16,100 standard deduction), federal income tax is $18,734.00 across progressive 10%/12%/22%/24%/32%/35%/37% brackets.",
         },
         "irs-2027-tax-brackets": {
-            "model_name": "IRS 2027 Tax Brackets and OBBBA Calculator Model",
-            "formula": "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)",
-            "inputs": {"gross_income": 125000.0, "standard_deduction_2026": 16100.0},
+            "model_name": "2026 Federal Income Tax (Single Filer, Rev. Proc. 2025-32)",
+            "formula": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0), 2)",
+            "inputs": {"gross_income": 125000.0, "standard_deduction": 16100.0},
             "published_output": 18734.0,
-            "statutory_authority": "26 U.S.C. Section 1(j); P.L. 119-21 (OBBBA); IRC Section 63(c)(7); IRS Rev. Proc. 2025-32",
-            "economic_dataset": "IRS SOI Individual Income Tax Return Statistics and CBO Budget & Economic Outlook",
-            "sample_calculation": "For a $125,000 Single filer under OBBBA P.L. 119-21 ($16,100 2026 standard deduction), federal income tax is $18,734.00 across progressive 10%/12%/22%/24% brackets.",
+            "statutory_authority": "P.L. 119-21 Section 70101, IRS Rev. Proc. 2025-32 & Rev. Proc. 2026-35",
+            "economic_dataset": "IRS SOI Individual Income Tax Statistics & BEA Personal Income Benchmarks",
+            "sample_calculation": "For a $125,000 Single filer under OBBBA P.L. 119-21 ($16,100 2026 standard deduction), federal income tax is $18,734.00 across progressive 10%/12%/22%/24%/32%/35%/37% brackets.",
         },
         "ca-tax-brackets-2026": {
             "model_name": "California 2026-2027 Income Tax Brackets Calculator Model",
-            "formula": "round(1240.0 + 4560.0 + 12166.0 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + california_ftb_tax_liability, 0)",
+            "formula": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0) + california_ftb_tax_liability, 2)",
             "inputs": {"gross_income": 125000.0, "standard_deduction": 16100.0, "california_ftb_tax_liability": 6887.0},
             "published_output": 25621.0,
             "statutory_authority": "California Revenue and Taxation Code Section 17041; 26 U.S.C. Section 1(j); IRS Rev. Proc. 2025-32",
@@ -10314,43 +10319,43 @@ class RetroReflectionEngine:
             "published_output": 350000.0,
             "statutory_authority": "26 U.S.C. Section 179; IRC Section 168(k); IRS Form 4562",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "For $350,000 in qualifying commercial equipment placed in service in 2026 (within the $2,560,000 IRC Section 179 cap and $4,090,000 phase-out threshold with 20% Section 168(k) bonus depreciation), first-year deduction is $350,000.00.",
+            "sample_calculation": "For $350,000 in qualifying commercial equipment placed in service in 2026 (within the $2,560,000 IRC Section 179 cap and $4,090,000 phase-out threshold with 100% Section 168(k) bonus depreciation under P.L. 119-21 Section 70301), first-year deduction is $350,000.00.",
         },
         "section-179-vehicle-deduction": {
             "model_name": "Section 179 Heavy SUV and Commercial Vehicle Deduction Model",
-            "formula": "round(min(vehicle_cost * business_use_rate, 30500.0) + max(0.0, (vehicle_cost * business_use_rate) - 30500.0) * 0.20, 2)",
+            "formula": "round(min(vehicle_cost * business_use_rate, 32000.0) + max(0.0, (vehicle_cost * business_use_rate) - 32000.0) * 1.0, 2)",
             "inputs": {"vehicle_cost": 85000.0, "business_use_rate": 0.80},
-            "published_output": 38000.0,
-            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F; IRC Section 168(k)",
+            "published_output": 68000.0,
+            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F; IRC Section 168(k); P.L. 119-21 Section 70301",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "For an $85,000 Heavy SUV at 80% business use ($68,000 basis), 2026 IRC Section 179 ($30,500 SUV cap) plus 20% Section 168(k) bonus depreciation ($7,500) yields $38,000.00.",
+            "sample_calculation": "For an $85,000 Heavy SUV at 80% business use ($68,000 basis), 2026 IRC Section 179 ($32,000 SUV cap) plus 100% Section 168(k) bonus depreciation ($36,000) yields $68,000.00.",
         },
         "section-179-vehicle-equipment-deduction": {
             "model_name": "Section 179 Heavy SUV and Commercial Vehicle Deduction Model",
-            "formula": "round(min(vehicle_cost * business_use_rate, 30500.0) + max(0.0, (vehicle_cost * business_use_rate) - 30500.0) * 0.20, 2)",
+            "formula": "round(min(vehicle_cost * business_use_rate, 32000.0) + max(0.0, (vehicle_cost * business_use_rate) - 32000.0) * 1.0, 2)",
             "inputs": {"vehicle_cost": 85000.0, "business_use_rate": 0.80},
-            "published_output": 38000.0,
-            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F; IRC Section 168(k)",
+            "published_output": 68000.0,
+            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F; IRC Section 168(k); P.L. 119-21 Section 70301",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "For an $85,000 Heavy SUV at 80% business use ($68,000 basis), 2026 IRC Section 179 ($30,500 SUV cap) plus 20% Section 168(k) bonus depreciation ($7,500) yields $38,000.00.",
+            "sample_calculation": "For an $85,000 Heavy SUV at 80% business use ($68,000 basis), 2026 IRC Section 179 ($32,000 SUV cap) plus 100% Section 168(k) bonus depreciation ($36,000) yields $68,000.00.",
         },
         "commercial-heavy-vehicle-section-179-weight-calculator": {
             "model_name": "Commercial Heavy Vehicle Section 179 GVWR Weight Classification Model",
-            "formula": "round((min(vehicle_cost * business_use_rate, 30500.0) + max(0.0, (vehicle_cost * business_use_rate) - 30500.0) * 0.20) * marginal_tax_rate, 0)",
+            "formula": "round((min(vehicle_cost * business_use_rate, 32000.0) + max(0.0, (vehicle_cost * business_use_rate) - 32000.0) * 1.0) * marginal_tax_rate, 0)",
             "inputs": {"vehicle_cost": 95000.0, "business_use_rate": 0.90, "marginal_tax_rate": 0.35},
-            "published_output": 14525.0,
-            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F(d)(5); IRC Section 168(k)",
+            "published_output": 29925.0,
+            "statutory_authority": "26 U.S.C. Section 179(b)(5); IRC Section 280F(d)(5); IRC Section 168(k); P.L. 119-21 Section 70301",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "For a $95,000 Heavy SUV (6,000-14,000 lbs GVWR) at 90% business use ($85,500 basis), $30,500 IRC Section 179(b)(5) cap plus 20% bonus depreciation ($11,000) yields $41,500 deduction and $14,525.00 tax savings at 35%.",
+            "sample_calculation": "For a $95,000 Heavy SUV (6,000-14,000 lbs GVWR) at 90% business use ($85,500 basis), $32,000 IRC Section 179(b)(5) cap plus 100% bonus depreciation ($53,500) yields $85,500 deduction and $29,925.00 tax savings at 35%.",
         },
         "equipment-lease-tax-deduction": {
             "model_name": "Equipment Lease vs Section 179 Purchase Tax Deduction Model",
-            "formula": "round(min(equipment_cost * business_use_rate, 30500.0) + max(0.0, (equipment_cost * business_use_rate) - 30500.0) * 0.20, 2)",
+            "formula": "round(min(equipment_cost * business_use_rate, 32000.0) + max(0.0, (equipment_cost * business_use_rate) - 32000.0) * 1.0, 2)",
             "inputs": {"equipment_cost": 85000.0, "business_use_rate": 0.80},
-            "published_output": 38000.0,
-            "statutory_authority": "26 U.S.C. Section 162(a)(3); IRC Section 179; FASB ASC 842",
+            "published_output": 68000.0,
+            "statutory_authority": "26 U.S.C. Section 162(a)(3); IRC Section 179; IRC Section 168(k); FASB ASC 842",
             "economic_dataset": "BLS Producer Price Index (PPI) and Federal Reserve Industrial Production Index (G.17)",
-            "sample_calculation": "Comparing an $85,000 asset at 80% business use under IRC Section 162(a)(3) operating lease vs IRC Section 179/168(k) purchase yields a $38,000.00 first-year purchase write-off benchmark.",
+            "sample_calculation": "Comparing an $85,000 asset at 80% business use under IRC Section 162(a)(3) operating lease vs IRC Section 179/168(k) 100% bonus purchase yields a $68,000.00 first-year purchase write-off benchmark.",
         },
         "section-1031-calculator": {
             "model_name": "Section 1031 Like-Kind Exchange Tax Deferral Model",
@@ -10485,18 +10490,18 @@ class RetroReflectionEngine:
             "formula": "bond_penalty_amount * (credit_tier_rate_pct / 100.0)",
             "inputs": {"bond_penalty_amount": 50000.0, "credit_tier_rate_pct": 1.5},
             "published_output": 750.0,
-            "statutory_authority": "40 USC Section 3131 Federal Miller Act and 48 CFR Part 28 Surety Bond Regulations",
+            "statutory_authority": "31 U.S.C. Section 9304 and IRC Section 162(a) Commercial Surety Bond Regulations",
             "economic_dataset": "FRED Construction Spending Series and SFAA Surety Underwriting Loss Benchmarks",
             "sample_calculation": "Statutory $50,000 contractor license bond at a 1.5% standard credit tier underwriting rate yields a $750 annual bond premium.",
         },
         "equipment-lease-vs-buy-section-179-calculator": {
-            "model_name": "Equipment Lease Buy Section 179 Model",
-            "formula": "equipment_cost * marginal_tax_rate - year_one_financing_payments",
-            "inputs": {"equipment_cost": 180000.0, "marginal_tax_rate": 0.32, "year_one_financing_payments": 39600.0},
-            "published_output": 18000.0,
-            "statutory_authority": "IRC Section 179 First-Year Expensing and IRC Section 168(k) Bonus Depreciation",
-            "economic_dataset": "Federal Reserve G.19 Commercial Equipment Finance Rates and FRED Prime Rate Series",
-            "sample_calculation": "Financing $180,000 of qualifying equipment generates $57,600 in Year-1 Section 179 tax savings against $39,600 in payments for $18,000 positive Year-1 cash flow.",
+            "model_name": "2026Section179with32000HeavySUVCap100BonusDepreciation",
+            "formula": "round(min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) + max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * (bonus_pct / 100.0), 2)",
+            "inputs": {"equipment_cost": 85000.0, "business_use_pct": 0.8, "is_heavy_suv": 1, "bonus_pct": 100.0},
+            "published_output": 68000.0,
+            "statutory_authority": "IRC Section 179, P.L. 119-21 Section 70301, Rev. Proc. 2025-32",
+            "economic_dataset": "IRS SOI Benchmarks & FRED Federal Reserve Series",
+            "sample_calculation": "Baseline TruthPack inputs produce 68000.0",
         },
         "invoice-factoring-vs-business-line-of-credit-calculator": {
             "model_name": "Invoice Factoring vs Line Of Credit Model",
@@ -10774,14 +10779,17 @@ class RetroReflectionEngine:
                 taxable_2026 = max(0.0, inc_v - 16100.0)
                 fed_2026 = (
                     min(taxable_2026, 12400.0) * 0.10
-                    + min(max(0.0, taxable_2026 - 12400.0), 38000.0) * 0.12
-                    + min(max(0.0, taxable_2026 - 50400.0), 55300.0) * 0.22
-                    + max(0.0, taxable_2026 - 105700.0) * 0.24
+                    + max(0.0, min(taxable_2026, 50400.0) - 12400.0) * 0.12
+                    + max(0.0, min(taxable_2026, 105700.0) - 50400.0) * 0.22
+                    + max(0.0, min(taxable_2026, 201775.0) - 105700.0) * 0.24
+                    + max(0.0, min(taxable_2026, 256225.0) - 201775.0) * 0.32
+                    + max(0.0, min(taxable_2026, 640600.0) - 256225.0) * 0.35
+                    + max(0.0, taxable_2026 - 640600.0) * 0.37
                 )
                 st_tax_26 = max(0.0, round(tot_v - fed_2026, 2))
                 return {
                     "model_name": f"{slug_title} Model",
-                    "formula": "round(min(max(0.0, gross_income - standard_deduction), 12400.0) * 0.10 + min(max(0.0, (gross_income - standard_deduction) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction) - 105700.0) * 0.24 + state_income_tax, 2)",
+                    "formula": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0) + state_income_tax, 2)",
                     "inputs": {
                         "gross_income": inc_v,
                         "standard_deduction": 16100.0,
@@ -10839,31 +10847,75 @@ class RetroReflectionEngine:
                     "sample_calculation": f"Deferring ${fed_v:,.0f} federal capital gains and recapture tax plus ${st_v:,.0f} state capital gains tax under IRC Section 1031 preserves ${def_v:,.0f} in equity.",
                 }
         elif slug.startswith("section-179-calculator/") or slug.startswith("section-179-calculator-"):
-            wo_m = re.search(r'id=["\']sec179-res-writeoff["\'][^>]*>\s*\$([0-9,]+(?:\.\d+)?)<', html_content)
-            cost_m = re.search(r'id=["\']sec179-cost["\'][^>]*value=["\'](\d+)["\']', html_content)
+            wo_m = re.search(
+                r'id=["\'](?:total-first-year-deduction|sec179-res-writeoff)["\'][^>]*>\s*\$?([0-9,]+(?:\.\d+)?)<',
+                html_content,
+            )
+            cost_m = re.search(
+                r'id=["\'](?:input-equipment_cost|sec179-cost)["\'][^>]*value=["\']([0-9]+(?:\.\d+)?)["\']',
+                html_content,
+            )
             if wo_m and cost_m:
                 wo_v = float(wo_m.group(1).replace(",", ""))
                 cost_v = float(cost_m.group(1))
-                if abs(wo_v - cost_v) < 1.0:
-                    return {
-                        "model_name": f"{slug_title} Model",
-                        "formula": "min(vehicle_cost, section_179_cap_2026)",
-                        "inputs": {"vehicle_cost": cost_v, "section_179_cap_2026": 2560000.0},
-                        "published_output": wo_v,
-                        "statutory_authority": default_stat,
-                        "economic_dataset": default_econ,
-                        "sample_calculation": f"At ${cost_v:,.0f} commercial acquisition cost over 6,000 lbs GVWR (exempt from SUV cap), 100% first-year IRC Section 179 write-off is ${wo_v:,.0f}.",
-                    }
+                use_m = re.search(
+                    r'id=["\']input-business_use_pct["\'][^>]*value=["\']([0-9]+(?:\.\d+)?)["\']',
+                    html_content,
+                )
+                use_v = float(use_m.group(1)) if use_m else 1.0
+                suv_m = re.search(
+                    r'id=["\']input-is_heavy_suv["\'][^>]*value=["\']([01])["\']|<option\s+value=["\']([01])["\']\s+selected',
+                    html_content,
+                )
+                if suv_m:
+                    is_suv_v = int(suv_m.group(1) if suv_m.group(1) is not None else suv_m.group(2))
+                else:
+                    is_suv_v = 0 if abs(wo_v - cost_v) < 1.0 and "suv" not in html_content.lower() else 1
+                bonus_m = re.search(
+                    r'id=["\']input-bonus_pct["\'][^>]*value=["\']([0-9]+(?:\.\d+)?)["\']',
+                    html_content,
+                )
+                bonus_v = float(bonus_m.group(1)) if bonus_m else 100.0
+                formula_179 = (
+                    "round(min(equipment_cost * business_use_pct, "
+                    "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) + "
+                    "max(0.0, equipment_cost * business_use_pct - "
+                    "min(equipment_cost * business_use_pct, "
+                    "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * "
+                    "(bonus_pct / 100.0), 2)"
+                )
+                inputs_179 = {
+                    "equipment_cost": cost_v,
+                    "business_use_pct": use_v,
+                    "is_heavy_suv": is_suv_v,
+                    "bonus_pct": bonus_v,
+                }
+                eval_v = cls._safe_eval_manifest_formula(formula_179, inputs_179)
+                cap_txt = (
+                    "$32,000 IRC Section 179 Heavy SUV cap"
+                    if is_suv_v == 1
+                    else "$2,560,000 commercial vehicle Section 179 cap"
+                )
                 return {
+                    "formula_id": "section_179_heavy_suv_plus_bonus_2026",
                     "model_name": f"{slug_title} Model",
-                    "formula": "round(30500.0 + ((vehicle_cost - 30500.0) * 0.20), 0)",
-                    "inputs": {"vehicle_cost": cost_v},
-                    "published_output": wo_v,
+                    "formula": formula_179,
+                    "inputs": inputs_179,
+                    "published_output": round(eval_v, 2),
                     "statutory_authority": default_stat,
                     "economic_dataset": default_econ,
-                    "sample_calculation": f"At ${cost_v:,.0f} acquisition cost, $30,500 IRC Section 179 Heavy SUV cap plus 20% Section 168(k) bonus depreciation yields ${wo_v:,.0f} first-year write-off.",
+                    "sample_calculation": (
+                        f"At ${cost_v:,.0f} acquisition cost ({int(use_v * 100)}% business use), "
+                        f"{cap_txt} plus {int(bonus_v)}% P.L. 119-21 Section 168(k) bonus depreciation "
+                        f"yields ${eval_v:,.2f} first-year write-off."
+                    ),
                 }
         return None
+
+    @staticmethod
+    def _safe_eval_manifest_formula(formula: str, inputs: dict) -> float:
+        """Evaluates a manifest formula string against inputs via AST-safe evaluator."""
+        return float(safe_eval_mathematical_formula(formula, inputs))
 
     @classmethod
     def is_tool_or_calculator_page(cls, html_path: Path, dist_dir: Path, html_content: str = "") -> bool:
@@ -11152,6 +11204,7 @@ class RetroReflectionEngine:
         html_content: str,
         allow_rolled_back_zero_tax_title: bool = False,
         property_id: Optional[str] = None,
+        rel_path: Optional[str] = None,
     ) -> List[str]:
         """Returns list of missing upgraded engine mechanics for a tool/calculator HTML document."""
         from pseofactory.visual_primitives import (
@@ -11443,11 +11496,37 @@ class RetroReflectionEngine:
 
             try:
                 from pseofactory.tenant_facts import TruthReconciliationEngine
+                parsed_canon_tr = urllib.parse.urlsplit(canon_clean) if canon_clean else None
+                canon_path_tr = parsed_canon_tr.path.strip("/").lower() if parsed_canon_tr else ""
+                rel_clean_tr = str(rel_path).strip().lstrip("/") if rel_path else ""
+                rel_low_tr = rel_clean_tr.lower()
+                if rel_low_tr in ("tools", "tools/index.html") or (
+                    not rel_low_tr and canon_path_tr in ("tools", "tools/index.html")
+                ):
+                    effective_rel_path = "tools/index.html"
+                    effective_slug = ""
+                elif rel_low_tr in ("index.html", "index") or (
+                    not rel_low_tr and canon_path_tr in ("", "index.html")
+                ):
+                    effective_rel_path = "index.html"
+                    effective_slug = ""
+                elif canon_path_tr in ("", "index.html", "tools", "tools/index.html"):
+                    effective_rel_path = rel_clean_tr or "index.html"
+                    effective_slug = ""
+                elif rel_clean_tr:
+                    effective_rel_path = rel_clean_tr
+                    if rel_low_tr.startswith("tools/") and rel_low_tr.endswith("/index.html"):
+                        effective_slug = rel_clean_tr[len("tools/") : -len("/index.html")]
+                    else:
+                        effective_slug = inferred_slug
+                else:
+                    effective_rel_path = f"tools/{inferred_slug}/index.html" if inferred_slug else "index.html"
+                    effective_slug = inferred_slug
                 tr_issues = TruthReconciliationEngine.audit_html_truth_reconciliation(
                     html_content,
-                    tenant=inferred_prop,
-                    rel_path=f"tools/{inferred_slug}/index.html" if inferred_slug else "index.html",
-                    slug=inferred_slug,
+                    tenant=(property_id or inferred_prop),
+                    rel_path=effective_rel_path,
+                    slug=effective_slug,
                     include_fact_store=True,
                 )
                 if tr_issues and "statutory_truth_reconciliation" not in missing:
@@ -11796,6 +11875,155 @@ class RetroReflectionEngine:
         return out
 
     @classmethod
+    def _build_truth_superseded_number_map(
+        cls,
+        property_id: str,
+        slug: str = "",
+    ) -> Tuple[List[float], List[re.Pattern]]:
+        """Loads dynamic superseded numbers and patterns from the tenant TruthPack."""
+        sup_nums: List[float] = []
+        sup_pats: List[re.Pattern] = []
+        try:
+            from pseofactory.truth_pack import load_truth_pack
+
+            pack = load_truth_pack(property_id, allow_expired=True)
+        except Exception:
+            return sup_nums, sup_pats
+        slug_low = str(slug or "").strip().lower()
+        for fact in pack.entries.values():
+            applies = [str(s).lower() for s in (getattr(fact, "applies_to_slugs", None) or [])]
+            if applies and slug_low and not any(a in slug_low for a in applies):
+                continue
+            for sv in getattr(fact, "superseded_values", None) or []:
+                val = getattr(sv, "value", None)
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    fval = float(val)
+                    if abs(fval) >= 1000.0 or (abs(fval - round(fval)) > 1e-6 and abs(fval) >= 10.0):
+                        sup_nums.append(fval)
+                for pat in getattr(sv, "patterns", None) or []:
+                    try:
+                        sup_pats.append(re.compile(str(pat), re.IGNORECASE))
+                    except re.error:
+                        pass
+        return sup_nums, sup_pats
+
+    @classmethod
+    def _manifest_recomputes_cleanly_against_truth_pack(
+        cls,
+        raw: Any,
+        property_id: str,
+        slug: str,
+        expected_formula: Optional[str] = None,
+    ) -> bool:
+        """Returns True only when a manifest evaluates deterministically without tautologies or superseded constants."""
+        if not isinstance(raw, dict):
+            return False
+        formula = str(raw.get("formula") or "").strip()
+        inputs = raw.get("inputs")
+        if not formula or not isinstance(inputs, dict) or raw.get("published_output") is None:
+            return False
+        if formula == "gross_amount * (1.0 - effective_rate)":
+            return False
+        if "post-sunset" in str(raw.get("sample_calculation") or "").lower():
+            return False
+        try:
+            raw_pub = float(raw.get("published_output") or 0.0)
+        except Exception:
+            return False
+        from pseofactory.audit import detect_tautological_or_fabricated_manifest_issues
+        from pseofactory.contracts import safe_eval_mathematical_formula
+
+        if detect_tautological_or_fabricated_manifest_issues(formula, inputs, raw_pub):
+            return False
+        try:
+            eval_pub = float(safe_eval_mathematical_formula(formula, inputs))
+        except Exception:
+            return False
+        if abs(eval_pub - raw_pub) > 0.01:
+            return False
+
+        sup_nums, sup_pats = cls._build_truth_superseded_number_map(property_id, slug=slug)
+        raw_blob = json.dumps(
+            {
+                "formula": formula,
+                "inputs": inputs,
+                "published_output": raw_pub,
+                "sample_calculation": raw.get("sample_calculation") or "",
+                "statutory_authority": raw.get("statutory_authority") or "",
+            },
+            ensure_ascii=False,
+        )
+        for pat in sup_pats:
+            if pat.search(raw_blob):
+                return False
+        if sup_nums:
+            vals_to_check = [raw_pub] + [
+                float(v) for v in inputs.values() if isinstance(v, (int, float)) and not isinstance(v, bool)
+            ]
+            for sv_num in sup_nums:
+                if any(abs(v - sv_num) <= 0.01 for v in vals_to_check):
+                    return False
+                if str(int(sv_num)) in formula if sv_num.is_integer() else str(sv_num) in formula:
+                    return False
+        if str(property_id or "").strip().lower() == "prexvo":
+            raw_blob_low = raw_blob.lower()
+            if "225%" in raw_blob_low or "225 percent" in raw_blob_low or "2.25" in formula:
+                return False
+        if expected_formula is not None and formula != expected_formula:
+            # Allow TruthPack-bound formulas that match the same inputs/outputs without superseded terms
+            if not raw.get("formula_id") and "section_179" not in str(raw.get("model_name") or "").lower():
+                pass
+        return True
+
+    @classmethod
+    def _sync_sidecars_from_reconciled_html(cls, dist_dir: Path) -> int:
+        """Keeps dist/manifests/*.json sidecars synchronized with embedded calculation-manifest JSON after HTML reconciliation."""
+        d = Path(dist_dir)
+        manifests_dir = d / "manifests"
+        if not manifests_dir.is_dir() or _is_live_repo_mutation_blocked(d):
+            return 0
+        synced = 0
+        for html_file in sorted(d.rglob("*.html")):
+            if html_file.name.startswith("."):
+                continue
+            rel = html_file.relative_to(d).as_posix()
+            if not rel.startswith("tools/") or rel == "tools/index.html":
+                continue
+            parts = rel.split("/")
+            if len(parts) < 3 or parts[-1] != "index.html":
+                continue
+            slug = "/".join(parts[1:-1])
+            sidecar_path = manifests_dir / f"{slug.replace('/', '-')}.json"
+            if not sidecar_path.is_file():
+                continue
+            try:
+                html_txt = html_file.read_text(encoding="utf-8", errors="ignore")
+                m = re.search(
+                    r'<script[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>(.*?)</script>',
+                    html_txt,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if not m:
+                    continue
+                emb = json.loads(m.group(1).strip())
+                sc = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                if isinstance(emb, dict) and isinstance(sc, dict) and emb.get("formula"):
+                    merged = dict(sc)
+                    merged.update(emb)
+                    prop_tel = merged.get("proprietary_telemetry")
+                    if isinstance(prop_tel, dict) and isinstance(prop_tel.get("demand_telemetry"), dict):
+                        from pseofactory.proprietary_signals import PUBLISH_VOLATILE_TELEMETRY_KEYS
+
+                        for vk in PUBLISH_VOLATILE_TELEMETRY_KEYS:
+                            prop_tel["demand_telemetry"].pop(vk, None)
+                    if merged != sc:
+                        _atomic_write_text(sidecar_path, json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+                        synced += 1
+            except Exception:
+                continue
+        return synced
+
+    @classmethod
     def _resolve_manifest_for_page(
         cls,
         html_content: str,
@@ -11878,36 +12106,14 @@ class RetroReflectionEngine:
 
             if is_prexvo and slug_lookup in cls.PREXVO_FALLBACK_MANIFESTS:
                 preset = cls.PREXVO_FALLBACK_MANIFESTS[slug_lookup]
-                raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
-                raw_taut = (
-                    detect_tautological_or_fabricated_manifest_issues(
-                        str(raw.get("formula") or ""), raw.get("inputs") or {}, raw_pub
-                    )
-                    if isinstance(raw, dict) and raw.get("formula")
-                    else ["missing"]
-                )
-                if (
-                    not raw
-                    or not raw.get("formula")
-                    or bool(raw_taut)
-                    or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
-                ):
+                if not cls._manifest_recomputes_cleanly_against_truth_pack(raw, property_id, slug_lookup):
                     raw = dict(preset)
             elif is_gainhelm and slug_lookup in cls.GAINHELM_FALLBACK_MANIFESTS:
                 preset = cls.GAINHELM_FALLBACK_MANIFESTS[slug_lookup]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
-                raw_taut = (
-                    detect_tautological_or_fabricated_manifest_issues(
-                        str(raw.get("formula") or ""), raw.get("inputs") or {}, raw_pub
-                    )
-                    if isinstance(raw, dict) and raw.get("formula")
-                    else ["missing"]
-                )
                 if (
-                    not raw
-                    or not raw.get("formula")
+                    not cls._manifest_recomputes_cleanly_against_truth_pack(raw, property_id, slug_lookup)
                     or raw.get("formula") != preset["formula"]
-                    or bool(raw_taut)
                     or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
                 ):
                     raw = dict(preset)
@@ -11920,42 +12126,15 @@ class RetroReflectionEngine:
             elif is_lienbond and slug_lookup in cls.LIENBOND_FALLBACK_MANIFESTS:
                 preset = cls.LIENBOND_FALLBACK_MANIFESTS[slug_lookup]
                 raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
-                raw_taut = (
-                    detect_tautological_or_fabricated_manifest_issues(
-                        str(raw.get("formula") or ""), raw.get("inputs") or {}, raw_pub
-                    )
-                    if isinstance(raw, dict) and raw.get("formula")
-                    else ["missing"]
-                )
                 if (
-                    not raw
-                    or not raw.get("formula")
+                    not cls._manifest_recomputes_cleanly_against_truth_pack(raw, property_id, slug_lookup)
                     or raw.get("formula") != preset["formula"]
-                    or bool(raw_taut)
                     or round(raw_pub, 2) != round(float(preset["published_output"]), 2)
                 ):
                     raw = dict(preset)
             elif not is_prexvo and not is_gainhelm and not is_lienbond and slug in cls.PROFITHELM_FALLBACK_MANIFESTS:
                 preset = cls.PROFITHELM_FALLBACK_MANIFESTS[slug]
-                raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
-                # The preset is a fallback, not a second source of truth: a manifest the tenant
-                # generator built from its own (refreshed) data is kept when it uses the same
-                # model and its published_output really recomputes from its inputs.
-                try:
-                    from pseofactory.contracts import safe_eval_mathematical_formula
-
-                    raw_recomputes = abs(
-                        float(safe_eval_mathematical_formula(str(raw.get("formula")), raw.get("inputs") or {})) - raw_pub
-                    ) <= 0.01
-                except Exception:
-                    raw_recomputes = False
-                if (
-                    not raw
-                    or not raw.get("formula")
-                    or raw.get("formula") != preset["formula"]
-                    or raw.get("formula") == "gross_amount * (1.0 - effective_rate)"
-                    or not raw_recomputes
-                ):
+                if not cls._manifest_recomputes_cleanly_against_truth_pack(raw, property_id, slug):
                     raw = dict(preset)
             elif not is_prexvo and not is_gainhelm and not is_lienbond and (
                 "/" in slug
@@ -11972,12 +12151,9 @@ class RetroReflectionEngine:
                 if spoke_m is not None:
                     raw_pub = float(raw.get("published_output") or 0.0) if isinstance(raw, dict) else 0.0
                     if (
-                        not raw
-                        or not raw.get("formula")
+                        not cls._manifest_recomputes_cleanly_against_truth_pack(raw, property_id, slug)
                         or raw.get("formula") != spoke_m["formula"]
                         or raw.get("inputs") != spoke_m["inputs"]
-                        or "post-sunset" in str(raw.get("sample_calculation") or "").lower()
-                        or raw.get("formula") == "gross_amount * (1.0 - effective_rate)"
                         or round(raw_pub, 2) != round(float(spoke_m["published_output"]), 2)
                     ):
                         raw = spoke_m
@@ -12444,10 +12620,19 @@ class RetroReflectionEngine:
                 if dist_dir is None or not cls._sidecar_needs_sync(Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json", out_html):
                     return out_html, list(out_rep)
 
+        audit_rel_path: Optional[str] = None
+        if is_root_canon or slug_norm_early in ("index", "index.html", "root"):
+            audit_rel_path = "index.html"
+        elif parsed_canon is not None and parsed_canon.path.strip("/").lower() in ("tools", "tools/index.html"):
+            audit_rel_path = "tools/index.html"
+        elif slug and slug != "tool":
+            audit_rel_path = f"tools/{slug}/index.html"
+
         missing = cls.audit_html_mechanics(
             html_content,
             allow_rolled_back_zero_tax_title=eff_preserve_title,
             property_id=property_id,
+            rel_path=audit_rel_path,
         )
         if not missing and isinstance(manifest_override, dict):
             try:
@@ -13339,7 +13524,7 @@ class RetroReflectionEngine:
                 "$13,180",
                 "$27,713",
                 "$34,425",
-                "$12,240",
+                "$12,240 Medicare Surtax",
                 "784.12",
                 "48212.5",
                 "$39,900",
@@ -13474,6 +13659,39 @@ class RetroReflectionEngine:
             )
             or ("pslf-qualifying" in ov_s_low and "hold harmless buyback lump-sum" in m_val.lower())
             or ("loophole" in ov_s_low and "repayment options comparing 10% idr" in m_val.lower())
+            or "calculate how do you" in qa_meta_dump.lower()
+            or "$273.23" in qa_meta_dump
+            or "unlocking $65,164" in qa_meta_dump.lower()
+            or "$248.23" in qa_meta_dump
+            or "$242.42" in qa_meta_dump
+            or "$306.56" in qa_meta_dump
+            or "$35,212.50" in qa_meta_dump
+            or (
+                str(raw_ov.get("property_id") or raw_ov.get("tenant_id") or "").lower() == "prexvo"
+                and ("225%" in qa_meta_dump or "225 percent" in qa_meta_dump.lower())
+                and "save plan" not in qa_meta_dump.lower()
+                and "685.209(f)" not in qa_meta_dump.lower()
+            )
+            or (
+                str(raw_ov.get("property_id") or raw_ov.get("tenant_id") or "").lower() == "profithelm"
+                and (
+                    "20% bonus depreciation" in qa_meta_dump.lower()
+                    or "20% first-year bonus depreciation" in qa_meta_dump.lower()
+                    or "miller act" in qa_meta_dump.lower()
+                    or "40 u.s.c. 3131" in qa_meta_dump.lower()
+                    or "40 u.s.c. section 3131" in qa_meta_dump.lower()
+                    or "far part 28" in qa_meta_dump.lower()
+                    or "48 cfr part 28" in qa_meta_dump.lower()
+                    or (
+                        not any(k in ov_s_low for k in ("1031", "like-kind", "exchange", "ftb-3840"))
+                        and (
+                            "form 8824" in qa_meta_dump.lower()
+                            or "section 1031" in qa_meta_dump.lower()
+                            or "section-1031" in json.dumps(raw_ov.get("internal_links") or []).lower()
+                        )
+                    )
+                )
+            )
             or _has_lienbond_poisoned_meta(
                 m_val,
                 slug_or_url=ov_s_low,
@@ -14436,8 +14654,8 @@ class RetroReflectionEngine:
                 if is_prexvo:
                     sections_out.append(
                         "## Title IV Statutory Parameter Specifications & Formula Definitions\n"
-                        "- Repayment Assistance Plan (RAP): Discretionary income calculated at 225% of HHS Poverty Guidelines (42 U.S.C. 9902(2)). Statutory rate is 10% of discretionary income. 100% unpaid interest subsidy applies to undergraduate balances.\n"
-                        "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of HHS Poverty Guidelines under 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
+                        "- Repayment Assistance Plan (RAP): Enacted under P.L. 119-21 Section 82001 with tiered AGI percentages (1% to 10% of AGI; 6% tier equals $325.00/mo at $65,000 AGI), $10/mo minimum payment, $50/mo dependent reduction, 360-month forgiveness timeline, 100% unpaid interest subsidy, and up to $50/mo matching principal payment.\n"
+                        "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of 2026 HHS Poverty Guidelines ($15,960 single, $23,940 shield under 91 FR 1797) and 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
                         "- Pay As You Earn (PAYE): Governed by 34 CFR 685.209. 150% poverty exemption, 10% discretionary income rate, 20-year forgiveness horizon, capped at 10-year standard repayment payment.\n"
                         "- Income-Contingent Repayment (ICR): Governed by 34 CFR 685.209(b). Lesser of: 20% discretionary income over 100% poverty line, or 12-year income-adjusted payment formula. Sole direct IDR option for consolidated Parent PLUS loans.\n"
                         "- Tiered Standard Repayment: Governed by 34 CFR 685.208. Fixed amortization terms based on total debt: $7,500-$9,999 (12 years), $10,000-$19,999 (15 years), $20,000-$39,999 (20 years), $40,000-$59,999 (25 years), $60,000+ (30 years).\n"
@@ -15494,6 +15712,7 @@ class RetroReflectionEngine:
                 content,
                 allow_rolled_back_zero_tax_title=bool(tool_slug_key and tool_slug_key in degraded_overlays),
                 property_id=property_id,
+                rel_path=rel,
             )
             if rel.startswith("tools/") and rel.endswith("/index.html"):
                 tool_slug_rel = rel[len("tools/") : -len("/index.html")]
@@ -16038,6 +16257,17 @@ class RetroReflectionEngine:
         scanned = 0
         retrofitted_paths: List[str] = []
         agy_dir = d.parent / ".agy"
+        if not _is_live_repo_mutation_blocked(d):
+            try:
+                from pseofactory.estate_common import sanitize_tenant_overlays
+
+                sanitize_tenant_overlays(
+                    d.parent,
+                    tools_dir=None,
+                    property_id=property_id,
+                )
+            except Exception:
+                pass
         overlay_snapshot = cls._load_overlay_snapshot(d.parent)
 
         # Prune stale non-tool overlays and bogus non-tool dist/manifests/*.json before rollback/healing
@@ -16248,7 +16478,7 @@ class RetroReflectionEngine:
             if "commercial-heavy-vehicle-section-179-weight-calculator" in rel and "Model combined IRC Section 179 expensing" in content:
                 content = content.replace(
                     "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
-                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
+                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($32,000 SUV cap vs full truck expensing plus 100% bonus depreciation) on IRS Form 4562.",
                 )
                 html_file.write_text(content, encoding="utf-8")
                 if rel not in retrofitted_paths:
@@ -16894,15 +17124,29 @@ class RetroReflectionEngine:
                                     try:
                                         yt_sync = generate_youtube_syndication(islu, property_id=property_id)
                                         if (
-                                            item.get("youtube_title") != yt_sync["title"]
+                                            item.get("title") != yt_sync["title"]
+                                            or item.get("youtube_title") != yt_sync["title"]
+                                            or item.get("description") != yt_sync["description"]
                                             or item.get("youtube_description") != yt_sync["description"]
                                             or item.get("pinned_comment") != yt_sync["pinned_comment"]
+                                            or any(st in str(item.get("spoken_script") or "") for st in ("225%", "248.23", "242.42", "5%"))
                                         ):
+                                            item["title"] = yt_sync["title"]
                                             item["youtube_title"] = yt_sync["title"]
+                                            item["description"] = yt_sync["description"]
                                             item["youtube_description"] = yt_sync["description"]
                                             item["pinned_comment"] = yt_sync["pinned_comment"]
                                             item["tags"] = yt_sync["tags"]
                                             item["transcript"] = yt_sync["transcript"]
+                                            try:
+                                                from pseofactory.video_factory import extract_and_verify_three_sentence_script
+
+                                                sb_sync = extract_and_verify_three_sentence_script(islu, property_id=property_id)
+                                                item["spoken_script"] = sb_sync["spoken_script"]
+                                                item["sentence_count"] = sb_sync["sentence_count"]
+                                                item["word_count"] = sb_sync["word_count"]
+                                            except Exception:
+                                                pass
                                             cat_updated = True
                                     except Exception:
                                         pass
@@ -16984,7 +17228,11 @@ class RetroReflectionEngine:
                     dist_dir=d,
                 )
                 is_real_tenant_repo = (
-                    str(d.parent).startswith("/home/ubuntuadmin/projects/")
+                    (
+                        str(d.parent).startswith("/home/ubuntuadmin/projects/")
+                        or (synd_dir / "directory_manifest.json").is_file()
+                    )
+                    and not _is_live_repo_mutation_blocked(d)
                     and "PYTEST_CURRENT_TEST" not in os.environ
                 )
                 if (
@@ -16998,7 +17246,13 @@ class RetroReflectionEngine:
                         and dir_manifest.is_file()
                         and "profithelm" in dir_manifest.read_text(encoding="utf-8", errors="ignore").lower()
                     )
-                    needs_synd_export = bool(retrofitted_paths) or has_foreign_manifest or any(
+                    gh_seed = synd_dir / "github_seed_discovery.md"
+                    has_stale_seed = (
+                        property_id.lower() == "prexvo"
+                        and gh_seed.is_file()
+                        and any(t in gh_seed.read_text(encoding="utf-8", errors="ignore") for t in ("225%", "15650", "242.42"))
+                    )
+                    needs_synd_export = bool(retrofitted_paths) or has_foreign_manifest or has_stale_seed or any(
                         not (synd_dir / td.name / "syndication_pack.json").is_file()
                         for td in tools_dir.iterdir()
                         if td.is_dir() and not td.name.startswith(".") and (td / "index.html").is_file()
@@ -17026,6 +17280,7 @@ class RetroReflectionEngine:
                         degraded_overlays=degraded_overlays,
                     )
                     _cleanup_reconciled_html_files(post_repaired)
+                    cls._sync_sidecars_from_reconciled_html(d)
                     for rp in post_repaired or []:
                         try:
                             rel_rp = Path(rp).relative_to(d).as_posix()
@@ -18313,7 +18568,8 @@ def _sync_post_retrofit_reconciliation_and_porcelain(
             )
             rec_html_paths = _extract_reconciled_html_paths(rec_res, d)
             cleaned_paths = _cleanup_reconciled_html_files(rec_html_paths or rec_res)
-            if rec_html_paths or cleaned_paths:
+            synced_sc = RetroReflectionEngine._sync_sidecars_from_reconciled_html(d)
+            if rec_html_paths or cleaned_paths or synced_sc:
                 html_mutated = True
     except Exception:
         pass
@@ -18862,15 +19118,15 @@ def reflect_and_recompile_all_assets(
                     for old_c, new_c in (
                         (
                             "deduction = min(basis, 31300.0) + max(0.0, basis - 31300.0) * 0.60",
-                            "deduction = min(basis, 30500.0) + max(0.0, basis - 30500.0) * 0.20",
+                            "deduction = min(basis, 32000.0) + max(0.0, basis - 32000.0) * 1.0",
                         ),
                         (
                             "deduction = Math.min(basis, 31300) + Math.max(0, basis - 31300) * 0.60;",
-                            "deduction = Math.min(basis, 30500) + Math.max(0, basis - 30500) * 0.20;",
+                            "deduction = Math.min(basis, 32000) + Math.max(0, basis - 32000) * 1.0;",
                         ),
                         (
                             "const suvCap = 31300 * busUse;\n      const suvBonus = Math.max(0, basis - suvCap) * 0.60;",
-                            "const suvCap = Math.min(basis, 30500);\n      const suvBonus = Math.max(0, basis - suvCap) * 0.20;",
+                            "const suvCap = Math.min(basis, 32000);\n      const suvBonus = Math.max(0, basis - suvCap) * 1.0;",
                         ),
                         ("const ssWageCap = 176100;", "const ssWageCap = 184500;"),
                         ('"annual_fica_savings": 13180,', '"annual_fica_savings": 14235,'),
@@ -18884,14 +19140,16 @@ def reflect_and_recompile_all_assets(
                         ('"annual_fica_savings": "$10,485"', '"annual_fica_savings": "$11,406"'),
                         ('"annual_fica_savings": "$10,364"', '"annual_fica_savings": "$11,406"'),
                         ("OASDI wage base limit ($176,100)", "OASDI wage base limit ($184,500)"),
-                        ('"heavy_suv_capped_savings": 21895,', '"heavy_suv_capped_savings": 14525,'),
-                        ('"year_1_deduction_95k": "$62,556", "cash_tax_savings_35pct": "$21,895"', '"year_1_deduction_95k": "$41,500", "cash_tax_savings_35pct": "$14,525"'),
-                        ("$53,320", "$38,000"),
-                        ("$19,728", "$14,060"),
-                        ("60% bonus depreciation", "20% bonus depreciation"),
-                        ("60% on balance (2024-2026 phase-down)", "20% on balance (2026 statutory rate)"),
-                        ('"bonus_deprec": "60% on balance"', '"bonus_deprec": "20% on balance"'),
-                        ("$31,300", "$30,500"),
+                        ('"heavy_suv_capped_savings": 21895,', '"heavy_suv_capped_savings": 29925,'),
+                        ('"year_1_deduction_95k": "$62,556", "cash_tax_savings_35pct": "$21,895"', '"year_1_deduction_95k": "$85,500", "cash_tax_savings_35pct": "$29,925"'),
+                        ("$53,320", "$68,000"),
+                        ("$19,728", "$25,160"),
+                        ("60% bonus depreciation", "100% bonus depreciation"),
+                        ("20% bonus depreciation", "100% bonus depreciation"),
+                        ("60% on balance (2024-2026 phase-down)", "100% on balance (P.L. 119-21 Section 70301)"),
+                        ('"bonus_deprec": "60% on balance"', '"bonus_deprec": "100% on balance"'),
+                        ("$31,300", "$32,000"),
+                        ("$30,500", "$32,000"),
                         ('"sec179_cap": "$1,220,000 (Full Basis 100%)"', '"sec179_cap": "$2,560,000 (Full Basis 100%)"'),
                         ("IRS Rev. Proc. 2024-34: Annual Inflation Adjustments & Vehicle Thresholds", "IRS Rev. Proc. 2025-32 & OBBBA P.L. 119-21: Annual Inflation Adjustments & Vehicle Thresholds"),
                         ("ss_cap = 176100.0", "ss_cap = 184500.0"),
@@ -19262,9 +19520,9 @@ def reflect_and_recompile_all_assets(
                             '                "title": f"Proprietary {tool_meta[\'short_title\']} Surety Underwriting Matrix",\n'
                             '                "columns": ["Credit / Underwriting Tier", "Bond Penal Sum", "Annual Surety Rate", "Credit Adjustment %", "Annual Bond Premium", "Statutory Reference"],\n'
                             '                "rows": [\n'
-                            '                    {"tier": "Preferred Treasury Circular 570 Tier", "baseline": "$100,000", "rate": "0.75%", "drag_delta": "-0.25%", "net_retained": "$750", "reference": "40 U.S.C. Section 3131 (Miller Act)"},\n'
-                            '                    {"tier": "Standard Commercial Contractor Tier", "baseline": "$250,000", "rate": "1.50%", "drag_delta": "+0.50%", "net_retained": "$3,750", "reference": "48 CFR Part 28 / SFAA"},\n'
-                            '                    {"tier": "High-Risk / Non-Standard Surety Tier", "baseline": "$1,000,000", "rate": "3.00%", "drag_delta": "+1.50%", "net_retained": "$30,000", "reference": "13 CFR Part 115 / Circular 570"},\n'
+                            '                    {"tier": "Preferred Commercial Surety Tier", "baseline": "$100,000", "rate": "0.75%", "drag_delta": "-0.25%", "net_retained": "$750", "reference": "31 U.S.C. Section 9304 / IRC Section 162(a)"},\n'
+                            '                    {"tier": "Standard Commercial Contractor Tier", "baseline": "$250,000", "rate": "1.50%", "drag_delta": "+0.50%", "net_retained": "$3,750", "reference": "SBA Surety Bond Guarantee / SFAA"},\n'
+                            '                    {"tier": "High-Risk / Non-Standard Surety Tier", "baseline": "$1,000,000", "rate": "3.00%", "drag_delta": "+1.50%", "net_retained": "$30,000", "reference": "13 CFR Part 115 / IRC Section 162(a)"},\n'
                             '                ],\n'
                             '            }\n'
                             '        else:\n'
@@ -19280,7 +19538,7 @@ def reflect_and_recompile_all_assets(
                         ),
                         (
                             '<strong>Citation Authority:</strong> All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series.',
-                            '<strong>Citation Authority:</strong> {"All surety metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with 40 U.S.C. Section 3131 (Miller Act), 48 CFR Part 28, and U.S. Treasury Circular 570 surety benchmarks." if ("surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower()) else "All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series."}',
+                            '<strong>Citation Authority:</strong> {"All commercial surety metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with 31 U.S.C. Section 9304, IRC Section 162(a), and 13 CFR Part 115 surety underwriting benchmarks." if ("surety" in str(tool_meta.get("slug", "")).lower() or "bond" in str(tool_meta.get("slug", "")).lower()) else "All benchmark metrics derived from ProfitHelm Quantitative Research (2026), cross-referenced with primary statutory filings under IRC Title 26, CFR Title 26 regulations, and Federal Reserve FRED macroeconomic series."}',
                         ),
                     ):
                         ph_b_src = ph_b_src.replace(old_b, new_b)
@@ -19317,10 +19575,13 @@ def reflect_and_recompile_all_assets(
                 if ph_dyn_file.is_file():
                     ph_d_src = ph_dyn_file.read_text(encoding="utf-8")
                     ph_d_orig = ph_d_src
-                    if "face a $31,300 statutory Section 179 cap" in ph_d_src:
+                    if "face a $31,300 statutory Section 179 cap" in ph_d_src or "face a $30,500 statutory Section 179 cap" in ph_d_src:
                         ph_d_src = ph_d_src.replace(
                             "face a $31,300 statutory Section 179 cap",
+                            "face a $32,000 statutory Section 179 cap",
+                        ).replace(
                             "face a $30,500 statutory Section 179 cap",
+                            "face a $32,000 statutory Section 179 cap",
                         )
                     try:
                         dyn_data = json.loads(ph_d_src)
@@ -19711,13 +19972,13 @@ def reflect_and_recompile_all_assets(
                         '        "formula": "round(min(max(0, agi - poverty_guideline) * discretionary_rate / 12, round(base_12yr_payment, 2) * (agi / 60000.0)), 2)",\n'
                         '        "inputs": {\n'
                         '            "agi": 65000,\n'
-                        '            "poverty_guideline": 15650,\n'
+                        '            "poverty_guideline": 15960,\n'
                         '            "discretionary_rate": 0.20,\n'
                         '            "base_12yr_payment": 601.15,\n'
                         '        },\n'
                         '        "published_output": 651.25,\n'
                         '        "sample_calculation": (\n'
-                        '            "For $65,000 AGI with 1 person household: 20% discretionary formula yields $822.50 monthly. "\n'
+                        '            "For $65,000 AGI with 1 person household: 20% discretionary formula yields $817.33 monthly. "\n'
                         '            "12-year income-adjusted formula ($601.15 base * 65,000/60,000) yields $651.25 monthly, which is the lesser payment assessed."\n'
                         '        ),'
                     )
@@ -19737,16 +19998,16 @@ def reflect_and_recompile_all_assets(
                         '        ),'
                     )
                     new_save_b = (
+                        '        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",\n'
                         '        "inputs": {\n'
                         '            "agi": 65000,\n'
-                        '            "poverty_guideline": 15650,\n'
-                        '            "discretionary_multiplier": 2.25,\n'
-                        '            "rap_rate": 0.10,\n'
+                        '            "rap_rate": 0.06,\n'
+                        '            "dependents": 0.0,\n'
                         '        },\n'
-                        '        "published_output": 248.23,\n'
+                        '        "published_output": 325.0,\n'
                         '        "sample_calculation": (\n'
-                        '            "Borrower transitioning from litigation forbearance to RAP with $65,000 AGI receives 225% poverty exemption ($35,212.50), "\n'
-                        '            "establishing $248.23 monthly payment with 100% interest subsidy protection."\n'
+                        '            "Borrower transitioning from litigation forbearance to 2026 RAP at $65,000 AGI under the P.L. 119-21 Section 82001 6% tier "\n'
+                        '            "establishes a $325.00 monthly payment with 100% unpaid interest subsidy and up to $50/mo principal match."\n'
                         '        ),'
                     )
                     if old_save_b in px_b_src:
@@ -19758,17 +20019,27 @@ def reflect_and_recompile_all_assets(
                 if px_obs.is_file():
                     px_obs_src = px_obs.read_text(encoding="utf-8")
                     px_obs_orig = px_obs_src
-                    if '"published_output": 164.90,' in px_obs_src:
+                    if '"published_output": 164.90,' in px_obs_src or '"published_output": 248.23,' in px_obs_src:
                         px_obs_src = (
                             px_obs_src.replace('"agi": 55000,', '"agi": 65000,')
-                            .replace('"published_output": 164.90,', '"published_output": 248.23,')
+                            .replace('"published_output": 164.90,', '"published_output": 325.0,')
+                            .replace('"published_output": 248.23,', '"published_output": 325.0,')
+                            .replace('"poverty_guideline": 15650,', '"poverty_guideline": 15960,')
                             .replace(
                                 "Borrower transitioning from litigation forbearance to RAP with $55,000 AGI receives 225% poverty exemption, ",
+                                "Borrower transitioning from litigation forbearance to 2026 RAP at $65,000 AGI under the P.L. 119-21 Section 82001 6% tier ",
+                            )
+                            .replace(
                                 "Borrower transitioning from litigation forbearance to RAP with $65,000 AGI receives 225% poverty exemption ($35,212.50), ",
+                                "Borrower transitioning from litigation forbearance to 2026 RAP at $65,000 AGI under the P.L. 119-21 Section 82001 6% tier ",
                             )
                             .replace(
                                 "establishing $164.90 monthly payment with 100% interest subsidy protection.",
+                                "establishes a $325.00 monthly payment with 100% unpaid interest subsidy and up to $50/mo principal match.",
+                            )
+                            .replace(
                                 "establishing $248.23 monthly payment with 100% interest subsidy protection.",
+                                "establishes a $325.00 monthly payment with 100% unpaid interest subsidy and up to $50/mo principal match.",
                             )
                         )
                     old_gplus_obs = (
@@ -19859,32 +20130,32 @@ def reflect_and_recompile_all_assets(
                         '        },'
                     )
                     new_mfs_obs = (
-                        '        "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12), 2)",\n'
+                        '        "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * ibr_rate / 12), 2)",\n'
                         '        "inputs": {\n'
                         '            "borrower_agi": 72000,\n'
-                        '            "poverty_guideline": 15650,\n'
-                        '            "discretionary_multiplier": 2.25,\n'
-                        '            "rap_rate": 0.10,\n'
+                        '            "poverty_guideline": 15960,\n'
+                        '            "discretionary_multiplier": 1.5,\n'
+                        '            "ibr_rate": 0.10,\n'
                         '        },\n'
-                        '        "published_output": 306.56,\n'
+                        '        "published_output": 400.5,\n'
                         '        "sample_calculation": (\n'
-                        '            "Filing MFS excludes $80,000 spouse AGI, reducing borrower RAP payment on $72,000 separate AGI above the $35,212.50 (225% FPL) exemption to $306.56/mo."\n'
+                        '            "Filing MFS excludes $80,000 spouse AGI, reducing borrower New IBR payment on $72,000 separate AGI above the $23,940.00 (150% of $15,960 2026 FPL) exemption to $400.50/mo."\n'
                         '        ),\n'
                         '        "calculation_manifest": {\n'
                         '            "slug": "married-filing-separately-student-loan-calculator",\n'
                         '            "model_name": "Prexvo-MFS-IDR-Exclusion-Model-2026",\n'
-                        '            "statutory_authority": "34 CFR 685.209; 34 CFR 685.221(b); 26 U.S.C. 1(d) Married Filing Separately provisions",\n'
+                        '            "statutory_authority": "34 CFR 685.209; 34 CFR 685.221(b); 26 U.S.C. 1(d) Married Filing Separately provisions; 91 FR 1797",\n'
                         '            "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage statistics series (FRED)",\n'
-                        '            "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * rap_rate / 12), 2)",\n'
+                        '            "formula": "round(max(0.0, (borrower_agi - (poverty_guideline * discretionary_multiplier)) * ibr_rate / 12), 2)",\n'
                         '            "inputs": {\n'
                         '                "borrower_agi": 72000,\n'
-                        '                "poverty_guideline": 15650,\n'
-                        '                "discretionary_multiplier": 2.25,\n'
-                        '                "rap_rate": 0.10,\n'
+                        '                "poverty_guideline": 15960,\n'
+                        '                "discretionary_multiplier": 1.5,\n'
+                        '                "ibr_rate": 0.10,\n'
                         '            },\n'
-                        '            "published_output": 306.56,\n'
+                        '            "published_output": 400.5,\n'
                         '            "sample_calculation": (\n'
-                        '                "Filing MFS excludes $80,000 spouse AGI, reducing borrower RAP payment on $72,000 separate AGI above the $35,212.50 (225% FPL) exemption to $306.56/mo."\n'
+                        '                "Filing MFS excludes $80,000 spouse AGI, reducing borrower New IBR payment on $72,000 separate AGI above the $23,940.00 (150% of $15,960 2026 FPL) exemption to $400.50/mo."\n'
                         '            ),\n'
                         '            "entity_type": "FinancialProductOrService",\n'
                         '        },'
@@ -20003,6 +20274,13 @@ def reflect_and_recompile_all_assets(
                 )
                 if contam_cleanup["removed_syndication"] or contam_cleanup["removed_overlays"]:
                     source_sync_changed = True
+                from pseofactory.estate_common import sanitize_tenant_overlays
+
+                sanitize_tenant_overlays(
+                    repo_root_clean,
+                    tools_dir=None,
+                    property_id=adapter.property_id,
+                )
             except Exception:
                 pass
 
@@ -20219,12 +20497,17 @@ def reflect_and_recompile_all_assets(
                                         healed_ov, slug=ov_s, tenant=adapter.property_id
                                     )
                                     if "surety" in ov_s.lower() or "bond" in ov_s.lower():
+                                        surety_ref = (
+                                            "Miller Act and Treasury Circular 570 surety underwriting formulas"
+                                            if adapter.property_id == "lienbond"
+                                            else "31 U.S.C. Section 9304 and IRC Section 162(a) surety underwriting formulas"
+                                        )
                                         for ov_k in ("title", "title_rewrite", "meta_description", "quick_answer", "h1"):
                                             ov_v = healed_ov.get(ov_k)
                                             if isinstance(ov_v, str):
                                                 healed_ov[ov_k] = (
                                                     ov_v.replace("(IRC Rules)", "(Surety Rules)")
-                                                    .replace("IRC statutory formulas", "Miller Act and Treasury Circular 570 surety underwriting formulas")
+                                                    .replace("IRC statutory formulas", surety_ref)
                                                 )
                                     agy_ov.write_text(json.dumps(healed_ov, indent=2), encoding="utf-8")
                                 else:
@@ -20235,6 +20518,13 @@ def reflect_and_recompile_all_assets(
                                         agy_ov.write_text(json.dumps(reconciled_ov, indent=2), encoding="utf-8")
                             except Exception:
                                 pass
+                    from pseofactory.estate_common import sanitize_tenant_overlays
+
+                    sanitize_tenant_overlays(
+                        repo_root,
+                        tools_dir=None,
+                        property_id=adapter.property_id,
+                    )
                     seen_ov_slugs = set()
                     for overlays_dir in (repo_root / ".agy" / "overlays", repo_root / "content" / "overlays"):
                         if not overlays_dir.is_dir():
@@ -20382,7 +20672,48 @@ def reflect_and_recompile_all_assets(
                 porcelain_compiled = bool(post_sync_2["porcelain_compiled"])
                 html_mutated_since_porcelain = bool(post_sync_2["html_mutated"])
 
-        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+        repo_root_reflect = Path(
+            getattr(adapter, "repo_root", None)
+            or getattr(adapter, "repo_path", None)
+            or adapter.dist_dir.parent
+        )
+        synd_dir_reflect = repo_root_reflect / "syndication"
+        has_synd_drift = any(
+            Path(getattr(d_rec, "asset_path", "") or "") == synd_dir_reflect
+            or "syndication" in str(getattr(d_rec, "asset_path", "") or "").replace("\\", "/")
+            for d_rec in drifted_records
+        )
+        synd_regenerated = False
+        if (
+            not build_failed
+            and not is_live_repo_blocked
+            and synd_dir_reflect.is_dir()
+            and (force or has_synd_drift or should_run_full_build or estate_needed_mutation or retrofitted_count > 0)
+        ):
+            try:
+                from pseofactory.distributor import export_all_syndication_files
+
+                export_all_syndication_files(
+                    output_dir=synd_dir_reflect,
+                    dry_run=False,
+                    property_id=adapter.property_id,
+                )
+                synd_regenerated = True
+                for _ck in [
+                    k
+                    for k in list(evaluator._audit_cache.keys())
+                    if len(k) >= 2
+                    and (
+                        "syndication/" in str(k[1]).replace("\\", "/")
+                        or str(k[1]).replace("\\", "/").endswith("/syndication")
+                    )
+                ]:
+                    evaluator._audit_cache.pop(_ck, None)
+            except Exception as synd_err:
+                if verbose:
+                    print(f"Error regenerating syndication files for '{p_id}': {synd_err}")
+
+        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or synd_regenerated:
             # Evict failed drift entries from evaluator cache after rebuild/retrofit while preserving SHA-256-verified clean entries
             for _ck in [k for k, v in evaluator._audit_cache.items() if v is not None]:
                 evaluator._audit_cache.pop(_ck, None)
@@ -20397,7 +20728,7 @@ def reflect_and_recompile_all_assets(
                 or _has_pending_downstream_work(adapter, ignore_git_dirty=defer_live_indexing)
             )
         )
-        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0:
+        if should_run_full_build or estate_needed_mutation or retrofitted_count > 0 or synd_regenerated:
             build_verified = (
                 evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=False)
                 if not will_run_downstream
@@ -20579,7 +20910,7 @@ def reflect_and_recompile_all_assets(
             and build_verified.status == "PASS"
         )
         if (
-            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale)
+            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or force or substrate_lock_stale or synd_regenerated)
             and not build_failed
             and build_verified.status == "PASS"
             and not is_live_repo_blocked
@@ -20635,7 +20966,7 @@ def reflect_and_recompile_all_assets(
         ledger_verified_fresh = False
 
         if (
-            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh or substrate_lock_stale or force)
+            (recompiled_count > 0 or retrofitted_count > 0 or downstream_executed or freshness_needs_refresh or substrate_lock_stale or force or synd_regenerated)
             and not build_failed
             and latch_state
             and build_verified.status == "PASS"
@@ -20984,17 +21315,18 @@ def reflect_and_recompile_all_assets(
                     print(f"Error recording engine hash and asset ledger for '{p_id}': {l_err}")
         elif (
             not latch_state
-            and (recompiled_count > 0 or retrofitted_count > 0 or html_mutated_since_porcelain)
+            and (recompiled_count > 0 or retrofitted_count > 0 or html_mutated_since_porcelain or synd_regenerated)
             and not build_failed
             and build_verified.status == "PASS"
             and not is_live_repo_blocked
         ):
-            # Keep pre-existing asset_ledger.json synchronized when dist/ changed without touching engine_hash.json
+            # Keep pre-existing asset_ledger.json and substrate_lock.json synchronized when dist/ changed without touching engine_hash.json
             l_file = adapter.dist_dir.parent / ".agy" / "asset_ledger.json"
             if not l_file.is_file() and getattr(adapter, "repo_path", None):
                 cand_l_file = Path(adapter.repo_path) / ".agy" / "asset_ledger.json"
                 if cand_l_file.is_file():
                     l_file = cand_l_file
+            existing_eh: Optional[str] = None
             if l_file.is_file():
                 try:
                     existing_l = load_asset_ledger(l_file)
@@ -21011,6 +21343,32 @@ def reflect_and_recompile_all_assets(
                 except Exception as l_err:
                     if verbose:
                         print(f"Error refreshing existing asset ledger for '{p_id}': {l_err}")
+            lock_repo_nl = Path(
+                getattr(adapter, "repo_root", None)
+                or getattr(adapter, "repo_path", None)
+                or adapter.dist_dir.parent
+            )
+            lock_file_nl = lock_repo_nl / "substrate_lock.json"
+            if lock_file_nl.is_file():
+                try:
+                    from pseofactory.drift import write_substrate_lock
+
+                    existing_lock = json.loads(lock_file_nl.read_text(encoding="utf-8"))
+                    lock_existing_eh = (
+                        str(existing_lock.get("engine_hash") or existing_lock.get("substrate_hash") or "").strip()
+                        if isinstance(existing_lock, dict)
+                        else ""
+                    ) or existing_eh
+                    write_substrate_lock(
+                        lock_repo_nl,
+                        property_id=adapter.property_id,
+                        expected_hash=lock_existing_eh,
+                        dist_dir=adapter.dist_dir,
+                        sync_ledgers=False,
+                    )
+                except Exception as sl_err:
+                    if verbose:
+                        print(f"Error refreshing existing substrate_lock.json for '{p_id}': {sl_err}")
 
         can_reuse_build_verified = bool(
             build_verified.status == "PASS"
@@ -21024,7 +21382,7 @@ def reflect_and_recompile_all_assets(
             if can_reuse_build_verified
             else (
                 evaluator.audit_all(adapter, check_engine_drift=False, check_ledger=True)
-                if ((recompiled_count > 0 or retrofitted_count > 0) and not build_failed and latch_state and not is_live_repo_blocked)
+                if ((recompiled_count > 0 or retrofitted_count > 0 or synd_regenerated) and not build_failed and latch_state and not is_live_repo_blocked)
                 else build_verified
             )
         )

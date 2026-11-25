@@ -9,7 +9,7 @@ import json
 import html
 import logging
 import re
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Sequence, Set, Union
 from pathlib import Path
 import urllib.parse
 
@@ -935,7 +935,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
     )
 
     default_slug = os.environ.get("FACTORY_DEFAULT_TOOL_SLUG", "irs-2027-tax-brackets")
-    default_title = os.environ.get("FACTORY_DEFAULT_TOOL_TITLE", "IRS 2027 Federal Income Tax Brackets & TCJA Sunset Rates")
+    default_title = os.environ.get("FACTORY_DEFAULT_TOOL_TITLE", "IRS 2027 Federal Income Tax Brackets & OBBBA Rates")
     default_category = os.environ.get("FACTORY_DEFAULT_TOOL_CATEGORY", "Tax Intelligence")
 
     t_slug = ""
@@ -946,9 +946,10 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
 
     prop_env = property_id or os.environ.get("PROPERTY_ID") or os.environ.get("TENANT_ID") or ""
     property_id = resolve_canonical_property_id(prop_env, default=prop_env).lower() if prop_env else ""
-    is_prexvo = (property_id == "prexvo") or any(t.get("slug") == t_slug for t in PREXVO_DEFAULT_TOOLS)
-    is_gainhelm = (property_id == "gainhelm") or any(t.get("slug") == t_slug for t in GAINHELM_DEFAULT_TOOLS)
-    is_lienbond = (property_id == "lienbond") or any(t.get("slug") == t_slug for t in LIENBOND_DEFAULT_TOOLS)
+    is_prexvo = (property_id == "prexvo") or (not property_id and any(t.get("slug") == t_slug for t in PREXVO_DEFAULT_TOOLS))
+    is_gainhelm = (property_id == "gainhelm") or (not property_id and any(t.get("slug") == t_slug for t in GAINHELM_DEFAULT_TOOLS))
+    is_lienbond = (property_id == "lienbond") or (not property_id and any(t.get("slug") == t_slug for t in LIENBOND_DEFAULT_TOOLS))
+    eff_prop = property_id or ("prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm")))
 
     if is_prexvo:
         default_affiliates = ["splash_financial", "sofi", "credible"]
@@ -961,19 +962,22 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
 
     if not tool_or_slug:
         if TOOLS:
-            return dict(TOOLS[0])
+            return _sanitize_tool_metadata_for_property(dict(TOOLS[0]), property_id=eff_prop)
         clean_t, short_t = _clean_tool_title_and_short(default_title, default_slug)
-        return {
-            "slug": default_slug,
-            "title": clean_t,
-            "short_title": short_t,
-            "nav_label": short_t[:14],
-            "description": f"Deterministic quantitative model and planning calculator for {clean_t}.",
-            "primary_keyword": clean_t.lower(),
-            "quick_answer": f"The {clean_t} model provides deterministic projections and statutory analysis.",
-            "category": default_category,
-            "affiliates": list(default_affiliates),
-        }
+        return _sanitize_tool_metadata_for_property(
+            {
+                "slug": default_slug,
+                "title": clean_t,
+                "short_title": short_t,
+                "nav_label": short_t[:14],
+                "description": f"Deterministic quantitative model and planning calculator for {clean_t}.",
+                "primary_keyword": clean_t.lower(),
+                "quick_answer": f"The {clean_t} model provides deterministic projections and statutory analysis.",
+                "category": default_category,
+                "affiliates": list(default_affiliates),
+            },
+            property_id=eff_prop,
+        )
 
     if isinstance(tool_or_slug, dict):
         if tool_or_slug.get("slug"):
@@ -1001,7 +1005,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
             tool_dict.setdefault("category", default_category)
             tool_dict.setdefault("affiliates", default_affiliates)
-            return tool_dict
+            return _sanitize_tool_metadata_for_property(tool_dict, property_id=eff_prop)
 
         title = str(tool_or_slug.get("title", "") or "").strip()
         if title:
@@ -1009,7 +1013,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             clean_title = title
         else:
             if TOOLS:
-                return dict(TOOLS[0])
+                return _sanitize_tool_metadata_for_property(dict(TOOLS[0]), property_id=eff_prop)
             slug = default_slug
             clean_title = default_title
 
@@ -1024,7 +1028,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
         tool_dict.setdefault("quick_answer", f"The {clean_title} model provides deterministic projections and statutory analysis.")
         tool_dict.setdefault("category", default_category)
         tool_dict.setdefault("affiliates", default_affiliates)
-        return tool_dict
+        return _sanitize_tool_metadata_for_property(tool_dict, property_id=eff_prop)
 
     tool_slug = str(tool_or_slug).strip()
     match = (
@@ -1038,7 +1042,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
         c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
         res["title"] = c_title
         res["short_title"] = c_short
-        return res
+        return _sanitize_tool_metadata_for_property(res, property_id=eff_prop)
 
     try:
         from profithelm.config import load_dynamic_tools
@@ -1050,7 +1054,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             c_title = re.sub(r"\s+\(202[4-9]\)\s*$", "", c_title).strip()
             res["title"] = c_title
             res["short_title"] = c_short
-            return res
+            return _sanitize_tool_metadata_for_property(res, property_id=eff_prop)
     except Exception:
         pass
 
@@ -1060,17 +1064,146 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
     else:
         fallback_title = f"{raw_from_slug} Calculator"
     clean_title, clean_short = _clean_tool_title_and_short(fallback_title, tool_slug)
-    return {
-        "slug": tool_slug,
-        "title": clean_title,
-        "short_title": clean_short,
-        "nav_label": clean_short[:14],
-        "description": f"Deterministic quantitative model and planning calculator for {clean_title}.",
-        "primary_keyword": tool_slug.replace("-", " ").lower(),
-        "quick_answer": f"The {clean_title} model provides deterministic projections and statutory analysis based on federal guidelines.",
-        "category": default_category,
-        "affiliates": default_affiliates,
-    }
+    return _sanitize_tool_metadata_for_property(
+        {
+            "slug": tool_slug,
+            "title": clean_title,
+            "short_title": clean_short,
+            "nav_label": clean_short[:14],
+            "description": f"Deterministic quantitative model and planning calculator for {clean_title}.",
+            "primary_keyword": tool_slug.replace("-", " ").lower(),
+            "quick_answer": f"The {clean_title} model provides deterministic projections and statutory analysis based on federal guidelines.",
+            "category": default_category,
+            "affiliates": default_affiliates,
+        },
+        property_id=eff_prop,
+    )
+
+
+def _sanitize_property_statutory_text(text: Any, property_id: str = "", slug: str = "") -> Any:
+    """Rewrites superseded statutory figures and misattributed citations per tenant rules."""
+    if not isinstance(text, str) or not text:
+        return text
+    out = _sanitize_distribution_text(text)
+    norm_prop = _normalize_property_id(property_id) if property_id else ""
+    slug_low = str(slug or "").lower()
+    low = out.lower()
+
+    # 1. GainHelm / HIPAA 2026 Tier 4 cap ($2,190,294) and total breach ($2,577,794)
+    if norm_prop == "gainhelm" or "hipaa" in low or "160.404" in low:
+        for old, new in (
+            ("$2,067,813.00", "$2,190,294.00"),
+            ("$2,067,813", "$2,190,294"),
+            ("2,067,813.00", "2,190,294.00"),
+            ("2,067,813", "2,190,294"),
+            ("2067813.0", "2190294.0"),
+            ("2067813", "2190294"),
+            ("$2,455,313.00", "$2,577,794.00"),
+            ("$2,455,313", "$2,577,794"),
+            ("2,455,313.00", "2,577,794.00"),
+            ("2,455,313", "2,577,794"),
+            ("2455313.0", "2577794.0"),
+            ("2455313", "2577794"),
+        ):
+            out = out.replace(old, new)
+
+    # 2. LienBond statutory authority alignment (Davis-Bacon vs NCCI WC/EMR)
+    if norm_prop == "lienbond":
+        is_db = any(k in slug_low or k in low for k in ("davis-bacon", "davis bacon", "wh-347", "wh347"))
+        is_wc = any(k in slug_low or k in low for k in ("workers-comp", "workers comp", "emr", "class-code", "class code"))
+        if is_db or is_wc:
+            if is_db:
+                out = re.sub(
+                    r",\s*and\s+(?:IRC\s*(?:Sections?|Sec\.?)?\s*3111|26\s*U\.S\.C\.?\s*3111)\b",
+                    ", and 29 CFR Part 5",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+                out = re.sub(
+                    r"\b(?:IRC\s*(?:Sections?|Sec\.?)?\s*3111|26\s*U\.S\.C\.?\s*3111)\b",
+                    "40 U.S.C. Section 3141 and 29 CFR Part 5",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                out = re.sub(
+                    r"\b(?:IRC\s*(?:Sections?|Sec\.?)?\s*3111|26\s*U\.S\.C\.?\s*3111)\b",
+                    "NCCI Experience Rating Plan Manual",
+                    out,
+                    flags=re.IGNORECASE,
+                )
+        if is_wc:
+            out = re.sub(
+                r"\band\s+29\s*CFR\s*(?:Part\s*)?1904\s+OSHA\s+injury\s+reporting\s+standards\b",
+                "and State Workers Compensation Rating Bureau Manuals",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r",?\s*\b29\s*CFR\s*(?:Part\s*)?1904\b",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+
+    # 3. ProfitHelm statutory rules (P.L. 119-21 37% permanent rate, Section 179 Heavy SUV separation, allowlist)
+    if norm_prop == "profithelm":
+        out = re.sub(
+            r"Under\s+IRC\s+Section\s+1\s+and\s+Public\s+Law\s+115-97\s*\(TCJA\s+Sunset\),\s*"
+            r"federal\s+marginal\s+tax\s+brackets\s+revert\s+to\s+pre-2018\s+statutory\s+rates\s*"
+            r"\(10%,\s*15%,\s*25%,\s*28%,\s*33%,\s*35%,\s*and\s*39\.6%\)\s*"
+            r"alongside\s+a\s+halved\s+standard\s+deduction\.?",
+            "Under IRC Section 1(j) and P.L. 119-21 Section 70101 (OBBBA), federal marginal tax brackets "
+            "permanently retain the 10%, 12%, 22%, 24%, 32%, 35%, and 37% rate structure alongside enhanced "
+            "standard deductions ($16,100 single in 2026; $16,600 single in 2027).",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"10%,\s*15%,\s*25%,\s*28%,\s*33%,\s*35%,\s*and\s*39\.6%",
+            "10%, 12%, 22%, 24%, 32%, 35%, and 37%",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"(?<![0-9.])39\.6%",
+            "37% (permanent under P.L. 119-21 Section 70101)",
+            out,
+        )
+        out = re.sub(r"(?<![0-9.])39\.6(?![0-9.])", "37", out)
+        out = re.sub(
+            r"\(up to \$2,560,000 equipment or \$32,000 Heavy SUV\)\s*plus\s*100%\s*bonus\s*depreciation\s*on\s*remaining\s*basis\.?",
+            "(up to $2,560,000 for qualifying commercial equipment). Heavy SUVs remain capped at $32,000 under IRC Section 179(b)(5)(A) and IRS Rev. Proc. 2025-32, plus 100% bonus depreciation on remaining basis.",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r",\s*13\s*CFR\s*Part\s*115\b", "", out, flags=re.IGNORECASE)
+        out = re.sub(r"\b13\s*CFR\s*Part\s*115\b", "31 U.S.C. Section 9304", out, flags=re.IGNORECASE)
+
+    while "  " in out:
+        out = out.replace("  ", " ")
+    return out.strip()
+
+
+def _sanitize_tool_metadata_for_property(tool_dict: Dict[str, Any], property_id: str = "") -> Dict[str, Any]:
+    """Sanitizes text metadata fields on a resolved tool dict against tenant truth rules."""
+    if not isinstance(tool_dict, dict):
+        return tool_dict
+    slug = str(tool_dict.get("slug") or "")
+    cleaned = dict(tool_dict)
+    for field in (
+        "title",
+        "short_title",
+        "description",
+        "quick_answer",
+        "geo_summary",
+        "direct_answer_summary",
+        "statutory_source",
+        "economic_source",
+    ):
+        if isinstance(cleaned.get(field), str) and cleaned[field]:
+            cleaned[field] = _sanitize_property_statutory_text(cleaned[field], property_id=property_id, slug=slug)
+    return cleaned
 
 
 def _sanitize_distribution_text(text: Any) -> Any:
@@ -1096,6 +1229,222 @@ def _sanitize_youtube_text(text: Any) -> Any:
     while "  " in sanitized:
         sanitized = sanitized.replace("  ", " ")
     return sanitized
+
+
+def _truncate_at_word_boundary(text: str, max_chars: int) -> str:
+    """Truncates text cleanly at a word boundary without leaving dangling punctuation or citations."""
+    s = " ".join(str(text or "").split()).strip()
+    if max_chars <= 0:
+        return ""
+    if len(s) <= max_chars:
+        return s
+    cut = s[:max_chars].rstrip()
+    if " " in cut and len(s) > max_chars:
+        cut = cut.rsplit(" ", 1)[0].rstrip()
+    # Avoid leaving truncated statutory citation prefixes like "34 CFR" or "26 U.S.C."
+    dangling_cite_re = re.compile(
+        r"(?:\s+\d+\s+)?(?:U\.S\.C\.|CFR|C\.F\.R\.|IRC|Rev\.|Proc\.|Section|Sec\.|Part|Title)\s*$",
+        re.IGNORECASE,
+    )
+    while dangling_cite_re.search(cut) and " " in cut:
+        cut = dangling_cite_re.sub("", cut).rstrip()
+    cut = cut.rstrip(" ,;:-(")
+    if not cut:
+        cut = s[:max_chars].rstrip()
+    return cut
+
+
+def _ensure_gainhelm_benchmark_qualifier(text: str) -> str:
+    """Ensures any GainHelm $121.67 BLS wage mention carries a benchmark/estimate qualifier."""
+    if "$121.67" not in text:
+        return text
+    if re.search(r"\b(estimate|benchmark|loaded|average|typical)\b", text, re.IGNORECASE):
+        return text
+    return text.replace("$121.67/hr", "$121.67/hr benchmark estimate").replace(
+        "$121.67", "$121.67 benchmark estimate"
+    )
+
+
+def _fit_x_post_to_limit(
+    headline_candidates: Sequence[str],
+    url_candidates: Sequence[str],
+    max_len: int = 280,
+    required_phrase: str = "",
+) -> str:
+    """Fits X post copy deterministically within 280 chars while preserving canonical URL and required disclaimers."""
+    clean_urls = [u for u in url_candidates if u]
+    clean_heads = [_sanitize_distribution_text(h) for h in headline_candidates if _sanitize_distribution_text(h)]
+    req = _sanitize_distribution_text(required_phrase).strip() if required_phrase else ""
+
+    def _with_required(text_body: str) -> str:
+        if not req or req.lower() in text_body.lower():
+            return text_body
+        return _sanitize_distribution_text(f"{text_body} {req}".strip())
+
+    # Prefer richer headlines (with disclaimers intact) paired with shorter canonical URLs if UTM links overflow
+    if req:
+        for h in clean_heads:
+            h_req = _with_required(h)
+            for u in clean_urls or [""]:
+                cand = _sanitize_distribution_text(f"{h_req}\n{u}" if u else h_req)
+                if 10 <= len(cand) <= max_len and req.lower() in cand.lower():
+                    return cand
+    else:
+        for u in clean_urls:
+            for h in clean_heads:
+                cand = _sanitize_distribution_text(f"{h}\n{u}")
+                if 10 <= len(cand) <= max_len:
+                    return cand
+
+    # Deterministic word-boundary budget trim pairing shortest non-empty URL with best headline
+    fallback_url = clean_urls[-1] if clean_urls else ""
+    fallback_head = clean_heads[-1] if clean_heads else (clean_heads[0] if clean_heads else "")
+    for u in (reversed(clean_urls) if clean_urls else [""]):
+        url_len = len(u) + (1 if u else 0)
+        if req:
+            req_reserved = len(req) + 1
+            head_budget = max_len - url_len - req_reserved
+            base_head = clean_heads[0] if clean_heads else ""
+            if base_head and req.lower() in base_head.lower():
+                base_head = re.sub(re.escape(req), "", base_head, flags=re.IGNORECASE).strip()
+            if head_budget >= 16 and base_head:
+                trimmed = _truncate_at_word_boundary(base_head, head_budget)
+                if trimmed and not trimmed.endswith((".", "!", "?")):
+                    if len(trimmed) + 1 <= head_budget:
+                        trimmed = f"{trimmed}."
+                body = f"{trimmed} {req}".strip() if trimmed else req
+            else:
+                body = req
+            cand = _sanitize_distribution_text(f"{body}\n{u}" if u else body)
+            if 10 <= len(cand) <= max_len and req.lower() in cand.lower():
+                return cand
+        else:
+            budget = max_len - url_len
+            if budget >= 16:
+                trimmed = _truncate_at_word_boundary(clean_heads[0] if clean_heads else fallback_head, budget)
+                if trimmed and not trimmed.endswith((".", "!", "?")):
+                    if len(trimmed) + 1 <= budget:
+                        trimmed = f"{trimmed}."
+                cand = _sanitize_distribution_text(f"{trimmed}\n{u}" if u else trimmed)
+                if 10 <= len(cand) <= max_len:
+                    return cand
+
+    if req:
+        shortest_u = min(clean_urls, key=len) if clean_urls else ""
+        if shortest_u and len(req) + 1 + len(shortest_u) <= max_len:
+            return _sanitize_distribution_text(f"{req}\n{shortest_u}")
+        if len(req) <= max_len:
+            return req
+    raw_fallback = _sanitize_distribution_text(f"{fallback_head}\n{fallback_url}".strip())
+    return _truncate_at_word_boundary(raw_fallback, max_len)
+
+
+def _fit_youtube_pinned_comment_to_limit(
+    header: str,
+    sample_calc: str,
+    out_fmt: str,
+    cta_intro: str,
+    pinned_cta_url: str,
+    basis_line: str,
+    extra_notes: Sequence[str] = (),
+    max_len: int = 1000,
+) -> str:
+    """Budgets YouTube pinned comment cleanly <= 1000 chars preserving output, URL, basis, and mandatory notes."""
+    nl = chr(10)
+    notes_clean = [_sanitize_youtube_text(n).strip() for n in extra_notes if n and n.strip()]
+
+    def _assemble(proof_line: str, cta_text: str, basis_text: str, notes_list: Sequence[str]) -> str:
+        parts = [header, proof_line, "", cta_text, pinned_cta_url, "", basis_text]
+        for n in notes_list:
+            parts.append(n)
+        return _sanitize_youtube_text(nl.join(parts)).strip()
+
+    full_proof = f"Verified Proof: {sample_calc} (Output: {out_fmt})."
+    cand = _assemble(full_proof, cta_intro, basis_line, notes_clean)
+    if len(cand) <= max_len:
+        return cand
+
+    # 1. Trim sample_calc while keeping out_fmt, pinned_cta_url, basis_line, and extra notes intact
+    min_proof_prefix = "Verified Proof: "
+    min_proof_suffix = f" (Output: {out_fmt})."
+    shell_without_sample = _assemble(f"{min_proof_prefix}{min_proof_suffix}", cta_intro, basis_line, notes_clean)
+    sample_budget = max_len - len(shell_without_sample)
+    if sample_budget >= 24:
+        trimmed_sample = _truncate_at_word_boundary(sample_calc, sample_budget)
+        if trimmed_sample:
+            cand_trimmed = _assemble(
+                f"{min_proof_prefix}{trimmed_sample}{min_proof_suffix}",
+                cta_intro,
+                basis_line,
+                notes_clean,
+            )
+            if len(cand_trimmed) <= max_len:
+                return cand_trimmed
+
+    # 2. Compact proof + shorter CTA intro while keeping out_fmt, URL, basis_line, notes
+    compact_proof = f"Verified Calculation Output: {out_fmt}."
+    short_cta = "Calculate your numbers live:"
+    cand_compact = _assemble(compact_proof, short_cta, basis_line, notes_clean)
+    if len(cand_compact) <= max_len:
+        return cand_compact
+
+    # 3. Trim basis_line while preserving pinned_cta_url, out_fmt, and mandatory notes
+    shell_min_basis = _assemble(compact_proof, short_cta, "", notes_clean)
+    basis_budget = max_len - len(shell_min_basis)
+    trimmed_basis = _truncate_at_word_boundary(basis_line, max(0, basis_budget))
+    cand_min = _assemble(compact_proof, short_cta, trimmed_basis, notes_clean)
+    if len(cand_min) <= max_len:
+        return cand_min
+
+    # 4. Last-resort deterministic fit preserving out_fmt, pinned_cta_url, and mandatory notes
+    notes_tail = f"{nl}{nl.join(notes_clean)}" if notes_clean else ""
+    core = _sanitize_youtube_text(f"{compact_proof}{notes_tail}{nl}{pinned_cta_url}").strip()
+    if len(core) <= max_len:
+        return core
+    base_url = pinned_cta_url.split("?", 1)[0]
+    compact_url = f"{base_url}?utm_content=pinned_comment"
+    core_short_url = _sanitize_youtube_text(f"{compact_proof}{notes_tail}{nl}{compact_url}").strip()
+    if len(core_short_url) <= max_len:
+        return core_short_url
+    return core_short_url[:max_len]
+
+
+def _fit_raw_youtube_pinned_comment(
+    text: str,
+    pinned_cta_url: str,
+    out_fmt: str,
+    max_len: int = 1000,
+    required_phrase: str = "",
+) -> str:
+    """Enforces <= 1000 chars on curated YouTube pinned comments while preserving URL, output, and required disclosures."""
+    cleaned = _sanitize_youtube_text(text).strip()
+    req = _sanitize_youtube_text(required_phrase).strip() if required_phrase else ""
+    if out_fmt and out_fmt not in cleaned:
+        cleaned = _sanitize_youtube_text(f"{cleaned}\nVerified Calculation Output: {out_fmt}").strip()
+    if req and req.lower() not in cleaned.lower():
+        cleaned = _sanitize_youtube_text(f"{cleaned}\n{req}").strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    if "utm_content=pinned_comment" in cleaned:
+        lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
+        url_lines = [ln for ln in lines if "http://" in ln or "https://" in ln]
+        keep_url = url_lines[0] if url_lines else pinned_cta_url
+        non_url = " ".join(ln for ln in lines if ln != keep_url and (not req or ln.lower() != req.lower()))
+        tail = f"\nVerified Output: {out_fmt}\n{keep_url}" if out_fmt and out_fmt not in keep_url else f"\n{keep_url}"
+        if req:
+            tail = f"{tail}\n{req}"
+        budget = max_len - len(tail)
+        trimmed_body = _truncate_at_word_boundary(non_url, max(20, budget))
+        fitted = _sanitize_youtube_text(f"{trimmed_body}{tail}").strip()
+        if len(fitted) <= max_len:
+            return fitted
+    if req:
+        base_url = pinned_cta_url.split("?", 1)[0]
+        compact_url = f"{base_url}?utm_content=pinned_comment"
+        tail_req = f"Verified Output: {out_fmt}\n{compact_url}\n{req}" if out_fmt else f"{compact_url}\n{req}"
+        if len(tail_req) <= max_len:
+            return _sanitize_youtube_text(tail_req).strip()
+    return _truncate_at_word_boundary(cleaned, max_len)
 
 
 DEFAULT_TOOL_DEEP_LINK_PARAMS: Dict[str, Dict[str, Any]] = {
@@ -1253,7 +1602,7 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "round(bond_penalty_amount * (credit_tier_rate_pct / 100.0), 2)",
         "inputs": {"bond_penalty_amount": 50000.0, "credit_tier_rate_pct": 1.5},
         "published_output": 750.0,
-        "sample_calculation": "$50,000 Miller Act / contractor surety bond penalty * 1.5% preferred underwriting rate = $750 annual bond premium (vs $2,500 at 5% standard tier)",
+        "sample_calculation": "$50,000 commercial contractor surety bond penalty * 1.5% preferred underwriting rate = $750 annual bond premium (vs $2,500 at 5% standard tier), deductible under IRC Section 162",
         "statutory_claim_key": "standard_deduction_2026_single",
         "statutory_claim_value": 16100,
         "query_params": {"bond_penalty_amount": 50000, "credit_tier_rate_pct": 1.5},
@@ -1331,22 +1680,22 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"annual_payroll": 500000, "statutory_tax_rate": 0.0865, "workers_comp_rate_per_100": 3.45},
     },
     "student-loan-repayment-calculator": {
-        "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 82.58},
-        "published_output": 242.42,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month unpaid interest waived",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0},
+        "published_output": 325.0,
+        "sample_calculation": "Under P.L. 119-21 Section 82001, a single borrower at $65,000 AGI (6% tier) and 0 dependents pays $325.00/month under 2026 RAP with 100% unpaid interest waived and up to $50/mo principal match over 360 months",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
         "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "rap-vs-ibr-calculator": {
-        "formula": "round(((agi - fpl_225) * 0.10) / 12 + base_adjustment, 2)",
-        "inputs": {"agi": 95000.0, "fpl_225": 48690.0, "base_adjustment": 103.13},
-        "published_output": 489.05,
-        "sample_calculation": "At $95,000 AGI on $60,000 debt (6.5%), uncapped RAP charges $489.05/month ($176,058 over 360 months / 30 years) while IBR caps at $78,617 total",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
-        "query_params": {"balance": 60000, "agi": 95000, "rate": 6.5, "deps": 1},
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0},
+        "published_output": 325.0,
+        "sample_calculation": "At $65,000 AGI under P.L. 119-21 Section 82001 (6% tier), 2026 RAP sets payments at $325.00/month (360-month forgiveness, 100% unpaid interest subsidy, $50/mo principal match) vs $342.17 under New IBR",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "tiered-standard-calculator": {
         "formula": "round((principal * monthly_rate) / (1 - (1 + monthly_rate) ** (-360)), 2)",
@@ -1361,9 +1710,9 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "formula": "paye_forgiveness_years * 12",
         "inputs": {"paye_forgiveness_years": 20.0},
         "published_output": 240.0,
-        "sample_calculation": "20-year grandfathered PAYE graduate forgiveness horizon * 12 months = 240 qualifying payments (vs 300 on legacy IBR)",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "sample_calculation": "20-year grandfathered PAYE graduate forgiveness horizon * 12 months = 240 qualifying payments (vs 300 on legacy IBR and 360 on P.L. 119-21 RAP)",
+        "statutory_claim_key": "hhs_poverty_2026_1person",
+        "statutory_claim_value": 15960,
         "query_params": {"balance": 85000, "agi": 90000, "rate": 6.5, "deps": 0},
     },
     "icr-repayment-calculator": {
@@ -1376,22 +1725,22 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"balance": 75000, "agi": 80000, "rate": 7.5, "deps": 0},
     },
     "save-plan-transition-to-rap-repayment-calculator": {
-        "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 66.75},
-        "published_output": 217.42,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $217.42/month with $66.75/month interest waived",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
-        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0},
+        "published_output": 325.0,
+        "sample_calculation": "Under P.L. 119-21 Section 82001, transitioning from administrative SAVE forbearance into 2026 RAP at $65,000 AGI sets payments at $325.00/month with 100% unpaid interest subsidy and up to $50/mo principal match",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "save-plan-litigation-transition": {
-        "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 284.17, "interest_subsidy": 66.75},
-        "published_output": 217.42,
-        "sample_calculation": "On $55,000 debt at 6.2% ($284.17/mo interest) and $62,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $217.42/month with $66.75/month interest waived",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
-        "query_params": {"balance": 55000, "agi": 62000, "rate": 6.2, "deps": 0},
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0},
+        "published_output": 325.0,
+        "sample_calculation": "Under P.L. 119-21 Section 82001, transitioning from administrative SAVE forbearance into 2026 RAP at $65,000 AGI sets payments at $325.00/month with 100% unpaid interest subsidy and up to $50/mo principal match",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
+        "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "pslf-qualifying-payment-and-buyback-calculator": {
         "formula": "pslf_required_years * 12",
@@ -1412,30 +1761,30 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
     },
     "pslf-qualifying-payment-simulator": {
-        "formula": "round(monthly_rap_savings * 120, 0)",
-        "inputs": {"monthly_rap_savings": 99.75},
-        "published_output": 11970.0,
-        "sample_calculation": "$99.75/month RAP vs IBR savings * 120 qualifying PSLF payments = $11,970 saved with tax-free IRC Section 108(f) discharge",
+        "formula": "round(max(0.0, required_payments - certified_payments) * rap_monthly_payment, 0)",
+        "inputs": {"required_payments": 120.0, "certified_payments": 84.0, "rap_monthly_payment": 340.0},
+        "published_output": 12240.0,
+        "sample_calculation": "36 remaining P.L. 119-21 Section 82001 RAP payments at $340.00/mo ($12,240 outflow) ahead of $62,760 tax-free PSLF discharge under 34 CFR 685.219",
         "statutory_claim_key": "pslf_qualifying_payments",
         "statutory_claim_value": 120,
-        "query_params": {"balance": 92000, "agi": 78000, "rate": 6.8, "deps": 0},
+        "query_params": {"balance": 75000, "agi": 68000, "rate": 6.5, "deps": 0},
     },
     "parent-plus-double-consolidation-repayment-calculator": {
-        "formula": "round(icr_monthly_payment - monthly_savings, 2)",
-        "inputs": {"icr_monthly_payment": 1200.67, "monthly_savings": 766.59},
-        "published_output": 434.08,
-        "sample_calculation": "$1,200.67 single-consolidated ICR payment minus $766.59 two-step consolidation savings = $434.08/month under 10% RAP",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 88000.0, "rap_rate": 0.08, "dependents": 0},
+        "published_output": 586.67,
+        "sample_calculation": "$1,200.67 single-consolidated ICR payment vs $586.67/month under P.L. 119-21 Section 82001 8% RAP tier ($614.00/month savings)",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
         "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
     },
     "parent-plus-double-consolidation": {
-        "formula": "round(icr_monthly_payment - monthly_savings, 2)",
-        "inputs": {"icr_monthly_payment": 1200.67, "monthly_savings": 766.59},
-        "published_output": 434.08,
-        "sample_calculation": "$1,200.67 single-consolidated ICR payment minus $766.59 two-step consolidation savings = $434.08/month under 10% RAP",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 88000.0, "rap_rate": 0.08, "dependents": 0},
+        "published_output": 586.67,
+        "sample_calculation": "$1,200.67 single-consolidated ICR payment vs $586.67/month under P.L. 119-21 Section 82001 8% RAP tier ($614.00/month savings)",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
         "query_params": {"balance": 110000, "agi": 88000, "rate": 7.6, "deps": 0},
     },
     "student-loan-refinance-break-even-calculator": {
@@ -1448,12 +1797,12 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "query_params": {"balance": 75000, "agi": 110000, "rate": 7.2, "deps": 0},
     },
     "rap-payment-calculator": {
-        "formula": "round(monthly_interest - interest_subsidy, 2)",
-        "inputs": {"monthly_interest": 325.0, "interest_subsidy": 82.58},
-        "published_output": 242.42,
-        "sample_calculation": "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month interest waived",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
+        "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0},
+        "published_output": 325.0,
+        "sample_calculation": "Under P.L. 119-21 Section 82001, a single borrower at $65,000 AGI (6% tier) and 0 dependents pays $325.00/month under 2026 RAP with 100% unpaid interest subsidy and up to $50/mo principal match over 360 months",
+        "statutory_claim_key": "rap_forgiveness_months",
+        "statutory_claim_value": 360,
         "query_params": {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0},
     },
     "grad-plus-borrowing-cap-calculator": {
@@ -1470,8 +1819,8 @@ CURATED_TOOL_CALCULATION_PROOFS: Dict[str, Dict[str, Any]] = {
         "inputs": {"excluded_spousal_agi": 80000.0, "idr_assessment_rate": 0.10},
         "published_output": 8000.0,
         "sample_calculation": "$80,000 excluded spousal AGI under Married Filing Separately * 10% IDR assessment rate = $8,000/year student loan payment reduction",
-        "statutory_claim_key": "rap_fpl_multiplier",
-        "statutory_claim_value": 2.25,
+        "statutory_claim_key": "hhs_poverty_2026_1person",
+        "statutory_claim_value": 15960,
         "query_params": {"balance": 75000, "agi": 72000, "rate": 6.8, "deps": 1},
     },
     "ibr-hardship-cap-calculator": {
@@ -1612,7 +1961,7 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
     """
     from pseofactory.contracts import safe_eval_mathematical_formula
 
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = str(tool.get("slug", "financial-calculator"))
 
     ext_spec: Dict[str, Any] = {}
@@ -1693,7 +2042,7 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         published_output = float(tool["published_output"])
         sample_calc = str(tool.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
         claim_key = (
-            "rap_fpl_multiplier"
+            "rap_forgiveness_months"
             if norm_prop == "prexvo"
             else (
                 "sprs_max_score"
@@ -1701,7 +2050,7 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
                 else ("ncci_emr_unity_baseline" if norm_prop == "lienbond" else "section_179_limit_2026")
             )
         )
-        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
+        claim_val = 360 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
         q_params = dict(inputs)
     elif ext_spec.get("formula") and isinstance(ext_spec.get("inputs"), dict) and ext_spec.get("published_output") is not None:
         formula = str(ext_spec["formula"])
@@ -1709,7 +2058,7 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         published_output = float(ext_spec["published_output"])
         sample_calc = str(ext_spec.get("sample_calculation") or f"Evaluated {formula} = {published_output:,.2f}")
         claim_key = (
-            "rap_fpl_multiplier"
+            "rap_forgiveness_months"
             if norm_prop == "prexvo"
             else (
                 "sprs_max_score"
@@ -1717,7 +2066,7 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
                 else ("ncci_emr_unity_baseline" if norm_prop == "lienbond" else "section_179_limit_2026")
             )
         )
-        claim_val = 2.25 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
+        claim_val = 360 if norm_prop == "prexvo" else (110 if norm_prop == "gainhelm" else (1.0 if norm_prop == "lienbond" else 2560000))
         q_params = dict(inputs)
     elif norm_prop == "prexvo" and "refinance" in slug:
         crefin = CURATED_TOOL_CALCULATION_PROOFS["student-loan-refinance-break-even-calculator"]
@@ -1729,12 +2078,12 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         claim_val = crefin.get("statutory_claim_value", 120)
         q_params = dict(crefin["query_params"])
     elif norm_prop == "prexvo":
-        formula = "round(monthly_interest - interest_subsidy, 2)"
-        inputs = {"monthly_interest": 325.0, "interest_subsidy": 82.58}
-        published_output = 242.42
-        sample_calc = "On $60,000 debt at 6.5% ($325.00/mo interest) and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), 2026 RAP sets payment at $242.42/month with $82.58/month unpaid interest waived"
-        claim_key = "rap_fpl_multiplier"
-        claim_val = 2.25
+        formula = "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)"
+        inputs = {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0}
+        published_output = 325.0
+        sample_calc = "Under P.L. 119-21 Section 82001, a single borrower at $65,000 AGI (6% tier) and 0 dependents pays $325.00/month under 2026 RAP with 100% unpaid monthly interest waived and up to $50/mo principal match over 360 months"
+        claim_key = "rap_forgiveness_months"
+        claim_val = 360
         q_params = {"balance": 60000, "agi": 65000, "rate": 6.5, "deps": 0}
     elif norm_prop == "gainhelm":
         formula = "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)"
@@ -1860,7 +2209,13 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "AICPA SSAE 18 (AT-C Section 205), 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171 Rev 2")
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "BLS OEWS SOC 15-1212 Information Security Analysts and IBM Cost of a Data Breach Report")
     elif norm_prop == "lienbond":
-        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)")
+        if "workers-comp" in slug or "emr" in slug:
+            default_lb_stat = "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureau Manuals"
+        elif "davis-bacon" in slug:
+            default_lb_stat = "Davis-Bacon Act (40 U.S.C. Section 3141) and 29 CFR Section 5.5 (Form WH-347)"
+        else:
+            default_lb_stat = "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)"
+        stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or default_lb_stat)
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "NCCI State Loss Cost Advisory Rate Schedules and BLS Construction & Extraction Wage Series")
     else:
         cites = get_dual_dataset_citations(slug, property_id=norm_prop)
@@ -2270,14 +2625,14 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
         url = f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=linkedin&utm_medium=social&utm_campaign=contractor-surety-bond-cost-calculator&utm_content=company_post"
         text = (
             f"Securing a $50,000 contractor surety bond at a 1.5% preferred underwriting rate costs $750 per year versus $2,500 in standard tiers.\n\n"
-            f"Under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and state contractor licensing statutes, surety bond premiums scale directly with bond penalty limits and underwriter credit tiers.\n\n"
-            f"Key findings from our surety underwriting calculator:\n"
+            f"Under 31 U.S.C. Section 9304 and IRC Section 162(a), commercial contractor surety bond premiums scale directly with bond penalty limits and underwriter credit tiers.\n\n"
+            f"Key findings from our surety cost and tax deduction calculator:\n"
             f"• A $50,000 bond penalty at a 1.5% preferred rate requires a $750 annual premium ($1,750 saved vs 5.0% standard risk rates).\n"
-            f"• Federal construction contracts exceeding $150,000 mandate 100% performance and payment bond coverage.\n"
+            f"• Commercial construction contracts commonly mandate 100% performance and payment bond coverage.\n"
             f"• Surety premiums are 100% deductible as ordinary and necessary business expenses under IRC Section 162.\n\n"
-            f"Estimate your exact contractor license or Miller Act bond premium:\n"
+            f"Estimate your exact contractor license or commercial surety bond premium:\n"
             f"{url}\n\n"
-            f"#SuretyBonds #ConstructionFinance #MillerAct #Contractors #CommercialInsurance #CFO"
+            f"#SuretyBonds #ConstructionFinance #Contractors #CommercialInsurance #TaxDeductions #CFO"
         )
     elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
         url = f"{POST_URL_BASE}/tools/crypto-tax-form-1099-da-mandatory-reporting/?proceeds=50000&cost_basis=30000&utm_source=linkedin&utm_medium=social&utm_campaign=crypto-tax-form-1099-da-mandatory-reporting&utm_content=company_post"
@@ -2377,7 +2732,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
             f"Under IRC Section 3111 and Section 3301 alongside state NCCI workers compensation manuals, true employee cost extends well beyond base W-2 wages.\n\n"
             f"Key findings from our labor burden modeling engine:\n"
             f"• $500,000 covered payroll incurs $43,250 in statutory FICA/FUTA/SUTA taxes and $17,250 in workers comp premium ($60,500 total burden).\n"
-            f"• Lowering your Experience Modification Rate (EMR) from 1.20 to 0.85 cuts annual workers comp premiums by nearly 30%.\n"
+            f"• At a $3.45 per $100 NCCI rate, $500,000 covered payroll incurs $17,250.00 in annual workers comp premium on top of $43,250.00 in payroll taxes.\n"
             f"• Accurate per-hour labor burden pricing prevents margin erosion on fixed-bid commercial contracts.\n\n"
             f"Calculate your fully burdened payroll and NCCI workers comp cost:\n"
             f"{url}\n\n"
@@ -2437,7 +2792,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
         "teaser_content": teaser_content,
         "first_comment": first_comment,
         "command_hint": (
-            f'linkedin-cli post "{teaser_content[:80]}..." --company-id {cid}'
+            f'linkedin-cli post "{_truncate_at_word_boundary(teaser_content, 80)}..." --company-id {cid}'
             if cid
             else f"# LinkedIn company_id unconfigured for {norm_prop}"
         ),
@@ -2531,7 +2886,7 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "contractor-surety-bond-cost-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?bond=50000&rate=1.5&utm_source=x"
         text = (
-            f"a $50k Miller Act contractor surety bond costs $750/yr at 1.5% preferred rate vs $2,500 standard.\n\n"
+            f"a $50k contractor surety bond costs $750/yr at 1.5% preferred rate vs $2,500 standard.\n\n"
             f"price your surety bond:\n{url}"
         )
     elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
@@ -2588,7 +2943,8 @@ def generate_x_post(tool_slug: str) -> Dict[str, Any]:
 
     fc_url = _with_first_comment_utm(full_url)
     first_comment = f"model your exact numbers on ProfitHelm:\n{fc_url}"
-    teaser_content = _build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")
+    text = _fit_x_post_to_limit([text], [url, full_url, f"{POST_URL_BASE}/tools/{slug}/?utm_source=x"], max_len=280)
+    teaser_content = _fit_x_post_to_limit([_build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")], [], max_len=280)
 
     assert_x_post(text)
     assert_x_post(teaser_content)
@@ -2689,7 +3045,7 @@ def generate_facebook_post(tool_slug: str) -> Dict[str, Any]:
     elif slug == "contractor-surety-bond-cost-calculator":
         url = f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=facebook&utm_medium=social&utm_campaign=contractor-surety-bond-cost-calculator"
         text = (
-            f"A $50,000 contractor license or Federal Miller Act surety bond costs $750 per year at a 1.5% preferred underwriting rate compared to $2,500 per year in standard credit tiers.\n\n"
+            f"A $50,000 commercial contractor surety bond costs $750 per year at a 1.5% preferred underwriting rate compared to $2,500 per year in standard credit tiers, and premiums are deductible under IRC Section 162.\n\n"
             f"Model your bond penalty amount and credit tier rate here: {url}"
         )
     elif slug == "crypto-tax-form-1099-da-mandatory-reporting":
@@ -2789,7 +3145,7 @@ def generate_parasite_google_sites_html(tool_or_slug: Any, property_id: Optional
     canonical mandatory TruthPack disclosure, and canonical anchor pointing to the tenant URL.
     Zero em-dashes and zero en-dashes.
     """
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     eff_prop = _normalize_property_id(property_id or tool.get("property_id") or "profithelm")
     tenant_cfg = resolve_tenant_distribution_config(eff_prop)
@@ -3225,13 +3581,13 @@ def generate_parasite_google_sites_html(tool_or_slug: Any, property_id: Optional
     return html_content
 
 
-def generate_parasite_linkedin_pulse(tool_or_slug: Any) -> Dict[str, Any]:
+def generate_parasite_linkedin_pulse(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Generates LinkedIn Pulse DR 98 long-form teardown (300-500 words, strictly < 2,800 chars,
     dual-dataset citations statutory IRC + economic, 3-5 hashtags, canonical link).
     Zero em-dashes and zero en-dashes.
     """
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     domain = _classify_tool_domain(slug)
     proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
@@ -3508,9 +3864,9 @@ def generate_headless_brand_article_from_transcript(
     if len(takeaways) < 3:
         if prop_id == "prexvo":
             defaults = [
-                "RAP protects income up to 225% of HHS Poverty Guidelines.",
-                "100% unpaid interest subsidy stops negative loan amortization.",
-                "IBR retains statutory standard payment caps while RAP calculates payments without an upper ceiling.",
+                "P.L. 119-21 Section 82001 RAP sets payments at 1% to 10% of AGI minus $50 per dependent ($10 minimum) with 360-month forgiveness.",
+                "100% unpaid interest subsidy and up to $50/mo principal match prevent negative loan amortization.",
+                "IBR retains statutory 10-year Standard payment caps while RAP assesses tiered AGI percentages.",
             ]
         elif prop_id == "gainhelm":
             defaults = [
@@ -3581,12 +3937,12 @@ def generate_headless_brand_article_from_transcript(
     }
 
 
-def generate_parasite_substack_teardown(tool_or_slug: Any) -> Dict[str, Any]:
+def generate_parasite_substack_teardown(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Substack/Hashnode DR 94 deep-dive teardown (1,000-1,500 words, mathematical derivation,
     scenario comparison matrix, contextual links). Zero em-dashes and zero en-dashes.
     """
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     domain = _classify_tool_domain(slug)
     proof = _resolve_tool_calculation_proof(tool, property_id="profithelm")
@@ -4131,19 +4487,20 @@ def generate_reddit_community_teardown(tool_slug: str) -> Dict[str, Any]:
     }
 
 
-def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
+def generate_quora_thread_answer(tool_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Generates structured, authoritative Quora thread answer.
     Satisfies AI SEO Credibility Layer: non-promotional, high information density,
     question-matching, and extractable decision steps.
     Zero em-dashes. Zero en-dashes.
     """
-    tool = _resolve_tool(tool_slug)
-    citations = get_dual_dataset_citations(tool_slug)
+    tool = _resolve_tool(tool_slug, property_id=property_id)
+    slug = tool["slug"]
+    citations = get_dual_dataset_citations(slug, property_id=property_id or "profithelm")
     stat_source = citations["statutory_source"]
     econ_source = citations["economic_source"]
 
-    if tool_slug == "irs-2027-tax-brackets":
+    if slug == "irs-2027-tax-brackets":
         target_topic = "Personal Finance & Income Tax Law"
         question_thread = "How do the permanent OBBBA (P.L. 119-21) 2026-2027 federal tax brackets and standard deductions affect middle-class and high-income taxpayers?"
         extractable_steps = [
@@ -4393,7 +4750,7 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
 
     return {
         "platform": "quora",
-        "tool_slug": tool_slug,
+        "tool_slug": slug,
         "target_topic": target_topic,
         "question_thread": question_thread,
         "answer_markdown": answer_markdown,
@@ -4408,12 +4765,12 @@ def generate_quora_thread_answer(tool_slug: str) -> Dict[str, Any]:
 generate_quora_answer = generate_quora_thread_answer
 
 
-def generate_backlink_outreach_pitch(tool_slug: str) -> Dict[str, Any]:
+def generate_backlink_outreach_pitch(tool_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Generates 1-to-1 personalized backlink pitch under 100 words for finance editors/bloggers.
     Promotes embeddable interactive calculators to replace outdated text links.
     """
-    tool = _resolve_tool(tool_slug)
+    tool = _resolve_tool(tool_slug, property_id=property_id)
     dyn = _generate_dynamic_distribution_copy(tool)
     pitch = dyn["pitch_text"]
 
@@ -4425,17 +4782,18 @@ def generate_backlink_outreach_pitch(tool_slug: str) -> Dict[str, Any]:
     }
 
 
-def generate_newsletter_growth_hook(tool_slug: str) -> Dict[str, Any]:
+def generate_newsletter_growth_hook(tool_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Generates high-CTR newsletter teaser hook utilizing psychological contrast and benchmark metrics.
     """
-    tool = _resolve_tool(tool_slug)
-    url = f"{POST_URL_BASE}/tools/{tool['slug']}/"
+    tool = _resolve_tool(tool_slug, property_id=property_id)
+    slug = tool["slug"]
+    url = f"{POST_URL_BASE}/tools/{slug}/"
 
-    if tool_slug == "irs-2027-tax-brackets":
+    if slug == "irs-2027-tax-brackets":
         subject = f"Quantitative Alert: {tool['short_title']} Baseline Analysis"
         teaser = (
-            f"Did you know individual statutory tax rates are scheduled to jump by up to 4.0% in under 12 months? "
+            f"Under P.L. 119-21 Section 70101 (OBBBA) and IRS Rev. Proc. 2025-32 / 2026-35, the 10% to 37% individual federal tax brackets are permanently enacted with inflation-adjusted 2026-2027 thresholds. "
             f"We modeled the exact numbers and built a free interactive tool so you can see your household bottom line.\n\n"
             f"Test your numbers in 30 seconds: {url}"
         )
@@ -4452,23 +4810,23 @@ def generate_newsletter_growth_hook(tool_slug: str) -> Dict[str, Any]:
     }
 
 
-def generate_regulatory_lead_magnet_copy(tool_slug: str) -> Dict[str, Any]:
+def generate_regulatory_lead_magnet_copy(tool_slug: Any, property_id: str = "") -> Dict[str, Any]:
     """
     Generates 1st-party regulatory alert lead magnet syndication copy and email capture hooks (HWL-1076).
     Zero em-dashes.
     """
-    tool = _resolve_tool(tool_slug)
+    tool = _resolve_tool(tool_slug, property_id=property_id)
     slug = tool["slug"]
     url = f"{POST_URL_BASE}/tools/{slug}/"
 
     if slug == "irs-2027-tax-brackets":
         badge = "1st-Party Tax Policy Intelligence"
-        headline = "Get the 2026-2027 TCJA Sunset Scenario Playbook & Regulatory Alerts"
+        headline = "Get the 2026-2027 OBBBA Tax Rate & Regulatory Alerts Playbook"
         description = (
             "Join 14,000+ financial planners, CPAs, and high-net-worth operators receiving audited marginal tax rate projections, "
-            "standard deduction reversion schedules, and statutory bracket expiration alerts. Zero ads. Deterministic math only."
+            "Rev. Proc. 2025-32 / 2026-35 standard deduction updates, and OBBBA statutory bracket alerts. Zero ads. Deterministic math only."
         )
-        cta = "Get Free Sunset Playbook"
+        cta = "Get Free OBBBA Playbook"
     elif slug == "crypto-tax-calculator":
         badge = "1st-Party Digital Asset Intelligence"
         headline = "Get IRS Form 1099-DA Regulatory Compliance and Capital Gains Alerts"
@@ -4935,7 +5293,7 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
     elif slug == "contractor-surety-bond-cost-calculator":
         url = f"{POST_URL_BASE}/tools/{slug}/?bond=50000&rate=1.5&utm_source=x"
         text = (
-            f"a $50k Miller Act surety bond costs $750/yr at 1.5% preferred vs $2,500 standard.\n\n"
+            f"a $50k contractor surety bond costs $750/yr at 1.5% preferred vs $2,500 standard.\n\n"
             f"Grounded in {s_stat} and {s_econ}.\n"
             f"{url}"
         )
@@ -5028,7 +5386,8 @@ def generate_x_post_with_citations(tool_slug: str, stat_cite: str, econ_cite: st
 
     fc_url = _with_first_comment_utm(full_url)
     first_comment = f"model your exact numbers on ProfitHelm:\n{fc_url}"
-    teaser_content = _build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")
+    text = _fit_x_post_to_limit([text], [url, full_url, f"{POST_URL_BASE}/tools/{slug}/?utm_source=x"], max_len=280)
+    teaser_content = _fit_x_post_to_limit([_build_zero_link_teaser_content(text, platform="x", brand="ProfitHelm")], [], max_len=280)
 
     assert_x_post(text)
     assert_x_post(teaser_content)
@@ -5321,10 +5680,10 @@ TOOL_YOUTUBE_METADATA = {
         ],
     },
     "contractor-surety-bond-cost-calculator": {
-        "title": "Contractor License & Miller Act Surety Bond Cost Calculator",
+        "title": "Contractor License & Commercial Surety Bond Cost Calculator",
         "preset_query": "bond_penalty_amount=50000&credit_tier_rate_pct=1.5",
         "chapters": [
-            "40 U.S.C. Section 3131 Miller Act Surety Bond Rules",
+            "31 U.S.C. Section 9304 & IRC Section 162 Surety Bond Rules",
             "FICO Credit Tiers & Underwriting Premium Rates",
             "License vs Performance & Payment Bond Cost Scaling",
             "Interactive Contractor Surety Bond Walkthrough",
@@ -5334,12 +5693,12 @@ TOOL_YOUTUBE_METADATA = {
             "A $50,000 contractor surety bond costs $750/yr at a 1.5% preferred underwriting rate versus $2,500/yr in standard high-risk tiers.\n\n"
             "Model your exact bond penalty and credit tier live on ProfitHelm:\n"
             f"{POST_URL_BASE}/tools/contractor-surety-bond-cost-calculator/?bond_penalty_amount=50000&credit_tier_rate_pct=1.5&utm_source=youtube&utm_medium=video&utm_campaign=contractor-surety-bond-cost-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under the Federal Miller Act (40 U.S.C. Sections 3131-3134) and 31 U.S.C. Section 9304."
+            "Statutory Basis: Computed under 31 U.S.C. Section 9304 surety bonding rules and IRC Section 162(a) business expense deductibility."
         ),
         "tags": [
             "contractor surety bond cost calculator",
             "surety bond premium calculator",
-            "miller act performance bond",
+            "commercial performance bond cost",
             "contractor license bond rates",
             "construction bid bond cost",
             "profithelm",
@@ -5611,17 +5970,17 @@ TOOL_YOUTUBE_METADATA = {
         "title": "Federal Student Loan Repayment Calculator [2026 Title IV Rules]",
         "preset_query": "balance=60000&agi=65000&rate=6.5&deps=0",
         "chapters": [
-            "Title IV 34 CFR Part 685 Repayment Plan Architecture",
-            "225% Poverty Line Exemption & Discretionary Income",
+            "Title IV 34 CFR Part 685 & P.L. 119-21 Repayment Architecture",
+            "Tiered AGI RAP Formula vs 150% FPL IBR Math",
             "RAP vs IBR, PAYE, ICR & Tiered Standard Comparison",
             "Interactive Repayment Calculator Walkthrough",
         ],
         "pinned_comment": (
             "CALCULATE YOUR 2026 STUDENT LOAN REPAYMENT:\n"
-            "On $60,000 in federal student debt at $65,000 AGI (single filer, $35,910.00 225% FPL exemption), the 2026 RAP plan cuts payments to $242.42/mo and subsidizes $82.58/mo in unpaid interest.\n\n"
+            "On $60,000 in federal student debt at $65,000 AGI (single filer), the 2026 RAP 6% AGI tier (P.L. 119-21 Section 82001) sets payments at $325.00/mo with 100% unpaid interest subsidy and up to $50/mo principal match, vs $342.17/mo on New IBR.\n\n"
             "Run your exact loan balance and AGI in sub-100ms on Prexvo (free, zero login):\n"
             "https://prexvo.com/tools/student-loan-repayment-calculator/?balance=60000&agi=65000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-repayment-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines."
+            "Statutory Basis: Computed under P.L. 119-21 Section 82001, Title IV 34 CFR Part 685, and 2026 HHS Poverty Guidelines ($15,960)."
         ),
         "tags": [
             "student loan repayment calculator",
@@ -5634,27 +5993,27 @@ TOOL_YOUTUBE_METADATA = {
         ],
     },
     "rap-vs-ibr-calculator": {
-        "title": "RAP vs IBR Student Loan Calculator [225% FPL vs 10-Yr Cap]",
+        "title": "RAP vs IBR Student Loan Calculator [P.L. 119-21 vs 10-Yr Cap]",
         "preset_query": "balance=60000&agi=95000&rate=6.5&deps=1",
         "chapters": [
-            "RAP 225% Poverty Floor vs IBR 150% Discretionary Math",
+            "P.L. 119-21 Tiered AGI RAP vs IBR 150% Discretionary Math",
             "Uncapped RAP Escalation vs HEA Section 493C IBR Ceiling",
             "100% Unpaid Interest Subsidy & Forgiveness Horizons",
             "Interactive RAP vs IBR Comparison Walkthrough",
         ],
         "pinned_comment": (
             "COMPARE 2026 RAP VS IBR MONTHLY PAYMENTS:\n"
-            "At $95,000 AGI on $60,000 debt (family of 2, $48,690.00 225% FPL), uncapped RAP climbs to $489.05/mo ($176,058 over 360 months / 30 years) while IBR caps payments at the 10-year Standard ceiling ($78,617 total).\n\n"
+            "At $95,000 AGI on $60,000 debt (family of 2), uncapped 9% tiered RAP under P.L. 119-21 Section 82001 charges $662.50/mo (360-month horizon) while IBR caps payments at the 10-year Standard ceiling ($78,617 total).\n\n"
             "Find your exact AGI crossover point live on Prexvo (free, zero login):\n"
             "https://prexvo.com/tools/rap-vs-ibr-calculator/?balance=60000&agi=95000&rate=6.5&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=rap-vs-ibr-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under HEA Section 493C, 34 CFR Part 685, and HHS Poverty Guidelines."
+            "Statutory Basis: Computed under P.L. 119-21 Section 82001, HEA Section 493C, 34 CFR Part 685, and 2026 HHS Poverty Guidelines."
         ),
         "tags": [
             "rap vs ibr calculator",
             "repayment assistance plan vs ibr",
             "student loan payment cap ibr",
             "hea section 493c ibr",
-            "225 poverty line student loans",
+            "pl 119-21 rap student loans",
             "prexvo",
             "prexvo tools",
         ],
@@ -5670,7 +6029,7 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "CALCULATE YOUR TIERED STANDARD AMORTIZATION:\n"
-            "Crossing the $60,000 Direct Consolidation balance threshold under 34 CFR 685.208 unlocks a 30-year fixed term, cutting a $65k loan payment from $738/mo to $411/mo.\n\n"
+            "Crossing the $60,000 Direct Consolidation balance threshold under 34 CFR 685.208 establishes a 30-year fixed term, cutting a $65k loan payment from $738/mo to $411/mo.\n\n"
             "Model your exact consolidation balance tier live on Prexvo:\n"
             "https://prexvo.com/tools/tiered-standard-calculator/?balance=65000&agi=85000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=tiered-standard-calculator-demo&utm_content=pinned_comment\n\n"
             "Statutory Basis: Computed under Title IV 34 CFR 685.208(c) fixed amortization schedules."
@@ -5739,7 +6098,7 @@ TOOL_YOUTUBE_METADATA = {
     },
     "pslf-qualifying-payment-simulator": {
         "title": "PSLF Qualifying Payment & Buyback Simulator [34 CFR 685.219]",
-        "preset_query": "balance=92000&agi=78000&rate=6.8&deps=0",
+        "preset_query": "balance=92000&agi=65000&rate=6.8&deps=0",
         "chapters": [
             "34 CFR 685.219 120-Payment PSLF Qualification Rules",
             "34 CFR 685.219(g) Hold Harmless Deferment Buyback Math",
@@ -5748,10 +6107,10 @@ TOOL_YOUTUBE_METADATA = {
         ],
         "pinned_comment": (
             "SIMULATE YOUR 120 PSLF PAYMENTS & BUYBACK:\n"
-            "Public-sector borrowers with $92,000 debt at $78,000 AGI save $11,737 across 120 PSLF payments on RAP and can buy back eligible forbearance months under 34 CFR 685.219(g).\n\n"
+            "Public-sector borrowers with $92,000 debt at $65,000 AGI pay $325.00/mo under 2026 RAP (vs $342.17/mo on New IBR) toward 100% tax-free 120-payment PSLF discharge and can buy back eligible forbearance months under 34 CFR 685.219(g).\n\n"
             "Model your PSLF forgiveness date and buyback lump sum on Prexvo:\n"
-            "https://prexvo.com/tools/pslf-qualifying-payment-simulator/?balance=92000&agi=78000&rate=6.8&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=pslf-qualifying-payment-simulator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under 34 CFR 685.219 and IRC Section 108(f) tax-free discharge rules."
+            "https://prexvo.com/tools/pslf-qualifying-payment-simulator/?balance=92000&agi=65000&rate=6.8&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=pslf-qualifying-payment-simulator-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under 34 CFR 685.219, P.L. 119-21 Section 82001, and IRC Section 108(f) tax-free discharge rules."
         ),
         "tags": [
             "pslf qualifying payment simulator",
@@ -5769,15 +6128,15 @@ TOOL_YOUTUBE_METADATA = {
         "chapters": [
             "Title IV Parent PLUS Single Consolidation ICR Restriction",
             "Two-Step Direct Consolidation Statutory Pathway",
-            "20% ICR ($1,196/mo) vs 10% RAP/IBR ($430/mo) Savings",
+            "20% ICR ($1,201/mo) vs 10% IBR ($534/mo) & RAP ($587/mo) Savings",
             "Interactive Double Consolidation Walkthrough",
         ],
         "pinned_comment": (
-            "UNLOCK 10% IDR ON PARENT PLUS LOANS:\n"
-            "On $110,000 in Parent PLUS debt at $88,000 AGI, completing a two-step Direct Consolidation drops payments from $1,196.67/mo (20% ICR) to $430.42/mo (10% RAP).\n\n"
+            "UNLOCK LOWER IDR ON PARENT PLUS LOANS:\n"
+            "On $110,000 in Parent PLUS debt at $88,000 AGI, completing a two-step Direct Consolidation drops payments from $1,200.67/mo (20% ICR) to $533.83/mo (10% New IBR) or $586.67/mo (8% tier RAP).\n\n"
             "Calculate your Parent PLUS double consolidation savings on Prexvo:\n"
             "https://prexvo.com/tools/parent-plus-double-consolidation/?balance=110000&agi=88000&rate=7.6&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=parent-plus-double-consolidation-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under Title IV 34 CFR 685.209 and 34 CFR 685.220 consolidation rules."
+            "Statutory Basis: Computed under Title IV 34 CFR 685.209, 34 CFR 685.220, and P.L. 119-21 Section 82001 rules."
         ),
         "tags": [
             "parent plus double consolidation calculator",
@@ -5791,19 +6150,19 @@ TOOL_YOUTUBE_METADATA = {
     },
     "save-plan-litigation-transition": {
         "title": "SAVE Plan to 2026 RAP Transition Calculator [34 CFR Part 685]",
-        "preset_query": "balance=55000&agi=62000&rate=6.2&deps=1",
+        "preset_query": "balance=55000&agi=65000&rate=6.2&deps=0",
         "chapters": [
             "Exiting Administrative SAVE Forbearance into Active IDR",
-            "5% to 10% Assessment Shift & 225% Poverty Exemption",
+            "P.L. 119-21 Tiered AGI RAP Shift & Dependent Deduction",
             "100% Unpaid Monthly Interest Subsidy Preservation",
             "Interactive SAVE to RAP Transition Walkthrough",
         ],
         "pinned_comment": (
             "CALCULATE YOUR POST-SAVE MONTHLY PAYMENT:\n"
-            "Moving from administrative SAVE forbearance into 2026 RAP on $55,000 debt ($62,000 AGI, family of 2) sets payments at $223.23/mo and waives $60.94/mo in unpaid interest.\n\n"
+            "Moving from administrative forbearance into 2026 RAP (P.L. 119-21 Section 82001) on $55,000 debt ($65,000 AGI) sets payments at $325.00/mo with 100% unpaid interest subsidy and up to $50/mo principal match.\n\n"
             "Model your exact SAVE-to-RAP transition payment live on Prexvo:\n"
-            "https://prexvo.com/tools/save-plan-litigation-transition/?balance=55000&agi=62000&rate=6.2&deps=1&utm_source=youtube&utm_medium=video&utm_campaign=save-plan-litigation-transition-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under Title IV 34 CFR Part 685 and HHS Poverty Guidelines."
+            "https://prexvo.com/tools/save-plan-litigation-transition/?balance=55000&agi=65000&rate=6.2&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=save-plan-litigation-transition-demo&utm_content=pinned_comment\n\n"
+            "Statutory Basis: Computed under P.L. 119-21 Section 82001 and Title IV 34 CFR Part 685."
         ),
         "tags": [
             "save plan transition calculator",
@@ -5829,7 +6188,8 @@ TOOL_YOUTUBE_METADATA = {
             "Refinancing $75,000 in 7.2% federal loans to a 5.2% private note saves $9,140 in interest only if your AGI exceeds the threshold where Title IV subsidies and forgiveness drop to $0.\n\n"
             "Run your federal vs private break-even audit live on Prexvo:\n"
             "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/?balance=75000&agi=110000&rate=7.2&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=student-loan-refinance-break-even-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under Title IV 34 CFR Part 685, Truth in Lending (12 CFR Part 1026), and IRC Section 221."
+            "Statutory Basis: Computed under Title IV 34 CFR Part 685, Truth in Lending (12 CFR Part 1026), and IRC Section 221.\n\n"
+            "Note: Private refinancing permanently forfeits federal protections (IBR, RAP, PSLF)."
         ),
         "tags": [
             "student loan refinance break even calculator",
@@ -5842,26 +6202,26 @@ TOOL_YOUTUBE_METADATA = {
         ],
     },
     "rap-payment-calculator": {
-        "title": "2026 Repayment Assistance Plan (RAP) Calculator [225% FPL]",
+        "title": "2026 Repayment Assistance Plan (RAP) Calculator [P.L. 119-21]",
         "preset_query": "balance=60000&agi=65000&rate=6.5&deps=0",
         "chapters": [
             "2026 Repayment Assistance Plan (RAP) Statutory Formula",
-            "225% HHS Poverty Line Deduction by Household Size",
-            "100% Unpaid Interest Waiver & Principal Protection",
+            "P.L. 119-21 Tiered AGI Brackets (1% to 10%) & Dependent Relief",
+            "100% Unpaid Interest Waiver & $50/mo Principal Match",
             "Interactive RAP Payment Calculator Walkthrough",
         ],
         "pinned_comment": (
             "CALCULATE YOUR 2026 RAP PAYMENT & INTEREST SUBSIDY:\n"
-            "Under the 2026 Repayment Assistance Plan, a single borrower at $65,000 AGI deducts $35,910.00 (225% FPL) and pays $242.42/mo with 100% unpaid interest waived ($82.58/mo subsidy on $60k at 6.5%).\n\n"
+            "Under the enacted 2026 Repayment Assistance Plan (P.L. 119-21 Section 82001), a single borrower at $65,000 AGI (6% tier) pays $325.00/mo with 100% unpaid interest waived, up to $50/mo matching principal credit, and 360-month forgiveness.\n\n"
             "Calculate your exact 2026 RAP obligation live on Prexvo:\n"
             "https://prexvo.com/tools/rap-payment-calculator/?balance=60000&agi=65000&rate=6.5&deps=0&utm_source=youtube&utm_medium=video&utm_campaign=rap-payment-calculator-demo&utm_content=pinned_comment\n\n"
-            "Statutory Basis: Computed under Title IV 34 CFR Part 685 and 2026 HHS Poverty Guidelines."
+            "Statutory Basis: Computed under P.L. 119-21 Section 82001 and Title IV 34 CFR Part 685."
         ),
         "tags": [
             "rap payment calculator",
             "2026 repayment assistance plan calculator",
             "rap student loan formula",
-            "225 federal poverty line calculator",
+            "pl 119-21 section 82001 rap",
             "34 cfr part 685 rap",
             "prexvo",
             "prexvo tools",
@@ -5951,7 +6311,7 @@ TOOL_YOUTUBE_METADATA = {
         "chapters": [
             "AICPA SSAE 18 (AT-C Section 205) Type I vs Type II Audit Scope",
             "External CPA Attestation Fees vs Continuous GRC Automation",
-            "Internal Engineering Labor Valuation at $121.67/hr BLS SOC 15-1212",
+            "Internal Engineering Labor Valuation at $121.67/hr BLS SOC 15-1212 Benchmark Estimate",
             "Interactive SOC 2 Audit Cost Calculator Walkthrough",
         ],
         "pinned_comment": (
@@ -6459,7 +6819,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         LIENBOND_DEFAULT_TOOLS,
     )
 
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     raw_title = tool.get("title", slug.replace("-", " ").title())
     raw_short = tool.get("short_title", "")
@@ -6523,7 +6883,7 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         elif slug == "tiered-standard-calculator":
             seg1_script = (
                 f"Under 34 CFR 685.208(c), Direct Consolidation Tiered Standard repayment sets fixed amortization terms from 10 to 30 years based strictly on total loan balance tiers. "
-                f"Crossing the $60,000 consolidation balance threshold unlocks the 30-year fixed amortization schedule for a {out_fmt} benchmark. "
+                f"Crossing the $60,000 consolidation balance threshold establishes the 30-year fixed amortization schedule for a {out_fmt} benchmark. "
                 f"Prexvo calculates your exact consolidation balance tier and monthly fixed obligations across loan portfolios."
             )
             seg2_script = (
@@ -6566,9 +6926,8 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
             )
         else:
             seg1_script = (
-                f"Under HEA Section 493C and Department of Education regulations, income-driven repayment plans protect discretionary income above the HHS Poverty Guidelines. "
-                f"The 2026 Repayment Assistance Plan increases this exemption to 225% of the federal poverty line while subsidizing unpaid interest for a {out_fmt} benchmark. "
-                f"Prexvo calculates your exact discretionary threshold and monthly obligations across household sizes."
+                f"Under P.L. 119-21 Section 82001, the 2026 Repayment Assistance Plan calculates payments across 1% to 10% tiered AGI brackets with 100% unpaid interest subsidy and up to $50/mo principal match for a {out_fmt} benchmark. "
+                f"Prexvo computes your exact RAP tier, 150% poverty IBR cap, and monthly obligations across household sizes."
             )
             seg2_script = (
                 "Federal student loan borrowers compare standard tiered amortization against income-driven repayment under 34 CFR Part 685. "
@@ -6834,7 +7193,7 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         LIENBOND_DEFAULT_TOOLS,
     )
 
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     raw_title = tool.get("title", slug.replace("-", " ").title())
     raw_short = tool.get("short_title", "")
@@ -6947,22 +7306,32 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         clean_desc = _sanitize_youtube_text(nl.join(desc_lines))
 
         default_pinned = curated.get("pinned_comment")
+        is_refinance = "refinanc" in slug.lower()
+        refi_pinned_note = (
+            "Note: Private refinancing permanently forfeits federal protections (IBR, RAP, PSLF)."
+            if is_refinance
+            else ""
+        )
         if not default_pinned:
-            pinned_lines = [
-                "CALCULATE YOUR MONTHLY REPAYMENT:",
-                f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
-                "",
-                "Run your exact numbers in sub-100ms on Prexvo (free, deterministic, zero login required):",
-                f"{pinned_cta_url}",
-                "",
-                "Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines.",
-            ]
-            clean_pinned_comment = nl.join(pinned_lines)
+            prexvo_notes = [refi_pinned_note] if refi_pinned_note else []
+            clean_pinned_comment = _fit_youtube_pinned_comment_to_limit(
+                header="CALCULATE YOUR MONTHLY REPAYMENT:",
+                sample_calc=sample_calc,
+                out_fmt=out_fmt,
+                cta_intro="Run your exact numbers in sub-100ms on Prexvo (free, deterministic, zero login required):",
+                pinned_cta_url=pinned_cta_url,
+                basis_line="Statutory Basis: Computed under Title IV 34 CFR Part 685 regulations and HHS Poverty Guidelines.",
+                extra_notes=prexvo_notes,
+                max_len=1000,
+            )
         else:
-            clean_pinned_comment = default_pinned
-            if out_fmt not in clean_pinned_comment:
-                clean_pinned_comment = f"{clean_pinned_comment}\nVerified Calculation Output: {out_fmt}"
-        clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
+            clean_pinned_comment = _fit_raw_youtube_pinned_comment(
+                default_pinned,
+                pinned_cta_url=pinned_cta_url,
+                out_fmt=out_fmt,
+                max_len=1000,
+                required_phrase=refi_pinned_note,
+            )
 
         slug_phrase = slug.replace("-", " ")
         slug_calc_tag = slug_phrase if "calculator" in slug_phrase.lower() else f"{slug_phrase} calculator"
@@ -7043,21 +7412,23 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
                 if is_gainhelm
                 else "Statutory Basis: Computed under official IRC regulations and FRED economic benchmarks."
             )
-            pinned_lines = [
-                "CALCULATE YOUR NUMBERS:",
-                f"Verified Proof: {sample_calc} (Output: {out_fmt}).",
-                "",
-                f"Run your exact numbers in sub-100ms on {brand_name} (free, deterministic, zero login required):",
-                f"{pinned_cta_url}",
-                "",
-                stat_basis_line,
-            ]
-            clean_pinned_comment = nl.join(pinned_lines)
+            eff_sample_calc = _ensure_gainhelm_benchmark_qualifier(sample_calc) if is_gainhelm else sample_calc
+            clean_pinned_comment = _fit_youtube_pinned_comment_to_limit(
+                header="CALCULATE YOUR NUMBERS:",
+                sample_calc=eff_sample_calc,
+                out_fmt=out_fmt,
+                cta_intro=f"Run your exact numbers in sub-100ms on {brand_name} (free, deterministic, zero login required):",
+                pinned_cta_url=pinned_cta_url,
+                basis_line=stat_basis_line,
+                max_len=1000,
+            )
         else:
-            clean_pinned_comment = default_pinned
-            if out_fmt not in clean_pinned_comment:
-                clean_pinned_comment = f"{clean_pinned_comment}\nVerified Calculation Output: {out_fmt}"
-        clean_pinned_comment = _sanitize_youtube_text(clean_pinned_comment)
+            clean_pinned_comment = _fit_raw_youtube_pinned_comment(
+                default_pinned, pinned_cta_url=pinned_cta_url, out_fmt=out_fmt, max_len=1000
+            )
+        if is_gainhelm:
+            clean_desc = _ensure_gainhelm_benchmark_qualifier(clean_desc)
+            clean_pinned_comment = _ensure_gainhelm_benchmark_qualifier(clean_pinned_comment)
 
         slug_phrase = slug.replace("-", " ")
         slug_calc_tag = slug_phrase if "calculator" in slug_phrase.lower() else f"{slug_phrase} calculator"
@@ -7135,7 +7506,7 @@ def generate_ghost_article(tool_or_slug: Any, property_id: str = "profithelm") -
     """
     from pseofactory.contracts import assert_no_forbidden_dashes, assert_no_personal_attribution
 
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
@@ -7218,7 +7589,7 @@ def generate_exact_match_github_gist(tool_or_slug: Any, property_id: str = "prof
     """
     from pseofactory.contracts import assert_no_forbidden_dashes
 
-    tool = _resolve_tool(tool_or_slug)
+    tool = _resolve_tool(tool_or_slug, property_id=property_id)
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
@@ -7321,9 +7692,9 @@ def generate_social_syndication_pack(
     Zero em-dashes. Zero en-dashes.
     """
     target = tool_slug or tool_or_slug
-    tool = _resolve_tool(target)
-    slug = tool["slug"]
     norm_prop = _normalize_property_id(property_id)
+    tool = _resolve_tool(target, property_id=norm_prop)
+    slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=norm_prop)
     url = proof["parameterized_url"]
 
@@ -7483,25 +7854,29 @@ def generate_ai_benchmark_nodes(tools = None, tenant: str = "profithelm") -> Dic
         prexvo_base = "https://prexvo.com"
         rap_ibr_md = """# Title IV RAP vs IBR Student Loan Repayment Statutory Benchmarks
 
-Under 34 CFR Part 685 and Higher Education Act Section 493C, federal student loan borrowers evaluate two primary income-driven formulas: the 2026 Repayment Assistance Plan (RAP) and Income-Based Repayment (IBR). RAP exempts 225% of the HHS Federal Poverty Guideline and waives 100% of unpaid monthly interest, whereas new IBR exempts 150% of poverty and caps monthly payments at the 10-year Standard schedule.
+Under P.L. 119-21 Section 82001, 34 CFR Part 685, and Higher Education Act Section 493C, federal student loan borrowers evaluate two primary income-driven formulas: the 2026 Repayment Assistance Plan (RAP) and Income-Based Repayment (IBR). RAP assesses tiered AGI percentages (1% to 10% of AGI, with a $10/mo minimum and $50/mo per-dependent deduction), waives 100% of unpaid monthly interest, and provides up to $50/mo matching principal relief over 360 months, whereas New IBR exempts 150% of 2026 HHS Poverty Guidelines ($15,960 single, $23,940 shield under 91 FR 1797) and caps monthly payments at the 10-year Standard schedule.
 
 | Plan Parameter | 2026 RAP Formula | New IBR (Post-July 2014) | Old IBR (Pre-July 2014) | Statutory Authority |
 | :--- | :--- | :--- | :--- | :--- |
-| Poverty Exemption | 225% HHS Poverty | 150% HHS Poverty | 150% HHS Poverty | 34 CFR 685.209 |
-| Assessment Rate | 10% discretionary | 10% discretionary | 15% discretionary | HEA Section 493C |
-| Unpaid Interest | 100% monthly subsidy | Subsidized 3 years only | Capitalizes on exit | 34 CFR 685.209(b) |
-| Payment Cap | Uncapped by standard | 10-year Standard cap | 10-year Standard cap | 34 CFR 685.221 |
+| Income Basis / Exemption | Tiered AGI (1% to 10%, $50/dep) | 150% HHS Poverty ($23,940) | 150% HHS Poverty ($23,940) | P.L. 119-21 Sec. 82001 / 34 CFR 685.209 |
+| Assessment Rate | 1% to 10% AGI (6% at $65k AGI) | 10% discretionary | 15% discretionary | P.L. 119-21 Sec. 82001 / HEA Sec. 493C |
+| Unpaid Interest & Principal | 100% subsidy + $50/mo match | Subsidized 3 years only | Capitalizes on exit | P.L. 119-21 Sec. 82001 / 34 CFR 685.209(b) |
+| Payment Cap & Horizon | Uncapped; 360 months | 10-year Standard cap; 240 mo | 10-year Standard cap; 300 mo | 34 CFR 685.221 |
 
-On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer, $35,910.00 225% FPL exemption), RAP yields a $242.42 monthly payment with an $82.58 monthly unpaid interest subsidy, compared to $342.17 under new IBR."""
+On a $60,000 Direct Loan balance at 6.5% interest and $65,000 AGI (single filer, 0 dependents), 2026 RAP's 6% AGI tier yields a $325.00 monthly payment with 100% unpaid interest subsidy and up to $50/mo matching principal credit, compared to $342.17 under New IBR."""
 
         rap_ibr_json = {
             "topic": "Title IV RAP vs IBR Student Loan Repayment",
             "plan_year": 2026,
-            "statutory_authority": ["34 CFR Part 685", "HEA Section 493C", "2026 HHS Poverty Guidelines"],
-            "rap_poverty_multiplier": 2.25,
+            "statutory_authority": ["P.L. 119-21 Section 82001", "34 CFR Part 685", "HEA Section 493C", "2026 HHS Poverty Guidelines (91 FR 1797)"],
+            "rap_tier_65k_agi_rate": 0.06,
+            "rap_forgiveness_months": 360,
+            "rap_unpaid_interest_subsidy_pct": 100.0,
+            "rap_principal_match_monthly_cap": 50.0,
             "ibr_poverty_multiplier": 1.50,
+            "hhs_poverty_2026_1person": 15960.0,
             "benchmarks": [
-                {"plan": "rap_2026", "poverty_exemption_pct": 225, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 242.42, "monthly_interest_subsidy_usd": 82.58},
+                {"plan": "rap_2026", "agi_tier_rate_pct": 6.0, "sample_60k_65k_agi_payment_usd": 325.00, "principal_match_monthly_cap_usd": 50.0, "forgiveness_months": 360},
                 {"plan": "new_ibr", "poverty_exemption_pct": 150, "rate_pct": 10.0, "sample_60k_65k_agi_payment_usd": 342.17, "monthly_interest_subsidy_usd": 0.0},
                 {"plan": "old_ibr", "poverty_exemption_pct": 150, "rate_pct": 15.0, "sample_60k_65k_agi_payment_usd": 513.25, "monthly_interest_subsidy_usd": 0.0},
             ],
@@ -7536,7 +7911,7 @@ Under 34 CFR 685.209(c) and 34 CFR 685.220, Direct Parent PLUS loans are statuto
 | :--- | :--- | :--- | :--- | :--- |
 | Unconsolidated PLUS | Standard / Graduated / Extended | Fixed amortization | 0% | 34 CFR 685.208 |
 | Single Consolidation | Income-Contingent (ICR) | 20% discretionary | 100% HHS Poverty | 34 CFR 685.209(c) |
-| Double Consolidation | IBR / RAP (Pre-Sunset Cutoff) | 10% to 15% | 150% to 225% Poverty | 34 CFR 685.220 |
+| Double Consolidation | IBR / RAP (Pre-Sunset Cutoff) | 10% to 15% IBR / 1%-10% RAP | 150% FPL (IBR) / Tiered AGI (RAP) | 34 CFR 685.220 / P.L. 119-21 |
 
 Consolidation weighted interest rates are rounded up to the nearest one-eighth of one percent (0.125%) under 34 CFR 685.220(f)."""
 
@@ -7904,7 +8279,7 @@ This directory contains deterministic benchmark matrices and statutory reference
 - **Section 1031 Like-Kind Exchange**: [section_1031_benchmarks.md](./section_1031_benchmarks.md) (IRC Section 1031, Section 1250)
 - **Section 409A Stock Valuation**: [section_409a_benchmarks.md](./section_409a_benchmarks.md) (IRC Section 409A)
 - **Section 1202 QSBS Gain Exclusion**: [section_1202_benchmarks.md](./section_1202_benchmarks.md) (IRC Section 1202)
-- **IRS 2026/2027 Marginal Tax Brackets**: [tax_brackets_benchmarks.md](./tax_brackets_benchmarks.md) (IRC Section 1, TCJA Sunset)
+- **IRS 2026/2027 Marginal Tax Brackets**: [tax_brackets_benchmarks.md](./tax_brackets_benchmarks.md) (IRC Section 1(j), OBBBA P.L. 119-21)
 - **SaaS Startup Runway and Net Burn**: [saas_runway_benchmarks.md](./saas_runway_benchmarks.md) (FASB ASC 205-40)
 - **2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) (IRC Section 179, 1031, 1401, FASB ASC 205-40)
 
@@ -7970,8 +8345,8 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
         citables = [
             {
                 "id": "stat-rap-vs-ibr-65k",
-                "headline_stat": "In 2026, a borrower with $60,000 in federal Direct Loans and $65,000 AGI pays $242.42 per month under the Repayment Assistance Plan (RAP) compared to $342.17 under new IBR, while receiving an $82.58 monthly unpaid interest subsidy under 34 CFR 685.209.",
-                "statutory_authority": "34 CFR 685.209, HEA Section 493C",
+                "headline_stat": "In 2026, a borrower with $60,000 in federal Direct Loans and $65,000 AGI pays $325.00 per month under the enacted 2026 Repayment Assistance Plan (RAP 6% AGI tier, P.L. 119-21 Section 82001) compared to $342.17 under New IBR, while receiving a 100% unpaid interest subsidy and up to $50/mo matching principal credit.",
+                "statutory_authority": "P.L. 119-21 Section 82001, 34 CFR 685.209, HEA Section 493C",
                 "canonical_calculator_url": f"{base_url}/tools/rap-vs-ibr-calculator/",
             },
             {
@@ -8028,8 +8403,8 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
             },
             {
                 "id": "stat-ncci-emr-workers-comp-impact",
-                "headline_stat": "Under the NCCI Experience Rating Plan Manual and 29 CFR Part 1904, a 1.15 debit Experience Modification Rate (EMR) paired with a 5.0% safety committee credit adjusts a $52,000 manual workers compensation premium to $56,810.00.",
-                "statutory_authority": "NCCI Experience Rating Plan Rule 2-E, 29 CFR Part 1904",
+                "headline_stat": "Under the NCCI Experience Rating Plan Manual (Rule 2-E) and State Workers Compensation Rating Bureau Manuals, a 1.15 debit Experience Modification Rate (EMR) paired with a 5.0% safety committee credit adjusts a $52,000 manual workers compensation premium to $56,810.00.",
+                "statutory_authority": "NCCI Experience Rating Plan Manual, State Workers Compensation Rating Bureau Manuals",
                 "canonical_calculator_url": f"{base_url}/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/",
             },
         ]
@@ -8099,7 +8474,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
         briefs = [
             {
                 "campaign_id": "reclaim-prexvo-save-to-rap-2026",
-                "outdated_target_pattern": "Deprecated 2024 SAVE Plan 5% Undergraduate Calculators & Dead Federal Aid Estimator Links",
+                "outdated_target_pattern": "Deprecated 2024 SAVE Plan Undergraduate Calculators & Dead Federal Aid Estimator Links",
                 "target_resource_segments": [
                     "University Financial Aid Exit Counseling Resource Pages (.edu)",
                     "Nonprofit 501(c)(3) HR Public Service Loan Forgiveness Benefits Portals",
@@ -8175,7 +8550,7 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                     "Regional CPA Firm Client Tax Planning Resource Directories",
                 ],
                 "replacement_url": "https://profithelm.com/tools/section-179-calculator/",
-                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out), $32,000 heavy SUV cap under IRS Rev. Proc. 2025-32, and 100% bonus depreciation under P.L. 119-21 Section 70301.",
+                "statutory_upgrade_angle": "Updated for 2026 IRC Section 179 ($2,560,000 general equipment cap and $4,090,000 phase-out threshold). Heavy SUVs follow the $32,000 cap under IRS Rev. Proc. 2025-32 alongside 100% bonus depreciation under P.L. 119-21 Section 70301.",
             },
             {
                 "campaign_id": "reclaim-ph-1031-boot-form8824",
@@ -8198,37 +8573,37 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
 PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     "student-loan-repayment-calculator": {
         "query": "balance=60000&agi=65000&rate=6.5&deps=0",
-        "x_hook": "on $60k student debt at $65k AGI (single), 2026 RAP cuts payments to $242.42/mo (+$82.58 interest subsidy) vs $342.17 on IBR.",
-        "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the 2026 RAP formula cuts monthly payments to $242.42 while subsidizing $82.58/month in unpaid interest.",
+        "x_hook": "on $60k student debt at $65k AGI (single), 2026 RAP sets payments at $325.00/mo (+100% interest subsidy & $50/mo match) vs $342.17 on IBR.",
+        "li_hook": "On $60,000 in federal student debt at $65,000 AGI, the enacted 2026 RAP 6% AGI tier (P.L. 119-21 Section 82001) sets payments at $325.00/mo vs $342.17 under New IBR.",
         "li_body": (
-            "Borrowers comparing Title IV repayment options under 34 CFR Part 685 face two distinct statutory formulas:\n\n"
-            "• 225% Poverty Exemption (RAP): Protects $35,910.00 of income for a single borrower ($48,690.00 for a 2-person household), assessing 10% on remaining discretionary income ($242.42/month at $65k single AGI).\n"
-            "• 100% Unpaid Interest Subsidy: When $242.42 falls short of the $325.00 monthly interest accrual at 6.5%, the Department of Education waives the $82.58 difference every month.\n"
-            "• IBR Standard Ceiling: Under HEA Section 493C, IBR charges $342.17/month at $65k AGI but caps payments at the 10-year Standard schedule if income rises above $115,000."
+            "Borrowers comparing Title IV repayment options under P.L. 119-21 Section 82001 and 34 CFR Part 685 face two distinct statutory formulas:\n\n"
+            "• Tiered AGI Assessment (RAP): Uses 1% to 10% AGI tiers ($10/mo minimum, $50/mo dependent reduction), setting $325.00/month at $65,000 single AGI (6% tier).\n"
+            "• 100% Unpaid Interest Subsidy & Match: Waives 100% of unpaid monthly interest above your required RAP payment and provides up to $50/mo in matching principal relief.\n"
+            "• IBR Standard Ceiling: Under HEA Section 493C, New IBR protects 150% of 2026 HHS Poverty Guidelines ($23,940.00), yielding $342.17/month at $65k AGI and capping at the 10-year Standard schedule."
         ),
         "fb_body": (
-            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (single filer, $35,910.00 225% FPL exemption), the 2026 Repayment Assistance Plan (RAP) calculates a $242.42 monthly payment compared to $342.17 under new IBR.\n\n"
-            "Because $60,000 at 6.5% accrues $325.00 in interest each month, RAP's 100% unpaid interest subsidy waives the remaining $82.58 every month so your principal never grows. Grounded in statutory Title IV 34 CFR Part 685 rules and HHS Poverty Guidelines."
+            "If you carry $60,000 in federal student loans at 6.5% interest on a $65,000 AGI (single filer, 0 dependents), the enacted 2026 Repayment Assistance Plan (RAP, P.L. 119-21 Section 82001) calculates a $325.00 monthly payment in the 6% AGI tier compared to $342.17 under New IBR.\n\n"
+            "RAP waives 100% of unpaid monthly interest and applies up to $50/mo in matching principal relief across a 360-month forgiveness horizon. Grounded in P.L. 119-21 Section 82001, Title IV 34 CFR Part 685, and 2026 HHS Poverty Guidelines ($15,960)."
         ),
     },
     "rap-vs-ibr-calculator": {
         "query": "balance=60000&agi=95000&rate=6.5&deps=1",
-        "x_hook": "at $95k AGI on $60k debt (family of 2), uncapped RAP climbs to $489.05/mo across 360 months (30 years) while IBR caps at $78,617 total.",
-        "li_hook": "Crossing $95,000 AGI flips the Title IV math: RAP charges $489.05/month across 360 months (30 years) with no payment cap, while IBR locks a lower lifetime cost.",
+        "x_hook": "at $65k AGI, 2026 RAP sets payments at $325.00/mo vs $342.17 IBR; at $95k AGI, uncapped 9% RAP hits $662.50/mo while IBR caps at $78,617 total.",
+        "li_hook": "At $65,000 AGI, 2026 RAP pays $325.00/month (vs $342.17 on New IBR); at $95,000 AGI, 9% RAP rises to $662.50/month while IBR caps lifetime cost.",
         "li_body": (
-            "While the 2026 Repayment Assistance Plan (RAP) lowers monthly bills for moderate earners via the 225% HHS Poverty floor, high-income borrowers hit a structural trap:\n\n"
-            "• Uncapped RAP Escalation: At $95,000 AGI ($60k balance, 6.5% rate, 2-person $48,690.00 225% FPL), RAP charges $489.05/month across a 360-month (30-year) forgiveness horizon under P.L. 119-21 Section 82001.\n"
-            "• Statutory IBR Ceiling: Under HEA Section 493C, Income-Based Repayment strictly caps monthly bills at the 10-year Standard amount, retiring the loan in 158 months for $78,617.64.\n"
-            "• Crossover Point: Once AGI exceeds 1.4x your principal balance, IBR's 10-year ceiling prevents uncapped 10% discretionary assessments."
+            "While the 2026 Repayment Assistance Plan (RAP) under P.L. 119-21 Section 82001 lowers monthly bills for moderate earners ($325.00/month at $65,000 AGI in the 6% tier vs $342.17/month on New IBR), higher-income borrowers hit a structural trap:\n\n"
+            "• Uncapped Tiered RAP Escalation: At $95,000 AGI ($60k balance, 6.5% rate, 1 dependent $50/mo offset), the 9% RAP tier charges $662.50/month across a 360-month (30-year) forgiveness horizon.\n"
+            "• Statutory IBR Ceiling: Under HEA Section 493C, Income-Based Repayment shields 150% of 2026 FPL and strictly caps monthly bills at the 10-year Standard amount, retiring the loan in 158 months for $78,617.64.\n"
+            "• Crossover Point: Once AGI reaches the 8%-10% RAP tiers ($80,000+), IBR's 10-year ceiling prevents uncapped AGI assessments."
         ),
         "fb_body": (
-            "Most borrowers assume the new 2026 RAP plan is always cheaper than IBR because RAP uses a 225% poverty exemption instead of 150%. That holds true at $65,000 single AGI ($242.42/mo on RAP vs $342.17/mo on IBR).\n\n"
-            "However, RAP has no 10-year Standard payment cap and requires 360 months (30 years) for forgiveness. At $95,000 AGI on a $60,000 loan, IBR caps your payment and pays off the balance in 158 months for $78,617. Grounded in statutory HEA Section 493C and 34 CFR Part 685."
+            "Many borrowers assume the 2026 RAP plan is always cheaper than IBR. That holds true at $65,000 single AGI ($325.00/mo on 6% RAP vs $342.17/mo on New IBR).\n\n"
+            "However, RAP has no 10-year Standard payment cap and requires 360 months (30 years) for forgiveness. At $95,000 AGI on a $60,000 loan (family of 2), uncapped 9% RAP charges $662.50/mo across 360 months, whereas IBR caps your payment and pays off the balance in 158 months for $78,617. Grounded in P.L. 119-21 Section 82001, HEA Section 493C, and 34 CFR Part 685."
         ),
     },
     "tiered-standard-calculator": {
         "query": "balance=65000&agi=85000&rate=6.5&deps=0",
-        "x_hook": "consolidating $65k in federal loans unlocks 30-year Tiered Standard ($410.84/mo vs $738.06/mo on 10-yr standard).",
+        "x_hook": "consolidating $65k in federal loans establishes 30-year Tiered Standard ($410.84/mo vs $738.06/mo on 10-yr standard).",
         "li_hook": "Consolidating $65,000 in federal student debt extends Tiered Standard amortization from 10 years to 30 years under 34 CFR 685.208, cutting monthly bills by 44.3%.",
         "li_body": (
             "Under 34 CFR 685.208(c), Direct Consolidation Loans determine fixed amortization terms strictly by total principal balance tiers:\n\n"
@@ -8237,7 +8612,7 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
             "• $60,000 and Above: Full 30-year fixed amortization ($410.84/month at 6.5% vs $738.06/month on the 10-year baseline), trading lower monthly cash outflow for higher cumulative interest."
         ),
         "fb_body": (
-            "Under Title IV 34 CFR 685.208, crossing the $60,000 Direct Consolidation balance threshold unlocks a 30-year fixed Tiered Standard repayment schedule regardless of your income.\n\n"
+            "Under Title IV 34 CFR 685.208, crossing the $60,000 Direct Consolidation balance threshold establishes a 30-year fixed Tiered Standard repayment schedule regardless of your income.\n\n"
             "On a $65,000 balance at 6.5%, extending from the 10-year standard plan ($738.06/mo) to the 30-year tier drops the required monthly payment to $410.84/mo, though cumulative interest rises over the longer horizon. Grounded in statutory 34 CFR 685.208 amortization schedules."
         ),
     },
@@ -8249,11 +8624,11 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
             "Evaluating the 2026 Pay As You Earn (PAYE) sunset under 34 CFR 685.209 requires comparing three interacting statutory levers:\n\n"
             "• 20-Year vs 25-Year Graduate Horizon: PAYE forgives remaining graduate debt at 240 qualifying payments, whereas switching to legacy IBR extends graduate forgiveness to 300 payments.\n"
             "• 10% Capitalization Cap: PAYE caps unpaid interest capitalization at 10% of original principal if you leave the plan or exceed the partial financial hardship threshold.\n"
-            "• RAP Subsidy Trade-Off: Switching to RAP increases the poverty exemption from 150% to 225% FPL and waives 100% of unpaid interest, but removes the 10-year Standard payment ceiling."
+            "• RAP Subsidy Trade-Off: Switching to 2026 RAP (P.L. 119-21 Section 82001) uses 1% to 10% tiered AGI pricing and waives 100% of unpaid interest with up to $50/mo principal match, but removes the 10-year Standard cap and requires 360 months."
         ),
         "fb_body": (
-            "If you hold graduate Direct Loans and are currently enrolled in PAYE, switching plans without modeling the 240-month vs 300-month forgiveness clock can add 5 extra years of payments.\n\n"
-            "While the 2026 RAP plan offers a larger 225% poverty exemption and 100% unpaid interest subsidy, PAYE preserves the 10-year Standard payment cap and 20-year graduate forgiveness window for grandfathered borrowers. Grounded in statutory 34 CFR 685.209 rules."
+            "If you hold graduate Direct Loans and are currently enrolled in PAYE, switching plans without modeling the 240-month vs 300-month vs 360-month forgiveness clock can add years of payments.\n\n"
+            "While the 2026 RAP plan offers tiered 1%-10% AGI brackets, 100% unpaid interest subsidy, and up to $50/mo principal match, PAYE preserves the 10-year Standard payment cap and 20-year graduate forgiveness window for grandfathered borrowers. Grounded in statutory 34 CFR 685.209 and P.L. 119-21 rules."
         ),
     },
     "icr-repayment-calculator": {
@@ -8272,33 +8647,33 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         ),
     },
     "save-plan-transition-to-rap-repayment-calculator": {
-        "query": "balance=55000&agi=62000&rate=6.2&deps=0",
-        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $217.42/mo with 100% interest subsidy.",
-        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
+        "query": "balance=55000&agi=65000&rate=6.2&deps=0",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($65k AGI) sets payments at $325.00/mo with 100% interest subsidy.",
+        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan receive 100% unpaid interest subsidy and up to $50/mo principal match under P.L. 119-21 Section 82001.",
         "li_body": (
-            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
-            "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,910.00 225% FPL exemption) pays $217.42/month and receives a $66.75/month federal interest subsidy.\n"
-            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
+            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment under P.L. 119-21 Section 82001, three statutory rules govern monthly cash flow:\n\n"
+            "• Tiered AGI Assessment: 2026 RAP assesses 1% to 10% of AGI across both undergraduate and graduate balances ($10/mo floor, $50/mo deduction per dependent).\n"
+            "• Permanent Interest Waiver & Match: On a $55,000 balance at $65,000 single AGI (6% tier), the monthly payment is $325.00 with 100% of unpaid monthly interest waived and up to $50/mo matching principal relief.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward 360-month RAP and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
-            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,910.00 225% FPL exemption), RAP sets the monthly payment at $217.42 and waives the remaining $66.75 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP, P.L. 119-21 Section 82001) retain two critical protections: 100% unpaid monthly interest waiver and up to $50/mo in matching principal relief.\n\n"
+            "For a single borrower with $55,000 in loans and $65,000 AGI in the 6% tier, RAP sets the monthly payment at $325.00 so the balance never balloons. Grounded in P.L. 119-21 Section 82001 and 34 CFR Part 685 rules."
         ),
     },
     "save-plan-litigation-transition": {
-        "query": "balance=55000&agi=62000&rate=6.2&deps=0",
-        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($62k AGI) sets payments at $217.42/mo with 100% interest subsidy.",
-        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan retain the 225% poverty exemption and 100% unpaid interest subsidy under 34 CFR Part 685.",
+        "query": "balance=55000&agi=65000&rate=6.2&deps=0",
+        "x_hook": "moving from SAVE forbearance to 2026 RAP on $55k debt ($65k AGI) sets payments at $325.00/mo with 100% interest subsidy.",
+        "li_hook": "Borrowers exiting administrative SAVE forbearance into the 2026 RAP plan receive 100% unpaid interest subsidy and up to $50/mo principal match under P.L. 119-21 Section 82001.",
         "li_body": (
-            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment, three statutory changes govern monthly cash flow:\n\n"
-            "• Assessment Rate Alignment: RAP assesses 10% of discretionary income above 225% of HHS Poverty Guidelines across both undergraduate and graduate balances.\n"
-            "• Permanent Interest Waiver: On a $55,000 balance at 6.2% ($284.17 monthly interest), a single borrower at $62,000 AGI ($35,910.00 225% FPL exemption) pays $217.42/month and receives a $66.75/month federal interest subsidy.\n"
-            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward IDR and 120-payment PSLF forgiveness horizons."
+            "As borrowers transition from administrative SAVE forbearance into active 2026 Title IV repayment under P.L. 119-21 Section 82001, three statutory rules govern monthly cash flow:\n\n"
+            "• Tiered AGI Assessment: 2026 RAP assesses 1% to 10% of AGI across both undergraduate and graduate balances ($10/mo floor, $50/mo deduction per dependent).\n"
+            "• Permanent Interest Waiver & Match: On a $55,000 balance at $65,000 single AGI (6% tier), the monthly payment is $325.00 with 100% of unpaid monthly interest waived and up to $50/mo matching principal relief.\n"
+            "• Qualifying Payment Credit: Transitioning out of administrative forbearance restarts active monthly credit toward 360-month RAP and 120-payment PSLF forgiveness horizons."
         ),
         "fb_body": (
-            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP) keep the two most important protections: the 225% federal poverty line deduction and the 100% unpaid monthly interest subsidy.\n\n"
-            "For a single borrower with $55,000 in loans at 6.2% and $62,000 AGI ($35,910.00 225% FPL exemption), RAP sets the monthly payment at $217.42 and waives the remaining $66.75 in monthly interest so the balance never balloons. Grounded in statutory 34 CFR Part 685 rules."
+            "Borrowers moving out of administrative SAVE forbearance into the 2026 Repayment Assistance Plan (RAP, P.L. 119-21 Section 82001) retain two critical protections: 100% unpaid monthly interest waiver and up to $50/mo in matching principal relief.\n\n"
+            "For a single borrower with $55,000 in loans and $65,000 AGI in the 6% tier, RAP sets the monthly payment at $325.00 so the balance never balloons. Grounded in P.L. 119-21 Section 82001 and 34 CFR Part 685 rules."
         ),
     },
     "pslf-qualifying-payment-and-buyback-calculator": {
@@ -8317,18 +8692,18 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         ),
     },
     "pslf-qualifying-payment-simulator": {
-        "query": "balance=92000&agi=78000&rate=6.8&deps=0",
-        "x_hook": "for PSLF borrowers with $92k debt at $78k AGI, 2026 RAP cuts qualifying payments by $97.81/mo ($11,737 saved).",
-        "li_hook": "Public-sector borrowers pursuing 120-payment PSLF forgiveness save $11,737 across 10 years by pairing 225% FPL RAP payments with IRC Section 108(f) tax-free discharge.",
+        "query": "balance=92000&agi=65000&rate=6.8&deps=0",
+        "x_hook": "with 84 certified PSLF payments, 36 remaining 2026 RAP payments at $340.00/mo ($12,240 outflow) reach $62,760 tax-free discharge.",
+        "li_hook": "Public-sector borrowers at 84 certified payments need 36 remaining 2026 RAP payments at $340.00/mo ($12,240 outflow) toward $62,760 tax-free PSLF discharge under 34 CFR 685.219.",
         "li_body": (
             "Under 34 CFR 685.219, Public Service Loan Forgiveness (PSLF) discharges 100% of remaining Direct Loan principal and interest after 120 qualifying monthly payments:\n\n"
-            "• Maximizing Forgiveness Principal: Because PSLF discharge is 100% federal tax-free under IRC Section 108(f), minimizing your monthly qualifying payment directly increases net debt forgiveness.\n"
-            "• RAP vs IBR Monthly Spread: At $78,000 AGI ($92k balance, 6.8% rate), RAP's 225% poverty exemption reduces the qualifying payment by $97.81/month compared to 150% FPL IBR.\n"
+            "• Maximizing Forgiveness Principal: Because PSLF discharge is 100% federal tax-free under IRC Section 108(f), minimizing your remaining payments (36 remaining P.L. 119-21 Section 82001 RAP payments at $340.00/mo = $12,240 total outflow) maximizes the $62,760 tax-free discharge.\n"
+            "• RAP vs IBR Monthly Spread: At $65,000 single AGI ($92k balance, 6.8% rate), 6% tiered RAP under P.L. 119-21 ($325.00/mo) reduces the qualifying payment by $17.17/month compared to 150% FPL New IBR ($342.17/mo), saving $2,060.40 across 120 payments.\n"
             "• Hold Harmless Buyback: Under 34 CFR 685.219(g), borrowers with 120 months of certified employment can retroactively buy back eligible forbearance months."
         ),
         "fb_body": (
-            "When you are on the 120-payment Public Service Loan Forgiveness (PSLF) track under 34 CFR 685.219, every dollar you save on your monthly IDR payment increases the tax-free balance forgiven at month 120 under IRC Section 108(f).\n\n"
-            "For a public-sector borrower with $92,000 in Direct Loans at $78,000 AGI, using the 225% poverty floor under RAP instead of 150% FPL reduces payments by $97.81/month ($11,737 saved over 120 months). Grounded in statutory 34 CFR 685.219 rules."
+            "When you are on the 120-payment Public Service Loan Forgiveness (PSLF) track under 34 CFR 685.219, 36 remaining P.L. 119-21 Section 82001 RAP payments at $340.00/mo ($12,240 total outflow) reach $62,760 in 100% federal tax-free discharge under IRC Section 108(f).\n\n"
+            "At $65,000 single AGI, using the 6% P.L. 119-21 RAP tier ($325.00/mo) instead of 150% FPL New IBR ($342.17/mo) saves $2,060.40 across 120 months. Grounded in statutory 34 CFR 685.219 and P.L. 119-21 rules."
         ),
     },
     "pslf-buyback-calculator": {
@@ -8348,32 +8723,32 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
     },
     "parent-plus-double-consolidation-repayment-calculator": {
         "query": "balance=110000&agi=88000&rate=7.6&deps=0",
-        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430.42/mo (10% RAP).",
-        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,200.67/mo (ICR) to $533.83/mo (IBR) or $586.67/mo (RAP).",
+        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% New IBR or 8% tiered RAP via two-step Direct Consolidation cuts monthly bills from $1,200.67 (ICR) to $533.83-$586.67.",
         "li_body": (
             "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
-            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% FPL = $1,196.67/month at $88k AGI).\n"
-            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, unlocking 10% RAP/IBR ($430.42/month, saving $766.25/month).\n"
+            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% 2026 FPL = $1,200.67/month at $88k AGI).\n"
+            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, accessing 10% New IBR ($533.83/month, saving $666.84/month) or 8% tiered RAP ($586.67/month).\n"
             "• Statutory Deadline Sensitivity: Borrowers must complete both consolidation steps before statutory grandfathering windows close."
         ),
         "fb_body": (
-            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the poverty line ($1,196.67/month).\n\n"
-            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% IDR/RAP formulas ($430.42/month, saving $9,195/year). Grounded in statutory Title IV 34 CFR 685.209 rules."
+            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the 2026 poverty line ($1,200.67/month).\n\n"
+            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% New IBR ($533.83/month, saving $8,002/year) or 8% tiered RAP ($586.67/month). Grounded in statutory Title IV 34 CFR 685.209 and P.L. 119-21 rules."
         ),
     },
     "parent-plus-double-consolidation": {
         "query": "balance=110000&agi=88000&rate=7.6&deps=0",
-        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,196/mo (ICR) to $430.42/mo (10% RAP).",
-        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% RAP via two-step Direct Consolidation cuts monthly obligations from $1,196.67 (ICR) to $430.42.",
+        "x_hook": "on $110k Parent PLUS debt at $88k AGI, double consolidation cuts bills from $1,200.67/mo (ICR) to $533.83/mo (IBR) or $586.67/mo (RAP).",
+        "li_hook": "On $110,000 in Parent PLUS debt at $88,000 AGI, unlocking 10% New IBR or 8% tiered RAP via two-step Direct Consolidation cuts monthly bills from $1,200.67 (ICR) to $533.83-$586.67.",
         "li_body": (
             "Parent PLUS loans carry the highest statutory interest rates under Title IV and are barred from direct enrollment in 10% IDR plans unless consolidated properly:\n\n"
-            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% FPL = $1,196.67/month at $88k AGI).\n"
-            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, unlocking 10% RAP/IBR ($430.42/month, saving $766.25/month).\n"
+            "• Single Consolidation Trap: Consolidating Parent PLUS loans once restricts the new Direct Consolidation Loan to Income-Contingent Repayment (20% of income above 100% 2026 FPL = $1,200.67/month at $88k AGI).\n"
+            "• Two-Step Consolidation Path: Consolidating two separate Parent PLUS loan groups into two Direct Consolidation Loans and then consolidating those two loans removes the Parent PLUS flag, accessing 10% New IBR ($533.83/month, saving $666.84/month) or 8% tiered RAP ($586.67/month).\n"
             "• Statutory Deadline Sensitivity: Borrowers must complete both consolidation steps before statutory grandfathering windows close."
         ),
         "fb_body": (
-            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the poverty line ($1,196.67/month).\n\n"
-            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% IDR/RAP formulas ($430.42/month, saving $9,195/year). Grounded in statutory Title IV 34 CFR 685.209 rules."
+            "A single Direct Consolidation of $110,000 in Parent PLUS loans at $88,000 AGI restricts you to the ICR plan, which takes 20% of income above 100% of the 2026 poverty line ($1,200.67/month).\n\n"
+            "When two separate Parent PLUS loan groups are consolidated separately and then merged into a final Direct Consolidation Loan before the grandfathering cutoff, the loan qualifies for 10% New IBR ($533.83/month, saving $8,002/year) or 8% tiered RAP ($586.67/month). Grounded in statutory Title IV 34 CFR 685.209 and P.L. 119-21 rules."
         ),
     },
     "student-loan-refinance-break-even-calculator": {
@@ -8382,28 +8757,28 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
         "li_hook": "Refinancing $75,000 in 7.2% Direct Loans into a 5.2% private note saves $9,140 in interest only when your AGI exceeds the Title IV subsidy threshold, because refinancing federal student loans permanently waives federal protections.",
         "li_body": (
             "Evaluating a federal-to-private student loan refinance under Title IV (34 CFR Part 685) and Truth in Lending (12 CFR Part 1026) requires pricing three statutory forfeitures:\n\n"
-            "• Unpaid Interest Subsidy Value: Under 2026 RAP, the Department of Education waives 100% of unpaid monthly interest above your 225% FPL payment.\n"
-            "• Tax-Free PSLF & IDR Forgiveness: Refinancing federal student loans permanently waives federal protections, including IRC Section 108(f) public service discharge and 240/300-month IDR forgiveness.\n"
+            "• Unpaid Interest Subsidy Value: Under 2026 RAP (P.L. 119-21 Section 82001), the Department of Education waives 100% of unpaid monthly interest above your tiered AGI payment.\n"
+            "• Tax-Free PSLF & IDR Forgiveness: Refinancing federal student loans permanently waives federal protections, including IRC Section 108(f) public service discharge and 360-month RAP / 240-month IBR forgiveness.\n"
             "• Net Present Value Break-Even Spread: A private APR must beat your effective subsidy-adjusted federal rate by at least 150 to 200 bps to justify losing statutory forbearance."
         ),
         "fb_body": (
             "Before refinancing $75,000 in 7.2% federal student loans into a 5.2% private rate (which saves $9,140 in nominal interest only when federal subsidies equal $0), borrowers must price the exact dollar value of forfeited Title IV protections because refinancing federal student loans permanently waives federal protections.\n\n"
-            "If your AGI qualifies you for 225% FPL RAP interest subsidies or 120-payment PSLF forgiveness under 34 CFR 685.219, a lower private rate can still increase your net lifetime out-of-pocket cost. Grounded in statutory Title IV 34 CFR Part 685 and 12 CFR Part 1026 rules."
+            "If your AGI qualifies you for 2026 RAP interest subsidies and matching principal relief or 120-payment PSLF forgiveness under 34 CFR 685.219, a lower private rate can still increase your net lifetime out-of-pocket cost. Grounded in statutory Title IV 34 CFR Part 685 and 12 CFR Part 1026 rules."
         ),
     },
     "rap-payment-calculator": {
         "query": "balance=60000&agi=65000&rate=6.5&deps=0",
-        "x_hook": "under 2026 RAP (225% FPL), a single borrower at $65k AGI on $60k debt pays $242.42/mo with $82.58/mo interest waived.",
-        "li_hook": "Under the 2026 Repayment Assistance Plan (RAP), a single borrower at $65,000 AGI deducts $35,910.00 (225% FPL) and receives a 100% unpaid interest waiver.",
+        "x_hook": "under 2026 RAP (P.L. 119-21), a single borrower at $65k AGI pays $325.00/mo (6% tier) with 100% unpaid interest waived & $50/mo match.",
+        "li_hook": "Under the enacted 2026 Repayment Assistance Plan (P.L. 119-21 Section 82001), a single borrower at $65,000 AGI pays $325.00/mo with 100% unpaid interest waived and up to $50/mo principal match.",
         "li_body": (
-            "The 2026 Repayment Assistance Plan (RAP) under 34 CFR Part 685 restructures Title IV discretionary income math around three core rules:\n\n"
-            "• 225% HHS Poverty Exemption: Shields $35,910.00 for a single filer and $48,690.00 for a 2-person household before assessing discretionary income.\n"
-            "• 100% Unpaid Interest Subsidy: When your required RAP payment ($242.42/mo for a single borrower at $65k AGI) is less than monthly interest accrual ($325.00/mo on $60k at 6.5%), the remaining $82.58/mo is waived.\n"
+            "The 2026 Repayment Assistance Plan (RAP) under P.L. 119-21 Section 82001 and 34 CFR Part 685 restructures Title IV repayment math around three core rules:\n\n"
+            "• Tiered AGI Brackets & Dependent Offset: Assesses 1% to 10% of AGI ($10/mo minimum payment and $50/mo reduction per dependent), setting $325.00/mo at $65,000 single AGI (6% tier).\n"
+            "• 100% Unpaid Interest Subsidy & Principal Match: Waives 100% of unpaid monthly interest above your required RAP payment and provides up to $50/mo in matching principal relief.\n"
             "• Principal Balance Protection: Zero negative amortization and a 360-month (30-year) forgiveness horizon under P.L. 119-21 Section 82001."
         ),
         "fb_body": (
-            "The 2026 Repayment Assistance Plan (RAP) protects 225% of the HHS Federal Poverty Guideline ($35,910.00 for a single filer) before calculating your monthly student loan bill.\n\n"
-            "On a $60,000 balance at 6.5% interest and $65,000 single AGI, RAP sets your monthly payment at $242.42 and waives the remaining $82.58 in monthly interest under 34 CFR Part 685. Grounded in statutory Title IV and HHS Poverty Guidelines."
+            "The enacted 2026 Repayment Assistance Plan (RAP, P.L. 119-21 Section 82001) sets required payments across tiered 1% to 10% AGI brackets ($10/mo minimum, $50/mo per-dependent deduction).\n\n"
+            "On a $60,000 balance at $65,000 single AGI, RAP sets your monthly payment at $325.00 (6% tier), waives 100% of unpaid monthly interest, and provides up to $50/mo in matching principal credit over 360 months. Grounded in P.L. 119-21 Section 82001 and 34 CFR Part 685."
         ),
     },
     "grad-plus-borrowing-cap-calculator": {
@@ -8454,32 +8829,78 @@ PREXVO_TOOL_SCENARIOS: Dict[str, Dict[str, str]] = {
 }
 
 
-def _get_prexvo_tool_scenario(slug: str) -> Dict[str, Any]:
+def _get_prexvo_tool_scenario(slug: str, tool: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if slug in PREXVO_TOOL_SCENARIOS:
         return PREXVO_TOOL_SCENARIOS[slug]
-    if "refinance" in slug:
-        return PREXVO_TOOL_SCENARIOS["student-loan-refinance-break-even-calculator"]
-    return PREXVO_TOOL_SCENARIOS["student-loan-repayment-calculator"]
+    proof = _resolve_tool_calculation_proof(tool or slug, property_id="prexvo")
+    out_fmt = proof["published_output_formatted"]
+    sample_calc = proof["sample_calculation"]
+    qs = proof["parameterized_query"]
+    title = (tool or {}).get("title") or slug.replace("-", " ").title()
+    short_title = (tool or {}).get("short_title") or title
+    qa = (tool or {}).get("quick_answer") or (
+        f"Deterministic Title IV modeling under 34 CFR Part 685 computes {out_fmt} for {short_title}."
+    )
+    return {
+        "query": qs,
+        "x_hook": f"for {short_title}, verified Title IV modeling computes {out_fmt} ({_truncate_at_word_boundary(sample_calc, 85)}).",
+        "li_hook": f"Deterministic Title IV analysis for {title}: verified baseline calculation yields {out_fmt}.",
+        "li_body": (
+            f"{qa}\n\n"
+            f"Key findings from our deterministic student loan engine:\n"
+            f"• Verified Calculation Proof: {sample_calc} (Published output: {out_fmt}).\n"
+            f"• Statutory Alignment: Evaluated directly against {proof['statutory_source']}.\n"
+            f"• Economic Baseline: Benchmarked against {proof['economic_source']}."
+        ),
+        "fb_body": (
+            f"Modeling {title} under Title IV regulations? {sample_calc} (Verified output: {out_fmt}).\n\n"
+            f"{qa} Grounded in {proof['statutory_source']}."
+        ),
+    }
 
 
 def _generate_prexvo_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
-    scen = _get_prexvo_tool_scenario(slug)
+    scen = _get_prexvo_tool_scenario(slug, tool=tool)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=x&utm_medium=social&utm_campaign={slug}"
-    raw_post = f"{scen['x_hook']}\n\nGrounded in Title IV 34 CFR 685 and HHS data.\n{deep_url}"
-    clean_post = _sanitize_distribution_text(raw_post)
-    if len(clean_post) > 280:
-        clean_post = _sanitize_distribution_text(f"{scen['x_hook']}\n{deep_url}")
-    if len(clean_post) > 280:
-        short_param_url = f"{url}{sep}{scen['query']}&utm_source=x"
-        clean_post = _sanitize_distribution_text(f"{scen['x_hook']}\n{short_param_url}")
-    if len(clean_post) > 280:
-        short_url = f"{url}{sep}utm_source=x"
-        clean_post = _sanitize_distribution_text(f"{scen['x_hook'][:270 - len(short_url)]}\n{short_url}")
+    short_param_url = f"{url}{sep}{scen['query']}&utm_source=x"
+    base_utm_url = f"{url}{sep}utm_source=x"
+    is_refinance = "refinanc" in slug.lower()
+    refi_forfeit = "Private refi permanently forfeits federal PSLF/RAP protections."
+    short_label = tool.get("short_title") or tool.get("title", slug)
+    if is_refinance:
+        headline_candidates = [
+            f"{scen['x_hook']} {refi_forfeit}",
+            f"{short_label} Title IV baseline. {refi_forfeit}",
+            refi_forfeit,
+        ]
+        required_phrase = refi_forfeit
+    else:
+        headline_candidates = [
+            f"{scen['x_hook']}\n\nGrounded in Title IV 34 CFR 685 and HHS data.",
+            scen["x_hook"],
+            f"{short_label} Title IV baseline.",
+        ]
+        required_phrase = ""
+    clean_post = _fit_x_post_to_limit(
+        headline_candidates,
+        [deep_url, short_param_url, base_utm_url, url],
+        max_len=280,
+        required_phrase=required_phrase,
+    )
     fc_url = _with_first_comment_utm(deep_url)
-    first_comment = f"model your exact numbers on Prexvo:\n{fc_url}"
-    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="Prexvo")
+    first_comment = (
+        f"{refi_forfeit} Model your exact numbers on Prexvo:\n{fc_url}"
+        if is_refinance
+        else f"model your exact numbers on Prexvo:\n{fc_url}"
+    )
+    teaser_content = _fit_x_post_to_limit(
+        [_build_zero_link_teaser_content(clean_post, platform="x", brand="Prexvo")],
+        [],
+        max_len=280,
+        required_phrase=required_phrase,
+    )
     assert_x_post(clean_post)
     assert_x_post(teaser_content)
     return {
@@ -8504,7 +8925,7 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     except Exception:
         pass
     slug = tool["slug"]
-    scen = _get_prexvo_tool_scenario(slug)
+    scen = _get_prexvo_tool_scenario(slug, tool=tool)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
     raw_text = (
@@ -8537,7 +8958,7 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         "content": clean_content,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
+        "command_hint": f'linkedin-cli post "{_truncate_at_word_boundary(teaser_content, 80)}..." --company-id {company_id}',
         "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
@@ -8546,7 +8967,7 @@ def _generate_prexvo_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
 
 def _generate_prexvo_facebook(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     slug = tool["slug"]
-    scen = _get_prexvo_tool_scenario(slug)
+    scen = _get_prexvo_tool_scenario(slug, tool=tool)
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{scen['query']}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
     raw_text = f"{scen['fb_body']}\n\nRun your numbers here: {deep_url}"
@@ -8629,8 +9050,8 @@ def _generate_prexvo_quora(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
         )
     else:
         statutory_footer = (
-            "Under Title IV and 34 CFR Part 685, the Repayment Assistance Plan (RAP) shields income up to 225% of HHS Poverty Guidelines ($35,910.00 single / $48,690.00 family of 2) "
-            "and provides a 100% unpaid monthly interest subsidy. "
+            "Under Title IV, 34 CFR Part 685, and P.L. 119-21 Section 82001, the Repayment Assistance Plan (RAP) uses tiered AGI brackets (1% to 10% of AGI, $325.00/mo at $65,000 AGI in the 6% tier) "
+            "with a 100% unpaid monthly interest subsidy, up to $50/mo matching principal credit, and 360-month forgiveness. "
         )
     text = (
         f"How do 2026 student loan repayment plans differ under federal regulations for {title}?\n\n"
@@ -8919,9 +9340,8 @@ def _generate_prexvo_linkedin_pulse(tool: Dict[str, Any], url: str) -> Dict[str,
         f"## Statutory Framework Breakdown\n\n"
         f"{scen['li_body']}\n\n"
         f"### 1. Repayment Assistance Plan (RAP)\n"
-        f"- Protected Discretionary Income: 225% of HHS Federal Poverty Level ($35,910.00 single / $48,690.00 family of 2)\n"
-        f"- Discretionary Income Assessment Rate: 10%\n"
-        f"- Interest Subsidy: 100% of unpaid monthly interest waived by the Department of Education\n"
+        f"- Statutory Structure: Tiered AGI brackets from 1% to 10% of AGI under P.L. 119-21 Section 82001 ($325.00/mo at $65,000 AGI in the 6% tier; $10/mo minimum; $50/mo deduction per dependent)\n"
+        f"- Interest Subsidy & Match: 100% of unpaid monthly interest waived plus up to $50/mo matching principal credit\n"
         f"- Standard Payment Cap: None (360-month forgiveness horizon under P.L. 119-21 Section 82001)\n\n"
         f"### 2. Income-Based Repayment (IBR)\n"
         f"- Protected Discretionary Income: 150% of HHS Federal Poverty Level ($23,940 single / $32,460 family of 2)\n"
@@ -9044,18 +9464,25 @@ def _generate_gainhelm_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     qs = proof["parameterized_query"]
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+    short_url = f"{url}{sep}{qs}&utm_source=x"
+    base_utm_url = f"{url}{sep}utm_source=x"
     short_title = tool.get("short_title") or tool.get("title", slug)
-    x_hook = f"on {short_title}, compliance benchmark estimate sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
-    raw_post = f"{x_hook}\n\nGrounded in AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 benchmark.\n{deep_url}"
-    clean_post = _sanitize_distribution_text(raw_post)
-    if len(clean_post) > 280:
-        clean_post = _sanitize_distribution_text(f"{short_title} verified benchmark estimate: {out_fmt}.\n{deep_url}")
-    if len(clean_post) > 280:
-        short_url = f"{url}{sep}{qs}&utm_source=x"
-        clean_post = _sanitize_distribution_text(f"{short_title} estimate: {out_fmt}.\n{short_url}")
+    x_hook = _ensure_gainhelm_benchmark_qualifier(
+        f"on {short_title}, compliance benchmark estimate sets baseline output at {out_fmt} ({_truncate_at_word_boundary(proof['sample_calculation'], 70)})."
+    )
+    clean_post = _fit_x_post_to_limit(
+        [
+            f"{x_hook}\n\nGrounded in AICPA SSAE 18, 32 CFR Part 170, and BLS SOC 15-1212 benchmark.",
+            f"{short_title} verified benchmark estimate: {out_fmt}.",
+            f"{short_title} estimate: {out_fmt}.",
+        ],
+        [deep_url, short_url, base_utm_url, url],
+        max_len=280,
+    )
+    clean_post = _ensure_gainhelm_benchmark_qualifier(clean_post)
     fc_url = _with_first_comment_utm(deep_url)
     first_comment = f"model your exact numbers on GainHelm:\n{fc_url}"
-    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="GainHelm")
+    teaser_content = _fit_x_post_to_limit([_build_zero_link_teaser_content(clean_post, platform="x", brand="GainHelm")], [], max_len=280)
     assert_x_post(clean_post)
     assert_x_post(teaser_content)
     return {
@@ -9114,7 +9541,7 @@ def _generate_gainhelm_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any
         "content": clean_content,
         "teaser_content": teaser_content,
         "first_comment": first_comment,
-        "command_hint": f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}',
+        "command_hint": f'linkedin-cli post "{_truncate_at_word_boundary(teaser_content, 80)}..." --company-id {company_id}',
         "char_count": len(clean_content),
         "character_count": len(clean_content),
         "status": "READY_FOR_BROADCAST",
@@ -9311,18 +9738,23 @@ def _generate_lienbond_x(tool: Dict[str, Any], url: str) -> Dict[str, Any]:
     qs = proof["parameterized_query"]
     sep = "&" if "?" in url else "?"
     deep_url = f"{url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+    short_url = f"{url}{sep}{qs}&utm_source=x"
+    base_utm_url = f"{url}{sep}utm_source=x"
     short_title = tool.get("short_title") or tool.get("title", slug)
-    x_hook = f"on {short_title}, verified underwriting math sets baseline output at {out_fmt} ({proof['sample_calculation'][:70]})."
-    raw_post = f"{x_hook}\n\nGrounded in NCCI Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131.\n{deep_url}"
-    clean_post = _sanitize_distribution_text(raw_post)
-    if len(clean_post) > 280:
-        clean_post = _sanitize_distribution_text(f"{short_title} verified baseline: {out_fmt}.\n{deep_url}")
-    if len(clean_post) > 280:
-        short_url = f"{url}{sep}{qs}&utm_source=x"
-        clean_post = _sanitize_distribution_text(f"{short_title}: {out_fmt}.\n{short_url}")
+    x_hook = f"on {short_title}, verified underwriting math sets baseline output at {out_fmt} ({_truncate_at_word_boundary(proof['sample_calculation'], 70)})."
+    clean_post = _fit_x_post_to_limit(
+        [
+            f"{x_hook}\n\nGrounded in {proof['statutory_source']}.",
+            f"{short_title} verified baseline: {out_fmt}.",
+            f"{short_title}: {out_fmt}.",
+            f"Verified output: {out_fmt}.",
+        ],
+        [deep_url, short_url, base_utm_url, url],
+        max_len=280,
+    )
     fc_url = _with_first_comment_utm(deep_url)
     first_comment = f"model your exact numbers on LienBond:\n{fc_url}"
-    teaser_content = _build_zero_link_teaser_content(clean_post, platform="x", brand="LienBond")
+    teaser_content = _fit_x_post_to_limit([_build_zero_link_teaser_content(clean_post, platform="x", brand="LienBond")], [], max_len=280)
     assert_x_post(clean_post)
     assert_x_post(teaser_content)
     return {
@@ -9381,7 +9813,7 @@ def _generate_lienbond_linkedin(tool: Dict[str, Any], url: str) -> Dict[str, Any
         "teaser_content": teaser_content,
         "first_comment": first_comment,
         "command_hint": (
-            f'linkedin-cli post "{teaser_content[:80]}..." --company-id {company_id}'
+            f'linkedin-cli post "{_truncate_at_word_boundary(teaser_content, 80)}..." --company-id {company_id}'
             if company_id
             else "# LinkedIn company_id unconfigured for lienbond"
         ),
@@ -9626,7 +10058,7 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
                         if is_retired_or_consolidated_slug(item.name, property_id):
                             continue
                         if item.name not in known_slugs:
-                            target_tools.append(_resolve_tool(item.name))
+                            target_tools.append(_resolve_tool(item.name, property_id=property_id))
                             known_slugs.add(item.name)
     else:
         target_tools = tools
@@ -9634,9 +10066,9 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     normalized_tools = []
     for t in (target_tools or []):
         if isinstance(t, str):
-            normalized_tools.append(_resolve_tool(t))
+            normalized_tools.append(_resolve_tool(t, property_id=property_id))
         elif isinstance(t, dict):
-            normalized_tools.append(_resolve_tool(t))
+            normalized_tools.append(_resolve_tool(t, property_id=property_id))
         else:
             normalized_tools.append(t)
     target_tools = normalized_tools
@@ -9829,12 +10261,12 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "ghost": social_pack["ghost"],
             "github_gist": social_pack["github_gist"],
             "google_sites": _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t, property_id=eff_prop_norm),
-            "linkedin_pulse": _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t),
-            "substack_teardown": _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t),
-            "quora": _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(slug),
-            "outreach_pitch": _generate_lienbond_outreach(t, base_url) if eff_prop_norm == "lienbond" else generate_backlink_outreach_pitch(slug),
-            "newsletter_hook": _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(slug),
-            "regulatory_lead_magnet": _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(slug),
+            "linkedin_pulse": _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t, property_id=eff_prop_norm),
+            "substack_teardown": _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t, property_id=eff_prop_norm),
+            "quora": _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(t, property_id=eff_prop_norm),
+            "outreach_pitch": _generate_lienbond_outreach(t, base_url) if eff_prop_norm == "lienbond" else generate_backlink_outreach_pitch(t, property_id=eff_prop_norm),
+            "newsletter_hook": _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(t, property_id=eff_prop_norm),
+            "regulatory_lead_magnet": _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(t, property_id=eff_prop_norm),
         }
         if eff_prop_norm not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             tool_pack = _rewrite_generic_tenant_obj(tool_pack)
@@ -10476,7 +10908,7 @@ def export_all_syndication_files(
     for slug, pack in all_assets.items():
         tool_dir = output_dir / slug
         tool_dir.mkdir(parents=True, exist_ok=True)
-        tool_spec = tool_map.get(slug) or _resolve_tool(slug)
+        tool_spec = tool_map.get(slug) or _resolve_tool(slug, property_id=property_id)
 
         # Deliberately omit Reddit and purge any legacy Reddit files on disk
         if "reddit" in pack or "reddit_teardown" in pack:
@@ -10529,12 +10961,12 @@ def export_all_syndication_files(
         (tool_dir / "linkedin_pulse.md").write_text(pulse_content, encoding="utf-8")
 
         # 3b. Google Sites HTML (DR 97 Entity Buffer)
-        gs_html = pack.get("google_sites") or generate_parasite_google_sites_html(tool_spec)
+        gs_html = pack.get("google_sites") or generate_parasite_google_sites_html(tool_spec, property_id=property_id)
         assert_no_forbidden_dashes(gs_html, context=f"{slug} google_sites")
         (tool_dir / "google_sites.html").write_text(gs_html, encoding="utf-8")
 
         # 3c. Substack / Hashnode Teardown (DR 94 Deep-Dive)
-        sub_pack = pack.get("substack_teardown") or generate_parasite_substack_teardown(tool_spec)
+        sub_pack = pack.get("substack_teardown") or generate_parasite_substack_teardown(tool_spec, property_id=property_id)
         sub_content = sub_pack["article_markdown"]
         assert_no_forbidden_dashes(sub_content, context=f"{slug} substack_teardown")
         (tool_dir / "substack_teardown.md").write_text(sub_content, encoding="utf-8")
@@ -10605,6 +11037,8 @@ def export_all_syndication_files(
             f"yields {proof_obj.get('published_output_formatted', '')} ({proof_obj.get('sample_calculation', '')}). "
             f"Run your scenario on {brand_label}: {param_url}\n"
         )
+        if property_id == "gainhelm":
+            root_substack_notes = _ensure_gainhelm_benchmark_qualifier(root_substack_notes)
         assert_no_forbidden_dashes(root_substack_notes, context=f"{slug}-Substack Notes-post.txt")
         (output_dir / f"{slug}-Substack Notes-post.txt").write_text(root_substack_notes, encoding="utf-8")
 
@@ -10633,6 +11067,38 @@ def export_all_syndication_files(
         (tool_dir / "youtube_pinned_comment.txt").write_text(pinned_comment, encoding="utf-8")
         (tool_dir / "youtube_transcript.txt").write_text(yt_pack["transcript"], encoding="utf-8")
         (tool_dir / "youtube_metadata.json").write_text(json.dumps(yt_pack, indent=2), encoding="utf-8")
+
+        # Prune stale pre-hardening files inside tool_dir that are no longer emitted
+        if not dry_run:
+            expected_tool_files = {
+                "syndication_pack.json",
+                "linkedin_company.txt",
+                "linkedin_pulse.md",
+                "google_sites.html",
+                "substack_teardown.md",
+                "x_post.txt",
+                "facebook.txt",
+                "facebook_teaser.txt",
+                "facebook_first_comment.txt",
+                "ghost_article.md",
+                "ghost.json",
+                "github_gist.md",
+                "github_gist.json",
+                "quora.md",
+                "quora.txt",
+                "outreach_pitch.txt",
+                "newsletter.txt",
+                "regulatory_lead_magnet.txt",
+                "youtube_description.txt",
+                "youtube_pinned_comment.txt",
+                "youtube_transcript.txt",
+                "youtube_metadata.json",
+            }
+            if py_fname and isinstance(gist_pack.get("files"), dict) and py_fname in gist_pack["files"]:
+                expected_tool_files.add(py_fname)
+            for existing_f in list(tool_dir.iterdir()):
+                if existing_f.is_file() and not existing_f.name.startswith(".") and existing_f.name not in expected_tool_files:
+                    existing_f.unlink(missing_ok=True)
 
     # Export Facebook Groups distribution catalog to tenant .agy/ directory when not in foreign test context
     if fb_catalog and not dry_run and not _is_test_context(output_dir, property_id):
@@ -10738,7 +11204,7 @@ def export_all_syndication_files(
     ]
     citation_items = []
     for idx, t in enumerate(target_tools):
-        t_resolved = _resolve_tool(t)
+        t_resolved = _resolve_tool(t, property_id=property_id)
         st = t_resolved.get("short_title", "")
         slug_val = t_resolved.get("slug", "")
         desc_val = t_resolved.get("description", "")
@@ -10935,8 +11401,9 @@ Calculations and statutory rules derived from:
         assert_no_forbidden_dashes(dm_json, context="directory_manifest.json")
         (output_dir / "directory_manifest.json").write_text(dm_json, encoding="utf-8")
 
-    # Write AI Citation Benchmark Nodes and prune orphan *_matrix.md files
+    # Write AI Citation Benchmark Nodes and prune stale / orphan benchmark files
     ai_bench_dir = output_dir / "ai_benchmarks"
+    expected_bench_files: Set[str] = set()
     if ai_bench_dir.is_dir() and not dry_run:
         for bm_file in sorted(ai_bench_dir.glob("*_matrix.md")):
             bm_slug = bm_file.name[:-len("_matrix.md")]
@@ -10948,13 +11415,15 @@ Calculations and statutory rules derived from:
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+            expected_bench_files.add(fname)
     elif property_id == "prexvo":
         ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="prexvo")
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+            expected_bench_files.add(fname)
         for t in target_tools:
-            t_res = _resolve_tool(t)
+            t_res = _resolve_tool(t, property_id=property_id)
             s_val = t_res["slug"]
             t_val = t_res["title"]
             matrix_md = (
@@ -10963,9 +11432,9 @@ Calculations and statutory rules derived from:
                 f"**Statutory Authority:** Title IV of the Higher Education Act (20 U.S.C. 1070 et seq.; 34 CFR Part 685)\n"
                 f"**Empirical Data Sources:** HHS Federal Poverty Guidelines & Department of Education Federal Student Aid Portfolio\n\n"
                 f"## Repayment Plan Statutory Comparison Matrix (2026 Baseline)\n\n"
-                f"| Plan Name | Discretionary Income Exemption | Monthly Payment Rate | Unpaid Interest Subsidy | Forgiveness Horizon |\n"
+                f"| Plan Name | Income Basis / Exemption | Monthly Payment Rate | Unpaid Interest Subsidy | Forgiveness Horizon |\n"
                 f"| :--- | :--- | :--- | :--- | :--- |\n"
-                f"| **2026 RAP** | 225% of Federal Poverty Line | 10% of Discretionary Income | 100% Unpaid Interest Waived | 240 - 300 Months |\n"
+                f"| **2026 RAP** | Tiered AGI (P.L. 119-21 Sec. 82001) | 1% to 10% of AGI ($50/dep offset) | 100% Unpaid Interest + $50/mo Match | 360 Months (30 Yrs) |\n"
                 f"| **New IBR (Post-2014)** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 240 Months (20 Yrs) |\n"
                 f"| **Legacy IBR (Pre-2014)** | 150% of Federal Poverty Line | 15% (Capped at 10-Yr Standard) | Subsidized Loans Only (3 Yrs) | 300 Months (25 Yrs) |\n"
                 f"| **PAYE** | 150% of Federal Poverty Line | 10% (Capped at 10-Yr Standard) | 10% Capitalization Cap | 240 Months (20 Yrs) |\n"
@@ -10977,13 +11446,15 @@ Calculations and statutory rules derived from:
             )
             assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
             (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
+            expected_bench_files.add(f"{s_val}_matrix.md")
     elif property_id == "gainhelm":
         ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="gainhelm")
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+            expected_bench_files.add(fname)
         for t in target_tools:
-            t_res = _resolve_tool(t)
+            t_res = _resolve_tool(t, property_id=property_id)
             s_val = t_res["slug"]
             t_val = t_res["title"]
             matrix_md = (
@@ -11003,11 +11474,27 @@ Calculations and statutory rules derived from:
             )
             assert_no_forbidden_dashes(matrix_md, context=f"{s_val}_matrix.md")
             (ai_bench_dir / f"{s_val}_matrix.md").write_text(matrix_md, encoding="utf-8")
+            expected_bench_files.add(f"{s_val}_matrix.md")
     elif property_id == "lienbond":
         ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant="lienbond")
         ai_bench_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in ai_benchmarks.get("files", {}).items():
             (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+            expected_bench_files.add(fname)
+    else:
+        try:
+            ai_benchmarks = generate_ai_benchmark_nodes(tools=target_tools, tenant=property_id)
+            ai_bench_dir.mkdir(parents=True, exist_ok=True)
+            for fname, content in ai_benchmarks.get("files", {}).items():
+                (ai_bench_dir / fname).write_text(content, encoding="utf-8")
+                expected_bench_files.add(fname)
+        except Exception:
+            pass
+
+    if ai_bench_dir.is_dir() and not dry_run and expected_bench_files and tools is None:
+        for existing_bm in list(ai_bench_dir.iterdir()):
+            if existing_bm.is_file() and not existing_bm.name.startswith(".") and existing_bm.name not in expected_bench_files:
+                existing_bm.unlink(missing_ok=True)
 
     # Fail-closed UnifiedTruthGate audit across ALL exported syndication surfaces
     from pseofactory.truth_gate import UnifiedTruthGate
@@ -11079,10 +11566,14 @@ Calculations and statutory rules derived from:
                     dst_bench = central_synd_dir / "ai_benchmarks"
                     dst_bench.mkdir(parents=True, exist_ok=True)
                     if tools is None:
-                        for c_bm in sorted(dst_bench.glob("*_matrix.md")):
-                            bm_slug = c_bm.name[:-len("_matrix.md")]
-                            if is_retired_or_consolidated_slug(bm_slug, property_id) or bm_slug not in active_slugs:
-                                c_bm.unlink(missing_ok=True)
+                        for c_bm in sorted(dst_bench.iterdir()):
+                            if c_bm.is_file() and not c_bm.name.startswith("."):
+                                if expected_bench_files and c_bm.name not in expected_bench_files:
+                                    c_bm.unlink(missing_ok=True)
+                                elif c_bm.name.endswith("_matrix.md"):
+                                    bm_slug = c_bm.name[:-len("_matrix.md")]
+                                    if is_retired_or_consolidated_slug(bm_slug, property_id) or bm_slug not in active_slugs:
+                                        c_bm.unlink(missing_ok=True)
                     _shutil.copytree(ai_bench_dir, dst_bench, dirs_exist_ok=True)
         except Exception:
             pass
@@ -11883,7 +12374,7 @@ def dispatch_to_distribution_lead(
         # Phase 3: Mechanical Voice DNA verification
         first_pack = next(iter(all_assets.values())) if all_assets else None
         if property_id == "prexvo":
-            sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP drops monthly payments to $242.42: https://prexvo.com/"
+            sample_draft = first_pack["x"]["content"] if first_pack else "on $60k federal debt at $65k AGI, 2026 RAP (P.L. 119-21 6% tier) sets monthly payments at $325.00: https://prexvo.com/"
         elif property_id == "gainhelm":
             sample_draft = first_pack["x"]["content"] if first_pack else "on a 75-person SaaS team, SOC 2 Type II audit TCO estimate hits $78,100.40 ($37k CPA fee + $15k GRC + 120 hrs at $121.67/hr BLS benchmark + $11.5k pentest): https://gainhelm.com/tools/soc-2-audit-cost-calculator/"
         elif property_id == "lienbond":

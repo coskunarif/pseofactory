@@ -915,29 +915,49 @@ def _check_banned_claims(
 
 _HISTORICAL_QUALIFIER_RE = re.compile(
     r"\b(?:prior[- ]year|historical|pre[- ]enactment|pre[- ]obbba|pre[- ]tcja|repealed|"
-    r"expired|superseded|formerly|previously|old\s+(?:law|cap|limit|rule)|"
+    r"expired|superseded|formerly|previously|prior\s+law|counterfactual|"
+    r"(?:before|prior\s+to)\s+(?:p\.?l\.?\s*119-21|obbba)|"
+    r"under\s+(?:old|prior)\s+tcja|old\s+(?:law|cap|limit|rule|tcja)|"
     r"was\s+\$?\d|pre[- ]july\s+4,?\s+2025)\b",
+    re.IGNORECASE,
+)
+
+_COUNTERFACTUAL_REPEAL_RE = re.compile(
+    r"\b(?:pre[- ]obbba|pre[- ]tcja|pre[- ]enactment|repealed|superseded|"
+    r"prior\s+law|counterfactual|(?:before|prior\s+to)\s+(?:p\.?l\.?\s*119-21|obbba)|"
+    r"under\s+(?:old|prior)\s+tcja|old\s+(?:law|tcja)|pre[- ]july\s+4,?\s+2025)\b",
     re.IGNORECASE,
 )
 
 _ACTIVE_YEAR_RE = re.compile(r"\b(202[5-9]|203\d)\b")
 
 
-def _infer_hist_year(item: Dict[str, Any]) -> Optional[int]:
+def _infer_hist_year(item: Dict[str, Any], effective_year: Optional[int] = None) -> Optional[int]:
     hy = item.get("historical_year") or item.get("year")
+    cand_year: Optional[int] = None
     if hy is not None:
         try:
-            return int(hy)
+            cand_year = int(hy)
         except (TypeError, ValueError):
-            pass
-    lbl = str(item.get("label") or "")
-    m = re.search(r"\b(20\d{2})\b", lbl)
-    if m and any(k in lbl.lower() for k in ("pre-", "former", "outdated", "superseded", "prior", "2024", "2025")):
-        return int(m.group(1))
-    return None
+            cand_year = None
+    if cand_year is None:
+        lbl = str(item.get("label") or "")
+        m = re.search(r"\b(20\d{2})\b", lbl)
+        if m and any(k in lbl.lower() for k in ("pre-", "former", "outdated", "superseded", "prior", "2024", "2025")):
+            cand_year = int(m.group(1))
+    if cand_year is None:
+        return None
+    if cand_year >= 2026:
+        return None
+    if effective_year is not None and cand_year >= effective_year:
+        return None
+    return cand_year
 
 
-def _iter_superseded_regexes(val: Any) -> List[Tuple[Optional[re.Pattern], Optional[int], str, Optional[str]]]:
+def _iter_superseded_regexes(
+    val: Any,
+    effective_year: Optional[int] = None,
+) -> List[Tuple[Optional[re.Pattern], Optional[int], str, Optional[str]]]:
     """Expands a superseded_values item into [(compiled_regex, historical_year_or_None, label, regex_error_or_None)]."""
     item = _to_plain_dict(val)
     hist_year: Optional[int] = None
@@ -945,7 +965,7 @@ def _iter_superseded_regexes(val: Any) -> List[Tuple[Optional[re.Pattern], Optio
     label = ""
 
     if isinstance(item, dict):
-        hist_year = _infer_hist_year(item)
+        hist_year = _infer_hist_year(item, effective_year=effective_year)
         if isinstance(item.get("patterns"), (list, tuple)):
             pat_list.extend(str(p) for p in item["patterns"] if str(p).strip())
         single_pat = str(item.get("pattern") or item.get("regex") or "").strip()
@@ -1000,14 +1020,16 @@ def _is_valid_historical_context(
     match_end: int,
     hist_year: Optional[int],
     entry_hist_label: str = "",
+    entry_effective_year: Optional[int] = None,
 ) -> bool:
     """
     Allows a superseded value ONLY when explicitly year/pre-enactment qualified in the
     local clause and NOT paired with an active/wrong year (e.g. '2026 ... $30,500').
+    For active-year counterfactuals (hist_year is None), plain 'In 2026' never exempts;
+    explicit counterfactual/repeal qualification is required.
     """
     left_bound = max(0, match_start - 100)
     right_bound = min(len(text), match_end + 80)
-    window = text[left_bound:right_bound]
 
     # Narrow to current sentence/clause if delimiters exist
     before = text[left_bound:match_start]
@@ -1019,11 +1041,14 @@ def _is_valid_historical_context(
     years_in_clause = {int(y) for y in _ACTIVE_YEAR_RE.findall(clause)}
     # Check 4-digit years like 2023/2024 too
     all_years = {int(y) for y in re.findall(r"\b(20\d{2})\b", clause)}
+    has_active_or_eff_year = any(y >= 2026 for y in years_in_clause) or (
+        entry_effective_year is not None and any(y >= entry_effective_year for y in all_years)
+    )
 
     if hist_year is not None:
         # Wrong/later year in same clause (e.g. '2026 ... $30,500' when hist_year=2024) -> NEVER allow
         wrong_years = {y for y in all_years if y != hist_year}
-        if wrong_years:
+        if wrong_years or has_active_or_eff_year:
             return False
         has_hist_year = hist_year in all_years
         has_hist_marker = bool(_HISTORICAL_QUALIFIER_RE.search(clause))
@@ -1036,9 +1061,11 @@ def _is_valid_historical_context(
             return True
         return False
 
-    # No explicit historical_year on entry: require explicit historical marker AND no 2026+ active year in clause
-    if any(y >= 2026 for y in years_in_clause):
-        return False
+    # No explicit historical_year on entry (or pre-enactment counterfactual for active year):
+    # If an active/effective year (>= 2026 or >= entry_effective_year) appears in the clause,
+    # plain year framing MUST NOT exempt; require explicit counterfactual/repeal qualification.
+    if has_active_or_eff_year:
+        return bool(_COUNTERFACTUAL_REPEAL_RE.search(clause))
     return bool(_HISTORICAL_QUALIFIER_RE.search(clause))
 
 
@@ -1051,9 +1078,13 @@ def _entry_applies_to_file(entry: Dict[str, Any], file_path: str, slug: str = ""
     slug_parts = set(eff_slug.split("/")) if eff_slug else set()
     fp_norm = str(file_path or "").replace("\\", "/").lower()
     for target in applies_to:
-        if eff_slug and (eff_slug == target or target in slug_parts):
+        if eff_slug and (
+            eff_slug == target
+            or target in slug_parts
+            or re.search(rf"(?:^|[/\-_]){re.escape(target)}(?:$|[/\-_])", eff_slug)
+        ):
             return True
-        if re.search(rf"(?:^|/){re.escape(target)}(?:/|\.[^/]+$|$)", fp_norm):
+        if re.search(rf"(?:^|[/\-_]){re.escape(target)}(?:$|[/\-_\.])", fp_norm):
             return True
     return False
 
@@ -1120,6 +1151,12 @@ def _scan_js_chunks_for_superseded(
         for entry_key, entry in _normalize_entries(pack_dict):
             if not _entry_applies_to_file(entry, file_path, slug=slug):
                 continue
+            entry_eff_year: Optional[int] = None
+            if entry.get("effective_year") is not None:
+                try:
+                    entry_eff_year = int(entry["effective_year"])
+                except (TypeError, ValueError):
+                    entry_eff_year = None
             for sup_item in (entry.get("superseded_values") or []):
                 if not isinstance(sup_item, dict):
                     continue
@@ -1135,7 +1172,7 @@ def _scan_js_chunks_for_superseded(
                 i_val = int(f_val)
                 if i_val % 5000 == 0:
                     continue
-                hist_year = _infer_hist_year(sup_item)
+                hist_year = _infer_hist_year(sup_item, effective_year=entry_eff_year)
                 m_num = re.search(rf"\b{i_val}\b", js_code)
                 if not m_num:
                     continue
@@ -1186,16 +1223,24 @@ def _check_superseded_values(
             continue
         if not _entry_applies_to_file(entry, file_path, slug=slug):
             continue
+        entry_eff_year: Optional[int] = None
+        if entry.get("effective_year") is not None:
+            try:
+                entry_eff_year = int(entry["effective_year"])
+            except (TypeError, ValueError):
+                entry_eff_year = None
         entry_hist_year: Optional[int] = None
         if entry.get("historical_year") is not None:
             try:
                 entry_hist_year = int(entry["historical_year"])
+                if entry_hist_year >= 2026 or (entry_eff_year is not None and entry_hist_year >= entry_eff_year):
+                    entry_hist_year = None
             except (TypeError, ValueError):
                 entry_hist_year = None
         entry_hist_label = str(entry.get("historical_label") or entry.get("pre_enactment_label") or "")
 
         for sup_item in superseded_list:
-            for rx, item_hist_year, label, err in _iter_superseded_regexes(sup_item):
+            for rx, item_hist_year, label, err in _iter_superseded_regexes(sup_item, effective_year=entry_eff_year):
                 if err is not None:
                     violations.append(
                         TruthViolation(
@@ -1246,6 +1291,7 @@ def _check_superseded_values(
                         m.end(),
                         effective_hist_year,
                         entry_hist_label,
+                        entry_effective_year=entry_eff_year,
                     ):
                         continue
                     sig = (entry_key, f"text:{label}")
@@ -1281,7 +1327,12 @@ _UNGROUNDED_STAT_PATTERNS: Tuple[re.Pattern, ...] = (
 )
 
 
-def _collect_grounded_numbers(pack_dict: Dict[str, Any], manifest_data: Optional[Dict[str, Any]]) -> Set[float]:
+def _collect_grounded_numbers(
+    pack_dict: Dict[str, Any],
+    manifest_data: Optional[Dict[str, Any]],
+    file_path: str = "",
+    slug: str = "",
+) -> Set[float]:
     grounded: Set[float] = set()
 
     def _add_val(v: Any) -> None:
@@ -1306,10 +1357,24 @@ def _collect_grounded_numbers(pack_dict: Dict[str, Any], manifest_data: Optional
             for x in v.values():
                 _add_val(x)
 
+    eff_slug = (slug or _extract_slug_from_context(file_path) or "").strip().lower()
     for _, entry in _normalize_entries(pack_dict):
         cclass = str(entry.get("claim_class") or "enacted_law").strip().lower()
         if cclass not in ("enacted_law", "market_benchmark", "future_projection"):
             continue
+        if file_path or slug:
+            if not _entry_applies_to_file(entry, file_path, slug=slug):
+                continue
+            forbidden_slugs = [
+                str(s or "").strip().lower()
+                for s in (entry.get("forbidden_on_slugs") or [])
+                if str(s or "").strip()
+            ]
+            if forbidden_slugs and eff_slug and any(
+                eff_slug == target or re.search(rf"(?:^|[/\-_]){re.escape(target)}(?:$|[/\-_])", eff_slug)
+                for target in forbidden_slugs
+            ):
+                continue
         for field_key in ("value", "allowed_values", "numeric_values", "rate_pct", "text", "summary"):
             if field_key in entry:
                 _add_val(entry[field_key])
@@ -1335,10 +1400,11 @@ def _check_ungrounded_stats(
     pack_dict: Dict[str, Any],
     manifest_data: Optional[Dict[str, Any]],
     file_path: str,
+    slug: str = "",
 ) -> List[TruthViolation]:
     if not visible_text:
         return []
-    grounded = _collect_grounded_numbers(pack_dict, manifest_data)
+    grounded = _collect_grounded_numbers(pack_dict, manifest_data, file_path=file_path, slug=slug)
     violations: List[TruthViolation] = []
     seen: Set[str] = set()
 
@@ -1487,14 +1553,56 @@ def _check_claim_qualifiers(
 # ---------------------------------------------------------------------------
 
 _CITATION_EXTRACTORS: Tuple[re.Pattern, ...] = (
-    re.compile(r"\bIRC\s+Sections?\s*\d+[A-Za-z]?(?:\([a-zA-Z0-9]+\))*", re.IGNORECASE),
-    re.compile(r"\bIRC\s+Sections\s*(?=\.|,|;|$|\"|')", re.IGNORECASE),
-    re.compile(r"\b\d+\s+U\.S\.C\.\s+(?:Sections?\s+|Sec\.?\s+|§\s*)?\d+[A-Za-z0-9().-]*", re.IGNORECASE),
-    re.compile(r"\b\d+\s+C\.?F\.?R\.?\s+(?:Parts?\s+|Sections?\s+|Sec\.?\s+|§\s*)?\d+(?:\.\d+)?(?:\([a-zA-Z0-9]+\))*", re.IGNORECASE),
-    re.compile(r"\b(?:IRS\s+)?Rev\.\s*Proc\.\s*\d{4}-\d+", re.IGNORECASE),
-    re.compile(r"\bFAR\s+(?:Part\s+)?\d+(?:\.\d+)*(?:-\d+)?"),
-    re.compile(r"\b(?:P\.L\.|Pub\.\s*L\.)\s*\d+-\d+", re.IGNORECASE),
+    re.compile(r"\bIRC[ \t]+Sections?[ \t]*\d+[A-Za-z]?(?:\([a-zA-Z0-9]+\))*", re.IGNORECASE),
+    re.compile(r"\bIRC[ \t]+Sections[ \t]*(?=\.|,|;|$|\"|')", re.IGNORECASE),
+    re.compile(r"\b\d+[ \t]+U\.S\.C\.[ \t]+(?:Sections?[ \t]+|Sec\.?[ \t]+|§[ \t]*)?\d+[A-Za-z0-9().-]*", re.IGNORECASE),
+    re.compile(r"\b\d+[ \t]+C\.?F\.?R\.?[ \t]+(?:Parts?[ \t]+|Sections?[ \t]+|Sec\.?[ \t]+|§[ \t]*)?\d+(?:\.\d+)?(?:\([a-zA-Z0-9]+\))*", re.IGNORECASE),
+    re.compile(r"\b(?:IRS[ \t]+)?Rev\.[ \t]*Proc\.[ \t]*\d{4}-\d+", re.IGNORECASE),
+    re.compile(r"\bFAR[ \t]+(?:Part[ \t]+)?\d+(?:\.\d+)*(?:-\d+)?"),
+    re.compile(r"\b(?:P\.L\.|Pub\.[ \t]*L\.)[ \t]*\d+-\d+", re.IGNORECASE),
 )
+
+_VTT_CUE_TIMING_RE = re.compile(
+    r"^\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{3}(?:\s+.*)?$"
+)
+_VTT_INLINE_TAG_RE = re.compile(
+    r"<(?:/?[a-zA-Z][a-zA-Z0-9._-]*(?:\s+[^>]*)?|(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{3})>"
+)
+
+
+def _extract_webvtt_spoken_text(vtt_text: str) -> str:
+    """Strips WebVTT headers, NOTE/STYLE/REGION blocks, cue IDs, and cue timestamps."""
+    lines = vtt_text.splitlines()
+    out_lines: List[str] = []
+    in_header = False
+    in_skip_block = False
+    n = len(lines)
+    for idx, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if idx == 0 and stripped.upper().startswith("WEBVTT"):
+            in_header = True
+            continue
+        if in_header:
+            if not stripped:
+                in_header = False
+            continue
+        if in_skip_block:
+            if not stripped:
+                in_skip_block = False
+            continue
+        if stripped == "NOTE" or stripped.startswith(("NOTE ", "NOTE\t", "STYLE", "REGION")):
+            in_skip_block = True
+            continue
+        if not stripped:
+            continue
+        if _VTT_CUE_TIMING_RE.match(stripped):
+            continue
+        if idx + 1 < n and _VTT_CUE_TIMING_RE.match(lines[idx + 1].strip()):
+            continue
+        cleaned_line = _VTT_INLINE_TAG_RE.sub("", stripped).strip()
+        if cleaned_line:
+            out_lines.append(cleaned_line)
+    return re.sub(r"[ \t]+", " ", " ".join(out_lines)).strip()
 
 
 def _extract_citations(text: str) -> List[Tuple[str, int]]:
@@ -3642,7 +3750,7 @@ class UnifiedTruthGate:
         violations.extend(math_violations)
 
         # Gate 3 (continued): Zero-ungrounded-stat check (uses manifest formula/inputs when present)
-        violations.extend(_check_ungrounded_stats(visible_text, pack_dict, manifest_data, file_path))
+        violations.extend(_check_ungrounded_stats(visible_text, pack_dict, manifest_data, file_path, slug=eff_slug))
 
         # Gate 7: JSON-LD validation & pricing parity
         violations.extend(_check_jsonld(dom, pack_dict, file_path))
@@ -3818,24 +3926,26 @@ class UnifiedTruthGate:
                     )
                 )
 
+        scan_text = _extract_webvtt_spoken_text(clean_content) if surface_kind == "vtt" else clean_content
+
         if not is_js:
-            violations.extend(_check_banned_claims([clean_content], pack_dict, file_path))
-            violations.extend(_check_claim_qualifiers(clean_content, pack_dict, file_path))
-            violations.extend(_check_ungrounded_stats(clean_content, pack_dict, manifest_data, file_path))
-            violations.extend(_check_citations([clean_content], "", pack_dict, file_path))
-            violations.extend(_check_disclosures(clean_content, surface_kind, p.stem.lower(), pack_dict, file_path))
+            violations.extend(_check_banned_claims([scan_text], pack_dict, file_path))
+            violations.extend(_check_claim_qualifiers(scan_text, pack_dict, file_path))
+            violations.extend(_check_ungrounded_stats(scan_text, pack_dict, manifest_data, file_path))
+            violations.extend(_check_citations([scan_text], "", pack_dict, file_path))
+            violations.extend(_check_disclosures(scan_text, surface_kind, p.stem.lower(), pack_dict, file_path))
 
         violations.extend(
             _check_superseded_values(
-                clean_content,
-                [clean_content] if is_js else [],
-                "" if is_js else clean_content,
+                scan_text,
+                [scan_text] if is_js else [],
+                "" if is_js else scan_text,
                 pack_dict,
                 file_path,
                 is_js_file=is_js,
             )
         )
-        violations.extend(_check_cross_tenant_isolation(clean_content, foreign_tokens, file_path))
+        violations.extend(_check_cross_tenant_isolation(scan_text, foreign_tokens, file_path))
 
         if fname in ("llms.txt", "llms-full.txt"):
             violations.extend(_check_llms_surface(clean_content, pack_dict, dist_dir, file_path))

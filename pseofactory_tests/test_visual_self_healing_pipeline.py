@@ -62,13 +62,31 @@ def _build_clean_candidate_spec() -> dict:
         "query": "section 179 equipment expense tax deduction calculator",
         "slug": "section-179-equipment-expense-tax-deduction-calculator",
         "tenant": "profithelm",
-        "statutory_authority": "IRC Section 179(b)(1)",
+        "statutory_authority": "P.L. 119-21 Section 70306, IRS Rev. Proc. 2025-32, and P.L. 119-21 Section 70301",
         "economic_dataset": "FRED CPILFESL Series",
-        "model_name": "Section 179 Grounded Model",
-        "formula": "min(cost, cap)",
-        "inputs": {"cost": 400000, "cap": 1220000},
-        "published_output": 400000.0,
-        "sample_calculation": "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
+        "model_name": "2026 Section 179 (with $32,000 Heavy SUV Cap) + 100% Bonus Depreciation",
+        "formula": (
+            "round(min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) "
+            "+ max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) "
+            "* (bonus_pct / 100.0), 2)"
+        ),
+        "inputs": {
+            "equipment_cost": 85000.0,
+            "business_use_pct": 0.8,
+            "is_heavy_suv": 1,
+            "bonus_pct": 100.0,
+        },
+        "published_output": 68000.0,
+        "sample_calculation": (
+            "$85,000 heavy SUV at 80% business use ($68,000 depreciable basis) yields "
+            "$32,000 Section 179 cap plus $36,000 100% bonus depreciation (Section 70301), "
+            "totaling $68,000 first-year deduction."
+        ),
+        "mandatory_disclosures": [
+            "Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic statutory modeling for educational and planning purposes only and do not constitute individualized tax, legal, or accounting advice. Consult a licensed CPA or tax attorney before filing."
+        ],
         "canonical_base": "https://profithelm.com",
     }
 
@@ -242,7 +260,7 @@ def test_stage_1_and_2_contract_and_audit_block_all_five_flaw_classes():
         assert audit_report.gate_results.get("antislop_and_touch_target") is False
 
         # 3. Deterministic self-healing via normalize_html_visual_primitives must restore 100% compliance
-        healed_html, repairs = normalize_html_visual_primitives(sabotaged_html)
+        healed_html, repairs = normalize_html_visual_primitives(sabotaged_html, property_id="profithelm")
         assert len(repairs) > 0, f"normalize_html_visual_primitives reported 0 repairs for '{flaw_name}'"
         assert detect_visual_and_ux_contract_issues(healed_html, rel_path=f"{flaw_name}.html") == []
         assert verify_html_tool_utility_contract(healed_html, rel_path=f"{flaw_name}.html")["status"] == "PASS"
@@ -294,17 +312,19 @@ def test_stage_3_unattended_maintenance_and_supervisor_self_heal_seeded_flaws(tm
         </table>
       </div>
       <a href="/tools/section-179-equipment-tax-calculator/" class="btn-cta touch-target">Launch Tool</a>
+      <p>Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic modeling for educational purposes only and do not constitute individualized tax advice.</p>
     </div>
   </main>
 </body>
 </html>""",
         is_tenant_porcelain=True,
+        property_id="profithelm",
     )
     landing_file.write_text(clean_landing_html, encoding="utf-8")
     tool_file.write_text(clean_tool_html, encoding="utf-8")
 
     adapter = ConfigurablePropertyAdapter(
-        property_id="profithelm_test",
+        property_id="profithelm",
         brand_name="ProfitHelm",
         domain="profithelm.com",
         canonical_base="https://profithelm.com",

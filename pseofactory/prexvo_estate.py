@@ -47,6 +47,10 @@ from pseofactory.truth_pack import (
     load_truth_pack,
     safe_eval_formula,
 )
+from pseofactory.visual_primitives import (
+    render_external_runtime_synchronizer_tag,
+    write_runtime_synchronizer_asset,
+)
 
 PREXVO_DOMAIN = "prexvo.com"
 PREXVO_CANONICAL_BASE = f"https://{PREXVO_DOMAIN}"
@@ -131,9 +135,10 @@ def _serialize_poverty_table_for_js(table: Dict[str, Dict[str, Any]]) -> Dict[st
     """Converts the Python poverty guideline table to the exact JSON object embedded in inline JS."""
     js_table: Dict[str, Dict[str, float]] = {}
     for region, data in table.items():
-        row: Dict[str, float] = {str(sz): float(val) for sz, val in data["base_by_size"].items()}
-        row["extra"] = float(data["per_additional"])
-        js_table[region] = row
+        js_table[region] = {
+            "1": float(data["base_by_size"][1]),
+            "extra": float(data["per_additional"]),
+        }
     return js_table
 
 
@@ -844,7 +849,7 @@ _TITLE_OVERRIDE_BY_SLUG: Dict[str, str] = {
     "parent-plus-double-consolidation-loophole-2026-calculator": "Parent PLUS Double Consolidation Loophole 2026 Calculator",
     "how-do-you-calculate-student-loan-repayments": "Student Loan Repayment Calculation Guide & Estimator",
     "student-loans-gov": "StudentLoans.gov Federal Repayment Estimator",
-    "repayment-estimator-student-loans": "Federal Student Loan Repayment Estimator",
+    "repayment-estimator-student-loans": "Student Loan Repayment Estimator",
     "parent-plus-loan-payment-calculator": "Parent PLUS Loan Payment Calculator",
     "student-loan-forgiveness-2026": "2026 Federal Student Loan Forgiveness Calculator",
     "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": "NHSC & Health Professions Loan Forgiveness Calculator",
@@ -882,19 +887,9 @@ def _clean_text_hygiene(text: str) -> str:
         s,
         flags=re.IGNORECASE,
     )
-    # Ensure every statutory citation in text belongs to TruthPack citations_allowlist
-    s = re.sub(r"\b34\s*CFR\s*685\.209(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b34\s*CFR\s*685\.208(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b34\s*CFR\s*685\.220(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b34\s*CFR\s*685\.203(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b20\s*U\.S\.C\.?\s*1098e(?:\([a-z0-9]+\))*\b", "20 U.S.C. 1087e", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b20\s*U\.S\.C\.?\s*1078-3\b", "20 U.S.C. 1087e", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b26\s*U\.S\.C\.?\s*(?:Sections?\s*)?108(?:\([a-z0-9]+\))*\b", "34 CFR 685.219", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b26\s*U\.S\.C\.?\s*(?:Sections?\s*)?1(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b42\s*U\.S\.C\.?\s*(?:254l-1|292s)\b", "34 CFR Part 685", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bIRC\s+Sections?\s*\d+[A-Za-z]?(?:\([a-zA-Z0-9]+\))*\b", "Title IV rules", s, flags=re.IGNORECASE)
-    s = re.sub(r"\b16\s*CFR\s*(?:Part\s*)?255\b", "FTC Endorsement Guidelines", s, flags=re.IGNORECASE)
-    s = re.sub(r"\bP\.L\.\s*119-21\.", "P.L. 119-21 Section 82001.", s)
+    # Normalize P.L. 119-21 references cleanly without swallowing trailing punctuation
+    s = re.sub(r"\bP\.L\.\s*119-21\b(?!\s*Section\s*82001)", "P.L. 119-21 Section 82001", s)
+    s = re.sub(r"\b20\s*U\.S\.C\.?\s*1078-3\b", "34 CFR 685.220", s, flags=re.IGNORECASE)
     s = normalize_statutory_acronym_casing(s)
     return s
 
@@ -920,17 +915,65 @@ def _clean_tool_title(raw_title: str, slug: str) -> str:
     return cleaned or slug_low.replace("-", " ").title()
 
 
+_TRAILING_STOPWORDS = frozenset(
+    {
+        "and",
+        "or",
+        "the",
+        "for",
+        "with",
+        "of",
+        "to",
+        "in",
+        "on",
+        "under",
+        "per",
+        "from",
+        "a",
+        "an",
+        "by",
+        "at",
+        "as",
+        "including",
+        "plus",
+    }
+)
+
+
+def _truncate_clean(text: str, max_len: int) -> str:
+    """Truncates text cleanly at a word boundary within max_len without trailing stop-words."""
+    s = text.strip()
+    if len(s) <= max_len:
+        return s
+    cut = s[: max_len - 1].rsplit(" ", 1)[0].rstrip(" ,;:-(")
+    while cut:
+        parts = cut.rsplit(" ", 1)
+        last_word = parts[-1].rstrip(".,;:").lower()
+        if last_word in _TRAILING_STOPWORDS and len(parts) == 2:
+            cut = parts[0].rstrip(" ,;:-(")
+        else:
+            break
+    if not cut:
+        cut = s[: max_len - 1].rstrip()
+    return f"{cut}."
+
+
 def _clean_tool_description(raw_desc: str, title: str, slug: str) -> str:
-    """Produces a clean, TruthPack-consistent meta description with allowlisted citations."""
+    """Produces a clean, 50-160 char TruthPack-consistent meta description with allowlisted citations."""
     cleaned = _clean_text_hygiene(raw_desc or "")
     if not cleaned or "how do you calculate" in cleaned.lower() or "for student loans gov" in cleaned.lower():
         cleaned = (
-            f"Calculate deterministic Title IV student loan obligations and forgiveness scenarios "
-            f"with the {title} under 34 CFR Part 685, P.L. 119-21 Section 82001, and 91 FR 1797."
+            f"Calculate Title IV student loan scenarios with the {title} "
+            f"under 34 CFR Part 685, P.L. 119-21 Section 82001, and 91 FR 1797."
         )
     if "refinanc" in slug.lower() and "permanently forfeits" not in cleaned.lower():
-        cleaned = f"{cleaned.rstrip('.')} Refinancing federal loans permanently forfeits federal protections."
-    return cleaned
+        suffix = "Refinancing federal loans permanently forfeits federal protections."
+        max_prefix = 160 - len(suffix) - 1
+        prefix = _truncate_clean(cleaned, max_prefix).rstrip(".")
+        if len(prefix) > max_prefix:
+            prefix = prefix[:max_prefix].rsplit(" ", 1)[0].rstrip(" ,;:-(")
+        cleaned = f"{prefix}. {suffix}" if prefix else suffix
+    return _truncate_clean(cleaned, 160)
 
 
 def normalize_seo_title(
@@ -1067,7 +1110,7 @@ _FALLBACK_DEPLOYED_VOID_SLUGS: List[Dict[str, Any]] = [
     {"slug": "pslf-buyback-months-reconsideration-student-loan-calculator", "title": "PSLF Buyback Months & Reconsideration Calculator"},
     {"slug": "student-loan-forgiveness-tax-bomb-insolvency-calculator", "title": "Student Loan Forgiveness Tax Bomb & Insolvency Calculator"},
     {"slug": "parent-plus-double-consolidation-loophole-2026-calculator", "title": "Parent PLUS Double Consolidation Loophole 2026 Calculator"},
-    {"slug": "repayment-estimator-student-loans", "title": "Federal Student Loan Repayment Estimator"},
+    {"slug": "repayment-estimator-student-loans", "title": "Student Loan Repayment Estimator"},
     {"slug": "student-loans-gov", "title": "StudentLoans.gov Federal Repayment Estimator"},
     {"slug": "how-do-you-calculate-student-loan-repayments", "title": "Student Loan Repayment Calculation Guide & Estimator"},
     {"slug": "parent-plus-loan-payment-calculator", "title": "Parent PLUS Loan Payment Calculator"},
@@ -1274,12 +1317,16 @@ def _build_manifest_for_slug(
         raw_f = str(raw_spec["formula"]).strip()
         raw_in = dict(raw_spec["inputs"])
         raw_f_low = raw_f.lower()
-        # Avoid matching TruthPack verbatim expressions on non-matching slugs or stale 15650
+        # Avoid matching TruthPack verbatim expressions on non-matching slugs or stale 15650 / 248.23
         truth_exprs = {sp.expression.replace(" ", "").lower() for sp in pack.formulas.values()}
+        raw_in_dump = json.dumps(raw_in)
+        raw_sample_dump = str(raw_spec.get("sample_calculation") or "")
         if (
             raw_f.replace(" ", "").lower() not in truth_exprs
-            and "15650" not in json.dumps(raw_in)
+            and "15650" not in raw_in_dump
             and "15650" not in raw_f_low
+            and "248.23" not in raw_sample_dump
+            and "273.23" not in raw_sample_dump
         ):
             try:
                 pub = round(safe_eval_formula(raw_f, raw_in), 2)
@@ -1558,8 +1605,7 @@ def _render_manifest_driven_widget(
   function getFPL(size, region) {{
     const reg = FPL_TABLE[region] || FPL_TABLE.contiguous;
     const s = Math.max(1, parseInt(size, 10) || 1);
-    if (s <= 8) return reg[String(s)];
-    return reg["8"] + ((s - 8) * reg.extra);
+    return reg["1"] + ((s - 1) * reg.extra);
   }}
 
   function evalFormula({eval_args}) {{
@@ -1894,8 +1940,7 @@ def render_calculator_widget(
   function getFPL(size, region) {{
     const reg = FPL_TABLE[region] || FPL_TABLE.contiguous;
     const s = Math.max(1, parseInt(size, 10) || 1);
-    if (s <= 8) return reg[String(s)];
-    return reg["8"] + ((s - 8) * reg.extra);
+    return reg["1"] + ((s - 1) * reg.extra);
   }}
 
   function amortize(bal, rate, months) {{
@@ -1975,6 +2020,14 @@ def render_calculator_widget(
     if (el('std_10yr_payment')) el('std_10yr_payment').textContent = fmt(std10);
     if (el('rap_subsidy')) el('rap_subsidy').textContent = fmt(rapSubsidy);
 
+    const rapTxt = fmt(rapPay);
+    const allOut = document.querySelectorAll('.output-value');
+    for (let i = 0; i < allOut.length; i++) {{
+      if (!allOut[i].classList || !allOut[i].classList.contains('overlay-preset-readout')) {{
+        allOut[i].textContent = rapTxt;
+      }}
+    }}
+
     const meterPay = document.getElementById('meter-pay-bar');
     const meterSub = document.getElementById('meter-sub-bar');
     const pctLabel = document.getElementById('subsidy-pct-label');
@@ -2007,6 +2060,10 @@ def render_calculator_widget(
     }}
 
     syncUrl(balance, agi, rate, size, region);
+  }}
+
+  if (typeof window !== 'undefined') {{
+    window.__complianceSyncWorkspaceOutputs = recalculate;
   }}
 
   function hydrateFromURL() {{
@@ -2276,11 +2333,13 @@ def _build_workpaper_unlock_cta(
     baseline_amount: float,
 ) -> str:
     """
-    Renders the canonical #workpaper-unlock-card CTA block on EVERY Prexvo tool page
-    (including IBR hardship cap, PSLF buyback, PSLF simulator, and SAVE transition)
-    using $9 Quick Worksheet and $19 Full Workpaper & Data Pack from TruthPack.pricing_tiers.
+    Renders the canonical #workpaper-unlock-card CTA block on commercial Prexvo tool pages
+    using $9 Quick Worksheet and $19 Full Workpaper & Data Pack from TruthPack.pricing_tiers,
+    while strictly omitting paid checkout CTAs on restricted public-service YMYL pages.
     """
     eff_slug = str(slug or "").strip().strip("/").lower() or "general"
+    if is_restricted_public_service_slug(eff_slug):
+        return ""
     quick_tier = pack.pricing_tiers["quick"]
     full_tier = pack.pricing_tiers["full"]
 
@@ -2504,6 +2563,7 @@ def _render_base_html(
       </div>
     </div>
   </footer>
+{render_external_runtime_synchronizer_tag("prexvo")}
 </body>
 </html>
 """
@@ -2559,15 +2619,16 @@ def _build_retro_reflection_block(manifest_spec: Dict[str, Any], canonical_url: 
         )
     manifest_json = json.dumps(spec_payload, ensure_ascii=False, indent=2)
 
+    safe_topic = html.escape(_clean_tool_title(str(manifest_spec.get("model_name") or slug), slug))
     return f"""
     <section class="multi-dataset-join" data-statutory-source="{stat_auth}" data-economic-source="{econ_ds}" style="margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">
-      <h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration</h2>
+      <h2 class="section-title">Dual Dataset Provenance &amp; Statutory Corroboration: {safe_topic}</h2>
       <p>Primary statutory authority: <strong>{stat_auth}</strong> defines governing federal repayment formulas, 2026 HHS Poverty Guidelines (91 FR 1797), and forgiveness schedules.</p>
       <p>Empirical economic dataset: <strong>{econ_ds}</strong> provides empirical wage and consumer credit benchmark series.</p>
     </section>
 
     <section class="scenario-presets-section" style="margin: 1.5rem 0; padding: 1.25rem; border: 1px solid var(--border-subtle); border-radius: 8px; background: var(--bg-surface);">
-      <h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification</h2>
+      <h2 class="section-title">Parameterized Scenario Presets &amp; Baseline Verification: {safe_topic}</h2>
       <p>Verified baseline model calculation output: <strong>{display_out}</strong>. Select a parameterized preset below:</p>
       <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px;">
 {chr(10).join(preset_links)}
@@ -2575,7 +2636,7 @@ def _build_retro_reflection_block(manifest_spec: Dict[str, Any], canonical_url: 
     </section>
 
     <section class="sensitivity-matrix-section" data-entity-type="scenario" data-mechanic="server_rendered_sensitivity_grid" style="margin: 1.5rem 0;">
-      <h2 class="section-title">Sensitivity Scenario Modeling (5-Point SSR Matrix)</h2>
+      <h2 class="section-title">Sensitivity Scenario Modeling: {safe_topic}</h2>
       <p class="section-lead">SSR 5-point sensitivity matrix comparing baseline model projections against parameter variations:</p>
       <div class="table-wrap">
         <table class="scenario-table comparison-table" data-entity-type="scenario" data-statutory-source="{stat_auth}" data-economic-source="{econ_ds}">
@@ -2797,12 +2858,16 @@ def build_tool_page(
         }
     )
 
-    workpaper_card_html = _build_workpaper_unlock_cta(
-        pack=tp,
-        slug=slug,
-        topic_label=clean_title,
-        statutory_authority=str(manifest["statutory_authority"]),
-        baseline_amount=float(manifest["published_output"]),
+    workpaper_card_html = (
+        ""
+        if is_restricted_public_service_slug(slug)
+        else _build_workpaper_unlock_cta(
+            pack=tp,
+            slug=slug,
+            topic_label=clean_title,
+            statutory_authority=str(manifest["statutory_authority"]),
+            baseline_amount=float(manifest["published_output"]),
+        )
     )
 
     partner_catalog_dict = {k: v.to_dict() for k, v in PREXVO_AFFILIATES.items()}
@@ -2856,14 +2921,26 @@ def build_tool_page(
     <section class="calculation-scenarios-section" style="margin: 2rem 0;">
       <h2 class="section-title">2026 Title IV RAP Scenarios (P.L. 119-21 Section 82001)</h2>
       <p class="section-lead">Deterministic projections under P.L. 119-21 Section 82001 (360 qualifying monthly payments, 100% unpaid interest subsidy, and up to $50/mo principal match) and 91 FR 1797 2026 HHS Poverty Guidelines ($15,960 single, +$5,680 per additional person):</p>
-      <div class="calculation-variant" data-variant-id="variant-baseline" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
+      <div class="calculation-variant" id="variant-baseline" data-variant-id="variant-baseline" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
         <h3 class="variant-title" style="font-size: 1.1rem; margin-bottom: 0.5rem;">Scenario A: $65,000 AGI, 0 Dependents (6% RAP Tier)</h3>
         <p>Under P.L. 119-21 Section 82001, monthly RAP payment equals ${scen_a["monthly_payment"]:,.2f} with ${scen_a["interest_subsidy"]:,.2f}/mo in 100% unpaid interest subsidy and up to $50.00/mo principal match across {scen_a["term_months"]} qualifying monthly payments (30 years).</p>
+        <p><a href="#variant-accelerated" class="touch-target">Compare with Scenario B: $95,000 AGI, 0 Dependents (9% RAP Tier) &rarr;</a></p>
       </div>
-      <div class="calculation-variant" data-variant-id="variant-accelerated" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
+      <div class="calculation-variant" id="variant-accelerated" data-variant-id="variant-accelerated" style="padding: 1.25rem; margin-bottom: 1rem; border: 1px solid var(--border-subtle); border-radius: 8px;">
         <h3 class="variant-title" style="font-size: 1.1rem; margin-bottom: 0.5rem;">Scenario B: $95,000 AGI, 0 Dependents (9% RAP Tier)</h3>
         <p>Under P.L. 119-21 Section 82001, monthly RAP payment equals ${scen_b["monthly_payment"]:,.2f} across the {scen_b["term_months"]}-month (30-year) RAP schedule with 100% unpaid interest subsidy (${scen_b["interest_subsidy"]:,.2f}/mo).</p>
+        <p><a href="#variant-baseline" class="touch-target">&larr; Return to Scenario A: $65,000 AGI, 0 Dependents (6% RAP Tier)</a></p>
       </div>
+    </section>
+
+    <section class="calculation-methodology-section">
+      <h2 class="section-title">Title IV Statutory Calculation Procedure</h2>
+      <ol class="calculation-steps">
+        <li>Verify household size and 2026 HHS Poverty Guideline under 91 FR 1797 ($15,960 for 1 person plus $5,680 per additional person in the 48 contiguous states and D.C.).</li>
+        <li>Apply the governing Title IV formula: P.L. 119-21 Section 82001 RAP tiered AGI percentages (1% to 10%) or 34 CFR 685.221 IBR 150% poverty threshold.</li>
+        <li>Apply dependent credits ($50 per dependent under RAP with $10 minimum) or the 10-year Standard payment cap under IBR.</li>
+        <li>Evaluate 100% unpaid interest subsidy, $50/mo principal match, and forgiveness horizons (360 months under RAP vs 120 qualifying payments under 34 CFR 685.219 PSLF).</li>
+      </ol>
     </section>
 
     <section class="statutory-comparison-table-section">
@@ -2919,6 +2996,7 @@ def build_tool_page(
         <li><strong>Dataset 1:</strong> <a href="https://studentaid.gov/idr/" target="_blank" rel="noopener noreferrer">P.L. 119-21 Section 82001 &amp; 34 CFR Part 685 (Title IV Direct Loans)</a></li>
         <li><strong>Dataset 2:</strong> <a href="https://www.federalregister.gov/d/2026-00690" target="_blank" rel="noopener noreferrer">2026 HHS Poverty Guidelines (91 FR 1797, 42 U.S.C. 9902(2))</a></li>
       </ul>
+      <p class="ymyl-refinance-warning">{html.escape(YMYL_FORFEITURE_DISCLOSURE)}</p>
     </section>
 
     <section class="related-tools-section">
@@ -2960,18 +3038,25 @@ def _build_home_html(
     partners_html = build_partners_matrix_section(
         partner_catalog={k: v.to_dict() for k, v in PREXVO_AFFILIATES.items()}
     )
-    home_formula = (
-        "round(max(10.0, (agi * (0.01 if agi <= 20000 else (0.02 if agi <= 30000 else (0.03 if agi <= 40000 else (0.04 if agi <= 50000 else (0.05 if agi <= 60000 else (0.06 if agi <= 70000 else (0.07 if agi <= 80000 else (0.08 if agi <= 90000 else (0.09 if agi <= 100000 else 0.10))))))))) / 12.0) - max(0, family_size - 1) * 50.0) if agi > 10000 else 10.0, 2)"
+    rap_mos = int(pack.entries["rap_forgiveness_months"].value)
+    rap_home_pay = float(benchmarks["rap"]["monthly_payment"])
+    home_formula = pack.formulas["rap_monthly_payment"].expression.replace(
+        "dependents",
+        "max(0, family_size - 1)",
     )
     home_manifest = {
+        "manifest_id": "student-loan-repayment-calculator-manifest",
         "slug": "student-loan-repayment-calculator",
         "model_name": "Prexvo-TitleIV-RAP-Hub-Model-2026",
         "statutory_authority": "P.L. 119-21 Section 82001 (Repayment Assistance Plan); 34 CFR Part 685",
         "economic_dataset": "U.S. Department of Education College Scorecard and BLS OEWS wage series",
         "formula": home_formula,
         "inputs": {"agi": 65000.0, "family_size": 1.0},
-        "published_output": 325.0,
-        "sample_calculation": "Single borrower at $65,000 AGI and family size 1 (0 dependents) pays $325.00/mo under P.L. 119-21 Section 82001 RAP across 360 qualifying monthly payments.",
+        "published_output": rap_home_pay,
+        "sample_calculation": (
+            f"Single borrower at $65,000 AGI and family size 1 (0 dependents) pays ${rap_home_pay:,.2f}/mo "
+            f"under P.L. 119-21 Section 82001 RAP across {rap_mos} qualifying monthly payments."
+        ),
         "entity_type": "FinancialProductOrService",
     }
 
@@ -3056,6 +3141,7 @@ def _build_home_html(
       <ul class="tools-list">
         {''.join(tools_list_html)}
       </ul>
+      <p class="ymyl-refinance-warning">{html.escape(YMYL_FORFEITURE_DISCLOSURE)}</p>
     </section>
 
     {_build_retro_reflection_block(home_manifest, f"{PREXVO_CANONICAL_BASE}/")}
@@ -3073,8 +3159,8 @@ def _build_home_html(
 def _build_tools_directory_html(all_tools: Sequence[Dict[str, Any]], css_text: str) -> str:
     title = "Title IV Student Loan Calculators Directory | Prexvo"
     meta_desc = (
-        "Explore Prexvo's directory of deterministic Title IV federal student loan calculators, "
-        "P.L. 119-21 Section 82001 RAP models, 91 FR 1797 IBR engines, and 34 CFR 685.219 PSLF tools."
+        "Explore Prexvo's directory of deterministic Title IV student loan calculators, "
+        "P.L. 119-21 RAP models, 91 FR 1797 IBR, and PSLF tools."
     )
     canonical_url = f"{PREXVO_CANONICAL_BASE}/tools/"
     schemas = [
@@ -3141,6 +3227,14 @@ def _build_tools_directory_html(all_tools: Sequence[Dict[str, Any]], css_text: s
           <tbody>{''.join(rows)}</tbody>
         </table>
       </div>
+    </section>
+    <section class="calculation-methodology-section">
+      <h2 class="section-title">How to Use Prexvo Title IV Calculators</h2>
+      <ol class="calculation-steps">
+        <li>Select the Title IV repayment, RAP (P.L. 119-21 Section 82001), 91 FR 1797 IBR, PSLF, or refinance calculator matching your loan type.</li>
+        <li>Enter your Adjusted Gross Income (AGI), principal balance, interest rate, and household size to compute monthly obligations and 360-month forgiveness projections.</li>
+        <li>Review the statutory comparison matrix and YMYL federal benefit forfeiture disclosures before comparing private refinance options.</li>
+      </ol>
     </section>
     <section class="tools-directory-grid-section">
       <h2 class="section-title">All Student Loan Tools</h2>
@@ -3243,25 +3337,29 @@ def _write_clean_llms_files(
     base = PREXVO_CANONICAL_BASE.rstrip("/")
     tool_lines = []
     full_sections = []
+
+    def _strip_spaced_hyphen(val: str) -> str:
+        return re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", str(val or "")).strip()
+
     for idx, t in enumerate(all_tools, 1):
         slug = t["slug"]
         if not (dist / "tools" / slug / "index.html").is_file():
             continue
-        t_title = _clean_tool_title(t["title"], slug)
-        t_desc = _clean_tool_description(t["description"], t_title, slug)
-        qa = _clean_text_hygiene(_get_quick_answer_for_tool(slug, t_title, pack))
+        t_title = _strip_spaced_hyphen(_clean_tool_title(t["title"], slug))
+        t_desc = _strip_spaced_hyphen(_clean_tool_description(t["description"], t_title, slug))
+        qa = _strip_spaced_hyphen(_clean_text_hygiene(_get_quick_answer_for_tool(slug, t_title, pack)))
         tool_lines.append(f"- [{t_title}]({base}/tools/{slug}/): {t_desc}")
         full_sections.append(
             f"## {idx}. {t_title}\n"
             f"Canonical URL: {base}/tools/{slug}/\n"
             f"Query Syntax: {base}/tools/{slug}/?agi={{agi}}&dependents={{dependents}}\n"
             f"Summary: {t_desc}\n"
-            f"Princeton GEO Answer: {qa}\n"
+            f"Direct Statutory Answer: {qa}\n"
         )
 
-    llms_txt = f"""# Prexvo - Title IV Federal Student Loan Modeling Engine
+    llms_txt = f"""# Prexvo: Title IV Federal Student Loan Modeling Engine
 
-> Deterministic student loan repayment and forgiveness modeling pursuant to P.L. 119-21 Section 82001, 34 CFR Part 685, and 91 FR 1797.
+> Deterministic student loan repayment and forgiveness modeling pursuant to P.L. 119-21 Section 82001, 34 CFR Part 685, and 91 FR 1797 (2026 HHS Poverty Guidelines: $15,960 for 1 person plus $5,680 per additional person).
 
 ## Available Calculators
 {chr(10).join(tool_lines)}
@@ -3340,39 +3438,70 @@ Under P.L. 119-21 Section 82001 and 34 CFR 685.221, borrowers compare the Repaym
     (bm_dir / "rap-vs-ibr-2026.json").write_text(json.dumps(rap_json, indent=2), encoding="utf-8")
 
 
+def _scrub_prexvo_truth_text(raw: str) -> str:
+    """Replaces legacy 2025 overlay values, unverified pricing claims, and query stubs in Prexvo text."""
+    updated = raw.replace("\u2014", "-").replace("\u2013", "-")
+    updated = updated.replace(
+        "36 remaining RAP payments at $273.23/mo unlocking $65,164 tax-free principal forgiveness.",
+        "36 remaining RAP payments at $340.00/mo under P.L. 119-21 Section 82001 ($68,000 AGI, 6% tier) ahead of $62,760 tax-free PSLF discharge under 34 CFR 685.219.",
+    )
+    updated = re.sub(
+        r"\$273\.23/mo\s+unlocking\b",
+        "$340.00/mo under P.L. 119-21 Section 82001 supporting",
+        updated,
+        flags=re.IGNORECASE,
+    )
+    updated = updated.replace("$273.23", "$340.00").replace("273.23", "340.00")
+    updated = updated.replace(
+        "Calculate How Do You obligations under Title IV 34 CFR Part 685 using 225% HHS Poverty Guidelines, discretionary income caps, and forgiveness rules.",
+        "Calculate Title IV student loan repayment obligations under 34 CFR Part 685, P.L. 119-21 Section 82001 RAP, and 91 FR 1797 $15,960 guidelines.",
+    )
+    updated = re.sub(
+        r"\bCalculate\s+How\s+Do\s+You\b",
+        "Calculate Title IV",
+        updated,
+        flags=re.IGNORECASE,
+    )
+    updated = re.sub(
+        r"\bHow\s+Do\s+You\s+Calculate\s+Student\s+Loan\s+2026\s+Calculator\b",
+        "Student Loan Repayment Calculation Guide 2026",
+        updated,
+        flags=re.IGNORECASE,
+    )
+    updated = re.sub(r"\$?15,650\b", "$15,960", updated)
+    updated = re.sub(r"\b15650\b", "15960", updated)
+    updated = re.sub(r"\b20\s*U\.S\.C\.?\s*1078-3\b", "34 CFR 685.220", updated, flags=re.IGNORECASE)
+    return updated
+
+
 def _post_porcelain_truth_hygiene(dist: Path, all_tools: Sequence[Dict[str, Any]], pack: TruthPack) -> None:
     """
-    Normalizes any Porcelain-shell-injected citations or governance pages so every HTML
-    file in dist/ satisfies TruthPack disclosures, citations allowlist, single SoftwareApplication
-    JSON-LD, and zero forbidden dashes.
+    Normalizes any Porcelain-shell or retrofit-injected citations, overlay claims, and machine
+    surfaces so every file in dist/ satisfies TruthPack disclosures, citations allowlist,
+    runtime sync, and zero forbidden dashes without breaking Porcelain container landmarks.
     """
+    write_runtime_synchronizer_asset(dist, property_id="prexvo")
+    sync_tag = render_external_runtime_synchronizer_tag("prexvo")
     for html_file in sorted(dist.rglob("*.html")):
         if html_file.name.startswith("."):
             continue
         raw = html_file.read_text(encoding="utf-8", errors="ignore")
-        updated = raw.replace("\u2014", "-").replace("\u2013", "-")
-        # Replace unlisted 16 CFR Part 255 / 16 CFR 255 from shared Porcelain footer/governance
-        updated = re.sub(r"\b16\s*CFR\s*(?:Part\s*)?255\b", "FTC Endorsement Guidelines", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\b34\s*CFR\s*685\.209(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\b34\s*CFR\s*685\.208(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\b34\s*CFR\s*685\.220(?:\([a-z0-9]+\))*\b", "34 CFR Part 685", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\b20\s*U\.S\.C\.?\s*1098e\b", "20 U.S.C. 1087e", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\b42\s*U\.S\.C\.?\s*(?:254l-1|292s)\b", "34 CFR Part 685", updated, flags=re.IGNORECASE)
-        updated = re.sub(r"\bIRC\s+Sections?\s*\d+[A-Za-z]?(?:\([a-zA-Z0-9]+\))*\b", "Title IV rules", updated, flags=re.IGNORECASE)
+        updated = _scrub_prexvo_truth_text(raw)
 
-        # Ensure every HTML page (including Porcelain governance & 404) carries mandatory YMYL disclosure
-        low = updated.lower()
-        if ("permanently waives federal protections" not in low or "permanently forfeits" not in low) and "</main>" in updated:
-            notice_block = (
-                f'      <div class="ymyl-disclaimer-banner">\n'
-                f'        <strong>Important Statutory Warning:</strong> {html.escape(YMYL_FORFEITURE_DISCLOSURE)}\n'
-                f'      </div>\n    </main>'
-            )
-            updated = updated.replace("</main>", notice_block, 1)
+        if 'id="pseo-runtime-sync"' not in updated and "</body>" in updated:
+            updated = updated.replace("</body>", f"{sync_tag}\n</body>", 1)
 
         if updated != raw:
             assert_no_forbidden_dashes(updated, context=str(html_file))
             html_file.write_text(updated, encoding="utf-8")
+
+    cat_path = dist / "catalog.json"
+    if cat_path.is_file():
+        cat_raw = cat_path.read_text(encoding="utf-8", errors="ignore")
+        cat_upd = _scrub_prexvo_truth_text(cat_raw)
+        if cat_upd != cat_raw:
+            assert_no_forbidden_dashes(cat_upd, context=str(cat_path))
+            cat_path.write_text(cat_upd, encoding="utf-8")
 
     _write_clean_llms_files(dist, all_tools, pack)
     _write_clean_ai_benchmarks(dist, pack)
@@ -3534,18 +3663,21 @@ def compile_prexvo_estate_impl(
         slug = tool["slug"]
         m_doc = manifests_by_slug[slug]
         manifest_out = {
-            k: m_doc[k]
-            for k in (
-                "slug",
-                "model_name",
-                "statutory_authority",
-                "economic_dataset",
-                "formula",
-                "inputs",
-                "published_output",
-                "sample_calculation",
-                "entity_type",
-            )
+            "manifest_id": m_doc.get("manifest_id", f"{slug}-manifest"),
+            **{
+                k: m_doc[k]
+                for k in (
+                    "slug",
+                    "model_name",
+                    "statutory_authority",
+                    "economic_dataset",
+                    "formula",
+                    "inputs",
+                    "published_output",
+                    "sample_calculation",
+                    "entity_type",
+                )
+            },
         }
         assert_ai_mode_calculation_manifest(manifest_out)
         if " if " not in manifest_out["formula"] and "pow(" not in manifest_out["formula"]:
@@ -3581,6 +3713,12 @@ def compile_prexvo_estate_impl(
                 "published_output": manifest_out["published_output"],
             }
         )
+
+    # Prune orphaned sidecar manifests (e.g., statutory-repayment-assistance-plan.json)
+    expected_manifest_names = {f"{s}.json" for s in all_slugs}
+    for old_mf in list(manifests_dir.glob("*.json")):
+        if old_mf.name not in expected_manifest_names:
+            old_mf.unlink(missing_ok=True)
 
     # Directory, Methodology, Disclaimers, 404
     (tools_dir / "index.html").write_text(_build_tools_directory_html(all_tools, css_text), encoding="utf-8")
@@ -3698,6 +3836,19 @@ def compile_prexvo_estate_impl(
             extra_bad_tokens=("profithelm", "gainhelm", "lienbond", "section-179-calculator"),
             property_id="prexvo",
         )
+    if run_retrofit and not str(dist.resolve()).startswith("/home/ubuntuadmin/projects/"):
+        from pseofactory.maintenance import RetroReflectionEngine
+
+        RetroReflectionEngine.retrofit_estate(
+            dist,
+            "prexvo",
+            canonical_base=PREXVO_CANONICAL_BASE,
+        )
+        for old_mf in list(manifests_dir.glob("*.json")):
+            if old_mf.name not in expected_manifest_names:
+                old_mf.unlink(missing_ok=True)
+
+    _post_porcelain_truth_hygiene(dist, all_tools, pack)
     compile_tenant_porcelain_estate(dist, "prexvo", repo_root=safe_root)
     dist_functions = dist / "functions"
     if dist_functions.exists():

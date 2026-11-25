@@ -5681,7 +5681,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
     }
     statutoryTrendTimeseries = [
       { series_id: "ed_direct_undergrad_rate", metric_label: "Title IV Direct Undergraduate Fixed Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2028": 5.95, "2030": 5.8 } },
-      { series_id: "hhs_fpl_single_base", metric_label: "HHS 48-State Single Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15650, "2028": 16600, "2030": 17600 } },
+      { series_id: "hhs_fpl_single_base", metric_label: "HHS 48-State Single Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15960, "2028": 16600, "2030": 17600 } },
       { series_id: "fred_dgs10_yield", metric_label: "10-Year U.S. Treasury Benchmark Yield", statutory_citation: "31 U.S.C. 3102 / FRED DGS10", unit: "PCT", points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2028": 3.95, "2030": 3.8 } },
     ];
     methodologyNotes = [
@@ -5788,9 +5788,9 @@ def _render_edge_pricing_and_workpaper_engine_js(
       const effCap = Math.max(0, cap2026 - phaseReduction);
       const sec179 = Math.min(qualBasis, effCap);
       const remAfter179 = Math.max(0, qualBasis - sec179);
-      const bonus20 = Math.round(remAfter179 * 0.20 * 100) / 100;
-      const yr1MacrsRem = Math.round(Math.max(0, remAfter179 - bonus20) * 0.20 * 100) / 100;
-      const totalYr1 = Math.round((sec179 + bonus20 + yr1MacrsRem) * 100) / 100;
+      const bonus100 = Math.round(remAfter179 * 1.00 * 100) / 100;
+      const yr1MacrsRem = Math.round(Math.max(0, remAfter179 - bonus100) * 0.20 * 100) / 100;
+      const totalYr1 = Math.round((sec179 + bonus100 + yr1MacrsRem) * 100) / 100;
       const yr1Shield = Math.round(totalYr1 * margRate * 100) / 100;
       const stdMacrsYr1 = Math.round(qualBasis * 0.20 * 100) / 100;
 
@@ -5803,7 +5803,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       reconciliationSchedule = [
         { line_code: "4562-P1", line_item: `Qualifying Equipment Cost (${busUsePct}% Business Use)`, authority: "IRC Section 179(d) & Form 4562", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(qualBasis), delta_impact: `2026 Cap: ${fmtUsd(cap2026)}` },
         { line_code: "4562-L12", line_item: "IRC Section 179 First-Year Expense Election", authority: "IRC Section 179(b)(1)-(2) (2026 Rules)", baseline_value: `${fmtUsd(stdMacrsYr1)} (5-Yr MACRS Yr 1)`, optimized_value: fmtUsd(sec179), delta_impact: `+${fmtUsd(Math.max(0, sec179 - stdMacrsYr1))} Accelerated` },
-        { line_code: "4562-L14", line_item: "2026 Section 168(k) 20% Bonus Depreciation", authority: "IRC Section 168(k)(6) Statutory 20% Rate", baseline_value: "$0.00", optimized_value: fmtUsd(bonus20), delta_impact: "Applied to Post-179 Basis" },
+        { line_code: "4562-L14", line_item: "2026 Section 168(k) 100% Bonus Depreciation", authority: "P.L. 119-21 Section 70301 (26 U.S.C. 168(k)) 100% Rate", baseline_value: "$0.00", optimized_value: fmtUsd(bonus100), delta_impact: "Applied to Post-179 Basis" },
         { line_code: "4562-TAX", line_item: `Estimated Year-1 Cash Tax Shield (${fmtPct(margRatePct)})`, authority: "Form 4562 Part I & Part III", baseline_value: fmtUsd(stdMacrsYr1 * margRate), optimized_value: fmtUsd(yr1Shield), delta_impact: `+${fmtUsd(Math.max(0, yr1Shield - stdMacrsYr1 * margRate))} Liquidity` },
       ];
       const scaleFactors = [0.80, 0.90, 1.00, 1.10, 1.20];
@@ -5812,7 +5812,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
         const scCap = Math.max(0, cap2026 - Math.max(0, scAmt - phase2026));
         const sc179 = Math.min(scAmt, scCap);
         const scRem = Math.max(0, scAmt - sc179);
-        const scTot = sc179 + scRem * 0.20 + (scRem * 0.80) * 0.20;
+        const scTot = sc179 + scRem * 1.00;
         const scShield = Math.round(scTot * margRate * 100) / 100;
         const lbl = sf === 1.0 ? "Modeled CapEx Baseline (100%)" : `${sf < 1 ? "-" : "+"}${Math.round(Math.abs(sf - 1) * 100)}% Equipment Spend`;
         return {
@@ -5823,7 +5823,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
         };
       });
       const macrsRates = [0.20, 0.32, 0.192, 0.1152, 0.1152, 0.0576];
-      const remForMacrs = Math.max(0, qualBasis - sec179 - bonus20);
+      const remForMacrs = Math.max(0, qualBasis - sec179 - bonus100);
       periodSchedule = macrsRates.map((mr, idx) => {
         const stdDed = Math.round(qualBasis * mr * 100) / 100;
         const optDed = idx === 0 ? totalYr1 : Math.round(remForMacrs * mr * 100) / 100;
@@ -5833,11 +5833,11 @@ def _render_edge_pricing_and_workpaper_engine_js(
           metric_b: fmtUsd(optDed),
           metric_c: fmtUsd(optDed * margRate),
           metric_d: `${optDed >= stdDed ? "+" : ""}${fmtUsd((optDed - stdDed) * margRate)}`,
-          note: idx === 0 ? "Sec 179 + 20% Bonus + Yr1 MACRS" : "Remaining MACRS 200% DB Recovery",
+          note: idx === 0 ? "Sec 179 + 100% Bonus (P.L. 119-21)" : "Remaining MACRS 200% DB Recovery",
         };
       });
       methodologyNotes = [
-        "2026 IRC Section 179 statutory expense cap is $2,560,000 with dollar-for-dollar phase-out beginning at $4,090,000; 2026 IRC Section 168(k) bonus depreciation rate is 20%.",
+        "2026 IRC Section 179 statutory expense cap is $2,560,000 with dollar-for-dollar phase-out beginning at $4,090,000; 2026 IRC Section 168(k) bonus depreciation rate is 100% under P.L. 119-21 Section 70301.",
         "Standard 5-Year 200% Declining Balance Half-Year MACRS schedule (IRS Pub. 946 Table A-1): 20.00%, 32.00%, 19.20%, 11.52%, 11.52%, 5.76%.",
       ];
     } else {
@@ -5913,10 +5913,10 @@ def _render_edge_pricing_and_workpaper_engine_js(
       ];
     }
     statutoryTrendTimeseries = [
-      { series_id: "irs_sec179_cap", metric_label: "IRC Section 179 Maximum Deduction Cap", statutory_citation: "26 U.S.C. 179(b)(1)", unit: "USD", points: { "2024": 1220000, "2025": 1250000, "2026": 2560000, "2028": 2680000, "2030": 2810000 } },
+      { series_id: "irs_sec179_cap", metric_label: "IRC Section 179 Maximum Deduction Cap", statutory_citation: "26 U.S.C. 179(b)(1) / P.L. 119-21 Sec. 70306", unit: "USD", points: { "2024": 1220000, "2025": 2500000, "2026": 2560000, "2028": 2680000, "2030": 2810000 } },
       { series_id: "irs_sec199a_qbi", metric_label: "IRC Section 199A QBI Deduction Rate (OBBBA Permanent)", statutory_citation: "26 U.S.C. 199A / P.L. 119-21", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
       { series_id: "ssa_fica_wage_base", metric_label: "Social Security OASDI Maximum Taxable Wage Base", statutory_citation: "26 U.S.C. 3121", unit: "USD", points: { "2024": 168600, "2025": 176100, "2026": 184500, "2028": 196500, "2030": 209300 } },
-      { series_id: "irs_sec168k_bonus", metric_label: "IRC Section 168(k) First-Year Bonus Depreciation", statutory_citation: "26 U.S.C. 168(k)(6)", unit: "PCT", points: { "2024": 60.0, "2025": 40.0, "2026": 20.0, "2028": 0.0, "2030": 0.0 } },
+      { series_id: "irs_sec168k_bonus", metric_label: "IRC Section 168(k) First-Year Bonus Depreciation", statutory_citation: "26 U.S.C. 168(k) / P.L. 119-21 Sec. 70301", unit: "PCT", points: { "2024": 60.0, "2025": 40.0, "2026": 100.0, "2028": 100.0, "2030": 100.0 } },
     ];
     statutoryExecutionArtifacts = [
       {

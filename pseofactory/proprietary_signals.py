@@ -1119,7 +1119,7 @@ def compute_multi_year_longitudinal_trajectory(
             ("2025 Enacted Window", "Rev. Proc. 2024-28 Wallet-by-Wallet Transition", "1099-DA Gross Proceeds Broker Reporting Active", "cliff-exposure-2025", "$14,592 Tax / $2,700 1256 Alpha"),
             ("2026 Statutory Schedule", "Mandatory 1099-DA Covered Cost-Basis Enforcement", "3.8% IRC 1411 NIIT + 24% STCG / 15% LTCG Split", "cliff-exposure-2026", "$14,800 Tax ($14,592 1099-DA)"),
             ("2027 Enacted OBBBA Regime", "Permanent 10%-37% Ordinary STCG Brackets (P.L. 119-21)", "37.0% Top Ordinary Rate on Non-1256 Event Gains", "cliff-exposure-2027", "$14,800 Tax ($2,700 1256 Alpha)"),
-            ("2028-2030 Forward Projection", "Automated IRS CP2000 1099-DA Lot Matching", "Section 1256 60/40 Saves 10.2% vs 37.0% Ordinary", "cliff-exposure-2028", "$14,800 Tax Exposure"),
+            ("2028-2030 Forward Projection", "Automated IRS CP2000 1099-DA Lot Matching", "26 U.S.C. Section 1256 60/40 Blended Top Rate (26.8% vs 37.0% Ordinary, Form 6781)", "cliff-exposure-2028", "$14,800 Tax Exposure"),
         ]
     else:
         summary = (

@@ -4670,10 +4670,27 @@ class MasterSEOVerifier:
         <input> elements paired with <label> or aria-label, and a submit CTA (<button type="submit"> or equivalent).
         Zero em-dashes. Zero en-dashes.
         """
-        if isinstance(dist_dir_or_html, str) and ("<" in dist_dir_or_html or "\n" in dist_dir_or_html):
-            return verify_html_tool_utility_contract(dist_dir_or_html, rel_path="inline.html")
+        is_inline_html = isinstance(dist_dir_or_html, str) and ("<" in dist_dir_or_html or "\n" in dist_dir_or_html)
+        target = Path(dist_dir_or_html) if (dist_dir_or_html and not is_inline_html) else self.dist_dir
+        resolved_meta = _resolve_pseofactory_tenant_meta(
+            dist_dir=target if target and target.exists() else None,
+            repo_root=self.repo_root,
+            domain=self.domain,
+            brand_name=self.brand_name,
+        )
+        prop_id: Optional[str] = (
+            str(resolved_meta.get("property_id") or getattr(self, "property_id", "") or "").strip().lower() or None
+        )
+        if prop_id in ("profithelm-platform", "factory"):
+            prop_id = "profithelm"
 
-        target = Path(dist_dir_or_html) if dist_dir_or_html else self.dist_dir
+        if is_inline_html:
+            return verify_html_tool_utility_contract(
+                dist_dir_or_html,
+                rel_path="inline.html",
+                property_id=prop_id,
+            )
+
         issues: List[str] = []
         tools_checked = 0
 
@@ -4687,7 +4704,11 @@ class MasterSEOVerifier:
                 has_form_tag = "<form" in content.lower() or 'role="form"' in content.lower()
                 if is_tool or has_form_tag:
                     tools_checked += 1
-                    res = verify_html_tool_utility_contract(content, rel_path=rel)
+                    res = verify_html_tool_utility_contract(
+                        content,
+                        rel_path=rel,
+                        property_id=prop_id,
+                    )
                     if res["issues"]:
                         issues.extend(res["issues"])
 
@@ -7752,6 +7773,7 @@ verify_llms_full_txt_content = verify_llms_txt_content
 def verify_html_tool_utility_contract(
     html_content: str,
     rel_path: str = "index.html",
+    property_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     In-memory validation helper for an HTML document string against ToolUtilityContract.
@@ -7779,7 +7801,32 @@ def verify_html_tool_utility_contract(
             "tool_valid": False,
         }
 
-    detected = detect_tool_utility_issues(html_content, rel_path=rel_path)
+    eff_prop_id: Optional[str] = str(property_id).strip().lower() if property_id else None
+    if not eff_prop_id:
+        prop_m = re.search(
+            r'\bdata-property(?:-id)?=["\']([a-z0-9_-]+)["\']',
+            html_content,
+            re.IGNORECASE,
+        )
+        if prop_m:
+            eff_prop_id = prop_m.group(1).strip().lower()
+        else:
+            canon_m = re.search(
+                r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']https?://([^/"\'>]+)',
+                html_content,
+                re.IGNORECASE,
+            )
+            if canon_m:
+                canon_host = canon_m.group(1).strip().lower()
+                if canon_host.startswith("www."):
+                    canon_host = canon_host[4:]
+                meta = _resolve_pseofactory_tenant_meta(domain=canon_host)
+                if meta.get("property_id"):
+                    eff_prop_id = str(meta["property_id"]).strip().lower()
+    if eff_prop_id in ("profithelm-platform", "factory"):
+        eff_prop_id = "profithelm"
+
+    detected = detect_tool_utility_issues(html_content, rel_path=rel_path, property_id=eff_prop_id)
     # Reactive 3-step funnel calculators (with inputs + interactive buttons/workpaper CTA and zero legacy email forms)
     # no longer carry legacy <button type="submit"> lead-capture forms; suppress only that legacy CTA check when reactive controls + CTA exist.
     if detected:
@@ -7803,7 +7850,7 @@ def verify_html_tool_utility_contract(
 
     if detected:
         try:
-            assert_tool_utility_contract(html_content, context=f"Page {rel_path}")
+            assert_tool_utility_contract(html_content, context=f"Page {rel_path}", property_id=eff_prop_id)
         except Exception as ex:
             err_msg = str(ex)
             if err_msg not in issues:

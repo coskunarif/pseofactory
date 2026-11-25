@@ -429,17 +429,18 @@ def test_asset_integrity_evaluator_with_operational_shield_enforcement(tmp_path)
     dist_dir.mkdir(parents=True)
 
     adapter = ConfigurablePropertyAdapter(
-        property_id="test_property",
-        brand_name="TestBrand",
-        domain="testbrand.com",
-        canonical_base="https://testbrand.com",
+        property_id="profithelm",
+        brand_name="ProfitHelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
         dist_dir=dist_dir,
     )
 
     # Asset without operational shield
     unshielded_html = (
         '<!DOCTYPE html><html lang="en"><head><title>Unshielded</title></head>'
-        '<body><h1>Clean Title</h1><p>Compliant text.</p></body></html>'
+        '<body><h1>Clean Title</h1><p>Compliant text. Treasury Circular 230 Notice: '
+        'For modeling purposes only and does not constitute individualized tax advice.</p></body></html>'
     )
     unshielded_file = dist_dir / "unshielded.html"
     unshielded_file.write_text(unshielded_html, encoding="utf-8")
@@ -460,7 +461,8 @@ def test_asset_integrity_evaluator_with_operational_shield_enforcement(tmp_path)
     shielded_html = (
         '<!DOCTYPE html><html lang="en"><head><title>Shielded</title>'
         '<meta http-equiv="cache-control" content="public, max-age=3600" />'
-        '</head><body><h1>Clean Title</h1><p>Compliant text.</p></body></html>'
+        '</head><body><h1>Clean Title</h1><p>Compliant text. Treasury Circular 230 Notice: '
+        'For modeling purposes only and does not constitute individualized tax advice.</p></body></html>'
     )
     shielded_file = dist_dir / "shielded.html"
     shielded_file.write_text(shielded_html, encoding="utf-8")

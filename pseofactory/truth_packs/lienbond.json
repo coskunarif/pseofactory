@@ -552,9 +552,10 @@
       "forbidden_slug_patterns": []
     },
     "far_48cfr31": {
-      "canonical": "48 CFR Part 31 (FAR Contract Cost Principles & Procedures)",
+      "canonical": "48 CFR Part 31 / FAR Part 31 (Contract Cost Principles & Procedures)",
       "patterns": [
-        "48\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?31(?:\\.\\d+)?\\b"
+        "48\\s*CFR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?31(?:\\.\\d+)?\\b",
+        "FAR\\s*(?:Part\\s*|Sections?\\s*|Sec\\.?\\s*|§\\s*)?31(?:\\.\\d+)?\\b"
       ],
       "allowed_slug_patterns": [],
       "forbidden_slug_patterns": []

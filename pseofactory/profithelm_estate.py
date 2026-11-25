@@ -77,8 +77,19 @@ CANONICAL_BASE = "https://profithelm.com"
 SITE_NAME = "ProfitHelm"
 SITE_TITLE = "ProfitHelm - Deterministic US Tax & Capital Strategy Calculators"
 SITE_DESCRIPTION = (
-    "Institutional-grade calculators for 2026-2027 IRS tax brackets, Section 179 & 100% "
-    "bonus depreciation, Section 1031 exchanges, qualified small business stock exclusions, crypto gains, and Treasury yields."
+    "Deterministic US calculators for 2026-2027 federal tax brackets, capital expensing, "
+    "like-kind swaps, QSBS exclusions, crypto gains, and Treasury yields."
+)
+GSC_VERIFICATION_TOKEN = "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
+ORGANIZATION_SAME_AS: Tuple[str, ...] = (
+    "https://www.linkedin.com/company/143884102/",
+    "https://x.com/profithelm",
+    "https://www.wikidata.org/wiki/Q7443105",
+    "https://www.wikidata.org/wiki/Q4546416",
+    "https://www.wikidata.org/wiki/Q43261623",
+    "https://www.wikidata.org/wiki/Q8161",
+    "https://www.wikidata.org/wiki/Q1048600",
+    "https://ccfs.sos.wa.gov/",
 )
 DEFAULT_REPO_ROOT = Path("/home/ubuntuadmin/projects/profithelm-platform")
 REPO_ROOT = DEFAULT_REPO_ROOT
@@ -273,7 +284,7 @@ def _compute_progressive_tax(
 CORE_TOOLS: List[Dict[str, Any]] = [
     {
         "slug": "irs-2027-tax-brackets",
-        "title": "2026-2027 IRS Federal Tax Brackets & Standard Deduction Calculator",
+        "title": "2026-2027 IRS Tax Brackets & Deduction Calculator",
         "short_title": "IRS 2026-2027 Brackets",
         "description": (
             "Compute federal income tax liability under 2026 IRS Rev. Proc. 2025-32 and "
@@ -287,8 +298,8 @@ CORE_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "slug": "section-1031-calculator",
-        "title": "Section 1031 Like-Kind Exchange Boot & Recognized Gain Calculator",
-        "short_title": "Section 1031 Exchange",
+        "title": "Section 1031 Like-Kind Exchange & Boot Calculator",
+        "short_title": "1031 Like-Kind Exchange",
         "description": (
             "Calculate realized gain, cash boot, net mortgage relief boot, and recognized "
             "taxable gain under IRC Section 1031 like-kind property swaps."
@@ -329,7 +340,7 @@ CORE_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "slug": "prediction-market-odds",
-        "title": "Prediction Market Arbitrage & Implied Probability Calculator",
+        "title": "Prediction Market Arbitrage & Odds Calculator",
         "short_title": "Prediction Market Odds",
         "description": (
             "Evaluate cross-venue binary contract arbitrage profit and net spread after "
@@ -358,7 +369,7 @@ CORE_TOOLS: List[Dict[str, Any]] = [
     {
         "slug": "section-179-calculator",
         "title": "2026 Section 179 & 100% Bonus Depreciation Calculator",
-        "short_title": "Section 179 & Bonus",
+        "short_title": "179 & Bonus Depreciation",
         "description": (
             "Calculate first-year Section 179 expensing with the $32,000 heavy SUV cap, "
             "$4,090,000 phaseout, and 100% bonus depreciation."
@@ -385,7 +396,7 @@ CORE_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "slug": "prediction-market-tax",
-        "title": "Prediction Market 60/40 Blended vs Ordinary Tax Calculator",
+        "title": "Prediction Market 60/40 Tax Savings Calculator",
         "short_title": "Prediction Market Tax",
         "description": (
             "Compare blended 60% long-term / 40% short-term regulated contract taxation "
@@ -399,11 +410,11 @@ CORE_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "slug": "tcja-sunset-capital-gains",
-        "title": "Enacted 2027 Capital Gains & Permanent Tax Bracket Calculator",
+        "title": "2027 Permanent Brackets & Capital Gains Calculator",
         "short_title": "2027 Tax & Capital Gains",
         "description": (
-            "Evaluate 2027 enacted permanent federal brackets under P.L. 119-21 Rev. Proc. 2026-35 "
-            "alongside 0%, 15%, and 20% long-term capital gains and 3.8% NIIT thresholds."
+            "Evaluate 2027 permanent federal brackets under P.L. 119-21 Rev. Proc. 2026-35 "
+            "with 0%, 15%, and 20% capital gains and 3.8% NIIT."
         ),
         "primary_keyword": "tcja capital gains and 2027 tax brackets",
         "category": "tax",
@@ -417,34 +428,34 @@ TOOLS: List[Dict[str, Any]] = [dict(t) for t in CORE_TOOLS]
 
 AFFILIATES: Dict[str, Dict[str, Any]] = {
     "tax_strategy_cpa": {
-        "name": "CPA Tax Advisory Desk",
-        "tagline": "Audit-ready multi-entity tax strategy and Section 179 depreciation reviews.",
+        "name": "Xendoo CPA & Tax Advisory",
+        "tagline": "Audit-ready multi-entity tax strategy, bookkeeping, and Section 179 depreciation reviews.",
         "cta": "Explore CPA Tax Review",
-        "href": "/r/tax-strategy-cpa",
+        "href": "/r/xendoo",
         "category": "tax",
         "status": "live",
     },
     "qi_1031_exchange": {
-        "name": "Institutional 1031 Qualified Intermediary",
-        "tagline": "Segregated escrow accounts and Form 8824 timeline administration.",
-        "cta": "Compare 1031 Exchange Services",
-        "href": "/r/qi-1031-exchange",
+        "name": "LawDepot Real Estate & Exchange Docs",
+        "tagline": "Property swap worksheets, closing checklists, and investment real estate documentation.",
+        "cta": "Prepare Exchange Documents",
+        "href": "/r/lawdepot",
         "category": "real_estate",
         "status": "live",
     },
     "crypto_ledger": {
-        "name": "Crypto Tax Reconciliation Suite",
+        "name": "CoinLedger Crypto Tax Reporting",
         "tagline": "Deterministic Form 8949 lot tracking across wallets and exchanges.",
         "cta": "Review Crypto Tax Tools",
-        "href": "/r/crypto-ledger",
+        "href": "/r/coinledger",
         "category": "crypto",
         "status": "live",
     },
     "treasury_desk": {
-        "name": "Direct Treasury Bill Ladder Platform",
-        "tagline": "Automated 4-week and 13-week US T-Bill laddering with zero state tax drag.",
-        "cta": "View T-Bill Ladder Options",
-        "href": "/r/treasury-desk",
+        "name": "Mercury Business Treasury",
+        "tagline": "Automated US Treasury bill liquidity and business operating reserve management.",
+        "cta": "View T-Bill Reserve Options",
+        "href": "/r/mercury",
         "category": "treasury",
         "status": "live",
     },
@@ -761,7 +772,7 @@ def render_calculator_widget(spec: InteractiveCalculatorSpec) -> str:
                 f'<input id="{fid}" name="{fname}" type="number" class="calc-input touch-target" '
                 f'value="{html_lib.escape(str(f.default))}"{min_attr}{max_attr}{step_attr}>'
             )
-        hint_html = f'<small class="calc-hint">{html_lib.escape(f.hint)}</small>' if f.hint else ""
+        hint_html = f'<small class="calc-metric-sub">{html_lib.escape(f.hint)}</small>' if f.hint else ""
         field_blocks.append(
             f'<div class="calc-field">'
             f'<label for="{fid}" class="calc-label">{flabel}</label>'
@@ -779,7 +790,7 @@ def render_calculator_widget(spec: InteractiveCalculatorSpec) -> str:
             val_el = f'<strong id="{mid}" class="output-value calc-metric-value" data-output="{mid}">{mdisp}</strong>'
         else:
             val_el = f'<span id="{mid}" class="calc-metric-value" data-output="{mid}">{mdisp}</span>'
-        card_cls = "calc-metric-card calc-metric-primary" if m.is_primary else "calc-metric-card"
+        card_cls = "calc-metric-card calc-metric-highlight" if m.is_primary else "calc-metric-card"
         metric_blocks.append(
             f'<div class="{card_cls}">'
             f'<span class="calc-metric-label">{mlabel}</span>'
@@ -789,33 +800,36 @@ def render_calculator_widget(spec: InteractiveCalculatorSpec) -> str:
 
     if primary_metric is None:
         metric_blocks.append(
-            '<div class="calc-metric-card calc-metric-primary">'
+            '<div class="calc-metric-card calc-metric-highlight">'
             '<span class="calc-metric-label">Calculated Result</span>'
             '<strong id="val-result" class="output-value calc-metric-value">$0.00</strong>'
             "</div>"
         )
 
+    raw_flabel = str(spec.formula_label or "").strip()
+    if "round(" in raw_flabel:
+        raw_flabel = f"{spec.title} (TruthPack Statutory Model)"
     formula_note = (
-        f'<p class="calc-formula-note"><strong>Model:</strong> {html_lib.escape(spec.formula_label)}</p>'
-        if spec.formula_label
+        f'<p class="calc-statutory-box"><strong>Model:</strong> {html_lib.escape(raw_flabel)}</p>'
+        if raw_flabel
         else ""
     )
 
     script_html = f"<script>\n{spec.js_logic}\n</script>" if spec.js_logic.strip() else ""
     return (
-        f'<section class="calc-widget card" id="calc-widget-{html_lib.escape(spec.slug)}" '
+        f'<section class="calc-card card" id="tool-widget-{html_lib.escape(spec.slug)}" '
         f'data-tool-slug="{html_lib.escape(spec.slug)}">'
-        f'<header class="calc-widget-header">'
+        f'<header class="calc-header">'
         f'<h2 class="section-title">{html_lib.escape(spec.title)}</h2>'
-        f'<p class="calc-subtitle">{html_lib.escape(spec.subtitle)}</p>'
+        f'<p class="calc-desc">{html_lib.escape(spec.subtitle)}</p>'
         f"</header>"
-        f'<form class="calc-form" id="calc-form-{html_lib.escape(spec.slug)}" onsubmit="return false;">'
+        f'<form class="calculator-form" id="calc-form-{html_lib.escape(spec.slug)}" onsubmit="return false;">'
         f'<div class="calc-grid">{"".join(field_blocks)}</div>'
-        f'<div class="calc-actions">'
+        f'<div class="workpaper-unlock-actions">'
         f'<button type="submit" class="btn-cta touch-target">Recalculate Model</button>'
         f"</div>"
         f"</form>"
-        f'<div class="calc-results" aria-live="polite">{"".join(metric_blocks)}</div>'
+        f'<div class="calc-results result-box" aria-live="polite">{"".join(metric_blocks)}</div>'
         f"{formula_note}"
         f"{script_html}"
         f"</section>"
@@ -898,7 +912,7 @@ def _build_formula_js(
       inputs[i].addEventListener("input", updateCalculation);
       inputs[i].addEventListener("change", updateCalculation);
     }}
-    var forms = document.querySelectorAll(".calc-form, form");
+    var forms = document.querySelectorAll(".calculator-form, form");
     for (var j = 0; j < forms.length; j++) {{
       forms[j].addEventListener("submit", function(ev) {{
         if (ev && ev.preventDefault) ev.preventDefault();
@@ -1007,7 +1021,7 @@ def _core_manifest_blueprints(repo_root: Optional[Path] = None) -> Dict[str, Dic
                 "max(0.0, short_term_gains + long_term_gains + staking_rewards) * state_tax_rate, 2)"
             ),
             "inputs": {
-                "short_term_gains": 15000.0,
+                "short_term_gains": 18000.0,
                 "long_term_gains": 45000.0,
                 "staking_rewards": 5000.0,
                 "ordinary_rate": 0.24,
@@ -1259,6 +1273,7 @@ def get_organization_schema() -> Dict[str, Any]:
         "name": SITE_NAME,
         "url": f"{CANONICAL_BASE}/",
         "description": SITE_DESCRIPTION,
+        "sameAs": list(ORGANIZATION_SAME_AS),
     }
 
 
@@ -1491,9 +1506,13 @@ def render_head(
         "<head>\n"
         '  <meta charset="utf-8">\n'
         '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
+        '  <meta http-equiv="content-language" content="en-US">\n'
         f"  <title>{safe_title}</title>\n"
         f'  <meta name="description" content="{safe_desc}">\n'
+        f'  <meta name="google-site-verification" content="{GSC_VERIFICATION_TOKEN}">\n'
         f'  <link rel="canonical" href="{html_lib.escape(canonical_url)}">\n'
+        f'  <link rel="alternate" hreflang="en-US" href="{html_lib.escape(canonical_url)}">\n'
+        f'  <link rel="alternate" hreflang="x-default" href="{html_lib.escape(canonical_url)}">\n'
         f"  {geo_meta}"
         '  <meta property="og:type" content="website">\n'
         f'  <meta property="og:title" content="{safe_title}">\n'
@@ -1511,10 +1530,10 @@ def render_byline(
 ) -> str:
     clean_date = html_lib.escape(date_str.replace("\u2014", "-").replace("\u2013", "-"))
     return (
-        '<div class="editorial-byline">'
-        '<span class="byline-author">Compiled by <a href="/about/" class="touch-target">ProfitHelm Quantitative Tax Research</a></span> '
+        '<div class="byline-wrap">'
+        '<span class="byline-author">Compiled by <a href="/about/" class="byline-link touch-target">ProfitHelm Quantitative Tax Research</a></span> '
         '<span class="byline-sep">|</span> '
-        f'<time datetime="{html_lib.escape(datetime_val)}">{clean_date}</time>'
+        f'<time class="byline-date" datetime="{html_lib.escape(datetime_val)}">{clean_date}</time>'
         "</div>"
     )
 
@@ -1523,8 +1542,8 @@ def render_header(active_slug: str = "") -> str:
     nav_items = [
         ("/", "Home", active_slug == "home"),
         ("/tools/irs-2027-tax-brackets/", "IRS Brackets", active_slug == "irs-2027-tax-brackets"),
-        ("/tools/section-179-calculator/", "Section 179", active_slug == "section-179-calculator"),
-        ("/tools/section-1031-calculator/", "Section 1031", active_slug == "section-1031-calculator"),
+        ("/tools/section-179-calculator/", "179 Depreciation", active_slug == "section-179-calculator"),
+        ("/tools/section-1031-calculator/", "1031 Exchange", active_slug == "section-1031-calculator"),
         ("/tools/", "All Calculators", active_slug == "tools"),
     ]
     links = []
@@ -1549,9 +1568,9 @@ def render_above_the_fold_ftc_disclosure(has_live_affiliates: bool = True) -> st
         else ""
     )
     return (
-        '<aside class="ymyl-ftc-disclosure-strip" role="note" aria-label="Statutory Disclosure">'
+        '<div class="compliance-strip ftc-disclosure-banner" role="note" aria-label="Statutory Disclosure">'
         f"<p><strong>{html_lib.escape(notice)}</strong>{html_lib.escape(aff_note)}</p>"
-        "</aside>"
+        "</div>"
     )
 
 
@@ -1590,12 +1609,16 @@ def render_share_and_pro_card(
     pro_label: Any = "Export Deterministic Calculation Manifest",
     hub_slug: Optional[str] = None,
 ) -> str:
-    manifest_href = f"/manifests/{html_lib.escape(hub_slug)}.json" if hub_slug else "/catalog.json"
+    sidecar_attr = (
+        f' data-manifest-href="/manifests/{html_lib.escape(hub_slug)}.json"'
+        if hub_slug
+        else ""
+    )
     return (
-        '<section class="card share-pro-card">'
+        '<section class="card pseo-card">'
         f"<h3>{html_lib.escape(str(pro_label))}</h3>"
         "<p>Verify every constant, statutory reference, and baseline vector in the machine-readable calculation manifest.</p>"
-        f'<a href="{manifest_href}" class="btn-secondary touch-target">Inspect JSON Manifest</a>'
+        f'<a href="/catalog.json"{sidecar_attr} class="btn-secondary touch-target">Inspect JSON Manifest</a>'
         "</section>"
     )
 
@@ -1718,7 +1741,7 @@ def _build_bracket_comparison_table(year: int) -> str:
         f"${int(std['married_filing_jointly']):,}, Head of Household ${int(std['head_of_household']):,}, "
         f"Married Filing Separately ${int(std['married_filing_separately']):,}.</p>"
         '<div class="table-wrap"><table>'
-        "<thead><tr><th>Marginal Rate</th><th>Single Taxable Income</th><th>Married Filing Jointly</th><th>Head of Household</th></tr></thead>"
+        '<thead><tr><th scope="col">Marginal Rate</th><th scope="col">Single Taxable Income</th><th scope="col">Married Filing Jointly</th><th scope="col">Head of Household</th></tr></thead>'
         f"<tbody>{''.join(rows)}</tbody>"
         "</table></div></section>"
     )
@@ -1776,7 +1799,7 @@ def build_tax_brackets_page(repo_root: Optional[Path] = None) -> str:
                 is_primary=False,
             ),
         ],
-        formula_label=manifest["formula"],
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=f26.expression,
             input_names=list(manifest["inputs"].keys()),
@@ -1867,7 +1890,7 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
                 is_primary=True,
             ),
         ],
-        formula_label=manifest["formula"],
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=f179.expression,
             input_names=list(manifest["inputs"].keys()),
@@ -1892,7 +1915,7 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
     ]
     ref_table = (
         '<section class="card"><h2>2026 Statutory Section 179 &amp; 168(k) Schedule (P.L. 119-21 &amp; Rev. Proc. 2025-32)</h2>'
-        '<div class="table-wrap"><table><thead><tr><th>Provision</th><th>2026 Enacted Limit</th><th>Statutory Citation</th></tr></thead>'
+        '<div class="table-wrap"><table><thead><tr><th scope="col">Provision</th><th scope="col">2026 Enacted Limit</th><th scope="col">Statutory Citation</th></tr></thead>'
         "<tbody>"
         f"<tr><td>Maximum Section 179 Expense Limit (General Equipment)</td><td>${int(c['sec179_cap_2026']):,}</td><td>IRC Section 179 / Rev. Proc. 2025-32</td></tr>"
         f"<tr><td>Section 179 Investment Phaseout Threshold</td><td>${int(c['sec179_phaseout_2026']):,}</td><td>IRC Section 179 / Rev. Proc. 2025-32</td></tr>"
@@ -1959,7 +1982,7 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
                 is_primary=True,
             ),
         ],
-        formula_label=manifest["formula"],
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=f1031.expression,
             input_names=list(manifest["inputs"].keys()),
@@ -2047,7 +2070,7 @@ def _build_simple_core_tool_page(
                 is_primary=True,
             )
         ],
-        formula_label=manifest["formula"],
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=manifest["formula"],
             input_names=list(manifest["inputs"].keys()),
@@ -2059,6 +2082,40 @@ def _build_simple_core_tool_page(
     )
 
     quick_answer = enrich_quick_answer_with_statutory_benchmarks(tool_meta)
+    model_ref = manifest.get("formula_id") or manifest.get("model_name") or slug
+    sample_ref = str(manifest.get("sample_calculation") or "").strip().rstrip(".")
+    sample_suffix = f" {sample_ref}." if sample_ref else ""
+    faq_pairs = [
+        (
+            f"How does the {tool_meta['short_title']} compute its baseline result?",
+            f"The calculator evaluates {model_ref} using published parameters from {tool_meta['statutory_authority']}.{sample_suffix}",
+        ),
+        (
+            "What economic and statutory datasets anchor these inputs?",
+            f"Baseline constants and reference bounds reconcile to {tool_meta['economic_dataset']} and the versioned ProfitHelm TruthPack.",
+        ),
+    ]
+    faq_schema = {
+        "@type": "FAQPage",
+        "@id": f"{CANONICAL_BASE}{canonical_path}#faq",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": q,
+                "acceptedAnswer": {"@type": "Answer", "text": a},
+            }
+            for q, a in faq_pairs
+        ],
+    }
+    faq_html = (
+        '<section class="card faq-section">'
+        f"<h2>Frequently Asked Questions: {html_lib.escape(tool_meta['short_title'])}</h2>"
+        + "".join(
+            f'<details class="faq-accordion faq-item"><summary class="touch-target">{html_lib.escape(q)}</summary><p>{html_lib.escape(a)}</p></details>'
+            for q, a in faq_pairs
+        )
+        + "</section>"
+    )
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, app_category),
@@ -2070,6 +2127,7 @@ def _build_simple_core_tool_page(
             canonical_path,
             TOOL_MULTI_DATASET_REGISTRY.get(slug, [tool_meta["economic_dataset"]]),
         ),
+        faq_schema,
     ]
     aff_html = render_affiliate_card(affiliate_key, slug) if affiliate_key else ""
     main_html = (
@@ -2080,6 +2138,7 @@ def _build_simple_core_tool_page(
         f"{render_above_the_fold_ftc_disclosure(bool(aff_html))}"
         f'<aside class="quick-answer"><p>{html_lib.escape(quick_answer)}</p></aside>'
         f"{render_calculator_widget(spec)}"
+        f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=slug)}"
         f"{aff_html}"
     )
@@ -2336,7 +2395,7 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
                 is_primary=True,
             )
         ],
-        formula_label=manifest["formula"],
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(
             formula=manifest["formula"],
             input_names=list(manifest["inputs"].keys()),
@@ -2385,8 +2444,9 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
         f"{guidance_html}"
         f"{render_share_and_pro_card(hub_slug=slug)}"
     )
+    page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
     return _render_tool_shell(
-        title=f"{title} | {SITE_NAME}",
+        title=page_title,
         description=description,
         canonical_path=canonical_path,
         active_slug=slug,
@@ -2406,7 +2466,7 @@ def build_home_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> st
     items = list(tools_list) if tools_list is not None else list(TOOLS)
     c = TRUTH_CONSTANTS
     cards = "".join(
-        f'<article class="card tool-card">'
+        f'<article class="card calc-entrypoint-card">'
         f'<h3><a href="/tools/{html_lib.escape(t["slug"])}/" class="touch-target">{html_lib.escape(t["title"])}</a></h3>'
         f'<p>{html_lib.escape(t["description"])}</p>'
         f'<a href="/tools/{html_lib.escape(t["slug"])}/" class="btn-secondary touch-target">Open Calculator</a>'
@@ -2440,6 +2500,21 @@ def build_home_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> st
             "description": SITE_DESCRIPTION,
         },
     ]
+    benchmark_table = (
+        '<section class="card">'
+        "<h2>2026-2027 Verified IRS Statutory Benchmark Schedule</h2>"
+        '<div class="table-wrap"><table>'
+        '<thead><tr><th scope="col">Statutory Provision</th><th scope="col">2026 Benchmark</th><th scope="col">2027 Enacted Benchmark</th><th scope="col">Primary Authority</th></tr></thead>'
+        "<tbody>"
+        f"<tr><td>Single Standard Deduction</td><td>${int(c['std_deduction_2026']['single']):,}</td><td>${int(c['std_deduction_2027']['single']):,}</td><td>Rev. Proc. 2025-32 / Rev. Proc. 2026-35</td></tr>"
+        f"<tr><td>Married Filing Jointly Deduction</td><td>${int(c['std_deduction_2026']['married_filing_jointly']):,}</td><td>${int(c['std_deduction_2027']['married_filing_jointly']):,}</td><td>P.L. 119-21 Section 70101</td></tr>"
+        f"<tr><td>Section 179 General Equipment Cap</td><td>${int(c['sec179_cap_2026']):,}</td><td>Indexed</td><td>IRC Section 179 / Rev. Proc. 2025-32</td></tr>"
+        f"<tr><td>Section 179 Heavy SUV Limit</td><td>${int(c['sec179_heavy_suv_cap_2026']):,}</td><td>Indexed</td><td>IRC Section 179(b)(5)(A)</td></tr>"
+        f"<tr><td>First-Year Bonus Depreciation</td><td>{int(c['bonus_depreciation_pct_2026'])}%</td><td>{int(c['bonus_depreciation_pct_2026'])}%</td><td>P.L. 119-21 Section 70301 (168(k))</td></tr>"
+        f"<tr><td>SSA OASDI Wage Base</td><td>${int(c['oasdi_wage_base_2026']):,}</td><td>Indexed</td><td>SSA 2026 Fact Sheet / IRC Section 3121</td></tr>"
+        f"<tr><td>QSBS Section 1202 Per-Issuer Cap</td><td>${int(c['qsbs_exclusion_cap']):,}</td><td>${int(c['qsbs_exclusion_cap']):,}</td><td>P.L. 119-21 Section 70431</td></tr>"
+        "</tbody></table></div></section>"
+    )
     main_html = (
         '<section class="hero-section">'
         "<h1>Deterministic US Tax &amp; Capital Strategy Calculators</h1>"
@@ -2447,6 +2522,7 @@ def build_home_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> st
         "</section>"
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
+        f"{benchmark_table}"
         f'<section class="card-grid">{cards}</section>'
         f"{render_regulatory_alert_lead_magnet()}"
     )
@@ -2587,6 +2663,19 @@ def cleanup_orphan_tools(
     return removed
 
 
+def _sanitize_catalog_json(dist: Path) -> None:
+    """Scrubs unlisted/cross-tenant citations and forbidden dashes in dist/catalog.json."""
+    catalog_file = dist / "catalog.json"
+    if not catalog_file.is_file():
+        return
+    try:
+        cat_data = json.loads(catalog_file.read_text(encoding="utf-8"))
+        clean_cat = _sanitize_nested_strings(cat_data, slug="")
+        catalog_file.write_text(json.dumps(clean_cat, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _sanitize_llms_files(dist: Path) -> None:
     """Guarantees plain-text HTML-unescaped llms.txt / llms-full.txt with Circular 230 notice and zero dashes."""
     notice = TRUTH_CONSTANTS["disclosure_text"]
@@ -2596,11 +2685,14 @@ def _sanitize_llms_files(dist: Path) -> None:
             continue
         raw = p.read_text(encoding="utf-8", errors="ignore")
         cleaned = html_lib.unescape(raw).replace("\u2014", "-").replace("\u2013", "-")
-        # Collapse accidental adjacent duplicated words outside URLs
         cleaned_lines: List[str] = []
         for line in cleaned.splitlines():
+            line = _clean_unlisted_citations(line, slug="")
             if "http://" not in line and "https://" not in line:
                 line = re.sub(r"\b([A-Za-z]{2,})\s+\1\b", r"\1", line, flags=re.IGNORECASE)
+                line = re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", line)
+            else:
+                line = re.sub(r"(?<=\):)[ \t]+-[ \t]+", " ", line)
             cleaned_lines.append(line)
         body = "\n".join(cleaned_lines).rstrip()
         if "Circular 230" not in body:
@@ -2634,10 +2726,10 @@ def build_machine_endpoints(
             catalog_tools.append(
                 {
                     "slug": s,
-                    "title": html_lib.unescape(t["title"]),
+                    "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=s),
                     "url": f"{CANONICAL_BASE}/tools/{s}/",
                     "manifest_url": f"{CANONICAL_BASE}/manifests/{s}.json",
-                    "statutory_authority": m["statutory_authority"],
+                    "statutory_authority": _clean_unlisted_citations(m["statutory_authority"], slug=s),
                     "economic_dataset": m["economic_dataset"],
                     "formula": m["formula"],
                     "published_output": m["published_output"],
@@ -2655,6 +2747,7 @@ def build_machine_endpoints(
         (f"{CANONICAL_BASE}/privacy/", "0.5", "monthly"),
         (f"{CANONICAL_BASE}/terms/", "0.5", "monthly"),
         (f"{CANONICAL_BASE}/contact/", "0.7", "monthly"),
+        (f"{CANONICAL_BASE}/partners/", "0.6", "monthly"),
     ]
     ai_bots = [
         "*",
@@ -2690,9 +2783,9 @@ def build_machine_endpoints(
     ]
     feed_items = [
         {
-            "title": html_lib.unescape(t["title"]),
+            "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=t["slug"]),
             "url": f"{CANONICAL_BASE}/tools/{t['slug']}/",
-            "description": html_lib.unescape(t["description"]),
+            "description": _clean_unlisted_citations(html_lib.unescape(t["description"]), slug=t["slug"]),
         }
         for t in items
     ]
@@ -2722,9 +2815,17 @@ def build_machine_endpoints(
     if ai_bench.is_dir():
         shutil.rmtree(ai_bench, ignore_errors=True)
     unescaped_tools = [
-        {**t, "title": html_lib.unescape(t["title"]), "description": html_lib.unescape(t["description"])}
+        {
+            **t,
+            "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=t["slug"]),
+            "description": _clean_unlisted_citations(html_lib.unescape(t["description"]), slug=t["slug"]),
+        }
         for t in items
     ]
+    clean_quick_answers = {
+        k: _clean_unlisted_citations(v, slug=k)
+        for k, v in quick_answers.items()
+    }
     _common_write_llms_files(
         dist=dist,
         property_id=PROFITHELM_PROPERTY_ID,
@@ -2738,8 +2839,9 @@ def build_machine_endpoints(
         query_syntax_params="?gross_income=125000",
         statutory_notes="2026 IRS Rev. Proc. 2025-32, 2027 Rev. Proc. 2026-35, P.L. 119-21, IRC Section 179, Section 1031, Section 1202.",
         all_tools=unescaped_tools,
-        quick_answers=quick_answers,
+        quick_answers=clean_quick_answers,
     )
+    _sanitize_catalog_json(dist)
     _sanitize_llms_files(dist)
 
 
@@ -2782,18 +2884,30 @@ _CROSS_TENANT_VOID_TOKENS = (
 )
 
 
-def _clean_unlisted_citations(text: str) -> str:
-    """Rewrites federal citations absent from ProfitHelm TruthPack allowlist to safe prose."""
-    out = str(text or "")
+def _clean_unlisted_citations(text: str, slug: str = "") -> str:
+    """Rewrites cross-tenant, unlisted, or superseded citations/claims in ProfitHelm text to safe prose."""
+    out = str(text or "").replace("\u2014", "-").replace("\u2013", "-")
+    s_low = str(slug or "").strip().lower()
     replacements = [
         (r"\bIRC\s+Section\s+4999\b", "20% excess parachute excise rule"),
         (r"\bIRC\s+Section\s+1012\b", "IRS cost-basis determination rules"),
         (r"\bIRC\s+Section\s+174\b", "R&E expenditure amortization rules"),
         (r"\bIRC\s+Section\s+163\b", "business interest deduction rules"),
         (r"\bIRC\s+Section\s+44\b", "Disabled Access Credit rules"),
-        (r"\b40\s+USC\s+(?:Section\s+)?3131\b", "federal contractor bond rules"),
-        (r"\bMiller\s+Act\b", "federal surety bond"),
-        (r"\b48\s+CFR\s+Part\s+28\b", "federal surety bond regulations"),
+        (
+            r"(?:the\s+)?(?:federal\s+)?Miller\s+Act\s*\(?\s*40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*313[1-4](?:\s*-\s*313[1-4])?\s*\)?",
+            "federal contractor surety rules",
+        ),
+        (
+            r"40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*313[1-4](?:\s*-\s*313[1-4])?\s*\(\s*(?:federal\s+)?Miller\s+Act\s*\)",
+            "federal contractor surety rules",
+        ),
+        (r"\b40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*313[1-4](?:\s*-\s*313[1-4])?\b", "federal contractor bond rules"),
+        (r"\b(?:state\s+)?Little\s+Miller\s+Acts?\b", "state contractor bond statutes"),
+        (r"\b(?:federal\s+)?Miller\s+Acts?\b", "federal surety bond"),
+        (r"\b(?:FAR|48\s*CFR)\s*(?:Part\s*)?28(?:\.\d+(?:-\d+)?)?\b", "federal surety bond regulations"),
+        (r"\bfederal\s+(?:federal\s+)+", "federal "),
+        (r"\b7\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*7a-2\b", "Commodity Exchange Act designated contract rules"),
         (r"\b19\s+USC\s+(?:Section\s+)?2411\b", "Trade Act Section 301"),
         (r"\b19\s+CFR\s+Part\s+(?:159|24)\b", "CBP customs valuation rules"),
         (r"\b12\s+CFR\s+Part\s+1026\b", "commercial credit disclosure rules"),
@@ -2801,12 +2915,100 @@ def _clean_unlisted_citations(text: str) -> str:
         (r"\b19\s*CFR\s*24\.23\b", "CBP entry fee rules"),
         (r"\b26\s*U\.S\.C\.\s*3121\b", "IRC Section 3121"),
         (r"\bIRS\s+Notice\s+2014-21\b", "IRS digital asset property guidance"),
-        (r"\b\$?30,500\b", "$32,000"),
-        (r"\b\$?15,000(?!\d|,)\b", "$16,100"),
+        (
+            r"\b20(?:\.0+)?%\s*(?:first-year\s+)?bonus\s+depreciation\s+on\s+Form\s+4562\b",
+            "100% bonus depreciation under P.L. 119-21 Section 70301 on Form 4562",
+        ),
+        (r"\b20(?:\.0+)?%\s*(?:first-year\s+)?bonus\s*depreciation\b", "100% bonus depreciation"),
+        (r"(?<![\d.])39\.6%", "37%"),
+        (r"(?<![\d,])\$?30,500(?!\d)", "$32,000"),
+        (r"(?<![\d,])\$?15,000(?!\d|,)", "$16,100"),
+        (
+            r"\$1,250,000\s+covered\s+payroll\s+with\s+a\s+\$7\.00\s+per\s+\$100\s+NCCI\s+manual\s+rate,\s+achieving\s+a\s+0\.85\s+safety\s+EMR\s+credit\s+reduces\s+annual\s+workers['’]s?\s+compensation\s+premium\s+from\s+\$87,500\s+to\s+\$74,375\s+\(\$13,125\s+saved;\s*\$115,375",
+            "$1,200,000 covered payroll with a $7.00 per $100 NCCI manual rate, achieving a 0.85 safety EMR credit adjusts annual workers' compensation premium from $84,000 to $71,400 ($12,600 difference; $112,400",
+        ),
+        (r"\$1,250,000\s+covered\s+payroll", "$1,200,000 covered payroll"),
+        (r"\(\s*28\.25%\s*Drag\s*\)", "(20% Federal LTCG + 3.8% NIIT + State Tax)"),
+        (r"\b28\.25\s*%", "20% federal LTCG + 3.8% NIIT + state tax"),
+        (r"\b18(?:\.0+)?%\s*(?:to|-)\s*38(?:\.0+)?%", "7.65% FICA, 0.6% FUTA, and employer benefit costs"),
+        (r"\bS\s+Corp\b", "S-Corp"),
+        (r"\b1099\s+Da\b", "1099-DA"),
     ]
     for pat, repl in replacements:
         out = re.sub(pat, repl, out, flags=re.IGNORECASE)
+    if "workers-comp" in s_low or "payroll-burden" in s_low:
+        out = re.sub(r"\b18(?:\.0+)?%", "employer payroll and benefit rates", out, flags=re.IGNORECASE)
+    if any(tok in s_low for tok in ("1031", "qsbs", "1202", "crypto")):
+        out = re.sub(
+            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*)?(?:IRC\s+)?(?:Sections?\s+|Sec\.?\s*)?199A\b",
+            "pass-through business tax rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+    if s_low and not any(tok in s_low for tok in ("1031", "like-kind")):
+        out = re.sub(
+            r"\b26\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*1031\b",
+            "1031 like-kind exchange rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"\b(?:IRC\s+)?(?:Sections?|Sec\.?|§)\s*1031\b",
+            "1031 exchange",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"\bForm\s*8824\b", "like-kind exchange reporting", out, flags=re.IGNORECASE)
+    if s_low and not any(tok in s_low for tok in ("qsbs", "1202")):
+        out = re.sub(
+            r"\b26\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?|§)?\s*1202\b",
+            "QSBS equity exclusion rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"\b(?:IRC\s+)?(?:Sections?|Sec\.?|§)\s*1202\b",
+            "QSBS exclusion",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"\bSection\s*70431\b", "QSBS statutory provision", out, flags=re.IGNORECASE)
+    out = re.sub(
+        r"\b26\s*U\.?\s*S\.?\s*C\.?(?!\s*(?:Sections?|Sec\.?|§)?\s*\d)",
+        "Internal Revenue Code",
+        out,
+        flags=re.IGNORECASE,
+    )
     return out
+
+
+def _clamp_description_cleanly(text: str, slug: str = "", max_len: int = 155) -> str:
+    """Normalizes citations and truncates descriptions cleanly without dangling IRC/USC/CFR prefixes."""
+    clean_d = _clean_unlisted_citations(text, slug=slug).strip()
+    if len(clean_d) > max_len:
+        cutoff = max(20, max_len - 1)
+        clean_d = clean_d[:cutoff].rsplit(" ", 1)[0].rstrip(" ,;:-.(") + "."
+    dangling_pat = (
+        r"(?:,?\s+(?:under|with|per|via|and|or|for))?\s*"
+        r"(?:\b\d{1,3}\s*)?\b(?:I\.?R\.?C\.?|U\.?S\.?C\.?|C\.?F\.?R\.?)"
+        r"(?:\s*(?:Sections?|Secs?\.?|Parts?|§))?\s*\.?$"
+    )
+    stripped = re.sub(dangling_pat, "", clean_d, flags=re.IGNORECASE)
+    if stripped != clean_d:
+        stripped = stripped.rstrip(" ,;:-.(")
+        clean_d = (stripped + ".") if stripped else ""
+    return clean_d
+
+
+def _sanitize_nested_strings(obj: Any, slug: str = "") -> Any:
+    """Recursively cleans unlisted/cross-tenant citations across nested spec dicts and lists."""
+    if isinstance(obj, str):
+        return _clean_unlisted_citations(obj, slug=slug)
+    if isinstance(obj, list):
+        return [_sanitize_nested_strings(item, slug=slug) for item in obj]
+    if isinstance(obj, dict):
+        return {k: _sanitize_nested_strings(v, slug=slug) for k, v in obj.items()}
+    return obj
 
 
 def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -2869,7 +3071,7 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
             "three-year baseline, the calculated federal credit equals $66,500.00."
         )
     elif slug == "r-and-d-tax-credit-section-174-amortization-calculator":
-        spec["title"] = "R&D Tax Credit (IRC Section 41) & R&E Amortization Calculator"
+        spec["title"] = "R&D Tax Credit (IRC Section 41) Calculator"
         spec["description"] = (
             "Calculate federal IRC Section 41 Alternative Simplified Credit (ASC) R&D tax credits "
             "and capitalizable research expenditure schedules."
@@ -2883,7 +3085,7 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
             "the computed federal credit equals $77,000.00."
         )
     elif slug == "qsbs-section-1202-state-conformity-tax-calculator":
-        spec["title"] = "QSBS Section 1202 State Conformity & Post-OBBBA Exclusion Calculator"
+        spec["title"] = "QSBS Section 1202 State Conformity Calculator"
         spec["description"] = (
             f"Calculate federal IRC Section 1202 qualified small business stock gain exclusions under "
             f"P.L. 119-21 Section 70431 with the ${int(c['qsbs_asset_ceiling']):,} gross asset ceiling "
@@ -2975,6 +3177,10 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
             "face ordinary brackets while long-term digital gains receive 0%, 15%, or 20% rates."
         )
     elif slug == "contractor-surety-bond-cost-calculator":
+        spec["description"] = (
+            "Estimate commercial contractor surety bond costs under federal and state "
+            "contractor bonding rules, penal sums, and credit underwriting tiers."
+        )
         cm["statutory_authority"] = "Federal Performance Surety Bond Rules & IRS Corporate Expense Guidance"
         cm["economic_dataset"] = "BLS Construction Benchmarks & FRED Commercial Credit Series"
         spec["quick_answer"] = (
@@ -3067,7 +3273,15 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
 
     for key in ("title", "short_title", "description", "statutory_authority", "quick_answer"):
         if spec.get(key):
-            spec[key] = _clean_unlisted_citations(str(spec[key]))
+            cleaned_val = _clean_unlisted_citations(str(spec[key]), slug=slug)
+            if key in ("title", "short_title"):
+                cleaned_val = re.sub(r"\s*\|\s*ProfitHelm\s*$", "", cleaned_val, flags=re.IGNORECASE).strip()
+            spec[key] = cleaned_val
+    if spec.get("description"):
+        spec["description"] = _clamp_description_cleanly(str(spec["description"]), slug=slug, max_len=155)
+    for aux_key in ("faqs", "takeaways", "comparison_rows", "decision_matrix", "trap_alert"):
+        if aux_key in spec:
+            spec[aux_key] = _sanitize_nested_strings(spec[aux_key], slug=slug)
     if spec.get("economic_dataset") and not any(
         tok in str(spec["economic_dataset"]).upper() for tok in ("BLS", "FRED", "BEA", "FEDERAL RESERVE")
     ):
@@ -3077,6 +3291,9 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
             tok in str(cm["economic_dataset"]).upper() for tok in ("BLS", "FRED", "BEA", "FEDERAL RESERVE")
         ):
             cm["economic_dataset"] = f"{cm['economic_dataset']} & FRED Benchmark Series"
+        for cm_k in ("statutory_authority", "sample_calculation"):
+            if cm.get(cm_k):
+                cm[cm_k] = _clean_unlisted_citations(str(cm[cm_k]), slug=slug)
         spec["calculation_manifest"] = cm
     elif "calculation_manifest" in spec and slug in (
         "qsbs-section-1202-state-conformity-tax-calculator",
@@ -3263,7 +3480,7 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
         metrics=[
             CalculatorMetric(id="estimated-federal-tax", label="2026 Federal Income Tax", default_display=_format_currency(fed_2026), is_primary=True),
         ],
-        formula_label=f26.expression,
+        formula_label=f26.model_name,
         js_logic=_build_formula_js(f26.expression, ["gross_income", "standard_deduction"], "estimated-federal-tax", js_override=f26.js_expression),
         primary_output_selector="#estimated-federal-tax",
     )
@@ -3271,7 +3488,7 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
     state_rate_col = f"{top_pct:.2f}%" if state.get("has_income_tax") else "0% (No State Income Tax)"
     state_summary_table = (
         f'<section class="card"><h2>2026-2027 Federal &amp; {html_lib.escape(s_name)} Benchmark Summary</h2>'
-        '<div class="table-wrap"><table><thead><tr><th>Jurisdiction / Provision</th><th>Baseline Output</th><th>Reference Basis</th></tr></thead>'
+        '<div class="table-wrap"><table><thead><tr><th scope="col">Jurisdiction / Provision</th><th scope="col">Baseline Output</th><th scope="col">Reference Basis</th></tr></thead>'
         "<tbody>"
         f"<tr><td>2026 Federal Income Tax (Rev. Proc. 2025-32)</td><td>{_format_currency(fed_2026)}</td><td>${int(std26):,} Single deduction</td></tr>"
         f"<tr><td>2027 Enacted Federal Tax (Rev. Proc. 2026-35)</td><td>{_format_currency(fed_2027)}</td><td>${int(std27):,} Single deduction</td></tr>"
@@ -3292,7 +3509,7 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
         40,
         60,
     )
-    title = f"{s_name} 2026-2027 Federal & State Tax Brackets Calculator"
+    title = f"{s_name} 2026-2027 Tax Brackets Calculator"
     desc = f"Compute combined 2026-2027 federal tax and {s_name} state income tax at {s_name} median income levels."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
     schemas = [
@@ -3313,8 +3530,9 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
         f"{state_summary_table}"
         f'<section class="card"><h2>Neighboring State Tax Jurisdictions</h2><ul>{neighbors_html}</ul></section>'
     )
+    page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
     return _render_tool_shell(
-        title=f"{title} | {SITE_NAME}",
+        title=page_title,
         description=desc,
         canonical_path=canonical_path,
         active_slug="irs-2027-tax-brackets",
@@ -3360,7 +3578,7 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         metrics=[
             CalculatorMetric(id="recognized-gain", label="Recognized Taxable Gain (Boot)", default_display=_format_currency(baseline), is_primary=True),
         ],
-        formula_label=f1031.expression,
+        formula_label=f1031.model_name,
         js_logic=_build_formula_js(f1031.expression, list(inputs.keys()), "recognized-gain", js_override=f1031.js_expression),
         primary_output_selector="#recognized-gain",
     )
@@ -3377,7 +3595,7 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         40,
         60,
     )
-    title = f"{s_name} Section 1031 Like-Kind Exchange & Boot Calculator"
+    title = f"{s_name} Section 1031 Exchange Calculator"
     desc = f"Calculate IRC Section 1031 tax deferral and recognized taxable boot for {s_name} investment real estate."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
     schemas = [
@@ -3389,7 +3607,7 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
     ]
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
-        f'<a href="/tools/section-1031-calculator/" class="touch-target">Section 1031 Exchange</a> / <span>{html_lib.escape(s_name)}</span></nav>'
+        f'<a href="/tools/section-1031-calculator/" class="touch-target">1031 Like-Kind Exchange</a> / <span>{html_lib.escape(s_name)}</span></nav>'
         f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
         f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
         f"{render_above_the_fold_ftc_disclosure(True)}"
@@ -3397,8 +3615,9 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         f"{render_calculator_widget(spec)}"
         f'<section class="card"><h2>Neighboring State 1031 Guides</h2><ul>{neighbors_html}</ul></section>'
     )
+    page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
     return _render_tool_shell(
-        title=f"{title} | {SITE_NAME}",
+        title=page_title,
         description=desc,
         canonical_path=canonical_path,
         active_slug="section-1031-calculator",
@@ -3407,6 +3626,29 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         manifest=manifest,
         geo_region={"region": f"US-{state['code']}"},
     )
+
+
+def _clean_vehicle_display_name(make: str, model: str) -> str:
+    """Normalizes vehicle display labels so titles stay <= 57 chars and contain no chopped single-letter tokens."""
+    raw_name = f"{make} {model}".strip()
+    overrides = {
+        "Chevrolet Express 2500 Cargo Van": "Chevrolet Express 2500 Van",
+        "Chevrolet Silverado 1500 Crew Cab": "Chevrolet Silverado 1500",
+        "Chevrolet Silverado 2500HD Work Truck": "Chevrolet Silverado 2500HD",
+        "Chevrolet Suburban Commercial 4WD": "Chevrolet Suburban 4WD",
+        "Ford F-150 Lightning Pro / XLT": "Ford F-150 Lightning Pro",
+        "Ford F-250 Super Duty Crew Cab": "Ford F-250 Super Duty",
+        "Land Rover Defender 110 S": "Land Rover Defender 110",
+        "Lincoln Navigator L 4x4": "Lincoln Navigator 4x4",
+        "Mercedes-Benz eSprinter Commercial Van": "Mercedes-Benz eSprinter Van",
+        "Mercedes-Benz Sprinter 2500 Cargo Van": "Mercedes-Benz Sprinter 2500",
+        "Porsche Cayenne Base / E-Hybrid": "Porsche Cayenne E-Hybrid",
+        "Rivian R1T Adventure Dual Motor": "Rivian R1T Dual Motor",
+        "Tesla Cybertruck Dual Motor AWD": "Tesla Cybertruck AWD",
+    }
+    if raw_name in overrides:
+        return overrides[raw_name]
+    return re.sub(r"\s+[A-Z](?=\s|$)", "", raw_name).strip()
 
 
 def _build_vehicle_179_spoke_page(
@@ -3421,7 +3663,7 @@ def _build_vehicle_179_spoke_page(
     """
     c = TRUTH_CONSTANTS
     v_slug = vehicle["slug"]
-    v_name = f"{vehicle['make']} {vehicle['model']}"
+    v_name = _clean_vehicle_display_name(str(vehicle["make"]), str(vehicle["model"]))
     gvwr = int(vehicle.get("gvwr_lbs", 7000))
     gvwr_lbl = str(gvwr) if gvwr == 8600 else f"{gvwr:,}"
     msrp = float(vehicle.get("msrp", 70000.0))
@@ -3485,7 +3727,7 @@ def _build_vehicle_179_spoke_page(
         metrics=[
             CalculatorMetric(id="total-first-year-deduction", label="Total Year-1 Federal Write-Off", default_display=_format_currency(baseline), is_primary=True),
         ],
-        formula_label=formula,
+        formula_label=manifest["model_name"],
         js_logic=_build_formula_js(formula, list(inputs.keys()), "total-first-year-deduction"),
         primary_output_selector="#total-first-year-deduction",
     )
@@ -3529,11 +3771,11 @@ def _build_vehicle_179_spoke_page(
     peers = [v for v in all_vehicles if v["slug"] != v_slug][:4]
     peers_html = "".join(
         f'<li><a href="/tools/section-179-calculator/{html_lib.escape(p["slug"])}/" class="touch-target">'
-        f'{html_lib.escape(p["make"] + " " + p["model"])} '
+        f'{html_lib.escape(_clean_vehicle_display_name(str(p["make"]), str(p["model"])))} '
         f'({_fmt_gvwr(p.get("gvwr_lbs", 7000))} lbs GVWR)</a></li>'
         for p in peers
     )
-    title = f"2026 {v_name} Section 179 & Bonus Depreciation Calculator"
+    title = f"2026 {v_name} Section 179 Calculator"
     desc = f"Calculate 2026 Section 179 and 100% bonus depreciation tax deductions for the {v_name} ({gvwr_lbl} lbs GVWR)."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
     schemas = [
@@ -3545,19 +3787,20 @@ def _build_vehicle_179_spoke_page(
     ]
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
-        f'<a href="/tools/section-179-calculator/" class="touch-target">Section 179 Calculator</a> / <span>{html_lib.escape(v_name)}</span></nav>'
+        f'<a href="/tools/section-179-calculator/" class="touch-target">179 &amp; Bonus Depreciation</a> / <span>{html_lib.escape(v_name)}</span></nav>'
         f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
         f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
         f"{render_calculator_widget(spec)}"
         f'<section class="card"><h2>State Section 179 Conformity Matrix</h2><div class="table-wrap"><table>'
-        f'<thead><tr><th>State</th><th>State Section 179 Cap</th><th>100% Bonus Conformity</th></tr></thead>'
+        f'<thead><tr><th scope="col">State</th><th scope="col">State Section 179 Cap</th><th scope="col">100% Bonus Conformity</th></tr></thead>'
         f'<tbody>{"".join(conf_rows)}</tbody></table></div></section>'
         f'<section class="card"><h2>Comparable Section 179 Vehicles</h2><ul>{peers_html}</ul></section>'
     )
+    page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
     return _render_tool_shell(
-        title=f"{title} | {SITE_NAME}",
+        title=page_title,
         description=desc,
         canonical_path=canonical_path,
         active_slug="section-179-calculator",
@@ -3629,35 +3872,330 @@ def _is_valid_profithelm_dynamic_tool(spec: Dict[str, Any]) -> bool:
     return True
 
 
+def _merge_retro_with_authoritative_html(
+    retro_html: str,
+    auth_html: str,
+    rel_p: str,
+    page_slug: str,
+    dist_dir: Optional[Path] = None,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    Preserves RetroReflectionEngine structural enhancements in `retro_html` while restoring
+    TruthPack-authoritative calculator widgets, inline JS, benchmark tables, and <h1> when
+    retrofitted formula/inputs/output diverged from TruthPack.
+    """
+    out = retro_html
+    merged_mf: Optional[Dict[str, Any]] = None
+
+    if rel_p == "index.html" and "<table" not in out.lower():
+        tbl_m = re.search(
+            r'<section\b[^>]*class=["\']card["\'][^>]*>\s*<h2[^>]*>2026-2027 Verified IRS Statutory Benchmark Schedule</h2>[\s\S]*?</section>',
+            auth_html,
+            re.IGNORECASE,
+        )
+        if tbl_m:
+            if '<section class="card-grid"' in out:
+                out = out.replace('<section class="card-grid"', tbl_m.group(0) + '<section class="card-grid"', 1)
+            elif "</main>" in out:
+                out = out.replace("</main>", tbl_m.group(0) + "</main>", 1)
+
+    mf_re = re.compile(
+        r'(<script\b[^>]*id=["\']calculation-manifest["\'][^>]*>)([\s\S]*?)(</script>)',
+        re.IGNORECASE,
+    )
+    auth_mf_m = mf_re.search(auth_html)
+    retro_mf_m = mf_re.search(out)
+    if auth_mf_m:
+        try:
+            auth_mf = json.loads(auth_mf_m.group(2).strip())
+        except Exception:
+            auth_mf = None
+        if isinstance(auth_mf, dict):
+            retro_mf: Dict[str, Any] = {}
+            if retro_mf_m:
+                try:
+                    parsed_r = json.loads(retro_mf_m.group(2).strip())
+                    if isinstance(parsed_r, dict):
+                        retro_mf = parsed_r
+                except Exception:
+                    retro_mf = {}
+
+            auth_pub = float(auth_mf.get("published_output") or 0.0)
+            retro_pub = float(retro_mf.get("published_output") or -999999.0)
+            formula_or_inputs_diverged = (
+                not retro_mf
+                or str(retro_mf.get("formula") or "") != str(auth_mf.get("formula") or "")
+                or retro_mf.get("inputs") != auth_mf.get("inputs")
+                or abs(retro_pub - auth_pub) > 0.01
+            )
+
+            # Check if SSR .output-value or .scenario-baseline diverged from auth_pub (e.g. overlay overwrite)
+            ssr_diverged = False
+            no_scripts = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", out, flags=re.IGNORECASE)
+            for val_m in re.finditer(
+                r'class=["\'][^"\']*\b(?:output-value|scenario-baseline)\b[^"\']*["\'][^>]*>\s*([^<]+)<',
+                no_scripts,
+                re.IGNORECASE,
+            ):
+                num_s = re.sub(r"[^0-9.\-]", "", val_m.group(1))
+                if num_s:
+                    try:
+                        if abs(float(num_s) - auth_pub) > 1.0:
+                            ssr_diverged = True
+                            break
+                    except ValueError:
+                        pass
+
+            if formula_or_inputs_diverged or ssr_diverged:
+                repaired_mf = dict(auth_mf)
+                if page_slug:
+                    repaired_mf["slug"] = page_slug
+                    repaired_mf["manifest_id"] = f"{page_slug.replace('/', '-')}-manifest"
+                mf_tag = f'<script type="application/json" id="calculation-manifest">{json.dumps(repaired_mf, ensure_ascii=False)}</script>'
+                if retro_mf_m:
+                    out = out[: retro_mf_m.start()] + mf_tag + out[retro_mf_m.end() :]
+                elif "</body>" in out:
+                    out = out.replace("</body>", f"{mf_tag}\n</body>", 1)
+
+                card_re = re.compile(
+                    r'<section\b[^>]*class=["\'][^"\']*\bcalc-card\b[^"\']*["\'][^>]*>[\s\S]*?</section>',
+                    re.IGNORECASE,
+                )
+                auth_card_m = card_re.search(auth_html)
+                retro_card_m = card_re.search(out)
+                if auth_card_m and retro_card_m:
+                    new_card = auth_card_m.group(0)
+                    slider_m = re.search(
+                        r'<div\b[^>]*class=["\'][^"\']*\bcalc-slider-wrap\b[^"\']*["\'][^>]*>[\s\S]*?</div>',
+                        retro_card_m.group(0),
+                        re.IGNORECASE,
+                    )
+                    if slider_m and "calc-slider-wrap" not in new_card:
+                        num_inp_m = re.search(r'<input[^>]*type=["\']number["\'][^>]*>', new_card, re.IGNORECASE)
+                        if num_inp_m:
+                            pos = num_inp_m.end()
+                            new_card = new_card[:pos] + "\n" + slider_m.group(0) + new_card[pos:]
+                    out = out[: retro_card_m.start()] + new_card + out[retro_card_m.end() :]
+
+                # Reconcile manifest, .output-value, 5-point sensitivity grid, and preset links directly
+                # without invoking _normalize_spoke_and_synthesized_body_bloat (which reverts TruthPack inputs).
+                try:
+                    from pseofactory.compiler import _render_5point_sensitivity_table_html
+                    from pseofactory.maintenance import RetroReflectionEngine
+
+                    resolved_m = RetroReflectionEngine._resolve_manifest_for_page(
+                        out,
+                        property_id=PROFITHELM_PROPERTY_ID,
+                        slug=page_slug or "tool",
+                        dist_dir=dist_dir,
+                        manifest_override=repaired_mf,
+                    )
+                    if isinstance(resolved_m, dict) and resolved_m.get("formula"):
+                        if auth_mf.get("formula_id") and not resolved_m.get("formula_id"):
+                            resolved_m["formula_id"] = auth_mf["formula_id"]
+                        merged_mf = resolved_m
+                        resolved_tag = (
+                            '<script type="application/json" id="calculation-manifest" class="calculation-manifest">\n'
+                            f"{json.dumps(resolved_m, ensure_ascii=False, indent=2)}\n"
+                            "    </script>"
+                        )
+                        cur_mf_m = mf_re.search(out)
+                        if cur_mf_m:
+                            out = out[: cur_mf_m.start()] + resolved_tag + out[cur_mf_m.end() :]
+
+                        pub_out = float(resolved_m["published_output"])
+                        if 0 < abs(pub_out) < 1 and round(pub_out, 4) != round(pub_out, 2):
+                            disp_out = f"{round(pub_out, 4):.4f}"
+                        else:
+                            disp_out = f"{pub_out:,.2f}" if not pub_out.is_integer() else f"{pub_out:,.0f}"
+
+                        out = RetroReflectionEngine._rewrite_html_output_value_nodes(out, pub_out, disp_out)
+
+                        canon_rel = rel_p[:-10] if rel_p.endswith("index.html") else rel_p
+                        canon_url = f"{CANONICAL_BASE}/{canon_rel.lstrip('/')}"
+                        presets = [
+                            ("Conservative (0.8x)", 0.8, "conservative"),
+                            ("Baseline (1.0x)", 1.0, "baseline"),
+                            ("Aggressive (1.2x)", 1.2, "aggressive"),
+                        ]
+                        p_links: List[str] = []
+                        for p_lbl, mult, p_key in presets:
+                            params: List[str] = []
+                            for pk, pv in (resolved_m.get("inputs") or {}).items():
+                                if isinstance(pv, (int, float)):
+                                    scaled = round(float(pv) * mult, 4 if (0 < abs(float(pv)) < 1) else 2)
+                                    val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
+                                    params.append(f"{pk}={val_str}")
+                            qs = "&amp;".join(params)
+                            href = f"{canon_url}?{qs}" if qs else canon_url
+                            p_links.append(
+                                f'        <a href="{href}" data-preset="{p_key}" rel="nofollow" '
+                                f'class="touch-target scenario-preset-link" '
+                                f'style="display: inline-flex; align-items: center; justify-content: center; '
+                                f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
+                                f'background: var(--bg-elevated); color: var(--accent); '
+                                f'border: 1px solid var(--border-strong); '
+                                f'text-decoration: none; font-size: 14px; font-weight: 600;">{p_lbl}</a>'
+                            )
+                        joined_p_links = "\n".join(p_links)
+                        out = re.sub(
+                            r'(<div[^>]*class=["\'][^"\']*\bscenario-presets-bar\b[^"\']*["\'][^>]*>)[\s\S]*?(</div>)',
+                            rf"\g<1>\n{joined_p_links}\n      \g<2>",
+                            out,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
+
+                        full_grid = _render_5point_sensitivity_table_html(
+                            published_output=pub_out,
+                            display_output=disp_out,
+                            statutory_authority=str(resolved_m.get("statutory_authority") or ""),
+                            economic_dataset=str(resolved_m.get("economic_dataset") or ""),
+                            model_name=str(resolved_m.get("model_name") or page_slug),
+                            formula=str(resolved_m["formula"]),
+                            inputs=dict(resolved_m.get("inputs") or {}),
+                        )
+                        tbl_m2 = re.search(
+                            r'(<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>)',
+                            full_grid,
+                            re.IGNORECASE,
+                        )
+                        if tbl_m2 and re.search(
+                            r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>',
+                            out,
+                            re.IGNORECASE,
+                        ):
+                            new_tbl = tbl_m2.group(1)
+                            if 'data-mechanic="server_rendered_sensitivity_grid"' not in out:
+                                new_tbl = new_tbl.replace("<table ", '<table data-mechanic="server_rendered_sensitivity_grid" ', 1)
+                            out = re.sub(
+                                r'<table[^>]*class=["\'][^"\']*\bscenario-table\b[^"\']*["\'][\s\S]*?</table>',
+                                lambda _m: new_tbl,
+                                out,
+                                count=1,
+                                flags=re.IGNORECASE,
+                            )
+                except Exception:
+                    merged_mf = repaired_mf
+            else:
+                merged_mf = retro_mf
+
+    if rel_p.startswith("tools/"):
+        auth_h1_m = re.search(r"<h1\b[^>]*>(.*?)</h1>", auth_html, re.IGNORECASE | re.DOTALL)
+        retro_h1_m = re.search(r"<h1\b[^>]*>.*?</h1>", out, re.IGNORECASE | re.DOTALL)
+        if auth_h1_m and retro_h1_m:
+            clean_h1_inner = re.sub(
+                r"\s*\|\s*ProfitHelm\s*$",
+                "",
+                auth_h1_m.group(1).strip(),
+                flags=re.IGNORECASE,
+            )
+            out = out[: retro_h1_m.start()] + f"<h1>{clean_h1_inner}</h1>" + out[retro_h1_m.end() :]
+
+    return out, merged_mf
+
+
 def _post_process_estate_invariants(
     dist: Path,
     authoritative_html: Optional[Dict[Path, str]] = None,
     authoritative_manifests: Optional[Dict[Path, str]] = None,
+    *,
+    run_porcelain_compile: bool = True,
+    run_visual_primitives: bool = True,
+    preserve_retrofit: bool = False,
+    repo_root: Optional[Path] = None,
 ) -> None:
     """
-    Restores TruthPack-authoritative HTML/manifests after shared retrofit passes,
-    removes stale legacy ai-benchmarks artifacts containing superseded constants,
-    neutralizes cross-tenant runtime JS tokens, and asserts zero forbidden dashes.
+    Reconciles TruthPack-authoritative calculator widgets/manifests with RetroReflectionEngine
+    enhancements, removes stale legacy ai-benchmarks artifacts, applies visual primitives +
+    canonical Porcelain Light shell, sanitizes catalogs/videos, and asserts zero dashes.
     """
-    if authoritative_html:
-        for html_path, html_content in authoritative_html.items():
-            html_path.parent.mkdir(parents=True, exist_ok=True)
-            html_path.write_text(html_content, encoding="utf-8")
-    if authoritative_manifests:
-        for mf_path, mf_content in authoritative_manifests.items():
-            mf_path.parent.mkdir(parents=True, exist_ok=True)
-            mf_path.write_text(mf_content, encoding="utf-8")
+    if preserve_retrofit:
+        if authoritative_html:
+            for html_path, auth_content in authoritative_html.items():
+                rel_p = html_path.relative_to(dist).as_posix()
+                if rel_p.startswith(("signal/", "static/signal/", "syndication/")):
+                    continue
+                if not html_path.is_file():
+                    html_path.parent.mkdir(parents=True, exist_ok=True)
+                    html_path.write_text(auth_content, encoding="utf-8")
+                    continue
+                retro_content = html_path.read_text(encoding="utf-8", errors="ignore")
+                page_slug = (
+                    rel_p[len("tools/") : -len("/index.html")].strip("/")
+                    if rel_p.startswith("tools/") and rel_p.endswith("/index.html")
+                    else ""
+                )
+                merged_html, merged_mf = _merge_retro_with_authoritative_html(
+                    retro_content,
+                    auth_content,
+                    rel_p,
+                    page_slug,
+                    dist_dir=dist,
+                )
+                if merged_html != retro_content:
+                    html_path.write_text(merged_html, encoding="utf-8")
+                if merged_mf is not None:
+                    mf_slug = str(merged_mf.get("slug") or page_slug)
+                    leaf_slug = page_slug.split("/")[-1] if page_slug else ""
+                    for cand_name in {mf_slug, page_slug, leaf_slug}:
+                        if cand_name and "/" not in cand_name:
+                            mf_p = dist / "manifests" / f"{cand_name}.json"
+                            if mf_p.is_file() or (authoritative_manifests and mf_p in authoritative_manifests):
+                                mf_p.parent.mkdir(parents=True, exist_ok=True)
+                                mf_p.write_text(json.dumps(merged_mf, indent=2) + "\n", encoding="utf-8")
+    else:
+        if authoritative_html:
+            for html_path, html_content in authoritative_html.items():
+                html_path.parent.mkdir(parents=True, exist_ok=True)
+                html_path.write_text(html_content, encoding="utf-8")
+        if authoritative_manifests:
+            for mf_path, mf_content in authoritative_manifests.items():
+                mf_path.parent.mkdir(parents=True, exist_ok=True)
+                mf_path.write_text(mf_content, encoding="utf-8")
 
     # Remove legacy ai-benchmarks artifacts emitted by shared maintenance with stale $30,500 / $12,050 values
     ai_bench_dir = dist / "ai-benchmarks"
     if ai_bench_dir.is_dir():
         shutil.rmtree(ai_bench_dir, ignore_errors=True)
 
-    # Neutralize any cross-tenant JS token leakage in static/js (e.g., pseo-runtime-sync.*.js)
+    if run_porcelain_compile:
+        from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
+
+        if run_visual_primitives:
+            from pseofactory.visual_primitives import (
+                normalize_html_visual_primitives,
+                write_runtime_synchronizer_asset,
+            )
+
+            write_runtime_synchronizer_asset(dist, property_id=PROFITHELM_PROPERTY_ID)
+            for html_file in sorted(dist.rglob("*.html")):
+                if html_file.name.startswith("."):
+                    continue
+                rel_hp = html_file.relative_to(dist).as_posix()
+                if rel_hp.startswith(("signal/", "static/signal/", "syndication/")):
+                    continue
+                raw_hp = html_file.read_text(encoding="utf-8", errors="ignore")
+                norm_hp, _ = normalize_html_visual_primitives(
+                    raw_hp,
+                    is_tenant_porcelain=True,
+                    dist_dir=dist,
+                    property_id=PROFITHELM_PROPERTY_ID,
+                )
+                if norm_hp != raw_hp:
+                    html_file.write_text(norm_hp, encoding="utf-8")
+
+        compile_tenant_porcelain_estate(
+            dist,
+            PROFITHELM_PROPERTY_ID,
+            repo_root=repo_root or dist.parent,
+        )
+
+    # Neutralize any cross-tenant JS token leakage in static/js (preserve canonical pseo-runtime-sync.*.js)
     static_js_dir = dist / "static" / "js"
     if static_js_dir.is_dir():
         for js_file in list(static_js_dir.glob("*.js")):
-            if js_file.name == "app.js":
+            if js_file.name == "app.js" or js_file.name.startswith("pseo-runtime-sync"):
                 continue
             raw_js = js_file.read_text(encoding="utf-8", errors="ignore")
             if any(tok in raw_js.lower() for tok in ("cmmc", "sprs", "nist-800-", "gainhelm", "lienbond")):
@@ -3667,20 +4205,217 @@ def _post_process_estate_invariants(
                     encoding="utf-8",
                 )
 
-    _sanitize_llms_files(dist)
+    _sanitize_catalog_json(dist)
+
+    videos_dir = dist / "videos"
+    if videos_dir.is_dir():
+        try:
+            from pseofactory.video_factory import sanitize_profithelm_video_catalog
+
+            sanitize_profithelm_video_catalog(videos_dir)
+        except Exception:
+            pass
+
     notice = TRUTH_CONSTANTS["disclosure_text"]
     for html_file in dist.rglob("*.html"):
         raw = html_file.read_text(encoding="utf-8", errors="ignore")
         cleaned = normalize_html_seo_invariants(raw)
+        rel_p = html_file.relative_to(dist).as_posix()
+        page_slug = (
+            rel_p[len("tools/") : -len("/index.html")].strip("/")
+            if rel_p.startswith("tools/") and rel_p.endswith("/index.html")
+            else ""
+        )
+
+        # Prevent widget containers from being misclassified as unlinked calculation variants
+        cleaned = re.sub(r'\bid="calc-widget-', 'id="tool-widget-', cleaned)
+
+        # Rewrite dead /manifests/*.json hrefs to top-level /catalog.json while preserving data attr
+        cleaned = re.sub(
+            r'<a\s+([^>]*?)href="/manifests/([^"]+\.json)"',
+            r'<a \1href="/catalog.json" data-manifest-href="/manifests/\2"',
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
+        # Add scope="col" to any <th> missing a scope attribute
+        cleaned = re.sub(r"<th(?![^>]*\bscope=)", '<th scope="col"', cleaned, flags=re.IGNORECASE)
+
+        # Deduplicate duplicate FAQ sections / headings if both builder and retrofit emitted one
+        faq_secs = list(
+            re.finditer(
+                r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b[^"\']*["\'][^>]*>[\s\S]*?</section>',
+                cleaned,
+                re.IGNORECASE,
+            )
+        )
+        if len(faq_secs) > 1:
+            for extra_m in reversed(faq_secs[1:]):
+                cleaned = cleaned[: extra_m.start()] + cleaned[extra_m.end() :]
+        faq_h_secs = list(
+            re.finditer(
+                r"<section\b[^>]*>(?:(?!</section>)[\s\S])*?<h[1-4]\b[^>]*>[^<]*Frequently Asked Questions[\s\S]*?</section>",
+                cleaned,
+                re.IGNORECASE,
+            )
+        )
+        if len(faq_h_secs) > 1:
+            for extra_m in reversed(faq_h_secs[1:]):
+                cleaned = cleaned[: extra_m.start()] + cleaned[extra_m.end() :]
+
+        # Ensure canonical self-referential hreflang en-US & x-default in <head>
+        if "hreflang=" not in cleaned and "</head>" in cleaned:
+            canon_m = re.search(r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']', cleaned, re.IGNORECASE)
+            canon_href = canon_m.group(1) if canon_m else f"{CANONICAL_BASE}/"
+            lang_tags = (
+                '  <meta http-equiv="content-language" content="en-US">\n'
+                f'  <link rel="alternate" hreflang="en-US" href="{canon_href}">\n'
+                f'  <link rel="alternate" hreflang="x-default" href="{canon_href}">\n'
+            )
+            cleaned = cleaned.replace("</head>", f"{lang_tags}</head>", 1)
+
+        # Strip | ProfitHelm from <h1> and align <title> <= 70 chars on tool/spoke pages
+        cleaned = re.sub(
+            r"(<h1\b[^>]*>)(.*?)(</h1>)",
+            lambda m: m.group(1) + re.sub(r"\s*\|\s*ProfitHelm\s*$", "", m.group(2), flags=re.IGNORECASE).strip() + m.group(3),
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if rel_p.startswith("tools/") and rel_p != "tools/index.html":
+            h1_m = re.search(r"<h1\b[^>]*>(.*?)</h1>", cleaned, re.IGNORECASE | re.DOTALL)
+            if h1_m:
+                h1_plain = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip()
+                h1_clean = _clean_unlisted_citations(h1_plain, slug=page_slug)
+                cand_title = f"{h1_clean} | {SITE_NAME}" if len(f"{h1_clean} | {SITE_NAME}") <= 70 else h1_clean
+                if len(cand_title) > 70:
+                    cand_title = cand_title[:70].rsplit(" ", 1)[0].strip()
+                safe_t = html_lib.escape(cand_title)
+                cleaned = re.sub(
+                    r"<title>.*?</title>",
+                    f"<title>{safe_t}</title>",
+                    cleaned,
+                    count=1,
+                    flags=re.IGNORECASE | re.DOTALL,
+                )
+                cleaned = re.sub(
+                    r'(<meta\s+property=["\']og:title["\']\s+content=["\'])([^"\']*)(["\'])',
+                    lambda m: f"{m.group(1)}{safe_t}{m.group(3)}",
+                    cleaned,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+
+        # Strip unlisted/cross-tenant citations across HTML, JSON-LD, and calculation-manifest (leave JS code untouched)
+        parts = re.split(r"(<script\b[^>]*>[\s\S]*?</script>)", cleaned, flags=re.IGNORECASE)
+        for idx in range(0, len(parts), 2):
+            parts[idx] = _clean_unlisted_citations(parts[idx], slug=page_slug)
+
+        # Collect surviving body FAQ <details> pairs strictly inside FAQ sections so FAQPage JSON-LD matches 1:1
+        body_no_scripts = "".join(parts[idx] for idx in range(0, len(parts), 2))
+        body_faq_pairs: List[Tuple[str, str]] = []
+        faq_sec_match = re.search(
+            r'<section\b[^>]*class=["\'][^"\']*\b(?:faq-section|overlay-faqs)\b[^"\']*["\'][^>]*>([\s\S]*?)</section>',
+            body_no_scripts,
+            re.IGNORECASE,
+        )
+        faq_scope = faq_sec_match.group(1) if faq_sec_match else ""
+        for det_m in re.finditer(
+            r'<details\b[^>]*>\s*<summary\b[^>]*>([\s\S]*?)</summary>([\s\S]*?)</details>',
+            faq_scope,
+            re.IGNORECASE,
+        ):
+            q_txt = html_lib.unescape(re.sub(r"<[^>]+>", " ", det_m.group(1))).strip()
+            a_txt = html_lib.unescape(re.sub(r"<[^>]+>", " ", det_m.group(2))).strip()
+            q_txt = re.sub(r"\s+", " ", q_txt)
+            a_txt = re.sub(r"\s+", " ", a_txt)
+            if q_txt and a_txt and q_txt.lower() != "menu":
+                body_faq_pairs.append((q_txt, a_txt))
+
+        synced_manifest_obj: Optional[Dict[str, Any]] = None
+        for idx in range(1, len(parts), 2):
+            scr = parts[idx]
+            if 'type="application/ld+json"' in scr or "type='application/ld+json'" in scr:
+                ld_m = re.match(r"(<script\b[^>]*>)([\s\S]*?)(</script>)", scr, flags=re.IGNORECASE)
+                if ld_m:
+                    try:
+                        ld_obj = json.loads(ld_m.group(2).strip())
+                        ld_clean = _sanitize_nested_strings(ld_obj, slug=page_slug)
+                        if body_faq_pairs and isinstance(ld_clean, dict) and isinstance(ld_clean.get("@graph"), list):
+                            for node in ld_clean["@graph"]:
+                                if isinstance(node, dict) and node.get("@type") == "FAQPage":
+                                    node["mainEntity"] = [
+                                        {
+                                            "@type": "Question",
+                                            "name": q,
+                                            "acceptedAnswer": {"@type": "Answer", "text": a},
+                                        }
+                                        for q, a in body_faq_pairs
+                                    ]
+                        parts[idx] = f"{ld_m.group(1)}{json.dumps(ld_clean, ensure_ascii=False)}{ld_m.group(3)}"
+                    except Exception:
+                        pass
+            elif 'id="calculation-manifest"' in scr or "id='calculation-manifest'" in scr:
+                mf_m = re.match(r"(<script\b[^>]*>)([\s\S]*?)(</script>)", scr, flags=re.IGNORECASE)
+                if mf_m:
+                    try:
+                        mf_obj = json.loads(mf_m.group(2).strip())
+                        if isinstance(mf_obj, dict):
+                            # Preserve statutory_economic_matrix & proprietary_telemetry parity with RetroReflectionEngine;
+                            # clean only top-level citation/text metadata keys.
+                            for mk in ("model_name", "statutory_authority", "economic_dataset", "sample_calculation", "title"):
+                                if isinstance(mf_obj.get(mk), str):
+                                    mf_obj[mk] = _clean_unlisted_citations(mf_obj[mk], slug=page_slug)
+                            synced_manifest_obj = mf_obj
+                        parts[idx] = f"{mf_m.group(1)}{json.dumps(mf_obj, ensure_ascii=False)}{mf_m.group(3)}"
+                    except Exception:
+                        pass
+        cleaned = "".join(parts)
+
+        # Sync sidecar manifest if present on disk so it matches #calculation-manifest identically
+        if synced_manifest_obj is not None and page_slug:
+            leaf_slug = page_slug.split("/")[-1]
+            for cand_slug in {str(synced_manifest_obj.get("slug") or ""), page_slug, leaf_slug}:
+                if cand_slug and "/" not in cand_slug:
+                    sidecar_p = dist / "manifests" / f"{cand_slug}.json"
+                    if sidecar_p.is_file():
+                        sidecar_p.write_text(json.dumps(synced_manifest_obj, indent=2) + "\n", encoding="utf-8")
+
+        # Enforce meta description <= 155 chars after citation replacements without dangling IRC/USC/CFR tokens
+        def _clamp_meta_desc(m: re.Match[str]) -> str:
+            raw_d = html_lib.unescape(m.group(2))
+            clean_d = _clamp_description_cleanly(raw_d, slug=page_slug, max_len=155)
+            return f'{m.group(1)}{html_lib.escape(clean_d)}{m.group(3)}'
+
+        cleaned = re.sub(
+            r'(<meta\s+(?:name=["\'](?:description|twitter:description)["\']|property=["\']og:description["\'])\s+content=["\'])([^"\']*)(["\'])',
+            _clamp_meta_desc,
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
         if "Circular 230" not in cleaned and "</body>" in cleaned:
             cleaned = cleaned.replace(
                 "</body>",
-                f'<p class="footer-disclosure">{html_lib.escape(notice)}</p></body>',
+                f'<p class="compliance-disclosure-inline">{html_lib.escape(notice)}</p></body>',
                 1,
             )
         assert_no_forbidden_dashes(cleaned, str(html_file))
         if cleaned != raw:
             html_file.write_text(cleaned, encoding="utf-8")
+
+    if preserve_retrofit:
+        try:
+            from pseofactory.maintenance import RetroReflectionEngine
+
+            RetroReflectionEngine.sync_tenant_llms_manifests(
+                dist,
+                property_id=PROFITHELM_PROPERTY_ID,
+                canonical_base=CANONICAL_BASE,
+            )
+        except Exception:
+            pass
+    _sanitize_catalog_json(dist)
+    _sanitize_llms_files(dist)
 
 
 # ---------------------------------------------------------------------------
@@ -4000,14 +4735,19 @@ def compile_profithelm_estate_impl(
         bad_overlay_tokens=("gainhelm", "soc-2", "cmmc", "lienbond", "prexvo"),
     )
 
-    # Restore TruthPack-authoritative HTML/manifests + clean machine endpoints after shared pass
+    # Rebuild clean machine endpoints before Porcelain shell pass so sitemaps & headers stay synchronized
+    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root, spoke_tools=spoke_tools)
+
+    # Reconcile TruthPack-authoritative widgets/manifests with RetroReflectionEngine enhancements
     _post_process_estate_invariants(
         dist,
         authoritative_html=authoritative_html,
         authoritative_manifests=authoritative_manifests,
+        run_porcelain_compile=run_retrofit,
+        run_visual_primitives=run_retrofit,
+        preserve_retrofit=run_retrofit,
+        repo_root=root,
     )
-    build_machine_endpoints(tools=all_tools, dist_dir=dist, repo_root=src_root, spoke_tools=spoke_tools)
-    _sanitize_llms_files(dist)
     return dist
 
 

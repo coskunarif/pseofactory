@@ -630,7 +630,7 @@ def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobil
 
     builder_txt = (pkg / "builder.py").read_text(encoding="utf-8")
     assert "Q499388" not in builder_txt
-    assert "https://www.wikidata.org/wiki/Q8161" in builder_txt
+    assert "compile_profithelm_estate" in builder_txt
 
     norm_leaf = leaf_path.read_text(encoding="utf-8")
     assert "Q499388" not in norm_leaf

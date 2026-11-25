@@ -185,6 +185,46 @@
       "required_qualifier_patterns": [],
       "applies_to_slugs": [],
       "forbidden_on_slugs": []
+    },
+    "save_2024_fpl_exemption_pct": {
+      "key": "save_2024_fpl_exemption_pct",
+      "value": 225.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2024,
+      "citation": "34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan Rule - subject to federal litigation)",
+      "primary_source_url": "https://www.federalregister.gov/d/2023-13112",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan final rule, subject to federal litigation), discretionary income was defined as AGI exceeding 225 percent of the applicable HHS Poverty Guideline.",
+      "source_quote_sha256": "e98ae16aa544f01bb1b98fbc14c0aaf7042b1542f72f360b971eeb5643960a68",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "save-plan-litigation-transition"
+      ],
+      "forbidden_on_slugs": []
+    },
+    "save_2024_undergrad_discretionary_pct": {
+      "key": "save_2024_undergrad_discretionary_pct",
+      "value": 5.0,
+      "claim_class": "enacted_law",
+      "unit": "percent",
+      "effective_year": 2024,
+      "citation": "34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan Undergraduate Rate - subject to federal litigation)",
+      "primary_source_url": "https://www.federalregister.gov/d/2023-13112",
+      "publisher": "U.S. Department of Education",
+      "verified_at": "2026-11-24",
+      "expires_at": "2027-11-15",
+      "verbatim_quote": "Under 34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan final rule, subject to federal litigation), undergraduate loan payments under SAVE were set at 5 percent of discretionary income.",
+      "source_quote_sha256": "ab0b76976f6aa1a2704e9e272a3fe0ca572e8111ad29c026c54d3a8e1552b99f",
+      "superseded_values": [],
+      "required_qualifier_patterns": [],
+      "applies_to_slugs": [
+        "save-plan-litigation-transition"
+      ],
+      "forbidden_on_slugs": []
     }
   },
   "formulas": {
@@ -307,7 +347,7 @@
     "pslf_total_out_of_pocket_and_forgiveness": {
       "formula_id": "pslf_total_out_of_pocket_and_forgiveness",
       "model_name": "PSLF Remaining 120-Payment Forgiveness Estimate (34 CFR 685.219)",
-      "expression": "round(max(0.0, principal * pow(1.0 + annual_rate / 12.0, max(0, 120 - certified_payments)) - monthly_idr_payment * ((pow(1.0 + annual_rate / 12.0, max(0, 120 - certified_payments)) - 1.0) / (annual_rate / 12.0))), 2)",
+      "expression": "round(max(0.0, principal * ((1.0 + annual_rate / 12.0) ** max(0, 120 - certified_payments)) - monthly_idr_payment * ((((1.0 + annual_rate / 12.0) ** max(0, 120 - certified_payments)) - 1.0) / (annual_rate / 12.0))), 2)",
       "js_expression": "(Math.round((Math.max(0.0, ((principal * Math.pow((1.0 + (annual_rate / 12.0)), Math.max(0, (120 - certified_payments)))) - (monthly_idr_payment * ((Math.pow((1.0 + (annual_rate / 12.0)), Math.max(0, (120 - certified_payments))) - 1.0) / (annual_rate / 12.0)))))) * Math.pow(10, 2)) / Math.pow(10, 2))",
       "variables": {
         "principal": 65000.0,
@@ -472,10 +512,10 @@
       "forbidden_slug_patterns": []
     },
     "irc_section_108f": {
-      "canonical": "IRC Section 108(f) / 108(f)(1) / 108(f)(5) (Student Loan Forgiveness Tax Exclusion)",
+      "canonical": "IRC Section 108(f) / 108(f)(1) / 108(f)(4) / 108(f)(5) (Student Loan Forgiveness Tax Exclusion)",
       "patterns": [
-        "IRC\\s*(?:Section|Sec\\.?)?\\s*108\\(f\\)(?:\\(\\d+\\))?",
-        "26\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*)?108\\(f\\)(?:\\(\\d+\\))?"
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*108(?:\\(f\\)|f)(?:\\(\\d+\\))?",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?108(?:\\(f\\)|f)(?:\\(\\d+\\))?"
       ],
       "allowed_slug_patterns": [
         ".*"
@@ -487,7 +527,7 @@
       "patterns": [
         "12\\s*CFR\\s*Part\\s*1026",
         "Truth\\s*in\\s*Lending",
-        "20\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*)?1087e\\b"
+        "20\\s*U\\.S\\.C\\.?\\s*(?:Section\\s*|Sec\\.?\\s*)?1087e(?:\\([a-z0-9]+\\))*\\b"
       ],
       "allowed_slug_patterns": [
         ".*"
@@ -498,6 +538,123 @@
       "canonical": "16 CFR Part 255 (FTC Endorsement Guides)",
       "patterns": [
         "16\\s*CFR\\s*(?:Part\\s*)?255(?:\\.\\d+)?"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hea_20usc1070": {
+      "canonical": "20 U.S.C. 1070 (Higher Education Act Title IV Student Assistance)",
+      "patterns": [
+        "20\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?1070\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "hea_20usc1098e": {
+      "canonical": "20 U.S.C. 1098e / 1098e(b)(3) (HEA Income-Based Repayment & Interest Capitalization)",
+      "patterns": [
+        "20\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?1098e(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "cfr_34_685_consolidation_limits": {
+      "canonical": "34 CFR 685.220 (Direct Consolidation Loans) & 34 CFR 685.203 (Direct Loan Limits)",
+      "patterns": [
+        "34\\s*CFR\\s*(?:Sections?|Sec\\.?|§)?\\s*685\\.(?:220|203)(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_108_insolvency": {
+      "canonical": "IRC Section 108(a)(1)(B) & 108(a)(3) (Discharged Debt Insolvency Exclusion)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*108\\(a\\)(?:\\([0-9a-zA-Z]+\\))*",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?108\\(a\\)(?:\\([0-9a-zA-Z]+\\))*"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1_rates": {
+      "canonical": "IRC Section 1(d) & 1(j) / 26 U.S.C. Section 1 (Married Filing Separately Tax Rate Schedule)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*1(?:\\([dj]\\))+",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?1(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_6013": {
+      "canonical": "IRC Section 6013 (Joint vs Married Filing Separately Tax Returns)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*6013(?:\\([a-z0-9]+\\))*\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?6013(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_221": {
+      "canonical": "IRC Section 221 (Student Loan Interest Deduction & MFS Disallowance)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*221(?:\\([a-z0-9]+\\))*\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?221(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_21": {
+      "canonical": "IRC Section 21 (Child and Dependent Care Credit MFS Rules)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*21(?:\\([a-z0-9]+\\))*\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?21(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "irc_section_1411": {
+      "canonical": "IRC Section 1411 (Net Investment Income Tax MFS vs MFJ Thresholds)",
+      "patterns": [
+        "IRC\\s*(?:Sections?|Sec\\.?)?\\s*1411(?:\\([a-z0-9]+\\))*\\b",
+        "26\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?1411(?:\\([a-z0-9]+\\))*\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "usc_31_3102": {
+      "canonical": "31 U.S.C. 3102 (U.S. Treasury Bond & Benchmark Yield Authority)",
+      "patterns": [
+        "31\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?3102\\b"
+      ],
+      "allowed_slug_patterns": [
+        ".*"
+      ],
+      "forbidden_slug_patterns": []
+    },
+    "phsa_42usc254l1_292s": {
+      "canonical": "42 U.S.C. 254l-1 (NHSC Loan Repayment Program) & 42 U.S.C. 292s (HPSL)",
+      "patterns": [
+        "42\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?254l-1\\b",
+        "42\\s*U\\.S\\.C\\.?\\s*(?:Sections?\\s*|Sec\\.?\\s*)?292s\\b"
       ],
       "allowed_slug_patterns": [
         ".*"

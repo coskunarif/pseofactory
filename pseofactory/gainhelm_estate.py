@@ -12,6 +12,7 @@ import html
 import importlib.util
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -151,255 +152,306 @@ GAINHELM_TOOLS: List[Dict[str, Any]] = [
     },
 ]
 
-GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = {
-    "soc-2-audit-cost-calculator": {
-        "model_name": "GainHelm-AICPA-SSAE18-SOC2-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
-        "inputs": {
-            "cpa_base_fee": 28000.0,
-            "extra_tsc_count": 2.0,
-            "fee_per_extra_tsc": 4500.0,
-            "grc_platform_annual": 15000.0,
-            "pentest_fee": 11500.0,
-            "remediation_hours": 120.0,
-            "engineering_hourly_rate": 121.67,
-        },
-        "published_output": 78100.4,
-        "statutory_authority": "AICPA SSAE 18 (AT-C Section 205) & Trust Services Criteria (TSP Section 100)",
-        "economic_dataset": "BLS OEWS Information Security Analysts (SOC 15-1212) & AICPA Peer Review Fee Survey",
-        "sample_calculation": "For a 75-employee SaaS company selecting SOC 2 Type II across Security, Availability, and Confidentiality (3 TSC): CPA audit fee ($37,000.00 = $28,000 base + 2 extra TSC at $4,500) + GRC platform ($15,000.00) + penetration testing ($11,500.00) + 120 engineering hours at $121.67/hr ($14,600.40) = $78,100.40 total first-year compliance investment.",
-    },
-    "cmmc-2-0-compliance-cost-calculator": {
-        "model_name": "GainHelm-DoD-CMMC-Level2-Audit-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(c3pao_assessment_fee + enclave_licensing_annual + (remediation_hours * engineering_hourly_rate) + rpo_advisory_fee, 2)",
-        "inputs": {
-            "c3pao_assessment_fee": 48500.0,
-            "enclave_licensing_annual": 26400.0,
-            "remediation_hours": 380.0,
-            "engineering_hourly_rate": 121.67,
-            "rpo_advisory_fee": 13400.0,
-        },
-        "published_output": 134534.6,
-        "statutory_authority": "32 CFR Part 170 (CMMC 2.0 Final Rule) & DFARS 252.204-7012 / 252.204-7021",
-        "economic_dataset": "DoD CMMC 2.0 Regulatory Impact Analysis (RIA) & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Defense contractor (75 employees) pursuing CMMC 2.0 Level 2 C3PAO certification across 110 NIST SP 800-171 controls: C3PAO fee ($48,500.00) + FedRAMP enclave licensing ($26,400.00) + 380 remediation hours at $121.67/hr ($46,234.60) + RPO advisory ($13,400.00) = $134,534.60 total certification investment.",
-    },
-    "nist-800-171-sprs-score-calculator": {
-        "model_name": "GainHelm-DoD-NIST800171-SPRS-Scoring-Engine-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(110.0 - (missing_5pt_controls * 5.0) - (missing_3pt_controls * 3.0) - (missing_1pt_controls * 1.0), 2)",
-        "inputs": {
-            "missing_5pt_controls": 3.0,
-            "missing_3pt_controls": 2.0,
-            "missing_1pt_controls": 2.0,
-        },
-        "published_output": 87.0,
-        "statutory_authority": "DFARS 252.204-7019 / 252.204-7020 & NIST SP 800-171 DoD Assessment Methodology v1.2.1",
-        "economic_dataset": "DoD Supplier Performance Risk System (SPRS) Weighting Schedule & BLS SOC 15-1212",
-        "sample_calculation": "Starting from the statutory maximum of 110 points across 110 NIST SP 800-171 Rev 2 controls: deducting 3 unimplemented 5-point controls (-15), 2 unimplemented 3-point controls (-6), and 2 unimplemented 1-point controls (-2) yields a verified DoD SPRS score of 87.00.",
-    },
-    "iso-27001-certification-cost-calculator": {
-        "model_name": "GainHelm-ISO27006-AuditorDay-ISMS-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * engineering_hourly_rate), 2)",
-        "inputs": {
-            "auditor_days": 11.0,
-            "daily_auditor_rate": 1950.0,
-            "isms_platform_cost": 14500.0,
-            "internal_audit_fee": 8500.0,
-            "remediation_hours": 180.0,
-            "engineering_hourly_rate": 121.67,
-        },
-        "published_output": 66350.6,
-        "statutory_authority": "ISO/IEC 27001:2022 & ISO/IEC 27006-1:2024 Mandatory Auditor-Day Tables",
-        "economic_dataset": "IAF MD 5 / ISO 27006 Auditor-Day Schedule & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "For a 75-employee organization requiring 11.0 accredited Stage 1 and Stage 2 auditor days under ISO/IEC 27006-1:2024 at $1,950/day ($21,450.00) + ISMS platform ($14,500.00) + Clause 9.2 internal audit ($8,500.00) + 180 Annex A remediation hours at $121.67/hr ($21,900.60) = $66,350.60 total first-year ISO 27001:2022 cost.",
-    },
-    "hipaa-violation-penalty-breach-cost-calculator": {
-        "model_name": "GainHelm-HHS-OCR-HIPAA-Breach-Penalty-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(min(compromised_records * tier_penalty_per_record, statutory_annual_cap) + forensic_legal_retainer + (compromised_records * notification_cost_per_record), 2)",
-        "inputs": {
-            "compromised_records": 1500.0,
-            "tier_penalty_per_record": 13795.0,
-            "statutory_annual_cap": 2190294.0,
-            "forensic_legal_retainer": 95000.0,
-            "notification_cost_per_record": 195.0,
-        },
-        "published_output": 2577794.0,
-        "statutory_authority": "45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), 91 FR 3665 / 91 FR 66566 & 45 CFR Part 164 Subpart D",
-        "economic_dataset": "HHS Annual Civil Monetary Penalty Inflation Adjustment Rule & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "For a 1,500-record ePHI breach classified under 45 CFR 160.404 (91 FR 3665 / 91 FR 66566): statutory civil penalty capped at the $2,190,294.00 annual limit ($13,795/record * 1,500 = $20,692,500 raw) + forensic and legal retainer ($95,000.00) + patient notification and credit monitoring ($195/record * 1,500 = $292,500.00) = $2,577,794.00 total exposure.",
-    },
-    "pci-dss-4-0-compliance-cost-calculator": {
-        "model_name": "GainHelm-PCIDSS-v401-QSA-ROC-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(qsa_roc_fee + asv_annual_cost + (cde_system_count * fee_per_cde_system) + segmentation_pentest_fee + remediation_labor_cost, 2)",
-        "inputs": {
-            "qsa_roc_fee": 42000.0,
-            "asv_annual_cost": 3800.0,
-            "cde_system_count": 6.0,
-            "fee_per_cde_system": 2200.0,
-            "segmentation_pentest_fee": 12500.0,
-            "remediation_labor_cost": 21900.6,
-        },
-        "published_output": 93400.6,
-        "statutory_authority": "PCI DSS v4.0.1 Standard (PCI SSC) & Requirement 11.3 / 11.4 Testing Rules",
-        "economic_dataset": "PCI SSC QSA Assessment Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Level 1 Merchant requiring an annual QSA Report on Compliance (ROC) across 6 CDE systems: QSA ROC fee ($42,000.00) + quarterly ASV scans ($3,800.00) + 6 CDE systems at $2,200 ($13,200.00) + segmentation pentesting ($12,500.00) + 180 remediation hours at $121.67/hr ($21,900.60) = $93,400.60 total annual PCI DSS v4.0.1 cost.",
-    },
-    "fedramp-authorization-3pao-cost-calculator": {
-        "model_name": "GainHelm-FedRAMP-NIST80053-3PAO-ATO-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(threepao_rar_sar_fee + (boundary_engineering_hours * federal_eng_hourly_rate) + conmon_annual_cost + pmo_documentation_cost, 2)",
-        "inputs": {
-            "threepao_rar_sar_fee": 165000.0,
-            "boundary_engineering_hours": 1400.0,
-            "federal_eng_hourly_rate": 155.0,
-            "conmon_annual_cost": 68000.0,
-            "pmo_documentation_cost": 50000.0,
-        },
-        "published_output": 500000.0,
-        "statutory_authority": "FedRAMP Authorization Act (44 U.S.C. 3607) & NIST SP 800-53 Rev 5 Baselines",
-        "economic_dataset": "GSA FedRAMP PMO 3PAO Assessment Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Cloud Service Provider pursuing FedRAMP Moderate Authorization (325 NIST SP 800-53 Rev 5 controls): 3PAO RAR and SAR assessment ($165,000.00) + 1,400 FIPS 140-3 boundary engineering hours at $155/hr ($217,000.00) + Year-1 ConMon ($68,000.00) + PMO SSP documentation ($50,000.00) = $500,000.00 total authorization investment.",
-    },
-    "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
-        "model_name": "GainHelm-HITRUST-CSF-v11-Assurance-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(mycsf_subscription_fee + external_assessor_fee + hitrust_certification_fee + (remediation_hours * engineering_hourly_rate), 2)",
-        "inputs": {
-            "mycsf_subscription_fee": 22500.0,
-            "external_assessor_fee": 54000.0,
-            "hitrust_certification_fee": 14500.0,
-            "remediation_hours": 200.0,
-            "engineering_hourly_rate": 120.0,
-        },
-        "published_output": 115000.0,
-        "statutory_authority": "HITRUST CSF v11.x Assurance Program Requirements (e1, i1, r2 Tiers) & HIPAA / NIST Mapping",
-        "economic_dataset": "HITRUST Authorized External Assessor Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Healthcare technology vendor completing a HITRUST i1 Validated Assessment (182 controls): MyCSF portal subscription ($22,500.00) + External Assessor validation ($54,000.00) + HITRUST central certification review ($14,500.00) + 200 control remediation hours at $120/hr ($24,000.00) = $115,000.00 total certification cost.",
-    },
-    "penetration-testing-scoping-cost-calculator": {
-        "model_name": "GainHelm-NIST800115-Pentest-Scoping-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(base_engagement_fee + (web_and_api_endpoints * fee_per_endpoint) + cloud_iam_network_fee + retest_attestation_fee, 2)",
-        "inputs": {
-            "base_engagement_fee": 8500.0,
-            "web_and_api_endpoints": 18.0,
-            "fee_per_endpoint": 450.0,
-            "cloud_iam_network_fee": 4200.0,
-            "retest_attestation_fee": 2500.0,
-        },
-        "published_output": 23300.0,
-        "statutory_authority": "NIST SP 800-115 Technical Guide to Information Security Testing & PCI DSS Req 11.4",
-        "economic_dataset": "CREST / OSCP Senior Security Consultant Billing Benchmarks & BLS SOC 15-1212",
-        "sample_calculation": "Grey-box penetration test for SOC 2 and PCI DSS 11.4 compliance: base engagement ($8,500.00) + 18 web application and API endpoints at $450/endpoint ($8,100.00) + cloud IAM and external network testing ($4,200.00) + remediation retesting and attestation letter ($2,500.00) = $23,300.00 total engagement fee.",
-    },
-    "cyber-liability-insurance-breach-exposure-calculator": {
-        "model_name": "GainHelm-NAIC-SEC-Cyber-Insurance-Premium-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(round(policy_limit_millions * base_rate_per_million * sector_hazard_multiplier * control_modifier + surplus_lines_fee, 2) + retention_reserve_allocation, 2)",
-        "inputs": {
-            "policy_limit_millions": 5.0,
-            "base_rate_per_million": 3400.0,
-            "sector_hazard_multiplier": 1.35,
-            "control_modifier": 0.80,
-            "surplus_lines_fee": 2055.0,
-            "retention_reserve_allocation": 20485.0,
-        },
-        "published_output": 40900.0,
-        "statutory_authority": "NAIC Cyber Insurance Supplement & SEC Cybersecurity Risk Governance Rule (17 CFR 229.106)",
-        "economic_dataset": "NAIC Property & Casualty Cyber Loss Ratio Series & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Enterprise purchasing a $5M cyber liability limit ($3,400/M base rate * 1.35 sector hazard * 0.80 MFA/EDR/immutable-backup credit + $2,055 surplus lines fee = $20,415.00 annual premium) plus $20,485.00 self-insured retention reserve = $40,900.00 total annual risk transfer cost.",
-    },
-    "dora-ict-third-party-risk-compliance-cost-calculator": {
-        "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
-        "inputs": {
-            "tlpt_red_team_fee": 42000.0,
-            "critical_ict_vendors": 12.0,
-            "fee_per_ict_vendor": 2800.0,
-            "register_of_information_cost": 16500.0,
-            "remediation_hours": 160.0,
-            "engineering_hourly_rate": 125.0,
-        },
-        "published_output": 112100.0,
-        "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
-        "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
-    },
-    "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
-        "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
-        "inputs": {
-            "high_risk_ai_systems": 2.0,
-            "notified_body_audit_fee": 28500.0,
-            "annex_iv_technical_dossier_cost": 18000.0,
-            "qms_article_17_setup_fee": 24000.0,
-            "validation_hours": 140.0,
-            "ml_compliance_hourly_rate": 150.0,
-        },
-        "published_output": 120000.0,
-        "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
-        "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
-        "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
-    },
-    "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": {
-        "model_name": "GainHelm-SEC-8K-Item105-Materiality-Readiness-Cost-Model-2026",
-        "entity_type": "FinancialProductOrService",
-        "formula": "round(outside_securities_counsel_retainer + dfir_tabletop_retainer + (board_reg_sk_106_hours * governance_advisory_hourly_rate) + materiality_workflow_platform_fee, 2)",
-        "inputs": {
-            "outside_securities_counsel_retainer": 65000.0,
-            "dfir_tabletop_retainer": 48000.0,
-            "board_reg_sk_106_hours": 160.0,
-            "governance_advisory_hourly_rate": 225.0,
-            "materiality_workflow_platform_fee": 31000.0,
-        },
-        "published_output": 180000.0,
-        "statutory_authority": "SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 & Form 8-K Item 1.05 4-Business-Day Mandate)",
-        "economic_dataset": "SEC Division of Economic and Risk Analysis (DERA) Cyber Disclosure Cost Series & BLS OEWS SOC 15-1212 Wage Series",
-        "sample_calculation": "Public registrant operationalizing SEC Form 8-K Item 1.05 4-business-day materiality determination and Regulation S-K Item 106 board governance disclosures: outside securities counsel retainer ($65,000.00) + DFIR forensic readiness and tabletop exercises ($48,000.00) + 160 Regulation S-K Item 106 governance hours at $225/hr ($36,000.00) + automated materiality evidentiary workflow platform ($31,000.00) = $180,000.00 total annual SEC cyber disclosure readiness investment.",
-    },
-}
-
-GAINHELM_CALCULATION_MANIFESTS: List[Dict[str, Any]] = [
-    {"slug": m_slug, **m_item}
-    for m_slug, m_item in GAINHELM_FALLBACK_MANIFESTS_MAP.items()
-]
-
-
 def _gainhelm_truth_constants() -> Dict[str, Any]:
-    """Loads verified 2026 GainHelm constants from TruthPack when available, with canonical fallbacks."""
+    """Loads verified 2026 GainHelm constants and baselines from TruthPack."""
     defaults: Dict[str, Any] = {
         "hipaa_tier4_cap": 2190294.0,
         "eng_hourly_rate": 121.67,
+        "sprs_max_score": 110,
+        "sprs_min_score": -203,
         "sprs_5pt_max": 44,
         "sprs_3pt_max": 14,
         "sprs_1pt_max": 51,
+        "soc2_baseline": 78100.4,
+        "cmmc_baseline": 134534.6,
+        "iso27001_baseline": 66350.6,
+        "hipaa_baseline": 2577794.0,
     }
     try:
         from pseofactory.truth_pack import load_truth_pack
 
-        pack = load_truth_pack("gainhelm", allow_expired=True)
+        pack = load_truth_pack("gainhelm", allow_expired=False)
         cap_entry = pack.entries.get("hipaa_tier4_annual_cap_2026")
         if cap_entry is not None and isinstance(cap_entry.value, (int, float)):
             defaults["hipaa_tier4_cap"] = float(cap_entry.value)
         rate_entry = pack.entries.get("bls_infosec_hourly_loaded_2026")
         if rate_entry is not None and isinstance(rate_entry.value, (int, float)):
             defaults["eng_hourly_rate"] = float(rate_entry.value)
+        sprs_max = pack.entries.get("sprs_max_score")
+        if sprs_max is not None and isinstance(sprs_max.value, (int, float)):
+            defaults["sprs_max_score"] = int(sprs_max.value)
+        sprs_min = pack.entries.get("sprs_min_score")
+        if sprs_min is not None and isinstance(sprs_min.value, (int, float)):
+            defaults["sprs_min_score"] = int(sprs_min.value)
         sprs_entry = pack.entries.get("sprs_control_counts")
         if sprs_entry is not None and isinstance(sprs_entry.value, dict):
             defaults["sprs_5pt_max"] = int(sprs_entry.value.get("5_pt", 44))
             defaults["sprs_3pt_max"] = int(sprs_entry.value.get("3_pt", 14))
             defaults["sprs_1pt_max"] = int(sprs_entry.value.get("1_pt", 51))
+        for fid, key in (
+            ("soc2_type2_total_budget", "soc2_baseline"),
+            ("cmmc_level2_total_budget", "cmmc_baseline"),
+            ("iso27001_total_budget", "iso27001_baseline"),
+        ):
+            fspec = pack.formulas.get(fid)
+            if fspec is not None:
+                defaults[key] = float(fspec.expected_baseline_output)
     except Exception:
         pass
     return defaults
+
+
+def _build_gainhelm_manifests_map() -> Dict[str, Dict[str, Any]]:
+    """Builds GAINHELM_FALLBACK_MANIFESTS_MAP deterministically from TruthPack constants."""
+    tc = _gainhelm_truth_constants()
+    eng_rate = float(tc["eng_hourly_rate"])
+    hipaa_cap = float(tc["hipaa_tier4_cap"])
+    soc2_labor = round(120.0 * eng_rate, 2)
+    soc2_out = round(28000.0 + (2.0 * 4500.0) + 15000.0 + 11500.0 + soc2_labor, 2)
+    cmmc_labor = round(380.0 * eng_rate, 2)
+    cmmc_out = round(48500.0 + 26400.0 + cmmc_labor + 13400.0, 2)
+    iso_labor = round(180.0 * eng_rate, 2)
+    iso_out = round((11.0 * 1950.0) + 14500.0 + 8500.0 + iso_labor, 2)
+    hipaa_out = round(hipaa_cap + 95000.0 + (1500.0 * 195.0), 2)
+    pci_labor = round(180.0 * eng_rate, 2)
+    pci_out = round(42000.0 + 3800.0 + (6.0 * 2200.0) + 12500.0 + pci_labor, 2)
+
+    return {
+        "soc-2-audit-cost-calculator": {
+            "manifest_id": "soc-2-audit-cost-calculator-manifest",
+            "model_name": "GainHelm-AICPA-SSAE18-SOC2-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(cpa_base_fee + (extra_tsc_count * fee_per_extra_tsc) + grc_platform_annual + pentest_fee + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "cpa_base_fee": 28000.0,
+                "extra_tsc_count": 2.0,
+                "fee_per_extra_tsc": 4500.0,
+                "grc_platform_annual": 15000.0,
+                "pentest_fee": 11500.0,
+                "remediation_hours": 120.0,
+                "engineering_hourly_rate": eng_rate,
+            },
+            "published_output": soc2_out,
+            "statutory_authority": "AICPA SSAE 18 (AT-C Section 205) & Trust Services Criteria (TSP Section 100)",
+            "economic_dataset": "BLS OEWS Information Security Analysts (SOC 15-1212) & AICPA Peer Review Fee Survey",
+            "sample_calculation": f"For a 75-employee SaaS company selecting SOC 2 Type II across Security, Availability, and Confidentiality (3 TSC): CPA audit fee ($37,000.00 = $28,000 base + 2 extra TSC at $4,500) + GRC platform ($15,000.00) + penetration testing ($11,500.00) + 120 engineering hours at the BLS SOC 15-1212 loaded benchmark rate of ${eng_rate:,.2f}/hr (${soc2_labor:,.2f}) = ${soc2_out:,.2f} total first-year compliance estimate.",
+        },
+        "cmmc-2-0-compliance-cost-calculator": {
+            "manifest_id": "cmmc-2-0-compliance-cost-calculator-manifest",
+            "model_name": "GainHelm-DoD-CMMC-Level2-Audit-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(c3pao_assessment_fee + enclave_licensing_annual + (remediation_hours * engineering_hourly_rate) + rpo_advisory_fee, 2)",
+            "inputs": {
+                "c3pao_assessment_fee": 48500.0,
+                "enclave_licensing_annual": 26400.0,
+                "remediation_hours": 380.0,
+                "engineering_hourly_rate": eng_rate,
+                "rpo_advisory_fee": 13400.0,
+            },
+            "published_output": cmmc_out,
+            "statutory_authority": "32 CFR Part 170 (CMMC 2.0 Final Rule) & DFARS 252.204-7012 / 252.204-7021",
+            "economic_dataset": "DoD CMMC 2.0 Regulatory Impact Analysis (RIA) & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": f"Defense contractor (75 employees) pursuing CMMC 2.0 Level 2 C3PAO certification across 110 NIST SP 800-171 controls: C3PAO fee ($48,500.00) + FedRAMP enclave licensing ($26,400.00) + 380 remediation hours at the BLS SOC 15-1212 loaded benchmark rate of ${eng_rate:,.2f}/hr (${cmmc_labor:,.2f}) + RPO advisory ($13,400.00) = ${cmmc_out:,.2f} total certification estimate.",
+        },
+        "nist-800-171-sprs-score-calculator": {
+            "manifest_id": "nist-800-171-sprs-score-calculator-manifest",
+            "model_name": "GainHelm-DoD-NIST800171-SPRS-Scoring-Engine-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(110.0 - (missing_5pt_controls * 5.0) - (missing_3pt_controls * 3.0) - (missing_1pt_controls * 1.0), 2)",
+            "inputs": {
+                "missing_5pt_controls": 3.0,
+                "missing_3pt_controls": 2.0,
+                "missing_1pt_controls": 2.0,
+            },
+            "published_output": 87.0,
+            "statutory_authority": "DFARS 252.204-7019 / 252.204-7020 & NIST SP 800-171 DoD Assessment Methodology v1.2.1",
+            "economic_dataset": "DoD Supplier Performance Risk System (SPRS) Weighting Schedule & BLS SOC 15-1212",
+            "sample_calculation": "Starting from the statutory maximum of 110 points across 110 NIST SP 800-171 Rev 2 controls: deducting 3 unimplemented 5-point controls (-15), 2 unimplemented 3-point controls (-6), and 2 unimplemented 1-point controls (-2) yields a verified DoD SPRS score of 87.00.",
+        },
+        "iso-27001-certification-cost-calculator": {
+            "manifest_id": "iso-27001-certification-cost-calculator-manifest",
+            "model_name": "GainHelm-ISO27006-AuditorDay-ISMS-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((auditor_days * daily_auditor_rate) + isms_platform_cost + internal_audit_fee + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "auditor_days": 11.0,
+                "daily_auditor_rate": 1950.0,
+                "isms_platform_cost": 14500.0,
+                "internal_audit_fee": 8500.0,
+                "remediation_hours": 180.0,
+                "engineering_hourly_rate": eng_rate,
+            },
+            "published_output": iso_out,
+            "statutory_authority": "ISO/IEC 27001:2022 & ISO/IEC 27006-1:2024 Mandatory Auditor-Day Tables",
+            "economic_dataset": "IAF MD 5 / ISO 27006 Auditor-Day Schedule & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": f"For a 75-employee organization requiring 11.0 accredited Stage 1 and Stage 2 auditor days under ISO/IEC 27006-1:2024 at $1,950/day ($21,450.00) + ISMS platform ($14,500.00) + Clause 9.2 internal audit ($8,500.00) + 180 Annex A remediation hours at the BLS SOC 15-1212 loaded benchmark rate of ${eng_rate:,.2f}/hr (${iso_labor:,.2f}) = ${iso_out:,.2f} total first-year ISO 27001:2022 estimate.",
+        },
+        "hipaa-violation-penalty-breach-cost-calculator": {
+            "manifest_id": "hipaa-violation-penalty-breach-cost-calculator-manifest",
+            "model_name": "GainHelm-HHS-OCR-HIPAA-Breach-Penalty-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(min(compromised_records * tier_penalty_per_record, statutory_annual_cap) + forensic_legal_retainer + (compromised_records * notification_cost_per_record), 2)",
+            "inputs": {
+                "compromised_records": 1500.0,
+                "tier_penalty_per_record": 13795.0,
+                "statutory_annual_cap": hipaa_cap,
+                "forensic_legal_retainer": 95000.0,
+                "notification_cost_per_record": 195.0,
+            },
+            "published_output": hipaa_out,
+            "statutory_authority": "45 CFR 160.404, 42 U.S.C. 1320d-5 (HITECH Act), 91 FR 3665 / 91 FR 66566 & 45 CFR Part 164 Subpart D",
+            "economic_dataset": "HHS Annual Civil Monetary Penalty Inflation Adjustment Rule & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": f"For a 1,500-record ePHI breach classified under 45 CFR 160.404 (91 FR 3665 / 91 FR 66566): statutory civil penalty capped at the ${hipaa_cap:,.2f} annual limit ($13,795/record * 1,500 = $20,692,500 raw) + forensic and legal retainer ($95,000.00) + patient notification and credit monitoring ($195/record * 1,500 = $292,500.00) = ${hipaa_out:,.2f} total exposure.",
+        },
+        "pci-dss-4-0-compliance-cost-calculator": {
+            "manifest_id": "pci-dss-4-0-compliance-cost-calculator-manifest",
+            "model_name": "GainHelm-PCIDSS-v401-QSA-ROC-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(qsa_roc_fee + asv_annual_cost + (cde_system_count * fee_per_cde_system) + segmentation_pentest_fee + remediation_labor_cost, 2)",
+            "inputs": {
+                "qsa_roc_fee": 42000.0,
+                "asv_annual_cost": 3800.0,
+                "cde_system_count": 6.0,
+                "fee_per_cde_system": 2200.0,
+                "segmentation_pentest_fee": 12500.0,
+                "remediation_labor_cost": pci_labor,
+            },
+            "published_output": pci_out,
+            "statutory_authority": "PCI DSS v4.0.1 Standard (PCI SSC) & Requirement 11.3 / 11.4 Testing Rules",
+            "economic_dataset": "PCI SSC QSA Assessment Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": f"Level 1 Merchant requiring an annual QSA Report on Compliance (ROC) across 6 CDE systems: QSA ROC fee ($42,000.00) + quarterly ASV scans ($3,800.00) + 6 CDE systems at $2,200 ($13,200.00) + segmentation pentesting ($12,500.00) + 180 remediation hours at the BLS SOC 15-1212 loaded benchmark rate of ${eng_rate:,.2f}/hr (${pci_labor:,.2f}) = ${pci_out:,.2f} total annual PCI DSS v4.0.1 estimate.",
+        },
+        "fedramp-authorization-3pao-cost-calculator": {
+            "manifest_id": "fedramp-authorization-3pao-cost-calculator-manifest",
+            "model_name": "GainHelm-FedRAMP-NIST80053-3PAO-ATO-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(threepao_rar_sar_fee + (boundary_engineering_hours * federal_eng_hourly_rate) + conmon_annual_cost + pmo_documentation_cost, 2)",
+            "inputs": {
+                "threepao_rar_sar_fee": 165000.0,
+                "boundary_engineering_hours": 1400.0,
+                "federal_eng_hourly_rate": 155.0,
+                "conmon_annual_cost": 68000.0,
+                "pmo_documentation_cost": 50000.0,
+            },
+            "published_output": 500000.0,
+            "statutory_authority": "FedRAMP Authorization Act (44 U.S.C. 3607) & NIST SP 800-53 Rev 5 Baselines",
+            "economic_dataset": "GSA FedRAMP PMO 3PAO Assessment Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Cloud Service Provider pursuing FedRAMP Moderate Authorization (325 NIST SP 800-53 Rev 5 controls): 3PAO RAR and SAR assessment ($165,000.00) + 1,400 FIPS 140-3 boundary engineering hours at $155/hr ($217,000.00) + Year-1 ConMon ($68,000.00) + PMO SSP documentation ($50,000.00) = $500,000.00 total authorization investment.",
+        },
+        "hitrust-csf-e1-i1-r2-certification-cost-calculator": {
+            "manifest_id": "hitrust-csf-e1-i1-r2-certification-cost-calculator-manifest",
+            "model_name": "GainHelm-HITRUST-CSF-v11-Assurance-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(mycsf_subscription_fee + external_assessor_fee + hitrust_certification_fee + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "mycsf_subscription_fee": 22500.0,
+                "external_assessor_fee": 54000.0,
+                "hitrust_certification_fee": 14500.0,
+                "remediation_hours": 200.0,
+                "engineering_hourly_rate": 120.0,
+            },
+            "published_output": 115000.0,
+            "statutory_authority": "HITRUST CSF v11.x Assurance Program Requirements (e1, i1, r2 Tiers) & HIPAA / NIST Mapping",
+            "economic_dataset": "HITRUST Authorized External Assessor Fee Benchmarks & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Healthcare technology vendor completing a HITRUST i1 Validated Assessment (182 controls): MyCSF portal subscription ($22,500.00) + External Assessor validation ($54,000.00) + HITRUST central certification review ($14,500.00) + 200 control remediation hours at $120/hr ($24,000.00) = $115,000.00 total certification cost.",
+        },
+        "penetration-testing-scoping-cost-calculator": {
+            "manifest_id": "penetration-testing-scoping-cost-calculator-manifest",
+            "model_name": "GainHelm-NIST800115-Pentest-Scoping-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(base_engagement_fee + (web_and_api_endpoints * fee_per_endpoint) + cloud_iam_network_fee + retest_attestation_fee, 2)",
+            "inputs": {
+                "base_engagement_fee": 8500.0,
+                "web_and_api_endpoints": 18.0,
+                "fee_per_endpoint": 450.0,
+                "cloud_iam_network_fee": 4200.0,
+                "retest_attestation_fee": 2500.0,
+            },
+            "published_output": 23300.0,
+            "statutory_authority": "NIST SP 800-115 Technical Guide to Information Security Testing & PCI DSS Req 11.4",
+            "economic_dataset": "CREST / OSCP Senior Security Consultant Billing Benchmarks & BLS SOC 15-1212",
+            "sample_calculation": "Grey-box penetration test for SOC 2 and PCI DSS 11.4 compliance: base engagement ($8,500.00) + 18 web application and API endpoints at $450/endpoint ($8,100.00) + cloud IAM and external network testing ($4,200.00) + remediation retesting and attestation letter ($2,500.00) = $23,300.00 total engagement fee.",
+        },
+        "cyber-liability-insurance-breach-exposure-calculator": {
+            "manifest_id": "cyber-liability-insurance-breach-exposure-calculator-manifest",
+            "model_name": "GainHelm-NAIC-SEC-Cyber-Insurance-Premium-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(round(policy_limit_millions * base_rate_per_million * sector_hazard_multiplier * control_modifier + surplus_lines_fee, 2) + retention_reserve_allocation, 2)",
+            "inputs": {
+                "policy_limit_millions": 5.0,
+                "base_rate_per_million": 3400.0,
+                "sector_hazard_multiplier": 1.35,
+                "control_modifier": 0.80,
+                "surplus_lines_fee": 2055.0,
+                "retention_reserve_allocation": 20485.0,
+            },
+            "published_output": 40900.0,
+            "statutory_authority": "NAIC Cyber Insurance Supplement & SEC Cybersecurity Risk Governance Rule (17 CFR 229.106)",
+            "economic_dataset": "NAIC Property & Casualty Cyber Loss Ratio Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Enterprise purchasing a $5M cyber liability limit ($3,400/M base rate * 1.35 sector hazard * 0.80 MFA/EDR/immutable-backup credit + $2,055 surplus lines fee = $20,415.00 annual premium) plus $20,485.00 self-insured retention reserve = $40,900.00 total annual risk transfer cost.",
+        },
+        "dora-ict-third-party-risk-compliance-cost-calculator": {
+            "manifest_id": "dora-ict-third-party-risk-compliance-cost-calculator-manifest",
+            "model_name": "GainHelm-EU-DORA-ICT-ThirdParty-Risk-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(tlpt_red_team_fee + (critical_ict_vendors * fee_per_ict_vendor) + register_of_information_cost + (remediation_hours * engineering_hourly_rate), 2)",
+            "inputs": {
+                "tlpt_red_team_fee": 42000.0,
+                "critical_ict_vendors": 12.0,
+                "fee_per_ict_vendor": 2800.0,
+                "register_of_information_cost": 16500.0,
+                "remediation_hours": 160.0,
+                "engineering_hourly_rate": 125.0,
+            },
+            "published_output": 112100.0,
+            "statutory_authority": "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26 & 28)",
+            "economic_dataset": "ESAs Joint DORA Oversight Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Financial entity scoping EU DORA compliance across 12 critical ICT third-party providers: Article 26 threat-led penetration testing ($42,000.00) + 12 ICT vendor exit-strategy and contractual audits at $2,800 ($33,600.00) + Article 28 Register of Information automation ($16,500.00) + 160 remediation hours at $125/hr ($20,000.00) = $112,100.00 total first-year DORA compliance cost.",
+        },
+        "eu-ai-act-high-risk-conformity-assessment-cost-calculator": {
+            "manifest_id": "eu-ai-act-high-risk-conformity-assessment-cost-calculator-manifest",
+            "model_name": "GainHelm-EU-AI-Act-Article43-Conformity-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round((high_risk_ai_systems * notified_body_audit_fee) + annex_iv_technical_dossier_cost + qms_article_17_setup_fee + (validation_hours * ml_compliance_hourly_rate), 2)",
+            "inputs": {
+                "high_risk_ai_systems": 2.0,
+                "notified_body_audit_fee": 28500.0,
+                "annex_iv_technical_dossier_cost": 18000.0,
+                "qms_article_17_setup_fee": 24000.0,
+                "validation_hours": 140.0,
+                "ml_compliance_hourly_rate": 150.0,
+            },
+            "published_output": 120000.0,
+            "statutory_authority": "NIST AI RMF 1.0 (15 U.S.C. 278h-1) & EU Artificial Intelligence Act (Regulation (EU) 2024/1689 Articles 6 & 43)",
+            "economic_dataset": "European Commission AI Impact Assessment Cost Benchmark & BLS OEWS SOC 15-2051 Data Scientist Wage Series",
+            "sample_calculation": "Enterprise deploying 2 Annex III high-risk AI systems under EU Regulation 2024/1689: 2 Article 43 Notified Body conformity audits at $28,500 ($57,000.00) + Annex IV technical documentation dossier ($18,000.00) + Article 17 Quality Management System setup ($24,000.00) + 140 bias/robustness validation hours at $150/hr ($21,000.00) = $120,000.00 total conformity cost.",
+        },
+        "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": {
+            "manifest_id": "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator-manifest",
+            "model_name": "GainHelm-SEC-8K-Item105-Materiality-Readiness-Cost-Model-2026",
+            "entity_type": "FinancialProductOrService",
+            "formula": "round(outside_securities_counsel_retainer + dfir_tabletop_retainer + (board_reg_sk_106_hours * governance_advisory_hourly_rate) + materiality_workflow_platform_fee, 2)",
+            "inputs": {
+                "outside_securities_counsel_retainer": 65000.0,
+                "dfir_tabletop_retainer": 48000.0,
+                "board_reg_sk_106_hours": 160.0,
+                "governance_advisory_hourly_rate": 225.0,
+                "materiality_workflow_platform_fee": 31000.0,
+            },
+            "published_output": 180000.0,
+            "statutory_authority": "SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 & Form 8-K Item 1.05 4-Business-Day Mandate)",
+            "economic_dataset": "SEC Division of Economic and Risk Analysis (DERA) Cyber Disclosure Cost Series & BLS OEWS SOC 15-1212 Wage Series",
+            "sample_calculation": "Public registrant operationalizing SEC Form 8-K Item 1.05 4-business-day materiality determination and Regulation S-K Item 106 board governance disclosures: outside securities counsel retainer ($65,000.00) + DFIR forensic readiness and tabletop exercises ($48,000.00) + 160 Regulation S-K Item 106 governance hours at $225/hr ($36,000.00) + automated materiality evidentiary workflow platform ($31,000.00) = $180,000.00 total annual SEC cyber disclosure readiness investment.",
+        },
+    }
+
+
+GAINHELM_FALLBACK_MANIFESTS_MAP: Dict[str, Dict[str, Any]] = _build_gainhelm_manifests_map()
+
+GAINHELM_CALCULATION_MANIFESTS: List[Dict[str, Any]] = [
+    {"slug": m_slug, **m_item}
+    for m_slug, m_item in GAINHELM_FALLBACK_MANIFESTS_MAP.items()
+]
 
 
 def get_gainhelm_tool_quick_answers() -> Dict[str, str]:
@@ -1113,6 +1165,9 @@ def _render_calculator_widget(
     meter_right_pct = 100 - meter_left_pct
     meter_mode = html.escape(str(meter_bd["mode"]))
     quick_ans = _build_core_widget_quick_answer(slug_low, benchmarks)
+    _js_truth = _gainhelm_truth_constants()
+    js_eng_rate = float(_js_truth["eng_hourly_rate"])
+    js_hipaa_cap = float(_js_truth["hipaa_tier4_cap"])
 
     calc_title = spec["title"] if spec else "Enterprise SOC 2 Type II, DoD CMMC 2.0 &amp; NIST 800-171 SPRS Audit Calculator"
     calc_desc = spec["desc"] if spec else "Deterministic enterprise GRC audit budgeting and NIST SP 800-171 SPRS scoring engine."
@@ -1238,21 +1293,21 @@ def _render_calculator_widget(
           var cpaFee = 28000.0 + (crit * 4500.0);
           var pentestFee = 11500.0;
           var grcFee = 15000.0;
-          var internalLabor = Math.round((120.0 * scaleFactor * 121.67) * 100) / 100;
+          var internalLabor = Math.round((120.0 * scaleFactor * {js_eng_rate}) * 100) / 100;
           var soc2Total = Math.round((cpaFee + pentestFee + grcFee + internalLabor) * 100) / 100;
           var autoSavings = Math.round((internalLabor * 0.55) * 100) / 100;
 
           var sprsDeduction = (u5 * 5) + (u3 * 3) + (u1 * 1);
           var sprsScore = Math.max(-203, 110 - sprsDeduction);
 
-          var cmmcRem = Math.round((380.0 * 121.67 * Math.max(0.5, scaleFactor)) * 100) / 100;
+          var cmmcRem = Math.round((380.0 * {js_eng_rate} * Math.max(0.5, scaleFactor)) * 100) / 100;
           var cmmcTotal = Math.round((48500.0 + 26400.0 + cmmcRem + 13400.0) * 100) / 100;
           var isoDays = Math.max(5.0, Math.round(11.0 * Math.pow(scaleFactor, 0.35)));
           var isoReg = Math.round((isoDays * 1950.0) * 100) / 100;
-          var isoRem = Math.round((180.0 * 121.67 * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
+          var isoRem = Math.round((180.0 * {js_eng_rate} * Math.max(0.5, Math.pow(scaleFactor, 0.5))) * 100) / 100;
           var isoTotal = Math.round((isoReg + 14500.0 + 8500.0 + isoRem) * 100) / 100;
           var recFactor = Math.max(0.5, rec / 1500.0);
-          var ocrFine = Math.min(rec * 13795.0, 2190294.0);
+          var ocrFine = Math.min(rec * 13795.0, {js_hipaa_cap});
           var hipaaRetainer = Math.round((95000.0 * Math.max(0.5, scaleFactor)) * 100) / 100;
           var hipaaResp = Math.round((hipaaRetainer + (rec * 195.0)) * 100) / 100;
           var hipaaTotal = Math.round((ocrFine + hipaaResp) * 100) / 100;
@@ -2002,7 +2057,9 @@ def _sanitize_gainhelm_overlay_strings(val: Any) -> Any:
         out = out.replace("(82% SOC 2 / ISO 27001 Overlap)", "(Shared SOC 2 / ISO 27001 Evidence)")
         out = out.replace("$132,000.00 Total CMMC Level 2 Program", "$134,534.60 Total CMMC Level 2 Program")
         out = out.replace("$67,000.40 ISO 27001 Year-1 Cost", "$66,350.60 ISO 27001 Year-1 Cost")
-        out = out.replace("$2,067,813", "$2,190,294").replace("$2,455,313", "$2,577,794")
+        out = out.replace("$2,067,813", "$2,190,294").replace("2067813", "2190294").replace("$2,455,313", "$2,577,794")
+        out = re.sub(r"\bby\s+55%\b", "substantially", out, flags=re.IGNORECASE)
+        out = re.sub(r"\b55%\s+(?:reduction|savings|decrease)\b", "substantial automation savings", out, flags=re.IGNORECASE)
         return out
     if isinstance(val, list):
         return [_sanitize_gainhelm_overlay_strings(item) for item in val]
@@ -2604,7 +2661,7 @@ def _write_llms_files(dist: Path, all_tools: Sequence[Dict[str, Any]], quick_ans
     statutory_notes = html.unescape(
         """## Enterprise Cyber Compliance Statutory Parameter Specifications & Formula Definitions
 - SOC 2 Attestation (AICPA SSAE 18 / AT-C Section 205): Evaluates Security Common Criteria (CC1-CC9) plus optional Availability, Confidentiality, Processing Integrity, and Privacy under TSP Section 100. Baseline 75-employee SaaS Type II program (3 TSC) equals $78,100.40.
-- CMMC 2.0 Level 2 Certification (32 CFR Part 170 & DFARS 252.204-7021): Requires triennial C3PAO assessment across all 110 NIST SP 800-171 Rev 2 controls (320 objectives). Baseline 75-employee defense contractor program equals $134,534.60 at the BLS SOC 15-1212 $121.67/hr loaded rate.
+- CMMC 2.0 Level 2 Certification (32 CFR Part 170 & DFARS 252.204-7021): Requires triennial C3PAO assessment across all 110 NIST SP 800-171 Rev 2 controls (320 objectives). Baseline 75-employee defense contractor program equals $134,534.60 at the BLS SOC 15-1212 $121.67/hr loaded benchmark estimate.
 - NIST SP 800-171 DoD SPRS Score (DFARS 252.204-7019 / 7020): Starts at +110 and deducts 5, 3, or 1 points per unimplemented requirement across 44 five-point, 14 three-point, 51 one-point, and 1 zero-point SSP controls down to -203. Conditional POA&M eligibility requires >= 88 points with zero open 5-point controls.
 - ISO/IEC 27001:2022 Certification (ISO/IEC 27006-1:2024): Stage 1 + Stage 2 auditor days scale deterministically from effective ISMS headcount (11.0 auditor days for 66-85 employees; $66,350.60 first-year total).
 - HIPAA Civil Monetary Penalties (45 CFR 160.404, 42 U.S.C. 1320d-5 & 91 FR 3665 / 91 FR 66566): Four culpability tiers plus 45 CFR Part 164 Subpart D notification and credit monitoring ($2,577,794.00 baseline exposure for 1,500 ePHI records, including the $2,190,294.00 annual penalty cap)."""
@@ -2655,6 +2712,277 @@ _GAINHELM_REDIRECTS = (
     "/how-it-works /methodology/ 301\n"
     "/how-it-works/ /methodology/ 301\n"
 )
+
+
+def _scrub_gainhelm_text_for_truth(
+    text: str,
+    hipaa_cap_int: int,
+    hipaa_cap_float: float,
+    *,
+    is_html: bool = False,
+    apply_bls_qualifier: bool = True,
+) -> str:
+    """
+    Normalizes dashes, superseded HIPAA caps, ungrounded 55% claims, and BLS prose qualifiers.
+    Never alters <script> or <style> contents when `is_html=True`, and only qualifies
+    dollar-prefixed prose mentions (`$121.67`) so JS/JSON numbers remain valid.
+    """
+    hipaa_comma = f"{hipaa_cap_int:,}"
+
+    def _scrub_chunk(chunk: str, allow_bls: bool) -> str:
+        out = (chunk or "").replace("\u2014", " - ").replace("\u2013", "-")
+        out = out.replace("$2,067,813", f"${hipaa_comma}").replace("2,067,813", hipaa_comma)
+        out = out.replace("2067813.0", str(hipaa_cap_float)).replace("2067813", str(hipaa_cap_int))
+        out = out.replace("$2,455,313", f"${hipaa_cap_int + 387500:,}")
+        out = re.sub(
+            r"\bby\s+55%\b",
+            "substantially via automated workflow collection",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"\b55%\s+(?:automation|labor|manual|compliance|remediation)?\s*(?:reduction|savings|decrease|discount)\b",
+            "substantial automation savings",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"(?<!\d)55%(?!\d)", "substantial automated", out)
+
+        if allow_bls:
+            def _ensure_bls_qualifier(m: re.Match[str]) -> str:
+                start = max(0, m.start() - 120)
+                end = min(len(out), m.end() + 120)
+                ctx = out[start:end]
+                if re.search(r"\b(?:estimate|benchmark|loaded|average|typical)\b", ctx, re.IGNORECASE):
+                    return m.group(0)
+                return f"{m.group(0)} loaded benchmark estimate"
+
+            out = re.sub(r"\$121\.67(?:/hr)?", _ensure_bls_qualifier, out)
+        return out
+
+    if not is_html:
+        return _scrub_chunk(text or "", allow_bls=apply_bls_qualifier)
+
+    parts = re.split(r"(<(?:script|style)\b[^>]*>[\s\S]*?</(?:script|style)>)", text or "", flags=re.IGNORECASE)
+    rebuilt: List[str] = []
+    for idx, part in enumerate(parts):
+        if idx % 2 == 1:
+            # Inside <script> or <style>: only normalize dashes and HIPAA cap numbers/strings, never prose qualifiers
+            cleaned_tag = (
+                part.replace("\u2014", " - ")
+                .replace("\u2013", "-")
+                .replace("$2,067,813", f"${hipaa_comma}")
+                .replace("2,067,813", hipaa_comma)
+                .replace("2067813.0", str(hipaa_cap_float))
+                .replace("2067813", str(hipaa_cap_int))
+            )
+            rebuilt.append(cleaned_tag)
+        else:
+            rebuilt.append(_scrub_chunk(part, allow_bls=apply_bls_qualifier))
+    return "".join(rebuilt)
+
+
+def _scrub_gainhelm_manifest_obj(obj: Any, hipaa_cap_int: int, hipaa_cap_float: float) -> Any:
+    """Recursively reconciles manifest/JSON structures against 2026 GainHelm TruthPack values."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, int):
+        return hipaa_cap_int if obj == 2067813 else obj
+    if isinstance(obj, float):
+        return hipaa_cap_float if abs(obj - 2067813.0) < 0.01 else obj
+    if isinstance(obj, str):
+        return _scrub_gainhelm_text_for_truth(
+            obj, hipaa_cap_int, hipaa_cap_float, is_html=False, apply_bls_qualifier=True
+        )
+    if isinstance(obj, list):
+        return [_scrub_gainhelm_manifest_obj(item, hipaa_cap_int, hipaa_cap_float) for item in obj]
+    if isinstance(obj, dict):
+        return {
+            k: _scrub_gainhelm_manifest_obj(v, hipaa_cap_int, hipaa_cap_float)
+            for k, v in obj.items()
+        }
+    return obj
+
+
+def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
+    """
+    Reconciles GainHelm embedded HTML calculation manifests, sidecar dist/manifests/*.json,
+    prose artifacts, and .agy integrity ledgers so sidecar and embedded JSON match
+    byte-for-byte with zero superseded 2067813 or ungrounded 55% drift.
+    """
+    tc = _gainhelm_truth_constants()
+    hipaa_cap_float = float(tc["hipaa_tier4_cap"])
+    hipaa_cap_int = int(round(hipaa_cap_float))
+
+    script_rx = re.compile(
+        r"<script\b([^>]*\b(?:id=[\"']calculation-manifest[\"']|class=[\"'][^\"']*calculation-manifest[^\"']*[\"'])[^>]*)>(.*?)</script>",
+        re.IGNORECASE | re.DOTALL,
+    )
+
+    manifests_dir = dist / "manifests"
+    if manifests_dir.is_dir():
+        for sidecar_path in sorted(manifests_dir.glob("*.json")):
+            slug = sidecar_path.stem
+            try:
+                sidecar_raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(sidecar_raw, dict):
+                continue
+
+            html_path = dist / "tools" / slug / "index.html"
+            embedded_raw: Dict[str, Any] = {}
+            html_text = ""
+            if html_path.is_file():
+                html_text = html_path.read_text(encoding="utf-8")
+                m_emb = script_rx.search(html_text)
+                if m_emb:
+                    try:
+                        parsed_emb = json.loads(m_emb.group(2).strip())
+                        if isinstance(parsed_emb, dict):
+                            embedded_raw = parsed_emb
+                    except Exception:
+                        embedded_raw = {}
+
+            if slug in GAINHELM_FALLBACK_MANIFESTS_MAP:
+                canonical_manifest: Dict[str, Any] = {
+                    "slug": slug,
+                    **json.loads(json.dumps(GAINHELM_FALLBACK_MANIFESTS_MAP[slug])),
+                }
+                for extra_key in ("statutory_economic_matrix", "proprietary_telemetry"):
+                    val = embedded_raw.get(extra_key)
+                    if val is None:
+                        val = sidecar_raw.get(extra_key)
+                    if val is not None:
+                        canonical_manifest[extra_key] = val
+            else:
+                canonical_manifest = dict(sidecar_raw)
+                canonical_manifest.pop("gsc_lifecycle_signals", None)
+                for extra_key in ("statutory_economic_matrix", "proprietary_telemetry"):
+                    if extra_key not in canonical_manifest and embedded_raw.get(extra_key) is not None:
+                        canonical_manifest[extra_key] = embedded_raw[extra_key]
+                canonical_manifest["slug"] = slug
+                if not canonical_manifest.get("manifest_id"):
+                    canonical_manifest["manifest_id"] = embedded_raw.get("manifest_id") or f"{slug}-manifest"
+
+            canonical_manifest = _scrub_gainhelm_manifest_obj(
+                canonical_manifest, hipaa_cap_int, hipaa_cap_float
+            )
+            canonical_json = json.dumps(canonical_manifest, indent=2, ensure_ascii=False)
+            sidecar_path.write_text(canonical_json, encoding="utf-8")
+
+            if html_path.is_file():
+                scrubbed_html = _scrub_gainhelm_text_for_truth(
+                    html_text, hipaa_cap_int, hipaa_cap_float, is_html=True, apply_bls_qualifier=True
+                )
+                replacement_tag = (
+                    '<script id="calculation-manifest" class="calculation-manifest" '
+                    f'type="application/json">\n{canonical_json}\n</script>'
+                )
+                if script_rx.search(scrubbed_html):
+                    scrubbed_html = script_rx.sub(lambda _m: replacement_tag, scrubbed_html, count=1)
+                else:
+                    scrubbed_html = scrubbed_html.replace("</body>", f"{replacement_tag}\n</body>", 1)
+                assert_no_forbidden_dashes(scrubbed_html, context=f"gainhelm reconciled html '{slug}'")
+                html_path.write_text(scrubbed_html, encoding="utf-8")
+
+    # Scrub remaining HTML/JSON/text endpoints (homepage, directory, llms*.txt, catalog, feeds)
+    for asset_path in sorted(dist.glob("**/*")):
+        if not asset_path.is_file():
+            continue
+        if asset_path.parent == manifests_dir:
+            continue
+        suf = asset_path.suffix.lower()
+        if suf not in (".html", ".txt", ".json", ".xml"):
+            continue
+        if asset_path.parent.parent == dist / "tools" and asset_path.name == "index.html":
+            continue
+        raw_text = asset_path.read_text(encoding="utf-8")
+        if suf == ".json":
+            try:
+                parsed_json = json.loads(raw_text)
+                scrubbed_json_obj = _scrub_gainhelm_manifest_obj(
+                    parsed_json, hipaa_cap_int, hipaa_cap_float
+                )
+                cleaned_text = json.dumps(scrubbed_json_obj, indent=2, ensure_ascii=False)
+            except Exception:
+                cleaned_text = _scrub_gainhelm_text_for_truth(
+                    raw_text, hipaa_cap_int, hipaa_cap_float, is_html=False, apply_bls_qualifier=False
+                )
+        elif suf == ".html":
+            home_tag: Optional[str] = None
+            m_home = script_rx.search(raw_text)
+            if m_home:
+                try:
+                    home_man = json.loads(m_home.group(2).strip())
+                    if isinstance(home_man, dict):
+                        home_man = _scrub_gainhelm_manifest_obj(
+                            home_man, hipaa_cap_int, hipaa_cap_float
+                        )
+                        home_json = json.dumps(home_man, indent=2, ensure_ascii=False)
+                        home_tag = (
+                            '<script id="calculation-manifest" class="calculation-manifest" '
+                            f'type="application/json">\n{home_json}\n</script>'
+                        )
+                except Exception:
+                    home_tag = None
+            cleaned_text = _scrub_gainhelm_text_for_truth(
+                raw_text, hipaa_cap_int, hipaa_cap_float, is_html=True, apply_bls_qualifier=True
+            )
+            if home_tag is not None:
+                cleaned_text = script_rx.sub(lambda _m: home_tag, cleaned_text, count=1)
+        else:
+            cleaned_text = _scrub_gainhelm_text_for_truth(
+                raw_text, hipaa_cap_int, hipaa_cap_float, is_html=False, apply_bls_qualifier=True
+            )
+        if cleaned_text != raw_text:
+            asset_path.write_text(cleaned_text, encoding="utf-8")
+
+    if os.environ.get("PSEO_IN_REFLECT") != "1":
+        try:
+            from pseofactory.drift import (
+                compute_asset_fingerprint,
+                compute_engine_hash,
+                record_asset_ledger,
+                record_engine_hash,
+                write_substrate_lock,
+            )
+
+            eng_hash = compute_engine_hash()
+            lock_payload = write_substrate_lock(
+                root,
+                property_id="gainhelm",
+                expected_hash=eng_hash,
+                dist_dir=dist,
+                sync_ledgers=False,
+            )
+            synced_sub_hash = str(lock_payload.get("synced_substrate_hash") or "") or eng_hash
+            agy_dir = root / ".agy"
+            agy_dir.mkdir(parents=True, exist_ok=True)
+            record_engine_hash(
+                agy_dir / "engine_hash.json",
+                hash_value=eng_hash,
+                synced_substrate_hash=synced_sub_hash,
+            )
+            tracked_assets = sorted(
+                p
+                for p in dist.glob("**/*")
+                if p.is_file()
+                and "syndication" not in p.relative_to(dist).parts
+                and p.suffix.lower() in (".html", ".xml", ".txt", ".json", ".md")
+                and not any(p.name.endswith(ext) for ext in (".tmp", ".orig", ".backup"))
+            )
+            asset_hashes = {
+                p.relative_to(dist).as_posix(): compute_asset_fingerprint(p)
+                for p in tracked_assets
+            }
+            record_asset_ledger(
+                agy_dir / "asset_ledger.json",
+                asset_hashes=asset_hashes,
+                engine_hash=eng_hash,
+            )
+        except Exception:
+            pass
 
 
 def compile_gainhelm_estate_impl(
@@ -2752,7 +3080,11 @@ def compile_gainhelm_estate_impl(
         (leaf_dir / "index.html").write_text(leaf_html, encoding="utf-8")
 
         m_spec = GAINHELM_FALLBACK_MANIFESTS_MAP[slug]
-        manifest_doc = {"slug": slug, **{k: m_spec[k] for k in ("model_name", "statutory_authority", "economic_dataset", "formula", "inputs", "published_output", "sample_calculation", "entity_type")}}
+        manifest_doc = {
+            "slug": slug,
+            "manifest_id": m_spec.get("manifest_id") or f"{slug}-manifest",
+            **{k: m_spec[k] for k in ("model_name", "statutory_authority", "economic_dataset", "formula", "inputs", "published_output", "sample_calculation", "entity_type")},
+        }
         assert_ai_mode_calculation_manifest(manifest_doc)
         assert_high_effort_content_qualified(manifest_doc, context=f"gainhelm manifest '{slug}'")
         (manifests_dir / f"{slug}.json").write_text(json.dumps(manifest_doc, indent=2), encoding="utf-8")
@@ -2771,7 +3103,10 @@ def compile_gainhelm_estate_impl(
         leaf_dir.mkdir(parents=True, exist_ok=True)
         rendered_void = _apply_overlay_if_present(res["html"], slug, root)
         (leaf_dir / "index.html").write_text(rendered_void, encoding="utf-8")
-        (manifests_dir / f"{slug}.json").write_text(json.dumps(res["manifest"], indent=2), encoding="utf-8")
+        void_manifest = dict(res["manifest"])
+        void_manifest.setdefault("slug", slug)
+        void_manifest.setdefault("manifest_id", f"{slug}-manifest")
+        (manifests_dir / f"{slug}.json").write_text(json.dumps(void_manifest, indent=2), encoding="utf-8")
         compiled_pages.append({"slug": slug, "title": res["title"], "html_path": str(leaf_dir / "index.html"), "published_output": res["published_output"]})
         catalog_tools.append({"slug": slug, "title": res["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": spec_in.get("statutory_authority", ""), "economic_dataset": spec_in.get("economic_dataset", ""), "formula": spec_in.get("formula", ""), "published_output": res["published_output"]})
 
@@ -2835,7 +3170,36 @@ def compile_gainhelm_estate_impl(
         canonical_base=GAINHELM_CANONICAL_BASE,
         run_retrofit=run_retrofit,
         bad_overlay_tokens=("profithelm", "section-179-calculator", "section-301-tariff", "coinledger", "lienbond"),
+        strict_truth_gate=False,
     )
+
+    _reconcile_gainhelm_manifests_and_ledger(root, dist)
+
+    is_strict_truth_gate = (
+        os.environ.get("PSEO_STRICT_TRUTH_GATE") == "1"
+        or (
+            os.environ.get("PSEO_PRODUCTION_MODE") == "1"
+            and "PYTEST_CURRENT_TEST" not in os.environ
+        )
+    )
+    if is_strict_truth_gate:
+        from pseofactory.truth_gate import UnifiedTruthGate
+
+        truth_report = UnifiedTruthGate().audit_estate(
+            dist,
+            "gainhelm",
+            repo_root=root,
+        )
+        if isinstance(retrofit_report, dict):
+            retrofit_report["truth_gate"] = {
+                "passed": bool(truth_report.passed),
+                "summary": truth_report.summary(),
+                "violation_count": len(truth_report.violations),
+            }
+        if not truth_report.passed:
+            raise RuntimeError(
+                f"UnifiedTruthGate failed for 'gainhelm': {truth_report.summary()}"
+            )
 
     return {
         "status": "PASS",

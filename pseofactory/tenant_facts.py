@@ -828,12 +828,12 @@ def _build_gainhelm_profile() -> TenantTruthProfile:
             "bls_soc_15_1212_median_annual_wage": 120360.0,
             "bls_soc_15_1212_mean_hourly_loaded_rate": bls_hourly,
             "soc2_baseline_type2_75emp_total_cost": 78100.40,
-            "cmmc_level2_baseline_75emp_total_cost": 132000.0,
-            "cmmc_level2_baseline_85emp_total_cost": 132000.0,
-            "iso27001_baseline_75emp_total_cost": 67000.40,
-            "iso27001_baseline_120emp_3yr_tco": 67000.40,
+            "cmmc_level2_baseline_75emp_total_cost": 134534.6,
+            "cmmc_level2_baseline_85emp_total_cost": 134534.6,
+            "iso27001_baseline_75emp_total_cost": 66350.6,
+            "iso27001_baseline_120emp_3yr_tco": 66350.6,
             "hipaa_baseline_1500rec_total_exposure": 2577794.0,
-            "pci_dss_baseline_level1_total_cost": 94800.0,
+            "pci_dss_baseline_level1_total_cost": 93400.6,
             "fedramp_moderate_baseline_total_cost": 500000.0,
             "hitrust_i1_baseline_total_cost": 115000.0,
             "pentest_baseline_total_cost": 23300.0,
@@ -3433,7 +3433,7 @@ class TenantFactStore:
                     except ValueError:
                         pass
                 if re.search(r"(?:min(?:imum)?(?:\s+score)?|-196\s+to\s*\+?110|sprs[^\.\n]{0,40}-196\b)", text_lower):
-                    if "-196" in text_lower:
+                    if re.search(r"(?<![0-9])-196(?![0-9,.])", text_lower):
                         violations.append(
                             "NIST SP 800-171 SPRS minimum score contradiction: '-196' is erroneous; official DoD Methodology v1.2.1 minimum is -203 (44 5-pt, 14 3-pt, 51 1-pt, 1 0-pt)"
                         )
@@ -3455,7 +3455,7 @@ class TenantFactStore:
                 or "<td>46 to 85 employees</td>\n              <td>9.0 auditor days</td>" in text_lower
             ):
                 violations.append(
-                    "ISO/IEC 27006-1:2024 auditor-day contradiction: 75-employee baseline requires 11.0 Stage 1+2 auditor days ($21,450.00 registrar fee, $67,000.40 total cost) per signed AICPA/ISO dataset, not 9.0 auditor days ($16,200)"
+                    "ISO/IEC 27006-1:2024 auditor-day contradiction: 75-employee baseline requires 11.0 Stage 1+2 auditor days ($21,450.00 registrar fee, $66,350.60 total cost) per signed AICPA/ISO dataset, not 9.0 auditor days ($16,200)"
                 )
             # HIPAA 45 CFR 160.404 penalty cap & baseline exposure contradictions (2026 Tier 4 cap is $2,190,294 under 91 FR 3665 / 91 FR 66566)
             if (
@@ -3500,7 +3500,7 @@ class TenantFactStore:
                 or "($52,000 c3pao assessment" in text_lower
             ):
                 violations.append(
-                    "CMMC 2.0 Level 2 component contradiction: baseline is $48,500.00 C3PAO + $26,400.00 enclave + $43,700.00 remediation labor + $13,400.00 RPO = $132,000.00"
+                    "CMMC 2.0 Level 2 component contradiction: baseline is $48,500.00 C3PAO + $26,400.00 enclave + $46,234.60 remediation labor + $13,400.00 RPO = $134,534.60"
                 )
             if (
                 '"published_output": 38900' in text
@@ -3515,7 +3515,7 @@ class TenantFactStore:
                 or "$94,799.80" in text
             ):
                 violations.append(
-                    "PCI DSS v4.0.1 component contradiction: ground-truth formula uses $3,800.00 ASV + $13,200.00 CDE systems + $12,500.00 pentest + $23,300.00 remediation labor ($94,800.00 total), not $4,800.00 ASV or $94,799.80"
+                    "PCI DSS v4.0.1 component contradiction: ground-truth formula uses $3,800.00 ASV + $13,200.00 CDE systems + $12,500.00 pentest + $21,900.60 remediation labor ($93,400.60 total), not $4,800.00 ASV or $94,799.80"
                 )
             # GainHelm generic SOC 2 / CMMC / ISO 27006 overlay misattribution on specialized tools
             ctx_low_gh = f"{context or ''} {text_lower[:1200]}".lower()
@@ -3552,8 +3552,41 @@ class TenantFactStore:
                     if msg not in violations:
                         violations.append(msg)
 
-            is_license_bond_ctx = ("license-bond" in ctx_low_lb or "license bond" in ctx_low_lb) and "bid-bond" not in ctx_low_lb and "bid bond" not in ctx_low_lb
-            is_bid_bond_ctx = ("bid-bond" in ctx_low_lb or "bid bond" in ctx_low_lb) and "license-bond" not in ctx_low_lb and "license bond" not in ctx_low_lb
+            ctx_norm_lb = (context or "").strip().lower().replace("\\", "/")
+            is_lb_directory_page = (
+                ctx_norm_lb in ("index.html", "tools/index.html", "dist/index.html", "dist/tools/index.html")
+                or ctx_norm_lb.endswith("/tools/index.html")
+                or ctx_norm_lb.endswith("/dist/index.html")
+                or ctx_norm_lb in ("tools", "tools/")
+                or bool(
+                    re.search(
+                        r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']https?://[^/"\']+/(?:tools/)?["\']',
+                        text_lower[:3000],
+                    )
+                )
+                or '"@type": "collectionpage"' in text_lower[:5000]
+                or '"@type":"collectionpage"' in text_lower[:5000]
+                or "tools directory" in text_lower[:2000]
+            )
+            lb_route_hint = ctx_norm_lb
+            if not ("license-bond" in lb_route_hint or "license bond" in lb_route_hint or "bid-bond" in lb_route_hint or "bid bond" in lb_route_hint):
+                title_h1_m = re.search(r"<title[^>]*>([\s\S]*?)</title>|<h1[^>]*>([\s\S]*?)</h1>", text_lower[:4000])
+                if title_h1_m:
+                    lb_route_hint = f"{lb_route_hint} {title_h1_m.group(1) or ''} {title_h1_m.group(2) or ''}"
+                else:
+                    lb_route_hint = ctx_low_lb
+            is_license_bond_ctx = (
+                not is_lb_directory_page
+                and ("license-bond" in lb_route_hint or "license bond" in lb_route_hint)
+                and "bid-bond" not in lb_route_hint
+                and "bid bond" not in lb_route_hint
+            )
+            is_bid_bond_ctx = (
+                not is_lb_directory_page
+                and ("bid-bond" in lb_route_hint or "bid bond" in lb_route_hint)
+                and "license-bond" not in lb_route_hint
+                and "license bond" not in lb_route_hint
+            )
             if is_license_bond_ctx and re.search(r"\b(?:far\s*28\.101|5%\s*(?:to|-)\s*20%\s*penal\s*sum|bid\s+bond\s+penal\s+sum)\b", prose_scan_text, re.IGNORECASE):
                 violations.append(
                     "LienBond bond-type misattribution: FAR 28.101 Bid Bond penal sum (5%-20%) applied to a Contractor License Bond page"
@@ -4040,10 +4073,13 @@ class TruthReconciliationEngine:
         ("2134831", "2190294"),
         ("$2,067,813", "$2,190,294"),
         ("2067813", "2190294"),
-        ("$94,799.80", "$94,800.00"),
-        ("94799.80", "94800.00"),
-        ("$23,500.00 in remediation", "$23,300.00 in remediation"),
-        ("$23,500.00 CDE remediation labor", "$23,300.00 CDE remediation labor"),
+        ("$94,799.80", "$93,400.60"),
+        ("94799.80", "93400.60"),
+        ("$94,800.00", "$93,400.60"),
+        ("94800.00", "93400.60"),
+        ("$23,500.00 in remediation", "$21,900.60 in remediation"),
+        ("$23,500.00 CDE remediation labor", "$21,900.60 CDE remediation labor"),
+        ("$23,300.00 CDE remediation labor", "$21,900.60 CDE remediation labor"),
         ("$95.00/hr", "$121.67/hr"),
         ("$622,500 Breach", "$2,577,794 Breach"),
         ("$622,500 HHS OCR Tier 2 Breach Exposure", "$2,577,794 HHS OCR Tier 3 Breach Exposure"),
@@ -4408,42 +4444,96 @@ class TruthReconciliationEngine:
 
                 # Deterministically reconcile calculation manifest formulas and inputs across programmatic leaves
                 if tenant_norm == "profithelm":
+                    truthpack_179_f = (
+                        "round(min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) "
+                        "+ max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * (bonus_pct / 100.0), 2)"
+                    )
+                    estate_179_f = (
+                        "round(min(equipment_cost * business_use_pct, (is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) "
+                        "+ max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, (is_heavy_suv * 32000.0 + (1 - is_heavy_suv) * max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))))) * (bonus_pct / 100.0), 2)"
+                    )
+
                     # Reconcile equipment-lease-vs-buy-section-179-calculator
                     if "equipment-lease-vs-buy-section-179-calculator" in combined_slug or "equipment-lease-vs-buy-section-179-calculator" in rel_path:
-                        target_f = "equipment_cost * marginal_tax_rate - year_one_financing_payments"
-                        target_in = {
-                            "equipment_cost": 180000.0,
-                            "marginal_tax_rate": 0.32,
-                            "year_one_financing_payments": 39600.0,
-                        }
-                        if curr_man.get("formula") != target_f or curr_man.get("inputs") != target_in or curr_man.get("published_output") != 18000.0:
-                            curr_man["formula"] = target_f
-                            curr_man["inputs"] = target_in
-                            curr_man["published_output"] = 18000.0
-                            m_changed = True
+                        has_legacy_lease_dom = (
+                            'id="input-year_one_financing_payments"' in updated
+                            and 'id="input-business_use_pct"' not in updated
+                        )
+                        if not has_legacy_lease_dom:
+                            from pseofactory.contracts import safe_eval_mathematical_formula
 
-                    # Reconcile irs-2027-tax-brackets federal hub
+                            m_in = curr_man.get("inputs") if isinstance(curr_man.get("inputs"), dict) else {}
+                            curr_f = curr_man.get("formula")
+                            has_valid_4in = (
+                                set(m_in.keys()) == {"equipment_cost", "business_use_pct", "is_heavy_suv", "bonus_pct"}
+                                and curr_f in (truthpack_179_f, estate_179_f)
+                            )
+                            if has_valid_4in:
+                                expected_out = round(float(safe_eval_mathematical_formula(curr_f, m_in)), 2)
+                                if abs(float(curr_man.get("published_output", 0.0)) - expected_out) > 0.01:
+                                    curr_man["published_output"] = expected_out
+                                    m_changed = True
+                                if curr_man.get("formula_id") != "section_179_heavy_suv_plus_bonus_2026":
+                                    curr_man["formula_id"] = "section_179_heavy_suv_plus_bonus_2026"
+                                    m_changed = True
+                            else:
+                                target_in = {
+                                    "equipment_cost": 85000.0,
+                                    "business_use_pct": 0.8,
+                                    "is_heavy_suv": 1,
+                                    "bonus_pct": 100.0,
+                                }
+                                target_out = round(float(safe_eval_mathematical_formula(truthpack_179_f, target_in)), 2)
+                                if (
+                                    curr_man.get("formula") != truthpack_179_f
+                                    or curr_man.get("inputs") != target_in
+                                    or abs(float(curr_man.get("published_output", 0.0)) - target_out) > 0.01
+                                    or curr_man.get("formula_id") != "section_179_heavy_suv_plus_bonus_2026"
+                                ):
+                                    curr_man["formula_id"] = "section_179_heavy_suv_plus_bonus_2026"
+                                    curr_man["formula"] = truthpack_179_f
+                                    curr_man["inputs"] = target_in
+                                    curr_man["published_output"] = target_out
+                                    m_changed = True
+
+                    # Reconcile irs-2027-tax-brackets federal hub (all 7 progressive 2026 single brackets, $16,100 std ded)
                     if rel_path == "tools/irs-2027-tax-brackets/index.html" or slug == "irs-2027-tax-brackets":
-                        target_f = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
+                        std_var = (
+                            "standard_deduction_2026"
+                            if ('name="standard_deduction_2026"' in updated and 'name="standard_deduction"' not in updated)
+                            else "standard_deduction"
+                        )
+                        target_f = (
+                            f"round(0.10 * min(max(0.0, gross_income - {std_var}), 12400.0) "
+                            f"+ 0.12 * max(0.0, min(max(0.0, gross_income - {std_var}), 50400.0) - 12400.0) "
+                            f"+ 0.22 * max(0.0, min(max(0.0, gross_income - {std_var}), 105700.0) - 50400.0) "
+                            f"+ 0.24 * max(0.0, min(max(0.0, gross_income - {std_var}), 201775.0) - 105700.0) "
+                            f"+ 0.32 * max(0.0, min(max(0.0, gross_income - {std_var}), 256225.0) - 201775.0) "
+                            f"+ 0.35 * max(0.0, min(max(0.0, gross_income - {std_var}), 640600.0) - 256225.0) "
+                            f"+ 0.37 * max(0.0, max(0.0, gross_income - {std_var}) - 640600.0), 2)"
+                        )
                         if curr_man.get("formula") != target_f:
                             curr_man["formula"] = target_f
                             m_changed = True
-                        target_in = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
+                        target_in = {"gross_income": 125000.0, std_var: 16100.0}
                         if curr_man.get("inputs") != target_in:
                             curr_man["inputs"] = target_in
                             m_changed = True
                         if curr_man.get("published_output") != 18734.0:
                             curr_man["published_output"] = 18734.0
                             m_changed = True
+                        if curr_man.get("formula_id") != "federal_income_tax_2026_single":
+                            curr_man["formula_id"] = "federal_income_tax_2026_single"
+                            m_changed = True
 
-                    # Reconcile section-179-calculator vehicle leaves
+                    # Reconcile section-179-calculator vehicle leaves (preserve/emit 4-input section_179_heavy_suv_plus_bonus_2026)
                     elif (
                         (rel_path.startswith("tools/section-179-calculator/") and rel_path != "tools/section-179-calculator/index.html")
                         or (slug.startswith("section-179-calculator/") and slug != "section-179-calculator")
                         or slug.startswith("section-179-calculator-")
                     ):
-                        m_in = curr_man.get("inputs", {})
-                        cost_v = m_in.get("vehicle_cost") or m_in.get("equipment_cost")
+                        m_in = curr_man.get("inputs") if isinstance(curr_man.get("inputs"), dict) else {}
+                        cost_v = m_in.get("equipment_cost") if m_in.get("equipment_cost") is not None else m_in.get("vehicle_cost")
                         if cost_v is not None:
                             from pseofactory.contracts import safe_eval_mathematical_formula
                             # Determine heavy SUV vs full Section 179 equipment/commercial vehicle
@@ -4451,24 +4541,46 @@ class TruthReconciliationEngine:
                             suv_slugs = (
                                 "bmw-x5", "escalade", "suburban", "yukon", "defender", "navigator", "cayenne"
                             )
-                            is_heavy_suv = any(k in combined_slug for k in suv_slugs)
-                            if is_heavy_suv:
-                                target_f = "round(min(vehicle_cost, 32000.0) + max(0.0, vehicle_cost - 32000.0) * 1.0, 0)"
-                                target_in = {"vehicle_cost": float(cost_v)}
-                                target_out = safe_eval_mathematical_formula(target_f, target_in)
+                            is_heavy_suv = 1 if any(k in combined_slug for k in suv_slugs) else 0
+                            curr_f = curr_man.get("formula")
+                            has_valid_4in = (
+                                set(m_in.keys()) == {"equipment_cost", "business_use_pct", "is_heavy_suv", "bonus_pct"}
+                                and curr_f in (truthpack_179_f, estate_179_f)
+                                and int(m_in.get("is_heavy_suv", -1)) == is_heavy_suv
+                                and float(m_in.get("bonus_pct", 0.0)) == 100.0
+                            )
+                            if has_valid_4in:
+                                target_out = round(float(safe_eval_mathematical_formula(curr_f, m_in)), 2)
+                                if abs(float(curr_man.get("published_output", 0.0)) - target_out) > 0.01:
+                                    curr_man["published_output"] = target_out
+                                    m_changed = True
+                                if curr_man.get("formula_id") != "section_179_heavy_suv_plus_bonus_2026":
+                                    curr_man["formula_id"] = "section_179_heavy_suv_plus_bonus_2026"
+                                    m_changed = True
                             else:
-                                target_f = "min(vehicle_cost, section_179_cap_2026)"
-                                target_in = {"vehicle_cost": float(cost_v), "section_179_cap_2026": 2560000.0}
-                                target_out = float(cost_v)
-                            if (
-                                curr_man.get("formula") != target_f
-                                or curr_man.get("inputs") != target_in
-                                or abs(float(curr_man.get("published_output", 0)) - target_out) > 0.01
-                            ):
-                                curr_man["formula"] = target_f
-                                curr_man["inputs"] = target_in
-                                curr_man["published_output"] = target_out
-                                m_changed = True
+                                bus_raw = m_in.get("business_use_pct")
+                                if bus_raw is None:
+                                    bus_raw = m_in.get("business_use_rate")
+                                bus_v = float(bus_raw) if bus_raw is not None else 1.0
+                                target_f = estate_179_f if curr_f == estate_179_f else truthpack_179_f
+                                target_in = {
+                                    "equipment_cost": float(cost_v),
+                                    "business_use_pct": bus_v,
+                                    "is_heavy_suv": is_heavy_suv,
+                                    "bonus_pct": 100.0,
+                                }
+                                target_out = round(float(safe_eval_mathematical_formula(target_f, target_in)), 2)
+                                if (
+                                    curr_man.get("formula") != target_f
+                                    or curr_man.get("inputs") != target_in
+                                    or abs(float(curr_man.get("published_output", 0.0)) - target_out) > 0.01
+                                    or curr_man.get("formula_id") != "section_179_heavy_suv_plus_bonus_2026"
+                                ):
+                                    curr_man["formula_id"] = "section_179_heavy_suv_plus_bonus_2026"
+                                    curr_man["formula"] = target_f
+                                    curr_man["inputs"] = target_in
+                                    curr_man["published_output"] = target_out
+                                    m_changed = True
 
                 if m_changed:
                     updated = updated.replace(man_m.group(1), f"\n{_json_lib.dumps(curr_man, indent=2)}\n")
@@ -4818,7 +4930,7 @@ class TruthReconciliationEngine:
                 if "Calculate Section 179 deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out)" in updated_str:
                     updated_str = updated_str.replace(
                         "Calculate Section 179 deductions under IRC Section 179 ($2,560,000 cap, $4,090,000 phase-out) and Section 168(k) bonus depreciation on IRS Form 4562.",
-                        "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+                        "Model combined IRC Section 179 expensing, 100% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
                     )
                 if '"Section 179 Calculator 2026 (Form 4562) | ProfitHelm"' in updated_str:
                     updated_str = updated_str.replace(
@@ -4826,10 +4938,14 @@ class TruthReconciliationEngine:
                         '"Section 179 Commercial Vehicle & Equipment Deduction Calculator | ProfitHelm"',
                     )
             elif ov_slug == "commercial-heavy-vehicle-section-179-weight-calculator":
-                updated_str = updated_str.replace(
+                for old_desc in (
                     "Model combined IRC Section 179 expensing, 20% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
-                    "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($30,500 SUV cap vs full truck expensing) on IRS Form 4562.",
-                )
+                    "Model combined IRC Section 179 expensing, 100% bonus depreciation, and business-use recapture thresholds for commercial vehicles and equipment.",
+                ):
+                    updated_str = updated_str.replace(
+                        old_desc,
+                        "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions ($32,000 SUV cap vs full truck expensing) on IRS Form 4562.",
+                    )
             elif ov_slug == "equipment-lease-vs-buy-section-179-calculator":
                 updated_str = updated_str.replace(
                     "Calculate commercial equipment operating lease tax deductions under IRC Section 162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
@@ -5022,14 +5138,45 @@ class TruthReconciliationEngine:
                             man_d["sample_calculation"] = "Deterministic evaluation of round((min(net_business_income * 0.9235, ss_wage_cap) - min(reasonable_salary, ss_wage_cap)) * 0.124 + ((net_business_income * 0.9235) - reasonable_salary) * 0.029, 0) produces 14,235.00."
                             changed = True
                         if man_f.name == "irs-2027-tax-brackets.json" and (
-                            "sunset_standard_deduction" in raw_txt or man_d.get("published_output") == 23530.0
+                            "sunset_standard_deduction" in raw_txt
+                            or man_d.get("published_output") == 23530.0
+                            or "1240.0 + min(max(0.0," in str(man_d.get("formula", ""))
+                            or "standard_deduction_2026" in raw_txt
                         ):
-                            man_d["model_name"] = "IRS 2027 Tax Brackets and OBBBA Permanent Rate Calculator Model"
-                            man_d["formula"] = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
-                            man_d["inputs"] = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
+                            man_d["formula_id"] = "federal_income_tax_2026_single"
+                            man_d["model_name"] = "2026 Federal Income Tax (Single Filer, Rev. Proc. 2025-32)"
+                            man_d["formula"] = (
+                                "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) "
+                                "+ 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) "
+                                "+ 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) "
+                                "+ 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) "
+                                "+ 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) "
+                                "+ 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) "
+                                "+ 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0), 2)"
+                            )
+                            man_d["inputs"] = {"gross_income": 125000.0, "standard_deduction": 16100.0}
                             man_d["published_output"] = 18734.0
-                            man_d["statutory_authority"] = "26 U.S.C. Section 1(j); OBBBA (P.L. 119-21); IRS Rev. Proc. 2025-32"
-                            man_d["sample_calculation"] = "For a $125,000 Single filer in 2026-2027 under permanent OBBBA (P.L. 119-21) brackets ($16,100 standard deduction under Rev. Proc. 2025-32), federal income tax is $18,734.00 (saving $4,796 vs repealed pre-OBBBA sunset)."
+                            man_d["statutory_authority"] = "P.L. 119-21 Section 70101, IRS Rev. Proc. 2025-32 & Rev. Proc. 2026-35"
+                            man_d["sample_calculation"] = "For a $125,000 Single filer in 2026 under permanent OBBBA (P.L. 119-21) 10%-37% brackets ($16,100 standard deduction under Rev. Proc. 2025-32), federal income tax is $18,734.00."
+                            changed = True
+                        if man_f.name == "equipment-lease-vs-buy-section-179-calculator.json" and (
+                            "year_one_financing_payments" in raw_txt or man_d.get("published_output") == 18000.0
+                        ):
+                            man_d["formula_id"] = "section_179_heavy_suv_plus_bonus_2026"
+                            man_d["model_name"] = "2026Section179with32000HeavySUVCap100BonusDepreciation"
+                            man_d["formula"] = (
+                                "round(min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) "
+                                "+ max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, 32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * (bonus_pct / 100.0), 2)"
+                            )
+                            man_d["inputs"] = {
+                                "equipment_cost": 85000.0,
+                                "business_use_pct": 0.8,
+                                "is_heavy_suv": 1,
+                                "bonus_pct": 100.0,
+                            }
+                            man_d["published_output"] = 68000.0
+                            man_d["statutory_authority"] = "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32"
+                            man_d["sample_calculation"] = "Baseline TruthPack inputs produce 68000.0"
                             changed = True
                     elif tenant_norm == "prexvo":
                         if "refinanc" in man_f.name.lower():

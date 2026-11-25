@@ -666,7 +666,7 @@ class StatutoryEconomicDatasetCollector(BaseSuggestCollector):
                 "HHS OCR HIPAA Tier 4 Willful Neglect Uncorrected Annual Statutory Penalty Cap",
                 "USD",
                 "HHS-OCR",
-                {2024: 2003947.0, 2025: 2067813.0, 2026: hipaa_t4_2026, 2027: 2256003.0, 2028: 2323683.0, 2029: 2393393.0, 2030: 2465195.0},
+                {2024: 2003947.0, 2025: hipaa_t4_2026, 2026: hipaa_t4_2026, 2027: 2256003.0, 2028: 2323683.0, 2029: 2393393.0, 2030: 2465195.0},
             ),
             (
                 "bls_soc_15_1212_infosec_hourly_wage_usd",

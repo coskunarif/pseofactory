@@ -76,7 +76,7 @@ def _wrap_valid_page(
 <thead><tr><th>Metric</th><th>Value</th></tr></thead>
 <tbody>
 <tr><td>Primary Output</td><td>{manifest["published_output"]}</td></tr>
-<tr><td>Statutory Cap</td><td>$30,500</td></tr>
+<tr><td>Statutory Cap</td><td>$32,000</td></tr>
 </tbody>
 </table>
 <section class="methodology">
@@ -178,10 +178,10 @@ def test_prexvo_fallback_manifests_match_ground_truth_repayment_math() -> None:
     """Every Prexvo fallback manifest must evaluate without tautologies and match statutory repayment outputs."""
     manifests = RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS
     assert manifests["icr-repayment-calculator"]["published_output"] == 651.25
-    assert manifests["ibr-hardship-cap-calculator"]["published_output"] == 346.04
-    assert manifests["paye-sunset-calculator"]["published_output"] == 346.04
+    assert manifests["ibr-hardship-cap-calculator"]["published_output"] == 342.17
+    assert manifests["paye-sunset-calculator"]["published_output"] == 342.17
     assert manifests["tiered-standard-calculator"]["published_output"] == 379.24
-    assert manifests["save-plan-litigation-transition"]["published_output"] == 248.23
+    assert manifests["save-plan-litigation-transition"]["published_output"] == 325.0
 
     mfs = manifests["married-filing-separately-student-loan-calculator"]
     assert "48212.5" not in mfs["formula"]
@@ -203,8 +203,8 @@ def test_profithelm_fallback_manifests_match_ground_truth_statutory_math() -> No
     assert manifests["s-corp-reasonable-salary-tax-calculator"]["published_output"] == 14235.0
     assert manifests["irs-2027-tax-brackets"]["published_output"] == 18734.0
     assert manifests["treasury-yield-calculator"]["published_output"] == 6.13
-    assert manifests["section-179-vehicle-deduction"]["published_output"] == 38000.0
-    assert manifests["commercial-heavy-vehicle-section-179-weight-calculator"]["published_output"] == 14525.0
+    assert manifests["section-179-vehicle-deduction"]["published_output"] == 68000.0
+    assert manifests["commercial-heavy-vehicle-section-179-weight-calculator"]["published_output"] == 29925.0
 
     ph_limits = TenantFactStore.get_instance().get_profile("profithelm").statutory_truth.limits_and_thresholds
     assert ph_limits["obbba_2026_single_125k_fed_tax"] == 18734.0
@@ -297,7 +297,13 @@ def test_sidecar_manifest_lockstep_audit_and_healing(tmp_path) -> None:
     preset = RetroReflectionEngine.PROFITHELM_FALLBACK_MANIFESTS["prediction-market-odds"]
     html_raw, _ = _wrap_valid_page(
         preset,
-        '<div id="res-profit">$235</div>',
+        (
+            '<div id="res-profit">$235</div>'
+            '<p class="circular-230-notice">'
+            "Circular 230: Deterministic computational modeling for educational purposes only; "
+            "this output does not constitute individualized tax, legal, or accounting advice."
+            "</p>"
+        ),
         quick_answer="Under CFTC 17 CFR Part 40, the verified output is <strong class=\"output-value\">235.0</strong>.",
     )
     retro_html, _ = RetroReflectionEngine.retrofit_html(
@@ -352,16 +358,16 @@ def test_proprietary_signals_multivariable_synthesis_and_state_tax_isolation() -
         resolve_proprietary_signal_bundle,
     )
 
-    rap_preset = RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS["rap-payment-calculator"]
+    ibr_preset = RetroReflectionEngine.PREXVO_FALLBACK_MANIFESTS["ibr-hardship-cap-calculator"]
     rows = compute_5point_nonlinear_sensitivity_rows(
-        rap_preset["formula"], rap_preset["inputs"], float(rap_preset["published_output"])
+        ibr_preset["formula"], ibr_preset["inputs"], float(ibr_preset["published_output"])
     )
     assert len(rows) == 5
-    # Under 225% HHS FPL ($35,212.50 fixed shield), 0.8x AGI ($52,000) yields $139.90/mo vs $198.58 linear
+    # Under 150% 2026 HHS FPL ($23,940.00 fixed shield), 0.8x AGI ($52,000) yields $233.83/mo vs $273.74 linear
     cons_row = next(r for r in rows if r["css_class"] == "scenario-conservative")
-    assert cons_row["linear_output"] == "198.58"
-    assert cons_row["ast_output"] == "139.90"
-    assert cons_row["cliff_delta"] == "-58.68 Non-Linear Cliff"
+    assert cons_row["linear_output"] == "273.74"
+    assert cons_row["ast_output"] == "233.83"
+    assert cons_row["cliff_delta"] == "-39.91 Non-Linear Cliff"
 
     bundle = resolve_proprietary_signal_bundle(
         property_id="prexvo",

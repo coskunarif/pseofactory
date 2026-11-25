@@ -479,32 +479,27 @@ class CompetitorGapEngine:
             default_category = "Cyber Compliance & GRC Audit"
             affiliates = ["vanta_security", "drata_compliance"]
             if any(t in combined_q for t in ("cmmc", "800-171", "sprs", "dfars", "c3pao")):
-                statutory_authority = "32 CFR Part 170 & DFARS 252.204-7012 / 7019 / 7020 / 7021"
-                economic_dataset = "DoD CMMC 2.0 Cost Assessment & BLS OEWS 15-1212"
-                model_name = "CMMC 2.0 Level 2 C3PAO & NIST 800-171 SPRS Readiness Model"
-                formula = "round(c3pao_assessment_fee + enclave_licensing_cost + (remediation_hours * eng_hourly_rate), 2)"
-                inputs = {
-                    "c3pao_assessment_fee": 48000,
-                    "enclave_licensing_cost": 36000,
-                    "remediation_hours": 320,
-                    "eng_hourly_rate": 150,
-                }
-                published_output = 132000.0
-                sample_calculation = "C3PAO fee $48,000 plus $36,000 CUI enclave plus 320 hrs at $150/hr specialist rate yields $132,000 CMMC Level 2 TCO"
+                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
+
+                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["cmmc-2-0-compliance-cost-calculator"]
+                statutory_authority = str(mf_ref["statutory_authority"])
+                economic_dataset = str(mf_ref["economic_dataset"])
+                model_name = str(mf_ref["model_name"])
+                formula = str(mf_ref["formula"])
+                inputs = dict(mf_ref["inputs"])
+                published_output = float(mf_ref["published_output"])
+                sample_calculation = str(mf_ref["sample_calculation"])
             elif any(t in combined_q for t in ("iso-27001", "iso 27001", "isms", "27006")):
-                statutory_authority = "ISO/IEC 27001:2022 Annex A (93 Controls) & ISO/IEC 27006-1:2024"
-                economic_dataset = "IAF MD 5 Auditor-Day Schedule & BLS OEWS 15-1212"
-                model_name = "ISO/IEC 27001:2022 Stage 1/2 & Surveillance Certification Model"
-                formula = "round(stage1_stage2_registrar_fee + two_year_surveillance_audits + isms_platform_cost + (internal_isms_hours * eng_hourly_rate), 2)"
-                inputs = {
-                    "stage1_stage2_registrar_fee": 24000,
-                    "two_year_surveillance_audits": 16000,
-                    "isms_platform_cost": 12400,
-                    "internal_isms_hours": 120,
-                    "eng_hourly_rate": 121.67,
-                }
-                published_output = 67000.4
-                sample_calculation = "$24,000 Stage 1/2 registrar fee plus $16,000 surveillance audits plus $12,400 ISMS platform plus 120 hrs at $121.67/hr yields $67,000.40 ISO 27001 TCO"
+                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
+
+                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["iso-27001-certification-cost-calculator"]
+                statutory_authority = str(mf_ref["statutory_authority"])
+                economic_dataset = str(mf_ref["economic_dataset"])
+                model_name = str(mf_ref["model_name"])
+                formula = str(mf_ref["formula"])
+                inputs = dict(mf_ref["inputs"])
+                published_output = float(mf_ref["published_output"])
+                sample_calculation = str(mf_ref["sample_calculation"])
             elif any(t in combined_q for t in ("hipaa", "hitech", "ocr", "breach", "phi")):
                 statutory_authority = "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5"
                 economic_dataset = "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report"
@@ -5745,7 +5740,7 @@ def _build_prediction_market_depth_spec(
             (
                 "Regulated DCM vs Ordinary Tax Treatment",
                 "IRC Section 1256(g) (60% LTCG / 40% STCG) vs IRC Section 165(d)",
-                "26.8% top blended rate (Form 6781) vs 37.0% ordinary income rate (-10.2% saved)",
+                "26.8% top blended rate (Form 6781) vs 37.0% ordinary income rate (26 U.S.C. Section 1256 60/40)",
                 "IRS Form 6781 mark-to-market net loss carryback vs itemized wagering limits",
             ),
         ],

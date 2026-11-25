@@ -4209,6 +4209,15 @@ SAFE_OPERATORS: Dict[Any, Callable] = {
     ast.UAdd: operator.pos,
 }
 
+SAFE_COMPARATORS: Dict[Any, Callable[[Any, Any], bool]] = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
 def _safe_clamp(x: float, low: float, high: float) -> float:
     return float(min(max(float(x), float(low)), float(high)))
 
@@ -4281,6 +4290,36 @@ def safe_eval_mathematical_formula(formula: str, inputs: Dict[str, Any]) -> floa
     except Exception as ex:
         raise ValueError(f"Formula '{formula}' failed AST parse: {ex}")
 
+    def _eval_cond(node: ast.AST) -> bool:
+        if isinstance(node, ast.Compare):
+            left_val = _eval_node(node.left)
+            for op, comp in zip(node.ops, node.comparators):
+                op_type = type(op)
+                if op_type not in SAFE_COMPARATORS:
+                    raise ValueError(f"Unsupported comparison operator in formula: {op_type.__name__}")
+                right_val = _eval_node(comp)
+                if not SAFE_COMPARATORS[op_type](left_val, right_val):
+                    return False
+                left_val = right_val
+            return True
+        if isinstance(node, ast.BoolOp):
+            if isinstance(node.op, ast.And):
+                for val_node in node.values:
+                    if not _eval_cond(val_node):
+                        return False
+                return True
+            if isinstance(node.op, ast.Or):
+                for val_node in node.values:
+                    if _eval_cond(val_node):
+                        return True
+                return False
+            raise ValueError(f"Unsupported boolean operator in formula: {type(node.op).__name__}")
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return not _eval_cond(node.operand)
+        if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+            return node.value
+        return bool(_eval_node(node))
+
     def _eval_node(node: ast.AST) -> float:
         if isinstance(node, ast.Expression):
             return _eval_node(node.body)
@@ -4304,10 +4343,16 @@ def safe_eval_mathematical_formula(formula: str, inputs: Dict[str, Any]) -> floa
             return float(SAFE_OPERATORS[op_type](left_val, right_val))
         elif isinstance(node, ast.UnaryOp):
             op_type = type(node.op)
+            if op_type == ast.Not:
+                return 1.0 if not _eval_cond(node.operand) else 0.0
             if op_type not in SAFE_OPERATORS:
                 raise ValueError(f"Unsupported unary operator in formula: {op_type.__name__}")
             operand_val = _eval_node(node.operand)
             return float(SAFE_OPERATORS[op_type](operand_val))
+        elif isinstance(node, ast.IfExp):
+            return _eval_node(node.body) if _eval_cond(node.test) else _eval_node(node.orelse)
+        elif isinstance(node, (ast.Compare, ast.BoolOp)):
+            return 1.0 if _eval_cond(node) else 0.0
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id.lower() in SAFE_FUNCTIONS:
                 fn_key = node.func.id.lower()
@@ -9073,7 +9118,7 @@ def _strip_non_jsonld_script_and_style_bodies(html_text: str) -> str:
 
 
 _CONTRACT_DETECT_CACHE_LOCK = threading.Lock()
-_TOOL_UTILITY_ISSUES_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, ...]]" = collections.OrderedDict()
+_TOOL_UTILITY_ISSUES_CACHE: "collections.OrderedDict[Tuple[str, str, str], Tuple[str, ...]]" = collections.OrderedDict()
 _FREE_WEB_APP_SCHEMA_ISSUES_CACHE: "collections.OrderedDict[Tuple[str, str], Tuple[str, ...]]" = collections.OrderedDict()
 _CONTRACT_DETECT_CACHE_MAXSIZE = 2048
 _FREE_WEB_APP_SCRIPT_RE = re.compile(
@@ -9082,7 +9127,11 @@ _FREE_WEB_APP_SCRIPT_RE = re.compile(
 )
 
 
-def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> List[str]:
+def detect_tool_utility_issues(
+    html_text: str,
+    rel_path: str = "index.html",
+    property_id: Optional[str] = None,
+) -> List[str]:
     """
     Detects contract violations for interactive micro-tools against ToolUtilityContract:
     1. Zero em-dashes and zero en-dashes.
@@ -9098,7 +9147,12 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
     if not html_text.strip():
         return [f"Page {rel_path}: HTML content is empty"]
 
-    cache_key = (hashlib.sha256(html_text.encode("utf-8", errors="ignore")).hexdigest(), str(rel_path))
+    norm_prop_id = str(property_id or "").strip().lower()
+    cache_key = (
+        hashlib.sha256(html_text.encode("utf-8", errors="ignore")).hexdigest(),
+        str(rel_path),
+        norm_prop_id,
+    )
     with _CONTRACT_DETECT_CACHE_LOCK:
         cached = _TOOL_UTILITY_ISSUES_CACHE.get(cache_key)
         if cached is not None:
@@ -9157,7 +9211,12 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
     # 4. Check visual primitives, table overflow, tap target geometry, hierarchy, and calculator input/preset bounds
     from pseofactory.visual_primitives import detect_visual_and_ux_contract_issues
 
-    for v_issue in detect_visual_and_ux_contract_issues(html_text, rel_path=rel_path, require_primitives=False):
+    for v_issue in detect_visual_and_ux_contract_issues(
+        html_text,
+        rel_path=rel_path,
+        require_primitives=False,
+        property_id=property_id,
+    ):
         if v_issue not in issues:
             issues.append(f"Page {rel_path}: {v_issue}")
 
@@ -9170,7 +9229,11 @@ def detect_tool_utility_issues(html_text: str, rel_path: str = "index.html") -> 
     return issues
 
 
-def assert_tool_utility_contract(html_text: str, context: str = "") -> bool:
+def assert_tool_utility_contract(
+    html_text: str,
+    context: str = "",
+    property_id: Optional[str] = None,
+) -> bool:
     """
     Contract assertion validating ToolUtilityContract for interactive free tools.
     Verifies presence of interactive form or container, accessible input pairings,
@@ -9178,7 +9241,11 @@ def assert_tool_utility_contract(html_text: str, context: str = "") -> bool:
     Zero em-dashes. Zero en-dashes.
     """
     ctx = f" ({context})" if context else ""
-    issues = detect_tool_utility_issues(html_text, rel_path=context or "index.html")
+    issues = detect_tool_utility_issues(
+        html_text,
+        rel_path=context or "index.html",
+        property_id=property_id,
+    )
     if issues:
         raise ValueError(f"Tool utility contract violation{ctx}: {issues[0]}")
     return True

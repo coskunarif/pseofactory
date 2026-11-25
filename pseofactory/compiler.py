@@ -496,8 +496,36 @@ def compile_ast_to_js(
                 return f"(+{operand_js})"
             elif isinstance(node.op, ast.USub):
                 return f"(-{operand_js})"
+            elif isinstance(node.op, ast.Not):
+                return f"(!{_node_to_js(node.operand)})"
             else:
                 raise ValueError(f"Unsupported unary operator in formula: {type(node.op).__name__}")
+        elif isinstance(node, ast.Compare):
+            cmp_map = {
+                ast.Eq: "===",
+                ast.NotEq: "!==",
+                ast.Lt: "<",
+                ast.LtE: "<=",
+                ast.Gt: ">",
+                ast.GtE: ">=",
+            }
+            parts: List[str] = []
+            left_js = _node_to_js(node.left)
+            for op, comp in zip(node.ops, node.comparators):
+                op_str = cmp_map.get(type(op))
+                if op_str is None:
+                    raise ValueError(f"Unsupported comparison operator in formula: {type(op).__name__}")
+                right_js = _node_to_js(comp)
+                parts.append(f"({left_js} {op_str} {right_js})")
+                left_js = right_js
+            return f"({' && '.join(parts)})" if len(parts) > 1 else parts[0]
+        elif isinstance(node, ast.BoolOp):
+            op_js = " && " if isinstance(node.op, ast.And) else (" || " if isinstance(node.op, ast.Or) else None)
+            if op_js is None:
+                raise ValueError(f"Unsupported boolean operator in formula: {type(node.op).__name__}")
+            return f"({op_js.join(_node_to_js(v) for v in node.values)})"
+        elif isinstance(node, ast.IfExp):
+            return f"({_node_to_js(node.test)} ? {_node_to_js(node.body)} : {_node_to_js(node.orelse)})"
         elif isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name):
                 func_name = node.func.id.lower()
@@ -802,19 +830,78 @@ def _sanitize_visible_sample_calculation(sample_calc: str) -> str:
     return "".join(out_parts)
 
 
+def _convert_js_ternary_to_python(expr: str) -> str:
+    """Converts nested JS ternary `(cond ? a : b)` expressions into Python `((a) if (cond) else (b))`."""
+    py_expr = expr
+    max_iters = 64
+    for _ in range(max_iters):
+        q_idx = py_expr.find("?")
+        if q_idx == -1:
+            break
+        # Find enclosing '(' before '?'
+        depth = 0
+        open_idx = -1
+        for i in range(q_idx - 1, -1, -1):
+            ch = py_expr[i]
+            if ch == ")":
+                depth += 1
+            elif ch == "(":
+                if depth == 0:
+                    open_idx = i
+                    break
+                depth -= 1
+        start_idx = open_idx + 1 if open_idx != -1 else 0
+
+        # Find matching ':' at depth 0 after '?'
+        depth = 0
+        colon_idx = -1
+        for i in range(q_idx + 1, len(py_expr)):
+            ch = py_expr[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif ch == ":" and depth == 0:
+                colon_idx = i
+                break
+        if colon_idx == -1:
+            break
+
+        # Find matching ')' at depth 0 after ':'
+        depth = 0
+        end_idx = len(py_expr)
+        for i in range(colon_idx + 1, len(py_expr)):
+            ch = py_expr[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                if depth == 0:
+                    end_idx = i
+                    break
+                depth -= 1
+
+        cond_part = py_expr[start_idx:q_idx].strip()
+        true_part = py_expr[q_idx + 1 : colon_idx].strip()
+        false_part = py_expr[colon_idx + 1 : end_idx].strip()
+        py_expr = (
+            py_expr[:start_idx]
+            + f"(({true_part}) if ({cond_part}) else ({false_part}))"
+            + py_expr[end_idx:]
+        )
+    return py_expr
+
+
 def _eval_compiled_js_expr(js_expr: str, clamped_inputs: Dict[str, float]) -> float:
     """Evaluates a compiled JS arithmetic/piecewise expression in Python to verify parity."""
     import math
     from types import SimpleNamespace
 
-    py_expr = js_expr
-    # Convert JS ternary (cond ? a : b) into Python conditional ((a) if (cond) else (b))
-    while "?" in py_expr and ":" in py_expr:
-        m = re.search(r"\(([^()?]+)\?\s*([^():?]+):\s*([^():?]+)\)", py_expr)
-        if not m:
-            break
-        cond_part, true_part, false_part = m.group(1).strip(), m.group(2).strip(), m.group(3).strip()
-        py_expr = py_expr[: m.start()] + f"(({true_part}) if ({cond_part}) else ({false_part}))" + py_expr[m.end() :]
+    py_expr = _convert_js_ternary_to_python(js_expr)
+    py_expr = py_expr.replace("===", "==").replace("!==", "!=")
+    py_expr = py_expr.replace("&&", " and ").replace("||", " or ")
+    py_expr = re.sub(r"!(?!=)", " not ", py_expr)
 
     ns_inputs = SimpleNamespace(**{str(k).strip(): float(v) for k, v in clamped_inputs.items()})
     math_ns = SimpleNamespace(
@@ -828,7 +915,13 @@ def _eval_compiled_js_expr(js_expr: str, clamped_inputs: Dict[str, float]) -> fl
         PI=math.pi,
         E=math.e,
     )
-    return float(eval(py_expr, {"__builtins__": {}}, {"Math": math_ns, "inputs": ns_inputs}))
+    return float(
+        eval(
+            py_expr,
+            {"__builtins__": {}},
+            {"Math": math_ns, "inputs": ns_inputs, "true": True, "false": False},
+        )
+    )
 
 
 def verify_formula_boundary_fuzzing(
@@ -3140,13 +3233,28 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     from pseofactory.tenant_facts import TruthReconciliationEngine
 
     resolved_tenant = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    effective_property_id = (
+        str(
+            candidate_spec.get("property_id")
+            or candidate_spec.get("property")
+            or candidate_spec.get("tenant")
+            or resolved_tenant
+        )
+        .strip()
+        .lower()
+        or resolved_tenant
+    )
     html_content, _ = TruthReconciliationEngine.reconcile_html_truth(
         html_content,
         tenant=resolved_tenant,
         rel_path=f"tools/{slug}/index.html",
         slug=slug,
     )
-    html_content, _ = normalize_html_visual_primitives(html_content, is_tenant_porcelain=False)
+    html_content, _ = normalize_html_visual_primitives(
+        html_content,
+        is_tenant_porcelain=False,
+        property_id=effective_property_id,
+    )
     assert_visual_and_ux_contracts(html_content, context=f"compiled page '{slug}'", require_primitives=True)
     reconciliation_violations = TruthReconciliationEngine.audit_html_truth_reconciliation(
         html_content,

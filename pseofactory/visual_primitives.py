@@ -5604,6 +5604,7 @@ def detect_visual_and_ux_contract_issues(
     html_content: str,
     rel_path: str = "index.html",
     require_primitives: Optional[bool] = None,
+    property_id: Optional[str] = None,
 ) -> List[str]:
     """
     Deterministically audits an HTML document for all 6 visual and UX flaw classes:
@@ -5618,11 +5619,17 @@ def detect_visual_and_ux_contract_issues(
     if not html_content or not isinstance(html_content, str):
         return [f"[{rel_path}] Empty or non-string HTML content."]
     digest = hashlib.sha256(html_content.encode("utf-8", errors="ignore")).hexdigest()
-    cache_key = (digest, str(rel_path), require_primitives)
+    norm_pid = _normalize_runtime_sync_property_id(property_id)
+    cache_key = (digest, str(rel_path), require_primitives, norm_pid)
     cached = _VISUAL_CONTRACT_ISSUES_CACHE.get(cache_key)
     if cached is not None:
         return list(cached)
-    result = _detect_visual_and_ux_contract_issues_cached(html_content, rel_path, require_primitives)
+    result = _detect_visual_and_ux_contract_issues_cached(
+        html_content,
+        rel_path,
+        require_primitives,
+        property_id=property_id,
+    )
     if len(_VISUAL_CONTRACT_ISSUES_CACHE) >= 1024:
         _VISUAL_CONTRACT_ISSUES_CACHE.clear()
     _VISUAL_CONTRACT_ISSUES_CACHE[cache_key] = result
@@ -5730,6 +5737,7 @@ def _detect_visual_and_ux_contract_issues_cached(
     html_content: str,
     rel_path: str = "index.html",
     require_primitives: Optional[bool] = None,
+    property_id: Optional[str] = None,
 ) -> Tuple[str, ...]:
     issues: List[str] = []
     expect_primitives = _is_compiled_tenant_or_primitive_page(html_content, require_primitives)
@@ -5778,13 +5786,16 @@ def _detect_visual_and_ux_contract_issues_cached(
         )
     )
     if expect_primitives and has_calc_markers:
-        if not has_current_external_runtime_sync_tag(html_content):
+        detected_pid = _resolve_html_property_id(html_content)
+        has_valid_ext_rt = has_current_external_runtime_sync_tag(html_content, property_id=property_id)
+        if not has_valid_ext_rt and property_id is None and detected_pid:
+            has_valid_ext_rt = has_current_external_runtime_sync_tag(html_content, property_id=detected_pid)
+        if not has_valid_ext_rt:
             sync_match = re.search(
                 r'<script\b[^>]*id=["\']pseo-runtime-sync["\'][^>]*>([\s\S]*?)</script>',
                 html_content,
                 re.IGNORECASE,
             )
-            detected_pid = _resolve_html_property_id(html_content)
             sync_code = sync_match.group(1) if sync_match else ""
             if (
                 not sync_match
@@ -8596,6 +8607,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
         t_competing_forms = 0
         t_page_records: List[Dict[str, Any]] = []
         ext_rt_js_valid = False
+        matched_rt_pid: Optional[str] = None
         for cand_pid in (tenant, None):
             expected_rt_sha10 = get_runtime_synchronizer_js_sha10(property_id=cand_pid)
             expected_rt_bytes = render_runtime_synchronizer_js(property_id=cand_pid).encode("utf-8")
@@ -8610,6 +8622,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
                         and "resolveActiveScenarioAmount" in ext_rt_txt
                     ):
                         ext_rt_js_valid = True
+                        matched_rt_pid = cand_pid
                         break
                 except Exception:
                     ext_rt_js_valid = False
@@ -8721,7 +8734,7 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
 
             raw_no_comments = re.sub(r"<!--[\s\S]*?-->", "", raw_html)
             has_valid_runtime_sync = (
-                (has_current_external_runtime_sync_tag(raw_html) and ext_rt_js_valid)
+                (has_current_external_runtime_sync_tag(raw_html, property_id=matched_rt_pid) and ext_rt_js_valid)
                 or bool(
                     re.search(
                         r'<script\b[^>]*(?<![a-zA-Z0-9_-])id\s*=\s*["\']pseo-runtime-sync["\'][^>]*>[\s\S]*?resolveActiveScenarioAmount[\s\S]*?</script>',
