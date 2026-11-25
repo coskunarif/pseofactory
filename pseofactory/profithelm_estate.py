@@ -3165,7 +3165,7 @@ def build_privacy_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) ->
 
 def build_404_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> str:
     main_html = (
-        '<section class="hero-section"><h1>404 - Page Not Found</h1>'
+        '<section class="hero-section"><p class="badge">Status 404</p><h1>Status 404: Page Not Found</h1>'
         '<p class="hero-desc">The requested calculator page could not be found.</p>'
         '<p><a href="/tools/" class="btn-cta touch-target">Browse All Calculators</a></p></section>'
     )
@@ -5437,7 +5437,60 @@ def compile_profithelm_estate_impl(
     (dist / "index.html").write_text(home_html, encoding="utf-8")
     authoritative_html[dist / "index.html"] = home_html
 
-    dir_html = build_tools_directory_page(all_tools)
+    directory_tools = list(all_tools)
+    dir_known = {
+        str(t.get("slug") or "").strip().lower()
+        for t in directory_tools
+        if isinstance(t, dict)
+    }
+    if tools_dir.is_dir():
+        for existing_dir in sorted(tools_dir.iterdir()):
+            if not existing_dir.is_dir():
+                continue
+            ex_slug = existing_dir.name.strip().lower()
+            ex_idx = existing_dir / "index.html"
+            if not ex_slug or ex_slug in dir_known or not ex_idx.is_file():
+                continue
+            try:
+                ex_html = ex_idx.read_text(encoding="utf-8", errors="ignore")
+                if len(ex_html) < 100:
+                    continue
+                t_m = re.search(r"<h1[^>]*>(.*?)</h1>", ex_html, re.IGNORECASE | re.DOTALL)
+                if not t_m:
+                    t_m = re.search(r"<title[^>]*>(.*?)</title>", ex_html, re.IGNORECASE | re.DOTALL)
+                ex_title = (
+                    re.sub(r"<[^>]+>", "", t_m.group(1)).strip()
+                    if t_m
+                    else ex_slug.replace("-", " ").title()
+                )
+                ex_title = (
+                    re.sub(r"\s*\|\s*ProfitHelm.*$", "", ex_title, flags=re.IGNORECASE).strip()
+                    or ex_slug.replace("-", " ").title()
+                )
+                d_m = re.search(
+                    r'<meta[^>]*name=["\']description["\'][^>]*content=["\']([^"\']+)["\']',
+                    ex_html,
+                    re.IGNORECASE,
+                )
+                ex_desc = (
+                    d_m.group(1).strip()
+                    if d_m
+                    else f"Deterministic statutory calculation tool for {ex_title}."
+                )
+                directory_tools.append(
+                    {
+                        "slug": ex_slug,
+                        "title": ex_title,
+                        "short_title": ex_title,
+                        "description": ex_desc,
+                        "category": "Statutory Tax & Capital Strategy",
+                    }
+                )
+                dir_known.add(ex_slug)
+            except Exception:
+                continue
+
+    dir_html = build_tools_directory_page(directory_tools)
     (tools_dir / "index.html").write_text(dir_html, encoding="utf-8")
     authoritative_html[tools_dir / "index.html"] = dir_html
 
