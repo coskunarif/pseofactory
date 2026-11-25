@@ -10562,7 +10562,7 @@ class RetroReflectionEngine:
             "published_output": 310000.0,
             "statutory_authority": "26 U.S.C. Section 280G Golden Parachute Disallowance & IRC Section 4999 20% Excise Tax",
             "economic_dataset": "BLS OEWS Chief Executives SOC 11-1011 Wage Series & FRED CPILFESL Series",
-            "sample_calculation": "Executive with $550,000.00 five-year average W-2 base amount (3x safe harbor threshold = $1,650,000.00) receiving $2,100,000.00 in change-in-control parachute payments triggers $1,550,000.00 in excess parachute payments ($2,100,000 - $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00.",
+            "sample_calculation": "Executive with $550,000.00 five-year average W-2 base amount (3x safe harbor threshold = $1,650,000.00) receiving $2,100,000.00 in change-in-control parachute payments triggers $1,550,000.00 in excess parachute payments ($2,100,000 minus $550,000 base amount) and a 20% IRC Section 4999 excise tax of $310,000.00.",
         },
     }
 

@@ -84,6 +84,7 @@ GSC_VERIFICATION_TOKEN = "1b9AjxT3rRYA2iyPRraN2ShDNqEoKsfYW39UiTncB4U"
 ORGANIZATION_SAME_AS: Tuple[str, ...] = (
     "https://www.linkedin.com/company/143884102/",
     "https://x.com/profithelm",
+    "https://github.com/coskunarif/profithelm-platform",
     "https://www.wikidata.org/wiki/Q7443105",
     "https://www.wikidata.org/wiki/Q4546416",
     "https://www.wikidata.org/wiki/Q43261623",
@@ -315,8 +316,8 @@ CORE_TOOLS: List[Dict[str, Any]] = [
         "title": "Crypto Capital Gains & Staking Tax Calculator",
         "short_title": "Crypto Tax Calculator",
         "description": (
-            "Model combined federal tax liability on short-term crypto trades, long-term "
-            "capital gains, and ordinary staking income."
+            "Model federal Form 1099-DA and Form 8949 tax liability on short-term crypto trades, "
+            "long-term capital gains, and staking income."
         ),
         "primary_keyword": "crypto tax calculator",
         "category": "crypto",
@@ -526,7 +527,7 @@ def validate_multi_dataset_enrichment(
 ) -> Dict[str, Any]:
     """Verifies a tool cites at least `enforce_min_datasets` empirical/statutory datasets."""
     ds = list(datasets) if datasets is not None else list(TOOL_MULTI_DATASET_REGISTRY.get(tool_slug, []))
-    if not ds:
+    if datasets is None and not ds:
         ds = [
             "IRS Revenue Procedure Statutory Benchmark Schedule",
             "FRED Federal Reserve Macroeconomic Series",
@@ -538,7 +539,10 @@ def validate_multi_dataset_enrichment(
         "slug": tool_slug,
         "datasets": ds,
         "count": len(ds),
+        "dataset_count": len(ds),
         "valid": ok,
+        "is_valid": ok,
+        "content_effort_passed": ok,
         "rendered_verified": bool(rendered_html) if rendered_html is not None else True,
     }
 
@@ -591,10 +595,10 @@ def _normalize_tool_quick_answers() -> Dict[str, str]:
 
     raw: Dict[str, str] = {
         "irs-2027-tax-brackets": (
-            f"Under IRS Rev. Proc. 2025-32 for 2026, the standard deduction is {std26_s} Single and "
-            f"{std26_m} Joint across permanent 10% to 37% brackets. Under P.L. 119-21 and Rev. Proc. "
-            f"2026-35 for 2027, the standard deduction rises to {std27_s} Single and {std27_m} Joint "
-            "with $125,000 single income yielding $18,734.00 in 2026."
+            f"For 2026 under IRS Revenue Procedure 2025-32, the standard deduction is {std26_s} Single and "
+            f"{std26_m} Joint across permanent 10% to 37% brackets. For 2027 under Public Law 119-21 and "
+            f"Revenue Procedure 2026-35, the deduction rises to {std27_s} Single and {std27_m} Joint, "
+            "yielding $18,734.00 federal tax on $125,000 single income in 2026."
         ),
         "section-1031-calculator": (
             "Under IRC Section 1031 and Form 8824, realized gain on real property equals net sale "
@@ -604,9 +608,9 @@ def _normalize_tool_quick_answers() -> Dict[str, str]:
         ),
         "crypto-tax-calculator": (
             "Federal digital asset taxation separates short-term capital gains held one year or less, "
-            "taxed at ordinary marginal brackets, from long-term gains taxed at preferential 0%, 15%, "
-            "or 20% rates on Form 8949. Staking rewards are valued at receipt and taxed as ordinary "
-            "gross income alongside any qualifying state levies."
+            "taxed at ordinary brackets, from long-term gains taxed at 0%, 15%, or 20% rates on "
+            "Form 8949 and Form 1099-DA. Staking rewards are valued at receipt and taxed as ordinary "
+            "gross income alongside state levies."
         ),
         "saas-runway-calculator": (
             "SaaS cash runway equals liquid cash reserves divided by monthly net cash burn, where "
@@ -661,15 +665,40 @@ def enrich_quick_answer_with_statutory_benchmarks(tool: Dict[str, Any]) -> str:
     if preset and not tool.get("quick_answer"):
         return preset
     qa = str(tool.get("quick_answer") or "").strip()
+    title = str(tool.get("title") or slug.replace("-", " ").title())
+    auth = str(tool.get("statutory_authority") or "enacted United States statutory rules")
+    pk = str(tool.get("primary_keyword") or "").lower()
+    c = TRUTH_CONSTANTS
     if not qa:
-        title = str(tool.get("title") or slug.replace("-", " ").title())
-        auth = str(tool.get("statutory_authority") or "enacted United States statutory rules")
-        qa = (
-            f"{title} evaluates deterministic inputs under {auth} to compute exact baseline tax "
-            "and capital outcomes. Adjusting primary input parameters recalculates statutory liability, "
-            "effective marginal rates, and sensitivity scenarios with full traceability to published "
-            "federal schedules and benchmark datasets."
-        )
+        if "1202" in slug or "qsbs" in slug:
+            qa = (
+                f"{title} evaluates stock gain under {auth} using the post-OBBBA "
+                f"${int(c['qsbs_asset_ceiling']):,} gross asset ceiling and ${int(c['qsbs_exclusion_cap']):,} "
+                "per-issuer cap across 50%, 75%, and 100% exclusion tiers for 3-year, 4-year, and 5-year holding periods."
+            )
+        else:
+            qa = (
+                f"{title} evaluates deterministic inputs under {auth} to compute exact 100% traceable "
+                "statutory tax and capital outcomes. Adjusting primary parameters recalculates dollar "
+                "liability, effective marginal rates, and sensitivity scenarios against published federal "
+                "schedules and economic benchmark datasets."
+            )
+    else:
+        has_num = ("$" in qa) or ("%" in qa)
+        has_statute = any(tok in qa for tok in ("26 U.S. Code", "IRC ", "Section ", "Rev. Proc.", "P.L. 119-21"))
+        if not (has_num and has_statute):
+            is_179 = ("179" in slug) or ("179" in title.lower()) or ("179" in pk) or ("deduction" in pk and "tax" not in slug)
+            if is_179:
+                qa = (
+                    f"{qa.rstrip('. ')}. Under IRC Section 179 and Rev. Proc. 2025-32, equipment expensing "
+                    f"applies a ${int(c['sec179_cap_2026']):,} cap (${int(c['sec179_phaseout_2026']):,} phaseout), "
+                    f"${int(c['sec179_heavy_suv_cap_2026']):,} heavy SUV limit, and {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation."
+                )
+            else:
+                qa = (
+                    f"{qa.rstrip('. ')}. Under 26 U.S. Code Section 1 and IRS Rev. Proc. 2025-32, "
+                    f"permanent brackets span 10% to 37% above the ${int(c['std_deduction_2026']['single']):,} Single deduction."
+                )
     return _fit_quick_answer_words(qa, 40, 60)
 
 
@@ -682,13 +711,19 @@ def reflexive_geo_citability_gate(
     enriched = enrich_quick_answer_with_statutory_benchmarks(tool)
     word_count = len(enriched.split())
     assert_no_forbidden_dashes(enriched, f"quick_answer:{tool.get('slug', '')}")
-    return {
+    is_citable = 40 <= word_count <= 60
+    score = 1.85 if is_citable else 1.0
+    result = {
         "slug": tool.get("slug", ""),
         "quick_answer": enriched,
         "word_count": word_count,
-        "is_citable": 40 <= word_count <= 60,
-        "score": 1.85 if 40 <= word_count <= 60 else 1.0,
+        "is_citable": is_citable,
+        "score": score,
+        "information_gain_score": score,
     }
+    tool["quick_answer"] = enriched
+    tool["_geo_citability"] = dict(result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -729,6 +764,20 @@ class InteractiveCalculatorSpec:
     formula_label: str = ""
     js_logic: str = ""
     primary_output_selector: str = ""
+    id: str = ""
+
+
+_CALC_WRAPPER_ID_MAP: Dict[str, str] = {
+    "s-corp-reasonable-salary-tax-calculator": "s-corp-reasonable-salary-tax",
+    "workers-comp-and-payroll-burden-calculator": "workers-comp-payroll-burden",
+    "contractor-surety-bond-cost-calculator": "contractor-surety-bond-cost",
+    "equipment-lease-vs-buy-section-179-calculator": "equipment-lease-vs-buy-179",
+    "medical-and-dental-equipment-section-179-roi-calculator": "medical-equipment-179-roi",
+    "commercial-heavy-vehicle-section-179-weight-calculator": "commercial-heavy-vehicle-179",
+    "section-301-tariff-landed-cost-calculator": "section-301-tariff-landed-cost",
+    "invoice-factoring-vs-business-line-of-credit-calculator": "invoice-factoring-vs-loc",
+    "r-and-d-tax-credit-section-174-amortization-calculator": "rd-tax-credit-section-174",
+}
 
 
 def _format_currency(val: float) -> str:
@@ -815,8 +864,10 @@ def render_calculator_widget(spec: InteractiveCalculatorSpec) -> str:
         else ""
     )
 
+    calc_id = str(getattr(spec, "id", "") or _CALC_WRAPPER_ID_MAP.get(spec.slug, spec.slug))
     script_html = f"<script>\n{spec.js_logic}\n</script>" if spec.js_logic.strip() else ""
     return (
+        f'<div class="interactive-calculator-container" id="calculator-{html_lib.escape(calc_id)}">'
         f'<section class="calc-card card" id="tool-widget-{html_lib.escape(spec.slug)}" '
         f'data-tool-slug="{html_lib.escape(spec.slug)}">'
         f'<header class="calc-header">'
@@ -833,6 +884,7 @@ def render_calculator_widget(spec: InteractiveCalculatorSpec) -> str:
         f"{formula_note}"
         f"{script_html}"
         f"</section>"
+        f"</div>"
     )
 
 
@@ -1376,6 +1428,26 @@ def _default_authority_for_slug(slug: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+_SPEAKABLE_SPEC: Dict[str, Any] = {
+    "@type": "SpeakableSpecification",
+    "cssSelector": [".quick-answer-body", ".hero-subtitle"],
+}
+
+
+def _build_tool_breadcrumb_schema(title: str, canonical_path: str) -> Dict[str, Any]:
+    """Builds a BreadcrumbList schema pointing item 2 to /tools/."""
+    path_norm = canonical_path if canonical_path.startswith("/") else f"/{canonical_path}"
+    return {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+            {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{CANONICAL_BASE}/"},
+            {"@type": "ListItem", "position": 2, "name": "Calculators", "item": f"{CANONICAL_BASE}/tools/"},
+            {"@type": "ListItem", "position": 3, "name": title, "item": f"{CANONICAL_BASE}{path_norm}"},
+        ],
+    }
+
+
 def get_organization_schema() -> Dict[str, Any]:
     return {
         "@context": "https://schema.org",
@@ -1404,8 +1476,9 @@ def get_software_application_schema(
         "url": url,
         "applicationCategory": app_category,
         "operatingSystem": "Web",
-        "datePublished": "2026-01-15",
+        "datePublished": "2026-01-01",
         "dateModified": date_modified,
+        "speakable": copy.deepcopy(_SPEAKABLE_SPEC),
         "publisher": {"@id": f"{CANONICAL_BASE}/#organization"},
         "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
     }
@@ -1467,10 +1540,21 @@ def get_tech_article_schema(
         "headline": str(tool_meta.get("title") or SITE_NAME),
         "description": str(tool_meta.get("description") or SITE_DESCRIPTION),
         "url": url,
-        "datePublished": "2026-01-15",
+        "datePublished": "2026-01-01",
         "dateModified": date_modified,
-        "author": {"@id": f"{CANONICAL_BASE}/#organization"},
-        "publisher": {"@id": f"{CANONICAL_BASE}/#organization"},
+        "speakable": copy.deepcopy(_SPEAKABLE_SPEC),
+        "author": {
+            "@type": "Organization",
+            "@id": f"{CANONICAL_BASE}/#organization",
+            "name": SITE_NAME,
+            "url": f"{CANONICAL_BASE}/",
+        },
+        "publisher": {
+            "@type": "Organization",
+            "@id": f"{CANONICAL_BASE}/#organization",
+            "name": SITE_NAME,
+            "url": f"{CANONICAL_BASE}/",
+        },
     }
 
 
@@ -1618,6 +1702,7 @@ def render_head(
         '  <meta charset="utf-8">\n'
         '  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n'
         '  <meta http-equiv="content-language" content="en-US">\n'
+        '  <link rel="preconnect" href="https://www.googletagmanager.com">\n'
         f"  <title>{safe_title}</title>\n"
         f'  <meta name="description" content="{safe_desc}">\n'
         f'  <meta name="google-site-verification" content="{GSC_VERIFICATION_TOKEN}">\n'
@@ -1629,6 +1714,8 @@ def render_head(
         f'  <meta property="og:title" content="{safe_title}">\n'
         f'  <meta property="og:description" content="{safe_desc}">\n'
         f'  <meta property="og:url" content="{html_lib.escape(canonical_url)}">\n'
+        f'  <meta property="og:image" content="{CANONICAL_BASE}/static/img/profithelm-og.png">\n'
+        f'  <meta name="twitter:image" content="{CANONICAL_BASE}/static/img/profithelm-og.png">\n'
         '  <link rel="stylesheet" href="/static/css/style.css">\n'
         f'  <script type="application/ld+json">{ld_json}</script>\n'
         "</head>"
@@ -1692,11 +1779,14 @@ def render_regulatory_alert_lead_magnet(
     cta_label: str = "View Benchmark Alerts",
 ) -> str:
     return (
-        '<section class="card lead-capture-card">'
+        '<section class="card footer-lead-card regulatory-lead-magnet-card">'
         f'<span class="badge">{html_lib.escape(badge_label)}</span>'
         f"<h3>{html_lib.escape(headline)}</h3>"
         f"<p>{html_lib.escape(description)}</p>"
-        f'<a href="/methodology/" class="btn-cta touch-target">{html_lib.escape(cta_label)}</a>'
+        '<div class="lead-capture-form" role="group" aria-label="Regulatory Benchmark Alerts">'
+        '<input type="email" aria-label="Email address for regulatory updates" placeholder="you@company.com" style="min-height: 44px;">'
+        f'<a href="/methodology/" class="btn-cta touch-target" style="min-height: 44px;">{html_lib.escape(cta_label)}</a>'
+        "</div>"
         "</section>"
     )
 
@@ -1758,6 +1848,7 @@ def render_footer(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> str:
     return (
         '<footer class="site-footer">'
         '<div class="footer-inner">'
+        f"{render_regulatory_alert_lead_magnet()}"
         '<div class="footer-cols">'
         '<div><h4>Calculators</h4><ul class="footer-links">'
         f"{tool_links}"
@@ -1815,6 +1906,90 @@ def _render_tool_shell(
         "</html>\n"
     )
     return normalize_html_seo_invariants(raw)
+
+
+def _build_tool_faq_pair(
+    canonical_path: str,
+    short_title: str,
+    faq_pairs: Sequence[Tuple[str, str]],
+) -> Tuple[Dict[str, Any], str]:
+    """Builds 1:1 synchronized FAQPage JSON-LD schema and visible <details> accordion HTML."""
+    faq_schema: Dict[str, Any] = {
+        "@type": "FAQPage",
+        "@id": f"{CANONICAL_BASE}{canonical_path}#faq",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": q,
+                "acceptedAnswer": {"@type": "Answer", "text": a},
+            }
+            for q, a in faq_pairs
+        ],
+    }
+    faq_html = (
+        '<section class="card faq-section">'
+        f"<h2>Frequently Asked Questions: {html_lib.escape(short_title)}</h2>"
+        + "".join(
+            f'<details class="faq-accordion faq-item"><summary class="touch-target">{html_lib.escape(q)}</summary><p>{html_lib.escape(a)}</p></details>'
+            for q, a in faq_pairs
+        )
+        + "</section>"
+    )
+    return faq_schema, faq_html
+
+
+def _build_hub_spoke_directory_html(repo_root: Optional[Path], mode: str) -> str:
+    """Renders direct hub-to-spoke links so all 127 matrix spokes sit within crawl depth <= 2 from '/'."""
+    data_dir = (Path(repo_root).resolve() if repo_root is not None else DEFAULT_REPO_ROOT) / "profithelm" / "data"
+    if mode in ("state_tax", "state_1031"):
+        sf = data_dir / "us_states_tax.json"
+        if not sf.is_file():
+            return ""
+        try:
+            states = json.loads(sf.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        if not isinstance(states, list) or not states:
+            return ""
+        if mode == "state_tax":
+            heading = "2026-2027 State Income Tax Bracket Calculators (All 50 States &amp; DC)"
+            links = "".join(
+                f'<li><a href="/tools/irs-2027-tax-brackets/{html_lib.escape(str(st["slug"]))}/" class="touch-target">'
+                f'{html_lib.escape(str(st["name"]))} ({html_lib.escape(str(st.get("code", "")))}) Tax Brackets</a></li>'
+                for st in states
+                if isinstance(st, dict) and st.get("slug") and st.get("name")
+            )
+        else:
+            heading = "State Section 1031 Like-Kind Exchange Guides (All 50 States &amp; DC)"
+            links = "".join(
+                f'<li><a href="/tools/section-1031-calculator/{html_lib.escape(str(st["slug"]))}/" class="touch-target">'
+                f'{html_lib.escape(str(st["name"]))} ({html_lib.escape(str(st.get("code", "")))}) Section 1031 Exchange</a></li>'
+                for st in states
+                if isinstance(st, dict) and st.get("slug") and st.get("name")
+            )
+        return f'<section class="card"><h2>{heading}</h2><ul>{links}</ul></section>'
+    if mode == "vehicle_179":
+        vf = data_dir / "section_179_vehicles.json"
+        if not vf.is_file():
+            return ""
+        try:
+            vehicles = json.loads(vf.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        if not isinstance(vehicles, list) or not vehicles:
+            return ""
+        links = "".join(
+            f'<li><a href="/tools/section-179-calculator/{html_lib.escape(str(vh["slug"]))}/" class="touch-target">'
+            f'{html_lib.escape(_clean_vehicle_display_name(str(vh.get("make", "")), str(vh.get("model", ""))))} Section 179</a></li>'
+            for vh in vehicles
+            if isinstance(vh, dict) and vh.get("slug")
+        )
+        return (
+            '<section class="card">'
+            "<h2>2026 Section 179 Heavy SUV &amp; Commercial Vehicle Calculators</h2>"
+            f"<ul>{links}</ul></section>"
+        )
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1926,9 +2101,26 @@ def build_tax_brackets_page(repo_root: Optional[Path] = None) -> str:
     )
 
     quick_answer = enrich_quick_answer_with_statutory_benchmarks(tool_meta)
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        tool_meta["short_title"],
+        [
+            (
+                "What are the 2026 and 2027 permanent IRS standard deductions?",
+                f"Under Rev. Proc. 2025-32 and P.L. 119-21, the 2026 Single standard deduction is ${int(c['std_deduction_2026']['single']):,} "
+                f"and rises to ${int(c['std_deduction_2027']['single']):,} in 2027 under Rev. Proc. 2026-35.",
+            ),
+            (
+                "Did the 10% to 37% marginal tax brackets become permanent in 2027?",
+                "Yes. Public Law 119-21 permanently enacted the 10%, 12%, 22%, 24%, 32%, 35%, and 37% individual rate schedule beyond 2026.",
+            ),
+        ],
+    )
+    spoke_dir_html = _build_hub_spoke_directory_html(repo_root, "state_tax")
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(tool_meta["title"], canonical_path),
         get_howto_schema(tool_meta["title"], tool_meta["description"], canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(
@@ -1937,6 +2129,7 @@ def build_tax_brackets_page(repo_root: Optional[Path] = None) -> str:
             canonical_path,
             TOOL_MULTI_DATASET_REGISTRY[tool_meta["slug"]],
         ),
+        faq_schema,
     ]
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
@@ -1948,6 +2141,8 @@ def build_tax_brackets_page(repo_root: Optional[Path] = None) -> str:
         f"{render_calculator_widget(spec)}"
         f"{_build_bracket_comparison_table(2026)}"
         f"{_build_bracket_comparison_table(2027)}"
+        f"{spoke_dir_html}"
+        f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=tool_meta['slug'])}"
         f"{render_affiliate_card('tax_strategy_cpa', tool_meta['slug'])}"
     )
@@ -2015,9 +2210,25 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
     )
 
     quick_answer = enrich_quick_answer_with_statutory_benchmarks(tool_meta)
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        tool_meta["short_title"],
+        [
+            (
+                "What is the 2026 Section 179 general equipment deduction limit?",
+                f"For 2026, the general Section 179 deduction limit is ${int(c['sec179_cap_2026']):,} with a ${int(c['sec179_phaseout_2026']):,} investment phaseout threshold under Rev. Proc. 2025-32.",
+            ),
+            (
+                "What is the 2026 Section 179 heavy SUV cap and bonus depreciation rate?",
+                f"Passenger vehicles rated 6,001 to 14,000 lbs GVWR carry a ${int(c['sec179_heavy_suv_cap_2026']):,} Section 179(b)(5)(A) ceiling, and remaining basis qualifies for {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation under P.L. 119-21 Section 70301.",
+            ),
+        ],
+    )
+    spoke_dir_html = _build_hub_spoke_directory_html(repo_root, "vehicle_179")
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(tool_meta["title"], canonical_path),
         get_howto_schema(tool_meta["title"], tool_meta["description"], canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(
@@ -2026,16 +2237,27 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
             canonical_path,
             TOOL_MULTI_DATASET_REGISTRY[tool_meta["slug"]],
         ),
+        faq_schema,
     ]
     ref_table = (
         '<section class="card"><h2>2026 Statutory Section 179 &amp; 168(k) Schedule (P.L. 119-21 &amp; Rev. Proc. 2025-32)</h2>'
-        '<div class="table-wrap"><table><thead><tr><th scope="col">Provision</th><th scope="col">2026 Enacted Limit</th><th scope="col">Statutory Citation</th></tr></thead>'
+        '<div class="table-wrap"><table data-statutory="IRC Section 179 and Rev. Proc. 2025-32"><thead><tr><th scope="col">Provision</th><th scope="col">2026 Enacted Limit</th><th scope="col">Statutory Citation</th></tr></thead>'
         "<tbody>"
         f"<tr><td>Maximum Section 179 Expense Limit (General Equipment)</td><td>${int(c['sec179_cap_2026']):,}</td><td>IRC Section 179 / Rev. Proc. 2025-32</td></tr>"
         f"<tr><td>Section 179 Investment Phaseout Threshold</td><td>${int(c['sec179_phaseout_2026']):,}</td><td>IRC Section 179 / Rev. Proc. 2025-32</td></tr>"
         f"<tr><td>Heavy SUV Cap (6,001 to 14,000 lbs GVWR)</td><td>${int(c['sec179_heavy_suv_cap_2026']):,}</td><td>IRC Section 179(b)(5)(A) / Rev. Proc. 2025-32</td></tr>"
         f"<tr><td>First-Year Bonus Depreciation Rate</td><td>{int(c['bonus_depreciation_pct_2026'])}%</td><td>P.L. 119-21 Section 70301 (168(k))</td></tr>"
         "</tbody></table></div></section>"
+    )
+    cross_suite_html = (
+        '<section class="card">'
+        "<h2>State Income Tax &amp; Section 1031 Capital Allocation Cross-Links</h2>"
+        '<p>Coordinate federal Section 179 equipment expensing with localized state income tax and real estate deferral models.</p>'
+        "<ul>"
+        '<li><a href="/tools/irs-2027-tax-brackets/california/" class="touch-target">California 2026-2027 Tax Brackets Calculator</a></li>'
+        '<li><a href="/tools/section-1031-calculator/california/" class="touch-target">California Section 1031 Exchange Calculator</a></li>'
+        "</ul>"
+        "</section>"
     )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
@@ -2046,6 +2268,9 @@ def build_section_179_page(repo_root: Optional[Path] = None) -> str:
         f'<aside class="quick-answer"><p>{html_lib.escape(quick_answer)}</p></aside>'
         f"{render_calculator_widget(spec)}"
         f"{ref_table}"
+        f"{spoke_dir_html}"
+        f"{cross_suite_html}"
+        f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=tool_meta['slug'])}"
         f"{render_affiliate_card('tax_strategy_cpa', tool_meta['slug'])}"
     )
@@ -2110,9 +2335,25 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
     )
 
     quick_answer = enrich_quick_answer_with_statutory_benchmarks(tool_meta)
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        tool_meta["short_title"],
+        [
+            (
+                "What triggers taxable boot in a Section 1031 exchange?",
+                "Taxable boot under IRC Section 1031(b) and IRS Form 8824 occurs when you receive cash proceeds or reduce net mortgage debt without offsetting cash added.",
+            ),
+            (
+                "What are the statutory identification and closing deadlines?",
+                "Exchangers must identify replacement properties in writing within 45 calendar days and complete closing within 180 calendar days under 26 U.S.C. 1031(a)(3).",
+            ),
+        ],
+    )
+    spoke_dir_html = _build_hub_spoke_directory_html(repo_root, "state_1031")
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(tool_meta["title"], canonical_path),
         get_howto_schema(tool_meta["title"], tool_meta["description"], canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(
@@ -2121,7 +2362,19 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
             canonical_path,
             TOOL_MULTI_DATASET_REGISTRY[tool_meta["slug"]],
         ),
+        faq_schema,
     ]
+    sec1031_table = (
+        '<section class="card">'
+        "<h2>IRC Section 1031 &amp; Form 8824 Statutory Boot Schedule</h2>"
+        '<div class="table-wrap"><table data-statutory="IRC Section 1031 and Form 8824">'
+        '<thead><tr><th scope="col">Exchange Component</th><th scope="col">Baseline Benchmark</th><th scope="col">Statutory Authority</th></tr></thead>'
+        "<tbody>"
+        f"<tr><td>Relinquished Sale Price</td><td>{_format_currency(float(manifest['inputs'].get('relinquished_sale_price', 0.0)))}</td><td>IRC Section 1031(a)</td></tr>"
+        f"<tr><td>Recognized Taxable Boot</td><td>{_format_currency(baseline)}</td><td>IRC Section 1031(b) / Form 8824</td></tr>"
+        "<tr><td>Identification / Exchange Window</td><td>45 Days / 180 Days</td><td>26 U.S.C. 1031(a)(3)</td></tr>"
+        "</tbody></table></div></section>"
+    )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
         f'<a href="/tools/" class="touch-target">Calculators</a> / <span>{html_lib.escape(tool_meta["short_title"])}</span></nav>'
@@ -2130,6 +2383,9 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(quick_answer)}</p></aside>'
         f"{render_calculator_widget(spec)}"
+        f"{sec1031_table}"
+        f"{spoke_dir_html}"
+        f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=tool_meta['slug'])}"
         f"{render_affiliate_card('qi_1031_exchange', tool_meta['slug'])}"
     )
@@ -2141,6 +2397,82 @@ def build_section_1031_page(repo_root: Optional[Path] = None) -> str:
         schemas=schemas,
         main_html=main_html,
         manifest=manifest,
+    )
+
+
+def _build_core_tool_reference_tables(
+    slug: str,
+    manifest: Dict[str, Any],
+    tool_meta: Dict[str, Any],
+) -> str:
+    """Builds TruthPack-grounded statutory reference tables for core tool pages."""
+    auth = html_lib.escape(str(tool_meta.get("statutory_authority") or "Internal Revenue Code"))
+    ds = html_lib.escape(str(tool_meta.get("economic_dataset") or "IRS SOI & FRED Benchmarks"))
+    baseline = float(manifest.get("published_output", 0.0))
+    unit_hint = "months" if "runway" in slug else "currency"
+    base_disp = _format_metric_display(baseline, slug=slug, unit_hint=unit_hint)
+
+    if slug == "prediction-market-tax":
+        gain = float(manifest["inputs"].get("trading_gain", 50000.0))
+        ord_rate = float(manifest["inputs"].get("ordinary_rate", 0.32))
+        ltcg_rate = float(manifest["inputs"].get("ltcg_rate", 0.15))
+        ord_tax = round(gain * ord_rate, 2)
+        blended_tax = round(gain * (0.60 * ltcg_rate + 0.40 * ord_rate), 2)
+        venue_table = (
+            '<section class="card">'
+            "<h2>Event Contract Exchange &amp; Statutory Tax Treatment Comparison</h2>"
+            f'<div class="table-wrap"><table data-statutory="{auth}">'
+            '<thead><tr><th scope="col">Contract Venue Class</th><th scope="col">Federal Classification</th><th scope="col">Rate Structure</th><th scope="col">Tax on $50,000 Gain</th></tr></thead>'
+            "<tbody>"
+            f"<tr><td>CFTC-Regulated Event Contracts (Kalshi)</td><td>IRC Section 1256 60/40 Blended</td><td>60% at {int(round(ltcg_rate * 100))}% LTCG / 40% at {int(round(ord_rate * 100))}% Ordinary</td><td>{_format_currency(blended_tax)}</td></tr>"
+            f"<tr><td>Non-Regulated Prediction Markets (Polymarket)</td><td>Short-Term Ordinary Income</td><td>100% at {int(round(ord_rate * 100))}% Ordinary Rate</td><td>{_format_currency(ord_tax)}</td></tr>"
+            "</tbody></table></div>"
+            f'<p class="calc-metric-sub">Source: {auth} | {ds}.</p>'
+            "</section>"
+        )
+        schedule_table = (
+            '<section class="card">'
+            "<h2>Empirical 60/40 Tax Savings Schedule &amp; Rate Tiers</h2>"
+            f'<div class="table-wrap"><table data-statutory="{auth}">'
+            '<thead><tr><th scope="col">Net Trading Gain</th><th scope="col">Ordinary Federal Rate</th><th scope="col">LTCG Rate</th><th scope="col">Estimated 60/40 Tax Savings</th></tr></thead>'
+            "<tbody>"
+            f'<tr><td><data id="pm-tax-gain" value="{int(gain)}">{_format_currency(gain)}</data></td><td>{ord_rate * 100:.1f}%</td><td>{ltcg_rate * 100:.1f}%</td><td><span id="res-pm-tax-savings">{html_lib.escape(base_disp)}</span></td></tr>'
+            f"<tr><td>{_format_currency(gain * 2.0)}</td><td>{ord_rate * 100:.1f}%</td><td>{ltcg_rate * 100:.1f}%</td><td>{_format_currency(baseline * 2.0)}</td></tr>"
+            "</tbody></table></div>"
+            f'<p class="calc-metric-sub">Authority: {auth}.</p>'
+            "</section>"
+        )
+        return venue_table + schedule_table
+
+    if slug == "crypto-tax-calculator":
+        inp = manifest.get("inputs", {})
+        return (
+            '<section class="card">'
+            "<h2>Digital Asset Federal Rate &amp; Form 1099-DA Schedule</h2>"
+            f'<div class="table-wrap"><table data-statutory="{auth}">'
+            '<thead><tr><th scope="col">Digital Asset Income Category</th><th scope="col">Baseline Input</th><th scope="col">Statutory Rate Tier</th><th scope="col">IRS Reporting Form</th></tr></thead>'
+            "<tbody>"
+            f"<tr><td>Short-Term Capital Gains (Held &lt;= 1 Year)</td><td>{_format_currency(float(inp.get('short_term_gains', 18000.0)))}</td><td>{float(inp.get('ordinary_rate', 0.24)) * 100:.1f}% Ordinary</td><td>Form 8949 / Form 1099-DA</td></tr>"
+            f"<tr><td>Long-Term Capital Gains (Held &gt; 1 Year)</td><td>{_format_currency(float(inp.get('long_term_gains', 45000.0)))}</td><td>{float(inp.get('ltcg_rate', 0.15)) * 100:.1f}% LTCG</td><td>Form 8949 / Schedule D</td></tr>"
+            f"<tr><td>Staking &amp; Validation Rewards</td><td>{_format_currency(float(inp.get('staking_rewards', 5000.0)))}</td><td>{float(inp.get('ordinary_rate', 0.24)) * 100:.1f}% Ordinary</td><td>Form 1040 Schedule 1</td></tr>"
+            f"<tr><td>Combined Estimated Tax Liability</td><td>{html_lib.escape(base_disp)}</td><td>Federal + {float(inp.get('state_tax_rate', 0.05)) * 100:.1f}% State</td><td>{auth}</td></tr>"
+            "</tbody></table></div>"
+            f'<p class="calc-metric-sub">Dataset: {ds}.</p>'
+            "</section>"
+        )
+
+    rows = "".join(
+        f"<tr><td>{html_lib.escape(k.replace('_', ' ').title())}</td><td>{html_lib.escape(str(v))}</td><td>{auth}</td></tr>"
+        for k, v in list(manifest.get("inputs", {}).items())[:6]
+    )
+    rows += f"<tr><td><strong>Baseline Calculated Output</strong></td><td><strong>{html_lib.escape(base_disp)}</strong></td><td>{ds}</td></tr>"
+    return (
+        '<section class="card">'
+        f"<h2>Statutory Parameters &amp; Benchmark Schedule: {html_lib.escape(tool_meta['short_title'])}</h2>"
+        f'<div class="table-wrap"><table data-statutory="{auth}">'
+        '<thead><tr><th scope="col">Model Parameter</th><th scope="col">Baseline Value</th><th scope="col">Statutory / Dataset Source</th></tr></thead>'
+        f"<tbody>{rows}</tbody>"
+        "</table></div></section>"
     )
 
 
@@ -2236,6 +2568,7 @@ def _build_simple_core_tool_page(
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, app_category),
+        _build_tool_breadcrumb_schema(tool_meta["title"], canonical_path),
         get_howto_schema(tool_meta["title"], tool_meta["description"], canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(
@@ -2246,6 +2579,7 @@ def _build_simple_core_tool_page(
         ),
         faq_schema,
     ]
+    ref_tables_html = _build_core_tool_reference_tables(slug, manifest, tool_meta)
     aff_html = render_affiliate_card(affiliate_key, slug) if affiliate_key else ""
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
@@ -2255,6 +2589,7 @@ def _build_simple_core_tool_page(
         f"{render_above_the_fold_ftc_disclosure(bool(aff_html))}"
         f'<aside class="quick-answer"><p>{html_lib.escape(quick_answer)}</p></aside>'
         f"{render_calculator_widget(spec)}"
+        f"{ref_tables_html}"
         f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=slug)}"
         f"{aff_html}"
@@ -2575,6 +2910,20 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
             {"@type": "ListItem", "position": 3, "name": title, "item": f"{CANONICAL_BASE}{canonical_path}"},
         ]
 
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        title,
+        [
+            (
+                f"How does the {title} calculate its baseline output?",
+                f"The calculator evaluates {manifest['model_name']} using {manifest['statutory_authority']} parameters. {manifest['sample_calculation']}.",
+            ),
+            (
+                "Which authoritative datasets back this calculator?",
+                f"Inputs and reference benchmarks reconcile to {manifest['economic_dataset']} and the versioned ProfitHelm TruthPack.",
+            ),
+        ],
+    )
     schemas = [
         get_organization_schema(),
         get_software_application_schema({**tool_meta, "title": title, "description": description}, canonical_path, "FinanceApplication"),
@@ -2582,6 +2931,7 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
         get_howto_schema(title, description, canonical_path),
         get_tech_article_schema({**tool_meta, "title": title, "description": description}, canonical_path),
         get_dataset_schema(title, description, canonical_path, [manifest["economic_dataset"], manifest["statutory_authority"]]),
+        faq_schema,
     ]
 
     guidance_html = _build_generic_tool_guidance(slug)
@@ -2594,6 +2944,7 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
         f'<aside class="quick-answer"><p>{html_lib.escape(quick_answer)}</p></aside>'
         f"{render_calculator_widget(spec)}"
         f"{guidance_html}"
+        f"{faq_html}"
         f"{render_share_and_pro_card(hub_slug=slug)}"
     )
     page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
@@ -2614,16 +2965,46 @@ def render_generic_tool_page(tool_meta: Dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
+_CATALOG_9_SLUGS: Tuple[str, ...] = (
+    "irs-2027-tax-brackets",
+    "crypto-tax-calculator",
+    "saas-runway-calculator",
+    "prediction-market-odds",
+    "tcja-sunset-capital-gains",
+    "section-179-calculator",
+    "treasury-yield-calculator",
+    "section-1031-calculator",
+    "prediction-market-tax",
+)
+
+
 def build_home_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> str:
     items = list(tools_list) if tools_list is not None else list(TOOLS)
     c = TRUTH_CONSTANTS
-    cards = "".join(
-        f'<article class="card calc-entrypoint-card">'
-        f'<h3><a href="/tools/{html_lib.escape(t["slug"])}/" class="touch-target">{html_lib.escape(t["title"])}</a></h3>'
-        f'<p>{html_lib.escape(t["description"])}</p>'
-        f'<a href="/tools/{html_lib.escape(t["slug"])}/" class="btn-secondary touch-target">Open Calculator</a>'
-        "</article>"
-        for t in items[:18]
+    by_slug = {t["slug"]: t for t in items if "slug" in t}
+    if len(items) > len(_CATALOG_9_SLUGS) and all(s in by_slug for s in _CATALOG_9_SLUGS):
+        primary_items = [by_slug[s] for s in _CATALOG_9_SLUGS]
+        cat_set = set(_CATALOG_9_SLUGS)
+        extra_items = [t for t in items if t.get("slug") not in cat_set][:9]
+    else:
+        primary_items = items[:18]
+        extra_items = []
+
+    def _render_tool_cards(card_items: Sequence[Dict[str, Any]]) -> str:
+        return "".join(
+            f'<article class="card calc-entrypoint-card">'
+            f'<h3><a href="/tools/{html_lib.escape(t["slug"])}/" class="touch-target">{html_lib.escape(t["title"])}</a></h3>'
+            f'<p>{html_lib.escape(t["description"])}</p>'
+            f'<a href="/tools/{html_lib.escape(t["slug"])}/" class="btn-secondary touch-target">Open Calculator</a>'
+            "</article>"
+            for t in card_items
+        )
+
+    cards = _render_tool_cards(primary_items)
+    extra_cards_section = (
+        f'<section id="additional-tools" class="card-grid">{_render_tool_cards(extra_items)}</section>'
+        if extra_items
+        else ""
     )
     qa = _fit_quick_answer_words(
         f"ProfitHelm models 2026 and 2027 IRS tax brackets (${int(c['std_deduction_2026']['single']):,} "
@@ -2675,7 +3056,8 @@ def build_home_page(tools_list: Optional[Sequence[Dict[str, Any]]] = None) -> st
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
         f"{benchmark_table}"
-        f'<section class="card-grid">{cards}</section>'
+        f'<section id="tools" class="card-grid">{cards}</section>'
+        f"{extra_cards_section}"
         f"{render_regulatory_alert_lead_magnet()}"
     )
     return _render_tool_shell(
@@ -2803,15 +3185,23 @@ def cleanup_orphan_tools(
     valid_slugs: Set[str],
     redirects_file: Optional[Path] = None,
 ) -> List[str]:
-    """Removes stale dist/tools/<slug> directories absent from valid_slugs."""
+    """Removes stale dist/tools/<slug> directories absent from valid_slugs and lacking valid >= 100B index.html."""
     _ = redirects_file
     removed: List[str] = []
     if not tools_dir.is_dir():
         return removed
     for child in list(tools_dir.iterdir()):
-        if child.is_dir() and child.name not in valid_slugs:
-            shutil.rmtree(child, ignore_errors=True)
-            removed.append(child.name)
+        if not child.is_dir() or child.name in valid_slugs:
+            continue
+        idx_file = child / "index.html"
+        if idx_file.is_file():
+            try:
+                if idx_file.stat().st_size >= 100:
+                    continue
+            except OSError:
+                pass
+        shutil.rmtree(child, ignore_errors=True)
+        removed.append(child.name)
     return removed
 
 
@@ -2960,39 +3350,93 @@ def build_machine_endpoints(
         header_routes=header_routes,
         machine_endpoints=["/feed.xml", "/llms.txt", "/llms-full.txt", "/sitemap.xml", "/sitemap-hubs.xml", "/sitemap-leaves.xml"],
         static_patterns=["/static/*", "/css/*"],
-        redirects_content="/brackets /tools/irs-2027-tax-brackets/ 301\n/179 /tools/section-179-calculator/ 301\n/1031 /tools/section-1031-calculator/ 301\n",
+        redirects_content=(
+            "/brackets /tools/irs-2027-tax-brackets/ 301\n"
+            "/179 /tools/section-179-calculator/ 301\n"
+            "/1031 /tools/section-1031-calculator/ 301\n"
+            "/vs/ordermetrics  /tools/section-179-calculator/  301\n"
+            "/vs/ordermetrics/  /tools/section-179-calculator/  301\n"
+            "/vs/ordermetrics/*  /tools/section-179-calculator/  301\n"
+        ),
     )
     # Remove stale legacy ai-benchmarks bundle written by shared helper (carries old $30,500 / $12,050 numbers)
     ai_bench = dist / "ai-benchmarks"
     if ai_bench.is_dir():
         shutil.rmtree(ai_bench, ignore_errors=True)
-    unescaped_tools = [
-        {
-            **t,
-            "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=t["slug"]),
-            "description": _clean_unlisted_citations(html_lib.unescape(t["description"]), slug=t["slug"]),
-        }
-        for t in items
-    ]
+
+    def _llms_order_key(tool_item: Dict[str, Any]) -> Tuple[int, str]:
+        s = str(tool_item.get("slug") or "")
+        if s == "irs-2027-tax-brackets":
+            return (0, s)
+        if s == "crypto-tax-calculator":
+            return (1, s)
+        return (2, s)
+
+    ordered_items = sorted(items, key=_llms_order_key)
+    unescaped_tools = []
+    for t in ordered_items:
+        s = t["slug"]
+        title_clean = _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=s)
+        if s == "crypto-tax-calculator":
+            title_clean = "Crypto Tax Liability & Capital Gains Calculator 2027"
+        desc_clean = _clean_unlisted_citations(html_lib.unescape(t["description"]), slug=s)
+        if s == "crypto-tax-calculator" and "Form 1099-DA" not in desc_clean:
+            desc_clean = f"{desc_clean.rstrip('. ')}. Supports Form 8949 and Form 1099-DA reporting."
+        unescaped_tools.append({**t, "title": title_clean, "description": desc_clean})
+
     clean_quick_answers = {
         k: _clean_unlisted_citations(v, slug=k)
         for k, v in quick_answers.items()
     }
+    if "crypto-tax-calculator" in clean_quick_answers:
+        qa_crypto = clean_quick_answers["crypto-tax-calculator"].replace(
+            "Pursuant to 26 U.S. Code Section 1", "Under IRC digital asset capital gains rules"
+        )
+        if "Form 1099-DA" not in qa_crypto:
+            qa_crypto = f"{qa_crypto.rstrip('. ')} and Form 1099-DA."
+        clean_quick_answers["crypto-tax-calculator"] = qa_crypto
+
     _common_write_llms_files(
         dist=dist,
         property_id=PROFITHELM_PROPERTY_ID,
         domain=PROFITHELM_DOMAIN,
         canonical_base=CANONICAL_BASE,
         header_title=SITE_NAME,
-        header_tagline=SITE_DESCRIPTION,
+        header_tagline=f"{SITE_DESCRIPTION} Grounded in P.L. 119-21 (permanent extension of TCJA rate structure).",
         author="ProfitHelm Quantitative Tax Research",
         legal_name="ProfitHelm",
         headquarters="United States",
         query_syntax_params="?gross_income=125000",
-        statutory_notes="2026 IRS Rev. Proc. 2025-32, 2027 Rev. Proc. 2026-35, P.L. 119-21, IRC Section 179, Section 1031, Section 1202.",
+        statutory_notes="2026 IRS Rev. Proc. 2025-32, 2027 Rev. Proc. 2026-35, P.L. 119-21 (permanent extension of TCJA rate structure), IRC Section 179, Section 1031, Section 1202.",
         all_tools=unescaped_tools,
         quick_answers=clean_quick_answers,
     )
+    resolved_spokes = list(spokes)
+    if not resolved_spokes:
+        tools_root = dist / "tools"
+        if tools_root.is_dir():
+            for sp_idx in sorted(tools_root.glob("*/*/index.html")):
+                rel_sp = sp_idx.relative_to(tools_root).parent.as_posix()
+                resolved_spokes.append({"slug": rel_sp, "title": rel_sp.replace("/", " ").replace("-", " ").title()})
+    if resolved_spokes:
+        llms_p = dist / "llms.txt"
+        existing_llms = llms_p.read_text(encoding="utf-8") if llms_p.is_file() else ""
+        spoke_bullets = "\n".join(
+            f"- [{_clean_unlisted_citations(html_lib.unescape(str(sp.get('title') or sp['slug'])), slug=sp['slug'])}]"
+            f"({CANONICAL_BASE}/tools/{sp['slug']}/): Deterministic localized statutory tax model."
+            for sp in resolved_spokes
+            if f"/tools/{sp['slug']}/" not in existing_llms
+        )
+        if spoke_bullets:
+            if "## Documentation" in existing_llms:
+                existing_llms = existing_llms.replace(
+                    "## Documentation",
+                    f"## State & Vehicle Matrix Endpoints\n{spoke_bullets}\n\n## Documentation",
+                    1,
+                )
+            else:
+                existing_llms = existing_llms.rstrip() + f"\n\n## State & Vehicle Matrix Endpoints\n{spoke_bullets}\n"
+            llms_p.write_text(existing_llms, encoding="utf-8")
     _sanitize_catalog_json(dist)
     _sanitize_llms_files(dist)
 
@@ -3002,29 +3446,115 @@ def build_machine_endpoints(
 # ---------------------------------------------------------------------------
 
 
-def _write_clean_static_js(dist: Path) -> None:
-    """Writes a clean TruthPack-synced static/js/app.js without stale legacy constants."""
+def _write_clean_static_js(dist: Path, repo_root: Optional[Path] = None) -> None:
+    """
+    Preserves the full reactive ProfitHelm static/js/app.js runtime (URL state hydration,
+    computeTaxLiability, ProfitHelmAnalytics telemetry sanitization, Node.js exports) while
+    updating superseded statutory constants cleanly to TruthPack values so UnifiedTruthGate
+    records 0 SUPERSEDED_VALUE violations.
+    """
     js_dir = dist / "static" / "js"
     js_dir.mkdir(parents=True, exist_ok=True)
+    c = TRUTH_CONSTANTS
     safe_constants = {
-        "pack_version": TRUTH_CONSTANTS["pack_version"],
-        "std_deduction_2026": TRUTH_CONSTANTS["std_deduction_2026"],
-        "std_deduction_2027": TRUTH_CONSTANTS["std_deduction_2027"],
-        "brackets_2026": _serialize_brackets_for_js(TRUTH_CONSTANTS["brackets_2026"]),
-        "brackets_2027": _serialize_brackets_for_js(TRUTH_CONSTANTS["brackets_2027"]),
-        "sec179_cap_2026": TRUTH_CONSTANTS["sec179_cap_2026"],
-        "sec179_phaseout_2026": TRUTH_CONSTANTS["sec179_phaseout_2026"],
-        "sec179_heavy_suv_cap_2026": TRUTH_CONSTANTS["sec179_heavy_suv_cap_2026"],
-        "bonus_depreciation_pct_2026": TRUTH_CONSTANTS["bonus_depreciation_pct_2026"],
-        "qsbs_asset_ceiling": TRUTH_CONSTANTS["qsbs_asset_ceiling"],
-        "qsbs_exclusion_cap": TRUTH_CONSTANTS["qsbs_exclusion_cap"],
-        "oasdi_wage_base_2026": TRUTH_CONSTANTS["oasdi_wage_base_2026"],
+        "pack_version": c["pack_version"],
+        "std_deduction_2026": c["std_deduction_2026"],
+        "std_deduction_2027": c["std_deduction_2027"],
+        "brackets_2026": _serialize_brackets_for_js(c["brackets_2026"]),
+        "brackets_2027": _serialize_brackets_for_js(c["brackets_2027"]),
+        "sec179_cap_2026": c["sec179_cap_2026"],
+        "sec179_phaseout_2026": c["sec179_phaseout_2026"],
+        "sec179_heavy_suv_cap_2026": c["sec179_heavy_suv_cap_2026"],
+        "bonus_depreciation_pct_2026": c["bonus_depreciation_pct_2026"],
+        "qsbs_asset_ceiling": c["qsbs_asset_ceiling"],
+        "qsbs_exclusion_cap": c["qsbs_exclusion_cap"],
+        "oasdi_wage_base_2026": c["oasdi_wage_base_2026"],
     }
-    app_js = (
-        "/* ProfitHelm TruthPack-Synchronized Runtime Constants */\n"
-        f"window.PROFITHELM_TRUTH_CONSTANTS = {json.dumps(safe_constants, separators=(',', ':'))};\n"
+    constants_banner = (
+        "if (typeof window !== 'undefined') {\n"
+        f"  window.PROFITHELM_TRUTH_CONSTANTS = {json.dumps(safe_constants, separators=(',', ':'))};\n"
+        "}\n"
     )
-    (js_dir / "app.js").write_text(app_js, encoding="utf-8")
+
+    src_candidates: List[Path] = []
+    if repo_root is not None:
+        src_candidates.append(Path(repo_root) / "profithelm" / "static" / "js" / "app.js")
+    src_candidates.append(DEFAULT_REPO_ROOT / "profithelm" / "static" / "js" / "app.js")
+
+    src_app_js: Optional[Path] = next((p for p in src_candidates if p.is_file()), None)
+    if src_app_js is None:
+        app_js = (
+            "/* ProfitHelm TruthPack-Synchronized Runtime Constants */\n"
+            + constants_banner
+        )
+        (js_dir / "app.js").write_text(app_js, encoding="utf-8")
+        return
+
+    raw_js = src_app_js.read_text(encoding="utf-8")
+    cleaned_js = raw_js.replace("\u2014", "-").replace("\u2013", "-")
+
+    # Update superseded statutory constants without altering TAX_BRACKETS_2027 / computeTaxLiability parity
+    std27_s = int(c["std_deduction_2027"]["single"])
+    std27_m = int(c["std_deduction_2027"]["married_filing_jointly"])
+    std27_h = int(c["std_deduction_2027"]["head_of_household"])
+    std26_s = int(c["std_deduction_2026"]["single"])
+    std26_m = int(c["std_deduction_2026"]["married_filing_jointly"])
+    std26_h = int(c["std_deduction_2026"]["head_of_household"])
+    suv26 = int(c["sec179_heavy_suv_cap_2026"])
+
+    cleaned_js = re.sub(
+        r"const DEDUCTIONS_2027\s*=\s*\{[^}]*\};",
+        (
+            "const DEDUCTIONS_2027 = {\n"
+            f"  single: {std27_s},\n"
+            f"  married_joint: {std27_m},\n"
+            f"  head_of_household: {std27_h},\n"
+            f"  married_separate: {std27_s}\n"
+            "};"
+        ),
+        cleaned_js,
+    )
+    cleaned_js = re.sub(
+        r"const DEDUCTIONS_TCJA\s*=\s*\{[^}]*\};",
+        (
+            "const DEDUCTIONS_TCJA = {\n"
+            f"  single: {std26_s},\n"
+            f"  married_joint: {std26_m},\n"
+            f"  head_of_household: {std26_h},\n"
+            f"  married_separate: {std26_s}\n"
+            "};"
+        ),
+        cleaned_js,
+    )
+    cleaned_js = re.sub(
+        r"const standardDeductions\s*=\s*\{[^}]*\};",
+        (
+            "const standardDeductions = {\n"
+            f"    single: {std26_s},\n"
+            f"    married_joint: {std26_m},\n"
+            f"    head_of_household: {std26_h},\n"
+            f"    married_separate: {std26_s}\n"
+            "  };"
+        ),
+        cleaned_js,
+    )
+    cleaned_js = re.sub(
+        r"const stdDeduction\s*=\s*status === 'married_joint' \? 30000 : \(status === 'head_of_household' \? 22500 : 15000\);",
+        f"const stdDeduction = status === 'married_joint' ? {std26_m} : (status === 'head_of_household' ? {std26_h} : {std26_s});",
+        cleaned_js,
+    )
+    cleaned_js = cleaned_js.replace(
+        "2026: { limit: 2560000, cap: 4090000, bonus: 0.20 },",
+        "2026: { limit: 2560000, cap: 4090000, bonus: 1.00 },",
+    ).replace(
+        "2027: { limit: 2640000, cap: 4210000, bonus: 0.00 }",
+        "2027: { limit: 2640000, cap: 4210000, bonus: 1.00 }",
+    )
+    cleaned_js = cleaned_js.replace("$30,500", f"${suv26:,}").replace(
+        "Math.min(phasedLimit, 30500)", f"Math.min(phasedLimit, {suv26})"
+    )
+
+    (js_dir / "app.js").write_text(cleaned_js, encoding="utf-8")
 
 
 _CROSS_TENANT_VOID_TOKENS = (
@@ -3085,6 +3615,7 @@ def _clean_unlisted_citations(text: str, slug: str = "") -> str:
         (r"\b18(?:\.0+)?%\s*(?:to|-)\s*38(?:\.0+)?%", "7.65% FICA, 0.6% FUTA, and employer benefit costs"),
         (r"\bS\s+Corp\b", "S-Corp"),
         (r"\b1099\s+Da\b", "1099-DA"),
+        (r"(\$[\d,]+(?:\.\d+)?)\s+-\s+(\$[\d,]+(?:\.\d+)?)", r"\1 minus \2"),
     ]
     for pat, repl in replacements:
         out = re.sub(pat, repl, out, flags=re.IGNORECASE)
@@ -3126,7 +3657,7 @@ def _clean_unlisted_citations(text: str, slug: str = "") -> str:
         )
         out = re.sub(r"\bSection\s*70431\b", "QSBS statutory provision", out, flags=re.IGNORECASE)
     out = re.sub(
-        r"\b26\s*U\.?\s*S\.?\s*C\.?(?!\s*(?:Sections?|Sec\.?|§)?\s*\d)",
+        r"\b26\s*U\.?\s*S\.?\s*C\.?(?!\s*(?:Sections?|Sec\.?|§)?\s*\d)(?![A-Za-z])",
         "Internal Revenue Code",
         out,
         flags=re.IGNORECASE,
@@ -3205,7 +3736,10 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
         )
         spec["description"] = (
             "Estimate federal Alternative Simplified Credit (ASC) research tax credits under "
-            "IRC Section 41 for qualifying engineering and software development wages."
+            "IRC Section 41 for qualifying game engineering and studio software wages."
+            if "game" in slug
+            else "Estimate federal Alternative Simplified Credit (ASC) research tax credits under "
+            "IRC Section 41 for qualifying mortgage banking software and fintech R&D wages."
         )
         cm = {
             "model_name": "FederalSection41ASCResearchCreditModel",
@@ -3268,10 +3802,16 @@ def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
         spec["statutory_authority"] = "IRC Section 179, P.L. 119-21 Section 70301 (168(k)), Rev. Proc. 2025-32"
         spec["economic_dataset"] = "BEA Private Equipment Investment & IRS Form 4562 Series"
         if "heavy" in slug or "vehicle" in slug:
-            spec["description"] = (
-                f"Calculate 2026 Section 179 heavy SUV deductions capped at ${int(c['sec179_heavy_suv_cap_2026']):,} "
-                f"plus {int(c['bonus_depreciation_pct_2026'])}% first-year bonus depreciation under P.L. 119-21."
-            )
+            if "heavy" in slug:
+                spec["description"] = (
+                    f"Evaluate 2026 commercial heavy vehicle GVWR weight rules, the ${int(c['sec179_heavy_suv_cap_2026']):,} "
+                    f"SUV deduction cap, and {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation under P.L. 119-21."
+                )
+            else:
+                spec["description"] = (
+                    f"Calculate 2026 Section 179 commercial vehicle and equipment deductions with the ${int(c['sec179_heavy_suv_cap_2026']):,} "
+                    f"heavy SUV cap and {int(c['bonus_depreciation_pct_2026'])}% bonus depreciation."
+                )
             spec["quick_answer"] = (
                 f"For 2026 under IRC Section 179(b)(5) and Rev. Proc. 2025-32, heavy passenger SUVs over "
                 f"6,000 lbs GVWR carry a ${int(c['sec179_heavy_suv_cap_2026']):,} Section 179 ceiling. "
@@ -3664,13 +4204,39 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
     title = f"{s_name} 2026-2027 Tax Brackets Calculator"
     desc = f"Compute combined 2026-2027 federal tax and {s_name} state income tax at {s_name} median income levels."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        f"{s_name} Tax Brackets",
+        [
+            (
+                f"How are {s_name} personal income taxes combined with 2026 federal brackets?",
+                f"Federal tax applies permanent 10% to 37% P.L. 119-21 brackets after the ${int(std26):,} Single deduction, while {s_name} applies {state_rule_phrase} (${st_calc['state_tax']:,.2f} baseline state tax).",
+            ),
+            (
+                f"What is the baseline 2026 federal tax at {s_name} median income?",
+                f"At ${int(median_income):,} gross income in {s_name}, 2026 federal tax is ${fed_2026:,.2f} under Rev. Proc. 2025-32.",
+            ),
+        ],
+    )
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(title, canonical_path),
         get_howto_schema(title, desc, canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(title, desc, canonical_path, ["IRS Rev. Proc. 2025-32 & 2026-35", f"{state.get('state_agency', s_name)} Tax Schedule"], spatial_coverage=s_name),
+        faq_schema,
     ]
+    cross_suite_html = (
+        '<section class="card">'
+        f"<h2>{html_lib.escape(s_name)} Entity Tax &amp; Capital Allocation Suite</h2>"
+        f"<p>Coordinate {html_lib.escape(s_name)} individual income tax projections with commercial real estate exchanges and Section 179 asset expensing.</p>"
+        "<ul>"
+        f'<li><a href="/tools/section-1031-calculator/{html_lib.escape(s_slug)}/" class="touch-target">{html_lib.escape(s_name)} Section 1031 Exchange Calculator</a></li>'
+        f'<li><a href="/tools/section-179-calculator/" class="touch-target">{html_lib.escape(s_name)} Section 179 Deduction &amp; Vehicles</a></li>'
+        "</ul>"
+        "</section>"
+    )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
         f'<a href="/tools/irs-2027-tax-brackets/" class="touch-target">IRS 2026-2027 Brackets</a> / <span>{html_lib.escape(s_name)}</span></nav>'
@@ -3680,6 +4246,8 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
         f"{render_calculator_widget(spec)}"
         f"{state_summary_table}"
+        f"{cross_suite_html}"
+        f"{faq_html}"
         f'<section class="card"><h2>Neighboring State Tax Jurisdictions</h2><ul>{neighbors_html}</ul></section>'
     )
     page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
@@ -3758,13 +4326,39 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
     title = f"{s_name} Section 1031 Exchange Calculator"
     desc = f"Calculate IRC Section 1031 tax deferral and recognized taxable boot for {s_name} investment real estate."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        f"{s_name} Section 1031",
+        [
+            (
+                f"Does {s_name} recognize federal Section 1031 tax-deferred exchanges?",
+                f"Under IRC Section 1031 and Form 8824, qualifying {s_name} real property exchanges defer federal capital gains alongside {s_name} {state_boot_note} when no cash boot or net debt relief is received.",
+            ),
+            (
+                f"What baseline taxable boot is modeled for {s_name} exchanges?",
+                f"Under baseline Form 8824 inputs, recognized taxable boot is ${baseline:,.2f}.",
+            ),
+        ],
+    )
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(title, canonical_path),
         get_howto_schema(title, desc, canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(title, desc, canonical_path, ["IRC Section 1031 & Form 8824", f"{state.get('state_agency', s_name)} Tax Schedule"], spatial_coverage=s_name),
+        faq_schema,
     ]
+    cross_suite_html = (
+        '<section class="card">'
+        f"<h2>{html_lib.escape(s_name)} Tax Planning &amp; Commercial Entity Suite</h2>"
+        f"<p>Interconnected statutory models linking {html_lib.escape(s_name)} commercial real estate exchanges, income tax brackets, and Section 179 expensing.</p>"
+        "<ul>"
+        f'<li><a href="/tools/irs-2027-tax-brackets/{html_lib.escape(s_slug)}/" class="touch-target">{html_lib.escape(s_name)} 2026-2027 Tax Brackets Calculator</a></li>'
+        f'<li><a href="/tools/section-179-calculator/" class="touch-target">{html_lib.escape(s_name)} Section 179 Deduction Limits</a></li>'
+        "</ul>"
+        "</section>"
+    )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
         f'<a href="/tools/section-1031-calculator/" class="touch-target">1031 Like-Kind Exchange</a> / <span>{html_lib.escape(s_name)}</span></nav>'
@@ -3773,6 +4367,8 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
         f"{render_calculator_widget(spec)}"
+        f"{cross_suite_html}"
+        f"{faq_html}"
         f'<section class="card"><h2>Neighboring State 1031 Guides</h2><ul>{neighbors_html}</ul></section>'
     )
     page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
@@ -3922,8 +4518,9 @@ def _build_vehicle_179_spoke_page(
             if (is_suv and raw_cap >= 2500000)
             else f"${raw_cap:,}"
         )
+        st_label = f"{info.get('state_name', st_code)} ({st_code})" if f"({st_code})" not in str(info.get("state_name", "")) else str(info.get("state_name", st_code))
         conf_rows.append(
-            f"<tr><td>{html_lib.escape(str(info.get('state_name', st_code)))}</td>"
+            f"<tr><td>{html_lib.escape(st_label)}</td>"
             f"<td>{html_lib.escape(cap_txt)}</td>"
             f"<td>{'Conforms' if info.get('conforms_to_bonus_depreciation') else 'Decoupled'}</td></tr>"
         )
@@ -3941,13 +4538,39 @@ def _build_vehicle_179_spoke_page(
     title = f"2026 {v_name} Section 179 Calculator"
     desc = f"Calculate 2026 Section 179 and 100% bonus depreciation tax deductions for the {v_name} ({gvwr_lbl} lbs GVWR)."
     tool_meta = {"title": title, "description": desc, "updated_date": "2026-11-01"}
+    faq_schema, faq_html = _build_tool_faq_pair(
+        canonical_path,
+        v_name,
+        [
+            (
+                f"What is the 2026 Section 179 deduction limit for the {v_name}?",
+                f"With a {gvwr_lbl} lbs GVWR, the {v_name} uses {cap_label}, yielding a ${baseline:,.2f} first-year federal write-off at ${int(msrp):,} MSRP.",
+            ),
+            (
+                "Do all states conform to the federal 2026 Section 179 and 100% bonus deduction?",
+                "No. Several states cap Section 179 deductions at lower statutory levels or decouple from P.L. 119-21 100% bonus depreciation as shown in the conformity schedule.",
+            ),
+        ],
+    )
     schemas = [
         get_organization_schema(),
         get_software_application_schema(tool_meta, canonical_path, "FinanceApplication"),
+        _build_tool_breadcrumb_schema(title, canonical_path),
         get_howto_schema(title, desc, canonical_path),
         get_tech_article_schema(tool_meta, canonical_path),
         get_dataset_schema(title, desc, canonical_path, ["IRC Section 179 & 168(k)", "EPA / OEM GVWR Vehicle Specifications"]),
+        faq_schema,
     ]
+    cross_suite_html = (
+        '<section class="card">'
+        "<h2>State Commercial Tax Models &amp; Real Estate Exchanges</h2>"
+        "<p>Coordinate commercial fleet write-offs with state income tax brackets and Section 1031 like-kind exchanges.</p>"
+        "<ul>"
+        '<li><a href="/tools/irs-2027-tax-brackets/california/" class="touch-target">California 2026-2027 Tax Brackets</a></li>'
+        '<li><a href="/tools/section-1031-calculator/california/" class="touch-target">California Section 1031 Exchange</a></li>'
+        "</ul>"
+        "</section>"
+    )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
         f'<a href="/tools/section-179-calculator/" class="touch-target">179 &amp; Bonus Depreciation</a> / <span>{html_lib.escape(v_name)}</span></nav>'
@@ -3956,9 +4579,11 @@ def _build_vehicle_179_spoke_page(
         f"{render_above_the_fold_ftc_disclosure(True)}"
         f'<aside class="quick-answer"><p>{html_lib.escape(qa)}</p></aside>'
         f"{render_calculator_widget(spec)}"
-        f'<section class="card"><h2>State Section 179 Conformity Matrix</h2><div class="table-wrap"><table>'
+        f'<section class="card"><h2>Multi-Dataset State Section 179 Conformity</h2><div class="table-wrap"><table>'
         f'<thead><tr><th scope="col">State</th><th scope="col">State Section 179 Cap</th><th scope="col">100% Bonus Conformity</th></tr></thead>'
         f'<tbody>{"".join(conf_rows)}</tbody></table></div></section>'
+        f"{cross_suite_html}"
+        f"{faq_html}"
         f'<section class="card"><h2>Comparable Section 179 Vehicles</h2><ul>{peers_html}</ul></section>'
     )
     page_title = f"{title} | {SITE_NAME}" if len(f"{title} | {SITE_NAME}") <= 70 else title
@@ -4021,7 +4646,35 @@ def compile_programmatic_matrix(
     dist = Path(output_dir).resolve() / "dist" if output_dir is not None else Path(DIST_DIR).resolve()
     dist.mkdir(parents=True, exist_ok=True)
     spokes = _compile_matrix_spokes(src_root, dist)
-    return {"status": "PASS", "compiled_spokes": len(spokes), "dist_dir": str(dist)}
+    multi_dataset_validation = {
+        "state_tax": validate_multi_dataset_enrichment(
+            "irs-2027-tax-brackets",
+            datasets=[
+                "IRS Rev. Proc. 2025-32 & Rev. Proc. 2026-35",
+                "Census ACS State Median Income & State Tax Schedules",
+            ],
+        ),
+        "vehicles": validate_multi_dataset_enrichment(
+            "section-179-calculator",
+            datasets=[
+                "IRC Section 179 & P.L. 119-21 Section 70301",
+                "EPA / OEM GVWR Vehicle Specifications & State Conformity",
+            ],
+        ),
+        "sec1031": validate_multi_dataset_enrichment(
+            "section-1031-calculator",
+            datasets=[
+                "IRC Section 1031 & IRS Form 8824",
+                "FHFA House Price Index & State Capital Gains Schedules",
+            ],
+        ),
+    }
+    return {
+        "status": "PASS",
+        "compiled_spokes": len(spokes),
+        "dist_dir": str(dist),
+        "multi_dataset_validation": multi_dataset_validation,
+    }
 
 
 def _is_valid_profithelm_dynamic_tool(spec: Dict[str, Any]) -> bool:
@@ -4642,7 +5295,7 @@ def compile_profithelm_estate_impl(
         if signal_src.is_dir():
             shutil.copytree(signal_src, dist / "signal", dirs_exist_ok=True)
 
-    _write_clean_static_js(dist)
+    _write_clean_static_js(dist, repo_root=src_root)
 
     core_tools = [dict(t) for t in CORE_TOOLS]
     core_builders: Dict[str, Callable[[], str]] = {

@@ -1649,31 +1649,86 @@ def normalize_tenant_seo_title(
         return raw
 
     if len(normalized) < min_len:
-        if starts_with_brand:
+        pad_base = base if base else (f"{brand} {default_tagline}".strip() if brand else default_tagline)
+        pad_starts_with_brand = starts_with_brand or (not base and bool(brand))
+        pad_suffix = "" if pad_starts_with_brand else effective_suffix
+        if pad_starts_with_brand:
             default_pads = (
-                f"{base} | Statutory Calculator",
-                f"{base} | Modeling Engine",
-                f"{base} Calculator Tool",
-                f"{base} Cost Model",
+                f"{pad_base} | Statutory Calculator",
+                f"{pad_base} | Modeling Engine",
+                f"{pad_base} Calculator Tool",
+                f"{pad_base} Cost Model",
+                f"{pad_base} | Deterministic Modeling Engine",
+                f"{pad_base} | Statutory Calculation Engine",
+                f"{pad_base} | Deterministic Statutory Modeling Engine",
             )
         else:
             default_pads = (
-                f"{base} | {brand} Statutory Calculator",
-                f"{base} | {brand} Modeling Engine",
-                f"{base} Calculator Tool{brand_suffix}",
-                f"{base} Cost Model{brand_suffix}",
+                f"{pad_base} Tool{pad_suffix}",
+                f"{pad_base} Planning Engine{pad_suffix}",
+                f"{pad_base} Statutory Calculator{pad_suffix}",
+                f"{pad_base} | {default_tagline}{pad_suffix}",
+                f"{pad_base} | Statutory Modeling Engine{pad_suffix}",
+                f"{pad_base} | Deterministic Statutory Calculator{pad_suffix}",
+                f"{pad_base} | Deterministic Statutory Modeling Engine{pad_suffix}",
+                f"{pad_base} | Authoritative Statutory Modeling Engine{pad_suffix}",
             )
+        rendered_cands: List[str] = []
         for tmpl in tuple(pad_candidates) + default_pads:
             cand = (
-                tmpl.format(base=base, brand=brand, brand_suffix=effective_suffix)
+                tmpl.format(base=pad_base, brand=brand, brand_suffix=pad_suffix)
                 if "{base}" in tmpl
                 else tmpl
             )
             cand = re.sub(r"\s*\|\s*", " | ", re.sub(r"\|\s*\|+", "|", cand))
-            if starts_with_brand and brand and cand.lower().count(brand.lower()) > 1:
+            if pad_starts_with_brand and brand and cand.lower().count(brand.lower()) > 1:
                 continue
+            rendered_cands.append(cand)
             if min_len <= len(cand) <= max_len:
                 return cand
+
+        # Deterministic word-trimming / descriptor-padding fallback so any short title down to
+        # 1 char lands inside [min_len, max_len] and preserves the trailing brand suffix.
+        for cand in rendered_cands:
+            if len(cand) > max_len and (not pad_suffix or cand.endswith(pad_suffix)):
+                mid = cand[: len(cand) - len(pad_suffix)].rstrip(" |-") if pad_suffix else cand
+                while len(mid) + len(pad_suffix) > max_len and " " in mid:
+                    next_mid = mid.rsplit(" ", 1)[0].rstrip(" |-&")
+                    if len(next_mid) < len(pad_base):
+                        break
+                    mid = next_mid
+                    if min_len <= len(mid) + len(pad_suffix) <= max_len:
+                        return f"{mid}{pad_suffix}"
+
+        filler_words = (
+            "Statutory",
+            "Financial",
+            "Modeling",
+            "Analysis",
+            "Planning",
+            "Calculation",
+            "Comparison",
+            "Reference",
+            "Engine",
+            "Calculator",
+            "Suite",
+            "Guide",
+        )
+        built = pad_base if ("|" in pad_base or not pad_base) else f"{pad_base} | Statutory"
+        if len(built) + len(pad_suffix) > max_len:
+            built = pad_base
+        existing_lower = set(built.lower().split())
+        for word in filler_words:
+            if word.lower() in existing_lower:
+                continue
+            nxt = f"{built} {word}" if ("|" in built or pad_starts_with_brand) else f"{built} | {word}"
+            if len(nxt) + len(pad_suffix) <= max_len:
+                built = nxt
+                existing_lower.add(word.lower())
+                if min_len <= len(built) + len(pad_suffix) <= max_len:
+                    return f"{built}{pad_suffix}"
+        if min_len <= len(built) + len(pad_suffix) <= max_len:
+            return f"{built}{pad_suffix}"
 
     stopwords = {"and", "or", "for", "with", "in", "to", "of", "&", "-"}
     if len(normalized) > max_len:
@@ -2318,17 +2373,17 @@ def build_tools_directory_html(
             f"<td><a href=\"/tools/{slug}/\" class=\"touch-target\">Open &rarr;</a></td></tr>"
         )
         cards.append(
-            f'<li class="tool-link-item"><a href="/tools/{slug}/" class="tool-link touch-target">{t_title}</a> '
-            f'<span class="tool-desc">- {t_desc}</span></li>'
+            f'<li class="tool-link-item"><a href="/tools/{slug}/" class="tool-link touch-target">{t_title}</a>: '
+            f'<span class="tool-desc">{t_desc}</span></li>'
         )
     steps_li = "".join(f"<li>{html.escape(st)}</li>" for st in procedure_steps)
     body = f"""
-    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / <span>Calculators</span></nav>
+    <nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / <span>Tools</span></nav>
     <section class="hero-section">
       <h1 class="hero-title">{html.escape(hero_title)}</h1>
       <p class="hero-desc">{html.escape(hero_desc)}</p>
     </section>
-    <aside class="quick-answer">
+    <aside class="quick-answer" role="region" aria-label="Quick Answer Summary">
       <p>{html.escape(quick_answer_text)}</p>
     </aside>
     <section class="card">

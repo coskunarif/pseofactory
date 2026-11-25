@@ -2539,6 +2539,7 @@ def audit_estate_accuracy(
                     tenant=tenant_norm,
                     passed=False,
                     violations=[missing_msg],
+                    gate_results={"dist_dir_exists": False},
                 ),
             )
         return {
@@ -2787,6 +2788,10 @@ def audit_estate_accuracy(
                 tenant=tenant_norm,
                 passed=False,
                 violations=violations_by_surface[first_key],
+                gate_results={
+                    "estate_accuracy": False,
+                    "truth_gate": bool(truth_gate_report.passed),
+                },
             ),
         )
 

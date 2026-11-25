@@ -457,10 +457,17 @@ def resolve_proprietary_signal_bundle(
     db_cache = _load_trend_db_cache()
     series_by_id = db_cache["series_by_id"]
 
+    is_lienbond_wc_or_emr = prop == "lienbond" and any(
+        k in s_clean for k in ("workers-comp", "emr", "class-code")
+    )
     matched_series: List[Dict[str, Any]] = []
     for sid, s_obj in series_by_id.items():
         if s_obj["property_id"] not in (prop, "shared"):
             continue
+        if is_lienbond_wc_or_emr:
+            cit_low = str(s_obj.get("statutory_citation") or "").lower()
+            if "miller" in sid.lower() or "3131" in cit_low or "3133" in cit_low or "miller" in cit_low:
+                continue
         score = 0
         if s_obj["property_id"] == prop:
             score += 2
@@ -1011,6 +1018,21 @@ def compute_multi_year_longitudinal_trajectory(
         return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
 
     if prop == "lienbond":
+        if any(k in s_low for k in ("workers-comp", "emr", "class-code")):
+            h3_title = f"Multi-Year NCCI Experience Rating Plan &amp; Workers Comp Schedule (2024 to 2030): {topic_label}"
+            summary = (
+                f"2026 NCCI Workers Compensation &amp; EMR Schedule: Under the NCCI Experience Rating Plan Manual, "
+                f"NCCI Basic Manual class codes, and state rating bureau split-point tables ($18,500 primary split), "
+                f"contractor EMR modifiers and audited premium surcharges scale across 2024-2030 underwriting cycles. {telemetry_tag}"
+            )
+            rows = [
+                ("2024 Underwriting Cycle", "NCCI Experience Rating Plan Manual ($18,000 Split)", "State Workers Comp Class Code Base Rates", "cliff-exposure-2024", "0.96 EMR / $49,920 WC"),
+                ("2025 Statutory Revision", "NCCI Experience Rating Plan Manual ($18,500 Split)", "3-Year Audited Payroll &amp; Loss Run Window", "cliff-exposure-2025", "1.00 EMR / $52,000 WC"),
+                ("2026 Active Schedule", "NCCI Basic Manual Rule 2-E Safety Credit Tier", "BLS SOII Injury Incidence Benchmark Series", "cliff-exposure-2026", "1.15 EMR / $56,810 WC"),
+                ("2027 Forward Underwriting", "Indexed State Rating Bureau Split-Point Floor", "Safety Committee 5.0% Premium Credit Cap", "cliff-exposure-2027", "0.92 EMR / $47,840 WC"),
+                ("2028-2030 Multi-Year Horizon", "Multi-State NCCI Experience Mod Convergence", "Automated Payroll Audit &amp; Loss Control Review", "cliff-exposure-2028", "0.88 EMR / $45,760 WC"),
+            ]
+            return {"h3_title": h3_title, "summary": summary, "summary_default": summary, "rows": rows}
         h3_title = f"Multi-Year Surety Bond, NCCI EMR &amp; Statutory Lien Schedule (2024 to 2030): {topic_label}"
         summary = (
             f"2026 Construction Surety &amp; Statutory Compliance Schedule: Under 40 U.S.C. Section 3131 Federal Miller Act, "
@@ -1382,6 +1404,20 @@ def compute_stateful_comparator_defaults(
         }
 
     if prop == "lienbond":
+        if any(k in s_low for k in ("workers-comp", "emr", "class-code")):
+            return {
+                "base_a": "$52,000 Manual Premium (0.95 Credit EMR)",
+                "base_b": "$52,000 Manual Premium (1.25 Debit EMR)",
+                "base_live": "$52,000 Audited Workers Comp Baseline",
+                "ret_a": "$2,600 Safety Credit &amp; Split-Point Savings",
+                "ret_b": "$0 Loss-Control Credit",
+                "ret_live": "NCCI Experience Rating Plan Manual",
+                "tax_a": "$46,930 Net Audited WC Premium",
+                "tax_b": "$65,000 Unmitigated Debit WC Premium",
+                "tax_live": "$56,810",
+                "delta_b": "+$18,070 Debit EMR Surcharge",
+                "delta_live": "NCCI Basic Manual Class Code Rate",
+            }
         return {
             "base_a": "$500,000 Preferred Treasury Circular 570 Tier",
             "base_b": "$500,000 Standard Indemnity &amp; 1.25 Debit EMR",

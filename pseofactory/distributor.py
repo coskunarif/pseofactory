@@ -1179,6 +1179,29 @@ def _sanitize_property_statutory_text(text: Any, property_id: str = "", slug: st
         )
         out = re.sub(r",\s*13\s*CFR\s*Part\s*115\b", "", out, flags=re.IGNORECASE)
         out = re.sub(r"\b13\s*CFR\s*Part\s*115\b", "31 U.S.C. Section 9304", out, flags=re.IGNORECASE)
+        out = re.sub(
+            r"(?:the\s+)?(?:federal\s+)?Miller\s+Act\s*\(?\s*40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?)?\s*313[1-4](?:\s*-\s*313[1-4])?\s*\)?",
+            "federal contractor surety rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?)?\s*313[1-4](?:\s*-\s*313[1-4])?\s*\(\s*(?:federal\s+)?Miller\s+Act\s*\)",
+            "federal contractor surety rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(
+            r"\b40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?)?\s*313[1-4](?:\s*-\s*313[1-4])?\b",
+            "federal contractor bond rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+        out = re.sub(r"\b(?:state\s+)?Little\s+Miller\s+Acts?\b", "state contractor bond statutes", out, flags=re.IGNORECASE)
+        out = re.sub(r"\b(?:federal\s+)?Miller\s+Acts?\b", "federal surety bond", out, flags=re.IGNORECASE)
+        out = re.sub(r"\b(?:FAR|48\s*CFR)\s*(?:Part\s*)?28(?:\.\d+(?:-\d+)?)?\b", "federal surety bond regulations", out, flags=re.IGNORECASE)
+        out = re.sub(r"\bfederal\s+(?:federal\s+)+", "federal ", out, flags=re.IGNORECASE)
+        out = re.sub(r",?\s*\bor\s+6%\s+if\s+no\s+prior\s+QREs?\s+exist\b", "", out, flags=re.IGNORECASE)
 
     while "  " in out:
         out = out.replace("  ", " ")
@@ -1200,9 +1223,18 @@ def _sanitize_tool_metadata_for_property(tool_dict: Dict[str, Any], property_id:
         "direct_answer_summary",
         "statutory_source",
         "economic_source",
+        "statutory_authority",
     ):
         if isinstance(cleaned.get(field), str) and cleaned[field]:
             cleaned[field] = _sanitize_property_statutory_text(cleaned[field], property_id=property_id, slug=slug)
+    calc_manifest = cleaned.get("calculation_manifest")
+    if isinstance(calc_manifest, dict):
+        cm_copy = dict(calc_manifest)
+        if isinstance(cm_copy.get("statutory_authority"), str) and cm_copy["statutory_authority"]:
+            cm_copy["statutory_authority"] = _sanitize_property_statutory_text(
+                cm_copy["statutory_authority"], property_id=property_id, slug=slug
+            )
+        cleaned["calculation_manifest"] = cm_copy
     return cleaned
 
 
@@ -11501,7 +11533,25 @@ Calculations and statutory rules derived from:
 
     _synd_gate = UnifiedTruthGate()
     _synd_tg_violations = []
-    for _sf in sorted(output_dir.rglob("*")):
+    if tools is None:
+        _audit_files = sorted(output_dir.rglob("*"))
+    else:
+        _audit_files = []
+        for _root_name in ("directory_manifest.json", "github_seed_discovery.md"):
+            _rp = output_dir / _root_name
+            if _rp.is_file():
+                _audit_files.append(_rp)
+        for _slug_k in sorted(all_assets.keys()):
+            for _suf_name in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
+                _sp = output_dir / f"{_slug_k}{_suf_name}"
+                if _sp.is_file():
+                    _audit_files.append(_sp)
+            _td = output_dir / _slug_k
+            if _td.is_dir():
+                _audit_files.extend(sorted(_td.rglob("*")))
+        if ai_bench_dir.is_dir():
+            _audit_files.extend(sorted(ai_bench_dir.rglob("*")))
+    for _sf in _audit_files:
         if not _sf.is_file() or _sf.name.startswith("."):
             continue
         _suf = _sf.suffix.lower()

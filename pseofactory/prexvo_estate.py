@@ -985,14 +985,13 @@ def normalize_seo_title(
     """Normalizes Prexvo HTML title length strictly to 50-60 chars with zero forbidden dashes."""
     clean_in = _clean_text_hygiene(title)
     pads: Tuple[str, ...] = (
-        "{base} | {brand} Student Loan Calculator",
-        "{base} | {brand} Repayment Plans",
-        "{base} | {brand} Student Loan Engine",
-        "{base} | {brand} Comparison Tool",
-        "{base} | {brand} Planning Engine",
-        "{base} | {brand} Calculator Tool",
-        "{base} | {brand} Modeling Engine",
-        "{base} Scenario & Repayment Engine",
+        "{base} Tool{brand_suffix}",
+        "{base} Planning Tool{brand_suffix}",
+        "{base} | Student Loan Tools{brand_suffix}",
+        "{base} | Title IV Repayment Engine{brand_suffix}",
+        "{base} | Student Loan Planning Engine{brand_suffix}",
+        "{base} | Federal Student Loan Repayment Engine{brand_suffix}",
+        "{base} | Deterministic Title IV Repayment Engine{brand_suffix}",
     )
     return normalize_tenant_seo_title(
         title=clean_in,
@@ -3152,44 +3151,44 @@ def _build_home_html(
           <tbody>
             <tr>
               <td class="td-plan-name">Repayment Assistance Plan (RAP)</td>
-              <td class="td-num">${benchmarks["rap"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-rap-monthly" class="td-num">${benchmarks["rap"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["rap"]["term_months"]} months ({benchmarks["rap"]["term_years"]} Years)</td>
-              <td class="td-num">${benchmarks["rap"]["total_repayment"]:.2f}</td>
+              <td id="oracle-rap-total" class="td-num">${benchmarks["rap"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["rap"]["forgiveness_amount"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">Income-Based Repayment (IBR)</td>
-              <td class="td-num">${benchmarks["ibr"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-ibr-monthly" class="td-num">${benchmarks["ibr"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["ibr"]["term_months"]} months ({benchmarks["ibr"]["term_years"]} Years)</td>
-              <td class="td-num">${benchmarks["ibr"]["total_repayment"]:.2f}</td>
+              <td id="oracle-ibr-total" class="td-num">${benchmarks["ibr"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["ibr"]["forgiveness_amount"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">Pay As You Earn (PAYE)</td>
-              <td class="td-num">${benchmarks["paye"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-paye-monthly" class="td-num">${benchmarks["paye"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["paye"]["term_years"]} Years</td>
-              <td class="td-num">${benchmarks["paye"]["total_repayment"]:.2f}</td>
+              <td id="oracle-paye-total" class="td-num">${benchmarks["paye"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["paye"]["forgiveness_amount"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">Income-Contingent Repayment (ICR)</td>
-              <td class="td-num">${benchmarks["icr"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-icr-monthly" class="td-num">${benchmarks["icr"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["icr"]["term_years"]} Years</td>
-              <td class="td-num">${benchmarks["icr"]["total_repayment"]:.2f}</td>
+              <td id="oracle-icr-total" class="td-num">${benchmarks["icr"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["icr"]["forgiveness_amount"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">Tiered Standard Repayment</td>
-              <td class="td-num">${benchmarks["tiered_standard"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-tiered-monthly" class="td-num">${benchmarks["tiered_standard"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["tiered_standard"]["term_months"]} months ({benchmarks["tiered_standard"]["term_years"]} Years)</td>
-              <td class="td-num">${benchmarks["tiered_standard"]["total_repayment"]:.2f}</td>
+              <td id="oracle-tiered-total" class="td-num">${benchmarks["tiered_standard"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["tiered_standard"]["forgiveness_amount"]:.2f}</td>
             </tr>
             <tr>
               <td class="td-plan-name">Standard 10-Year Repayment (Cap)</td>
-              <td class="td-num">${benchmarks["standard_10yr"]["monthly_payment"]:.2f}</td>
+              <td id="oracle-std10-monthly" class="td-num">${benchmarks["standard_10yr"]["monthly_payment"]:.2f}</td>
               <td>{benchmarks["standard_10yr"]["term_years"]} Years</td>
-              <td class="td-num">${benchmarks["standard_10yr"]["total_repayment"]:.2f}</td>
+              <td id="oracle-std10-total" class="td-num">${benchmarks["standard_10yr"]["total_repayment"]:.2f}</td>
               <td class="td-num">${benchmarks["standard_10yr"]["forgiveness_amount"]:.2f}</td>
             </tr>
           </tbody>

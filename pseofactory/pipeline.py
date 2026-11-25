@@ -1042,6 +1042,7 @@ class FactoryPipeline:
                         report=ContentAccuracyAuditReport(
                             passed=False,
                             violations=[f"[{v.gate}:{v.code}] {v.message}" for v in tg_report.violations],
+                            gate_results={"unified_truth_gate": False},
                             tenant=tenant,
                             slug=decision.slug,
                         ),

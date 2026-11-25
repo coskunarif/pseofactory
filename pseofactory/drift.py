@@ -500,7 +500,11 @@ def write_substrate_lock(
                     or 'class="site-header"' in norm_html
                     or 'name="viewport"' in norm_html
                 ):
-                    norm_html, _ = normalize_html_visual_primitives(norm_html)
+                    norm_html, _ = normalize_html_visual_primitives(
+                        norm_html,
+                        dist_dir=eff_dist,
+                        property_id=pid,
+                    )
                 if "/r/" in norm_html or "overlay-partner-offer" in norm_html:
                     norm_html = normalize_html_callout_message_match(norm_html, property_id=pid)
                 if norm_html != raw_html and (
@@ -515,6 +519,7 @@ def write_substrate_lock(
                         active_tools=_porc_tools,
                         known_css_vars=_porc_vars,
                         existing_hubs=_porc_hubs,
+                        dist_dir=eff_dist,
                     )
                 if norm_html != raw_html:
                     html_f.write_text(norm_html, encoding="utf-8")
