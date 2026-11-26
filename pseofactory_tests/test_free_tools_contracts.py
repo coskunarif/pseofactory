@@ -761,3 +761,47 @@ def test_batch1c_bot_taxonomy_no_disallow_r_banned_ai_artifacts_and_header_gates
     with pytest.raises(ValueError):
         assert_catalog_json_no_raw_leaks(dist / "catalog.json")
 
+
+def test_leaf_schema_blocks_bloated_types_and_enforces_csv_json_dataset(tmp_path):
+    """HowTo, SpeakableSpecification, FAQPage, and HTML-only Dataset fail on calc leaves; real .csv Dataset passes."""
+    base_head = '<!DOCTYPE html><html lang="en"><head><title>Section 179 Tool | ProfitHelm</title><script type="application/ld+json">'
+    base_tail = "</script></head><body><h1>Section 179 Tool</h1></body></html>"
+
+    for bad_type, payload in [
+        ("HowTo", '{"@context":"https://schema.org","@type":"HowTo","name":"Steps","step":[{"@type":"HowToStep","text":"Step 1"}]}'),
+        ("SpeakableSpecification", '{"@context":"https://schema.org","@type":"SpeakableSpecification","cssSelector":[".quick-answer"]}'),
+        ("FAQPage", '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Q?","acceptedAnswer":{"@type":"Answer","text":"A."}}]}'),
+        ("Dataset", '{"@context":"https://schema.org","@type":"Dataset","name":"Data","description":"Desc","distribution":[{"@type":"DataDownload","encodingFormat":"text/html","contentUrl":"https://profithelm.com/tools/calc/"}]}'),
+    ]:
+        html_doc = f"{base_head}{payload}{base_tail}"
+        issues = contracts.detect_structured_data_issues(html_doc, rel_path="tools/calc/index.html")
+        assert issues, f"Expected calculator leaf rejection for {bad_type}"
+
+    # Valid downloadable CSV Dataset in dist/ passes when file exists
+    dist = tmp_path / "dist_csv"
+    (dist / "downloads").mkdir(parents=True)
+    (dist / "downloads" / "rates-2026.csv").write_text("year,rate\n2026,0.21\n", encoding="utf-8")
+    good_ds = (
+        f"{base_head}"
+        '{"@context":"https://schema.org","@type":"Dataset","name":"2026 Rates","description":"CSV table",'
+        '"distribution":[{"@type":"DataDownload","encodingFormat":"text/csv","contentUrl":"https://profithelm.com/downloads/rates-2026.csv"}]}'
+        f"{base_tail}"
+    )
+    assert contracts.detect_structured_data_issues(good_ds, rel_path="tools/calc/index.html", dist_dir=dist) == []
+
+
+def test_organization_sameas_forbids_generic_topic_qids_and_personal_profiles():
+    """Topic Wikidata QIDs, ccfs.sos.wa.gov, and github.com/coskunarif are forbidden in Organization.sameAs."""
+    for bad_url in [
+        "https://www.wikidata.org/wiki/Q192161",
+        "https://www.wikidata.org/wiki/Q633315",
+        "https://ccfs.sos.wa.gov/",
+        "https://github.com/coskunarif/pseofactory",
+    ]:
+        with pytest.raises(ValueError):
+            contracts.assert_authoritative_same_as(
+                [bad_url],
+                entity_domain="profithelm.com",
+                require_wikidata=False,
+            )
+

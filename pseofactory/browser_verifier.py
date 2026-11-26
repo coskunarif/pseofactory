@@ -2302,6 +2302,7 @@ class UnifiedBrowserAuditor:
                     if (onTested) onTested();
                     const origIdx = ctrl.selectedIndex;
                     const beforeSearch = window.location.search || '';
+                    const beforeHash = window.location.hash || '';
                     let anyChanged = false;
                     let urlSynced = false;
                     for (let offset = 1; offset < ctrl.options.length; offset++) {
@@ -2311,7 +2312,7 @@ class UnifiedBrowserAuditor:
                             anyChanged = true;
                             break;
                         }
-                        if ((window.location.search || '') !== beforeSearch) {
+                        if ((window.location.hash || '') !== beforeHash || (window.location.search || '') !== beforeSearch) {
                             urlSynced = true;
                         }
                     }
@@ -2409,6 +2410,7 @@ class UnifiedBrowserAuditor:
             'button[data-calc-preset]',
             '.btn-preset[data-calc-preset]',
             '.serp-archetype-btn[data-calc-preset]',
+            'button.scenario-preset-btn',
             '.calc-switcher-btn[data-preset-hc]',
             '[data-preset-sec179]',
             '[data-preset-gains]',
@@ -2518,7 +2520,7 @@ class UnifiedBrowserAuditor:
             page_errors: Array.isArray(window.__pseoPageErrors) ? [...window.__pseoPageErrors] : [],
             links_audit: { total_links: 0, internal_links: 0, affiliate_links: 0, invalid_links: [], unrouted_affiliate_links: [], internal_hrefs: [], affiliate_hrefs: [] },
             focus_and_keyboard_navigation: { tested: true, passed: true, focusable_count: 0, zero_outline_failures: [], positive_tabindex_traps: [], skip_link_valid: true, details_accordions_toggled: 0, accordion_failures: [] },
-            deep_link_hydration: { tested: false, passed: true, detail: '', url_sync_tested: false, url_sync_passed: true, reload_probe_url: '', reload_selector: '', reload_expected_value: '' },
+            deep_link_hydration: { tested: false, passed: true, detail: '', url_sync_tested: false, url_sync_passed: true, history_length_preserved: true, zero_crawlable_preset_links: true, crawlable_preset_links_count: 0, reload_probe_url: '', reload_selector: '', reload_expected_value: '', reload_expected_output: '' },
             calculator_and_presets: { tested: false, passed: true, before_snapshot: '', after_snapshot: '', preset_clicked: false, inputs_tested_count: 0, input_failures: [], buttons_tested_count: 0, button_failures: [] },
             cliff_visualizer: { present: false, passed: true, before_values: [], after_values: [] },
             scenario_comparator: { present: false, passed: true, pinned_a: '', pinned_b: '', live_delta: '' },
@@ -2702,7 +2704,14 @@ class UnifiedBrowserAuditor:
             (focusCandidates.length === 0 || report.focus_and_keyboard_navigation.focusable_count > 0)
         );
 
-        // 2. B2: Real input -> URL query param update + popstate hydration + reload probe (run before bulk control stress so Chromium replaceState flood guard is untouched)
+        // 2. B2: Real input -> URL hash-fragment (#k=v) update + zero pushState + zero crawlable ?preset links + reload probe
+        const crawlablePresetLinks = Array.from(document.querySelectorAll('a.scenario-preset-link[href*="?"], a[data-preset][href*="?"], .scenario-presets-bar a[href*="?"]'));
+        report.deep_link_hydration.zero_crawlable_preset_links = crawlablePresetLinks.length === 0;
+        report.deep_link_hydration.crawlable_preset_links_count = crawlablePresetLinks.length;
+        if (crawlablePresetLinks.length > 0) {
+            report.deep_link_hydration.passed = false;
+            report.deep_link_hydration.detail = 'crawlable_preset_links=' + crawlablePresetLinks.length;
+        }
         const primaryInp = document.querySelector('#field-gross_income, #tax-income, #sec179-cost, #sec1031-sale-price, #crypto-short-term, #runway-cash, #tey-principal, #cg-amount, #arb-yes-cents, #pm-tax-gain, #input-agi, #field-loan_balance, input[type="number"]:not([readonly]):not(.serp-sub-input)');
         if (primaryInp) {
             const origVal = primaryInp.value;
@@ -2714,6 +2723,7 @@ class UnifiedBrowserAuditor:
             const rawKey = (primaryInp.name || primaryInp.id || 'amount').replace(/^field-/, '').replace(/^input-/, '').replace(/^calc-input-/, '');
             const hydratedNum = Math.min(maxNum, Math.max(minNum + 5, Math.round(curNum * 1.25 + 120)));
             const origUrl = window.location.pathname + window.location.search + window.location.hash;
+            const beforeHistoryLen = (window.history && typeof window.history.length === 'number') ? window.history.length : 0;
             const isFullShellCalc = Boolean(
                 document.querySelector('link#pseo-visual-primitives') &&
                 primaryInp.id &&
@@ -2726,23 +2736,40 @@ class UnifiedBrowserAuditor:
                 primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
                 primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
                 const postSearch = String(window.location.search || '');
-                const urlUpdated = postSearch.includes(String(hydratedNum));
+                const postHash = String(window.location.hash || '');
+                const hashUpdated = postHash.startsWith('#') && postHash.includes(String(hydratedNum));
+                const searchClean = postSearch === '';
+                const urlUpdated = hashUpdated && searchClean;
+                const afterInputHistLen = (window.history && typeof window.history.length === 'number') ? window.history.length : 0;
+                const histPreserved = afterInputHistLen <= beforeHistoryLen;
                 report.deep_link_hydration.url_sync_passed = urlUpdated;
+                report.deep_link_hydration.history_length_preserved = histPreserved;
                 if (urlUpdated) {
-                    report.deep_link_hydration.reload_probe_url = window.location.pathname + postSearch;
+                    report.deep_link_hydration.reload_probe_url = window.location.pathname + postHash;
                     report.deep_link_hydration.reload_selector = '#' + CSS.escape(primaryInp.id);
                     report.deep_link_hydration.reload_expected_value = String(hydratedNum);
+                    report.deep_link_hydration.reload_expected_output = snapshotOutputs();
                 }
             }
-            window.history.replaceState(null, '', window.location.pathname + '?' + encodeURIComponent(rawKey) + '=' + encodeURIComponent(String(hydratedNum)));
+            window.history.replaceState(null, '', window.location.pathname + '#' + encodeURIComponent(rawKey) + '=' + encodeURIComponent(String(hydratedNum)));
+            try {
+                window.dispatchEvent(new HashChangeEvent('hashchange'));
+            } catch (hcErr) {}
             window.dispatchEvent(new PopStateEvent('popstate'));
             if (typeof window.__pseoHydrateFromUrl === 'function') {
                 window.__pseoHydrateFromUrl();
             }
             report.deep_link_hydration.tested = true;
             const popOk = String(primaryInp.value) === String(hydratedNum);
-            report.deep_link_hydration.passed = popOk && report.deep_link_hydration.url_sync_passed;
-            report.deep_link_hydration.detail = 'key=' + rawKey + ', expected=' + hydratedNum + ', actual=' + primaryInp.value + ', url_sync=' + String(report.deep_link_hydration.url_sync_passed);
+            const afterPopHistLen = (window.history && typeof window.history.length === 'number') ? window.history.length : 0;
+            report.deep_link_hydration.history_length_preserved = report.deep_link_hydration.history_length_preserved && (afterPopHistLen <= beforeHistoryLen);
+            report.deep_link_hydration.passed = (
+                popOk &&
+                report.deep_link_hydration.url_sync_passed &&
+                report.deep_link_hydration.history_length_preserved &&
+                report.deep_link_hydration.zero_crawlable_preset_links
+            );
+            report.deep_link_hydration.detail = 'key=' + rawKey + ', expected=' + hydratedNum + ', actual=' + primaryInp.value + ', hash_sync=' + String(report.deep_link_hydration.url_sync_passed) + ', hist_ok=' + String(report.deep_link_hydration.history_length_preserved) + ', crawlable_presets=' + String(crawlablePresetLinks.length);
             primaryInp.value = origVal;
             primaryInp.dispatchEvent(new Event('input', { bubbles: true }));
             primaryInp.dispatchEvent(new Event('change', { bubbles: true }));
@@ -2772,6 +2799,7 @@ class UnifiedBrowserAuditor:
             'button[data-calc-preset]',
             '.btn-preset[data-calc-preset]',
             '.serp-archetype-btn[data-calc-preset]',
+            'button.scenario-preset-btn',
             '.calc-switcher-btn[data-preset-hc]',
             '[data-preset-sec179]',
             '[data-preset-gains]',
@@ -5010,27 +5038,67 @@ class UnifiedBrowserAuditor:
             raw_e2e = await self._eval_js(ws, self._build_e2e_interactive_with_settle_js(), msg_id=msg_counter[0])
             e2e_rep = self._postprocess_interactive_report(base_url, route, raw_e2e)
 
-            # B2: Verify real browser page reload preserves URL-synced calculator state
+            # B2: Verify real browser page reload with #hash preserves URL-synced calculator inputs & computed outputs
             dlh = e2e_rep.get("deep_link_hydration") if isinstance(e2e_rep, dict) else None
             if isinstance(dlh, dict) and dlh.get("reload_probe_url") and dlh.get("reload_selector"):
                 reload_url = str(dlh["reload_probe_url"])
                 reload_sel_json = json.dumps(str(dlh["reload_selector"]))
                 reload_exp = str(dlh.get("reload_expected_value") or "")
+                reload_exp_out = str(dlh.get("reload_expected_output") or "")
+                if "#" in reload_url:
+                    msg_counter[0] += 1
+                    await self._send_cdp(ws, "Page.navigate", {"url": "about:blank"}, msg_id=msg_counter[0])
+                    await asyncio.sleep(0.05)
                 r_ok, _r_err = await self._navigate_and_wait_ready(ws, base_url, reload_url, msg_counter)
                 if r_ok:
                     msg_counter[0] += 1
-                    actual_after_reload = await self._eval_js(
+                    reload_snap = await self._eval_js(
                         ws,
-                        f"(() => {{ const el = document.querySelector({reload_sel_json}); return el ? String(el.value) : null; }})()",
+                        f"""(() => {{
+                            const el = document.querySelector({reload_sel_json});
+                            const outSel = '.output-value, .calc-metric-value, .metric-value, .metric-val, [id^="val-"], [id^="res-"], [id*="-res-"], [id^="metric-"], #serp-out-primary, #serp-out-secondary, #serp-out-tertiary, #serp-out-quaternary';
+                            const isVis = (n) => {{
+                                if (!n || n.nodeType !== 1) return false;
+                                if (typeof n.checkVisibility === 'function') return n.checkVisibility({{ checkOpacity: true, checkVisibilityCSS: true }}) && n.getClientRects().length > 0;
+                                const cs = window.getComputedStyle(n);
+                                return cs.display !== 'none' && cs.visibility !== 'hidden' && n.getClientRects().length > 0;
+                            }};
+                            const visTxt = (n) => {{
+                                if (n.children.length === 0) return (n.textContent || '').trim();
+                                const parts = [];
+                                const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT, {{
+                                    acceptNode: t => {{
+                                        const p = t.parentElement;
+                                        if (!p) return NodeFilter.FILTER_REJECT;
+                                        const tg = p.tagName.toLowerCase();
+                                        if (tg === 'script' || tg === 'style' || tg === 'noscript') return NodeFilter.FILTER_REJECT;
+                                        const pcs = window.getComputedStyle(p);
+                                        return (pcs.display === 'none' || pcs.visibility === 'hidden') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+                                    }}
+                                }});
+                                while (w.nextNode()) {{
+                                    const s = (w.currentNode.nodeValue || '').trim();
+                                    if (s) parts.push(s);
+                                }}
+                                return parts.join(' ');
+                            }};
+                            const outs = Array.from(document.querySelectorAll(outSel)).filter(isVis).map(visTxt).join('|');
+                            return {{ val: el ? String(el.value) : null, out: outs }};
+                        }})()""",
                         msg_id=msg_counter[0],
                     )
-                    reload_matched = str(actual_after_reload) == reload_exp
+                    actual_after_reload = reload_snap.get("val") if isinstance(reload_snap, dict) else None
+                    actual_out_after_reload = str(reload_snap.get("out") or "") if isinstance(reload_snap, dict) else ""
+                    val_matched = str(actual_after_reload) == reload_exp
+                    out_matched = (not reload_exp_out) or (actual_out_after_reload == reload_exp_out)
+                    reload_matched = val_matched and out_matched
                     dlh["reload_persisted"] = reload_matched
                     dlh["reload_actual_value"] = actual_after_reload
+                    dlh["reload_output_persisted"] = out_matched
                     if not reload_matched:
                         dlh["passed"] = False
                         e2e_rep["passed"] = False
-                        dlh["detail"] = f"{dlh.get('detail', '')}, reload_persisted=false (expected={reload_exp}, actual={actual_after_reload})"
+                        dlh["detail"] = f"{dlh.get('detail', '')}, reload_persisted={reload_matched} (val_exp={reload_exp}, val_act={actual_after_reload}, out_ok={out_matched})"
 
             defects["interactive_surface"] = e2e_rep
             if not e2e_rep.get("passed", False):

@@ -11129,7 +11129,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
 
         ov_slug_q = f"{overlay_data.get('slug') or ''} {overlay_data.get('query') or ''} {canon_url_ov}".strip()
         if (
-            detect_sentence_truncation_issues(meta_desc)
+            len(meta_desc) < 70
+            or len(meta_desc) > 160
+            or detect_sentence_truncation_issues(meta_desc)
             or re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", meta_desc, re.IGNORECASE)
             or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b|\bclawb\.", meta_desc, re.IGNORECASE)
             or (

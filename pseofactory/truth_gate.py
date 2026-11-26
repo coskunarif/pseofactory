@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import time
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple, Union
+import urllib.parse
 
 
 # ---------------------------------------------------------------------------
@@ -3397,6 +3398,66 @@ def _extract_offer_prices(node: Any, prices: List[Tuple[float, str]]) -> None:
             _extract_offer_prices(item, prices)
 
 
+def _is_official_primary_source_href(href: str) -> bool:
+    """Returns True when href points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org URL."""
+    raw = str(href or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return False
+    try:
+        host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    if host.endswith(".gov") or host.endswith(".mil"):
+        return True
+    if host == "eur-lex.europa.eu" or host.endswith(".eur-lex.europa.eu"):
+        return True
+    if host == "pcisecuritystandards.org" or host.endswith(".pcisecuritystandards.org"):
+        return True
+    return False
+
+
+def _check_enacted_law_primary_source_links(
+    dom: _PageDOMExtractor,
+    pack_dict: Dict[str, Any],
+    file_path: str,
+    slug: str,
+    is_tool_page: bool,
+) -> List[TruthViolation]:
+    """Fail-closed check: enacted-law calculator pages must include >= 1 outbound official primary-source link."""
+    if not is_tool_page:
+        return []
+    enacted_applicable = [
+        entry
+        for _k, entry in _normalize_entries(pack_dict)
+        if str(entry.get("claim_class") or "").strip().lower() == "enacted_law"
+        and _entry_applies_to_file(entry, file_path, slug=slug)
+    ]
+    if not enacted_applicable:
+        return []
+    has_official_link = any(
+        _is_official_primary_source_href(el.get("attrs", {}).get("href", ""))
+        for el in dom.elements
+        if el.get("tag") == "a"
+    )
+    if has_official_link:
+        return []
+    return [
+        TruthViolation(
+            gate="GATE_PROVENANCE",
+            severity="ERROR",
+            file_path=file_path,
+            code="MISSING_PRIMARY_SOURCE_LINK",
+            message=(
+                f"Enacted-law calculator page '{slug or file_path}' has 0 outbound official "
+                ".gov / eur-lex.europa.eu / pcisecuritystandards.org primary-source links"
+            ),
+            excerpt=slug or file_path,
+        )
+    ]
+
+
 def _check_jsonld(
     dom: _PageDOMExtractor,
     pack_dict: Dict[str, Any],
@@ -3752,8 +3813,17 @@ class UnifiedTruthGate:
         # Gate 3 (continued): Zero-ungrounded-stat check (uses manifest formula/inputs when present)
         violations.extend(_check_ungrounded_stats(visible_text, pack_dict, manifest_data, file_path, slug=eff_slug))
 
-        # Gate 7: JSON-LD validation & pricing parity
+        # Gate 7: JSON-LD validation & pricing parity + outbound official primary-source provenance
         violations.extend(_check_jsonld(dom, pack_dict, file_path))
+        violations.extend(
+            _check_enacted_law_primary_source_links(
+                dom=dom,
+                pack_dict=pack_dict,
+                file_path=file_path,
+                slug=eff_slug,
+                is_tool_page=tool_flag,
+            )
+        )
 
         # Sidecar manifest parity check if this is tools/<slug>/index.html inside dist_dir
         if dist_dir is not None and eff_slug and "/" not in eff_slug:

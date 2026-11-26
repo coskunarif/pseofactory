@@ -87,17 +87,15 @@ def compiled_lienbond_baseline(tmp_path_factory: pytest.TempPathFactory):
 
 
 def test_domain_registration_availability_verification() -> None:
-    """Verifies that lienbond.com is available while insurebond.com is registered."""
+    """Verifies that lienbond.com is available while insurebond.com is blocked for head-term overlap."""
     avail_res = verify_domain_registration_availability("lienbond.com", probe_live=False)
     assert avail_res["domain"] == "lienbond.com"
     assert avail_res["available"] is True
     assert avail_res["status"] == "AVAILABLE"
     assert avail_res["cloudflare_wholesale_price_usd"] == 10.46
 
-    reg_res = verify_domain_registration_availability("insurebond.com", probe_live=False)
-    assert reg_res["domain"] == "insurebond.com"
-    assert reg_res["available"] is False
-    assert reg_res["status"] == "REGISTERED"
+    with pytest.raises(ValueError, match="overlaps head term"):
+        verify_domain_registration_availability("insurebond.com", probe_live=False)
 
     candidates = evaluate_greenfield_tenant_candidates()
     surety_eval = next(c for c in candidates if c.vertical_id == "commercial_surety_insurance")
@@ -403,8 +401,8 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
     )
     html = res["html"]
     scripts = re.findall(r"<script(?:\s+[^>]*)?>(.*?)</script>", html, flags=re.DOTALL | re.IGNORECASE)
-    calc_scripts = [s for s in scripts if "updateQueryParams" in s and "handleRecompute" in s]
-    assert calc_scripts, "Expected compiled inline calculator script with updateQueryParams"
+    calc_scripts = [s for s in scripts if "updateHashParams" in s and "handleRecompute" in s]
+    assert calc_scripts, "Expected compiled inline calculator script with updateHashParams"
     calc_js = calc_scripts[-1]
 
     node_harness = (
@@ -425,14 +423,15 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
         "  setTimeout: (fn, ms) => { const id = scheduled.length + 1; scheduled.push({ id, fn, ms, cleared: false }); return id; },\n"
         "  clearTimeout: (id) => { const item = scheduled.find((x) => x.id === id); if (item) item.cleared = true; },\n"
         "  window: {\n"
-        "    location: { href: 'https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/', search: '' },\n"
-        "    history: { replaceState: (_s, _t, u) => { replaceCalls.push(u); sandbox.window.location.href = u; sandbox.window.location.search = new URL(u).search; } },\n"
+        "    location: { href: 'https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/', search: '', hash: '' },\n"
+        "    history: { replaceState: (_s, _t, u) => { replaceCalls.push(u); sandbox.window.location.href = u; sandbox.window.location.hash = new URL(u).hash; } },\n"
         "    addEventListener: () => {},\n"
         "  },\n"
         "  document: {\n"
         "    readyState: 'complete',\n"
         "    getElementById: (id) => (id.endsWith('-calculator') ? form : null),\n"
         "    querySelector: (sel) => (sel === '.output-value' ? outputElem : null),\n"
+        "    querySelectorAll: () => [],\n"
         "    addEventListener: () => {},\n"
         "  },\n"
         "};\n"
@@ -450,7 +449,7 @@ def test_compiled_calculator_submit_flushes_query_params_synchronously() -> None
     assert out["preSubmitSyncCalls"] == 0
     assert out["allCleared"] is True
     assert len(out["postSubmitCalls"]) == 1
-    assert "bond_amount=99000" in out["postSubmitCalls"][0]
+    assert "#bond_amount=99000" in out["postSubmitCalls"][0]
 
 
 @pytest.mark.host_estate

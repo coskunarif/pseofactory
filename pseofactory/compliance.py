@@ -6,6 +6,7 @@ search essentials, and spam prevention policies across programmatic calculation 
 Zero em-dashes. Zero en-dashes.
 """
 
+import hashlib
 import html as html_lib
 import json
 import re
@@ -13,7 +14,7 @@ import subprocess
 from enum import Enum
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional, Tuple, Callable, Union
+from typing import List, Dict, Any, Optional, Tuple, Callable, Union, Sequence
 
 from bs4 import BeautifulSoup
 
@@ -355,10 +356,8 @@ class GoogleSearchCentralComplianceMatrix:
         )
         try:
             jsonld_blocks = assert_valid_jsonld(html, context=f"ComplianceMatrix '{slug}'")
-            has_faq = False
             for b in jsonld_blocks:
                 if b.get("@type") == "FAQPage":
-                    has_faq = True
                     main_entity = b.get("mainEntity", [])
                     if not main_entity:
                         spam03_violations.append("FAQPage JSON-LD schema has empty mainEntity")
@@ -396,8 +395,8 @@ class GoogleSearchCentralComplianceMatrix:
                         spam03_violations.append(
                             "FAQPage schema exists but 0 visible <details class=\"faq-accordion\"> elements rendered"
                         )
-            if not has_faq:
-                spam03_violations.append("Missing required FAQPage structured data block")
+            if not jsonld_blocks:
+                spam03_violations.append("Missing required JSON-LD structured data block")
         except Exception as ex:
             spam03_violations.append(f"Structured data validation error: {ex}")
 
@@ -730,3 +729,278 @@ class GoogleSearchCentralComplianceMatrix:
 
         # 4. Strict numerical parity within 0.01 tolerance
         return abs(py_result - js_result) <= 0.01
+
+    def audit_sibling_programmatic_uniqueness(
+        self,
+        siblings: Sequence[Any],
+        *,
+        min_hamming_distance: int = 7,
+        max_shingle_overlap: float = 0.55,
+        fail_closed: bool = False,
+    ) -> Dict[str, Any]:
+        """Delegates to module-level audit_sibling_programmatic_uniqueness cohort checker."""
+        return audit_sibling_programmatic_uniqueness(
+            siblings,
+            min_hamming_distance=min_hamming_distance,
+            max_shingle_overlap=max_shingle_overlap,
+            fail_closed=fail_closed,
+        )
+
+
+def _extract_visible_text(html_or_text: str) -> str:
+    """Extracts visible body text when given HTML, or returns plain text unchanged."""
+    raw = str(html_or_text or "")
+    if "<" in raw and ">" in raw:
+        soup = BeautifulSoup(raw, "html.parser")
+        body = soup.find("body") or soup
+        for tag in body(["script", "style", "noscript", "svg"]):
+            tag.decompose()
+        return body.get_text(separator=" ")
+    return raw
+
+
+def _delete_modifier_tokens(html_or_text: str, modifier: str) -> List[str]:
+    """
+    Strips the target modifier (e.g. state name or vehicle model) from visible text
+    and returns the remaining ordered alphanumeric token stream for shingle overlap checks.
+    """
+    visible = _extract_visible_text(html_or_text)
+    norm_text = re.sub(r"[-_]+", " ", visible.lower())
+    mod_clean = re.sub(r"[-_]+", " ", str(modifier or "").lower()).strip()
+    if mod_clean:
+        norm_text = re.sub(rf"\b{re.escape(mod_clean)}\b", " ", norm_text)
+        mod_parts = re.findall(r"\b[a-z0-9]+\b", mod_clean)
+        for part in mod_parts:
+            if len(part) >= 3 or len(mod_parts) == 1:
+                norm_text = re.sub(rf"\b{re.escape(part)}\b", " ", norm_text)
+    return re.findall(r"\b[a-z0-9]+\b", norm_text)
+
+
+def compute_simhash64(text: str) -> int:
+    """
+    Computes a deterministic 64-bit SimHash fingerprint over unigrams and 3-word shingles
+    using blake2b-64 (independent of PYTHONHASHSEED).
+    Zero em-dashes. Zero en-dashes.
+    """
+    visible = _extract_visible_text(text)
+    tokens = re.findall(r"\b[a-z0-9]+\b", visible.lower())
+    if not tokens:
+        return 0
+
+    features: List[Tuple[str, int]] = [(f"u:{tok}", 1) for tok in tokens]
+    if len(tokens) >= 3:
+        for i in range(len(tokens) - 2):
+            features.append((f"s3:{tokens[i]}_{tokens[i + 1]}_{tokens[i + 2]}", 2))
+
+    bit_weights = [0] * 64
+    for feat, weight in features:
+        digest = hashlib.blake2b(feat.encode("utf-8"), digest_size=8).digest()
+        h_val = int.from_bytes(digest, "big")
+        for bit_idx in range(64):
+            if (h_val >> bit_idx) & 1:
+                bit_weights[bit_idx] += weight
+            else:
+                bit_weights[bit_idx] -= weight
+
+    fingerprint = 0
+    for bit_idx in range(64):
+        if bit_weights[bit_idx] > 0:
+            fingerprint |= 1 << bit_idx
+    return fingerprint
+
+
+def simhash_hamming_distance(a: int, b: int) -> int:
+    """Returns bitwise Hamming distance between two 64-bit SimHash integers."""
+    return (int(a) ^ int(b)).bit_count()
+
+
+def compute_delete_modifier_shingle_overlap(
+    html_a: str,
+    html_b: str,
+    modifier_a: str,
+    modifier_b: str,
+    shingle_size: int = 5,
+) -> float:
+    """
+    Computes ordered k-shingle Jaccard overlap between two HTML documents after
+    deleting each page's target modifier (Delete-the-Modifier doorway test).
+    Returns a float in [0.0, 1.0].
+    Zero em-dashes. Zero en-dashes.
+    """
+    tokens_a = _delete_modifier_tokens(html_a, modifier_a)
+    tokens_b = _delete_modifier_tokens(html_b, modifier_b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+
+    k = max(1, min(int(shingle_size), len(tokens_a), len(tokens_b)))
+    shingles_a = {tuple(tokens_a[i : i + k]) for i in range(len(tokens_a) - k + 1)}
+    shingles_b = {tuple(tokens_b[i : i + k]) for i in range(len(tokens_b) - k + 1)}
+    union = shingles_a | shingles_b
+    if not union:
+        return 0.0
+    return round(len(shingles_a & shingles_b) / float(len(union)), 4)
+
+
+def _normalize_sibling_entry(entry: Any, idx: int) -> Dict[str, Any]:
+    """Normalizes dict or (slug, html, spec) sibling entries for cohort uniqueness auditing."""
+    if isinstance(entry, (tuple, list)) and len(entry) >= 2:
+        slug = str(entry[0] or f"sibling-{idx}")
+        html = str(entry[1] or "")
+        spec = dict(entry[2]) if len(entry) >= 3 and isinstance(entry[2], dict) else {}
+    elif isinstance(entry, dict):
+        spec = dict(entry)
+        slug = str(spec.get("slug") or spec.get("url") or f"sibling-{idx}")
+        html = str(spec.get("html") or spec.get("body_html") or spec.get("text") or spec.get("body_text") or "")
+    else:
+        raise ValueError(f"Unsupported sibling entry type: {type(entry).__name__}")
+
+    manifest = spec.get("calculation_manifest") if isinstance(spec.get("calculation_manifest"), dict) else {}
+    modifier = str(
+        spec.get("modifier")
+        or spec.get("state")
+        or spec.get("jurisdiction")
+        or spec.get("vehicle")
+        or slug.strip("/").split("/")[-1].replace("-", " ")
+    ).strip()
+    raw_formula = str(spec.get("formula") or manifest.get("formula") or "")
+    norm_formula = re.sub(r"\s+", "", raw_formula.lower())
+
+    raw_inputs = spec.get("inputs") if spec.get("inputs") is not None else manifest.get("inputs")
+    if isinstance(raw_inputs, dict):
+        norm_inputs = json.dumps(
+            {str(k).strip().lower(): raw_inputs[k] for k in sorted(raw_inputs.keys())},
+            sort_keys=True,
+            default=str,
+        )
+    elif isinstance(raw_inputs, (list, tuple, set)):
+        norm_inputs = json.dumps(sorted(str(x).strip().lower() for x in raw_inputs))
+    else:
+        norm_inputs = ""
+
+    raw_consts = None
+    for ckey in (
+        "jurisdiction_constants",
+        "entity_constants",
+        "statutory_constants",
+        "state_constants",
+        "constants",
+    ):
+        val = spec.get(ckey) if spec.get(ckey) is not None else manifest.get(ckey)
+        if val:
+            raw_consts = val
+            break
+    if isinstance(raw_consts, dict):
+        norm_consts = json.dumps(raw_consts, sort_keys=True, default=str)
+    elif raw_consts:
+        norm_consts = str(raw_consts).strip()
+    else:
+        norm_consts = ""
+
+    return {
+        "slug": slug,
+        "html": html,
+        "modifier": modifier,
+        "norm_formula": norm_formula,
+        "norm_inputs": norm_inputs,
+        "norm_constants": norm_consts,
+        "simhash64": compute_simhash64(html),
+    }
+
+
+def audit_sibling_programmatic_uniqueness(
+    siblings: Sequence[Any],
+    *,
+    min_hamming_distance: int = 7,
+    max_shingle_overlap: float = 0.55,
+    fail_closed: bool = False,
+) -> Dict[str, Any]:
+    """
+    Fail-closed programmatic sibling uniqueness cohort gate.
+    For every sibling pair (A, B), requires:
+      1. SimHash64 Hamming distance > 6 (default min_hamming_distance=7)
+      2. Delete-the-Modifier ordered shingle overlap < 0.55
+      3. Identical formula + inputs are rejected unless distinct jurisdiction/entity constants exist.
+    Zero em-dashes. Zero en-dashes.
+    """
+    items = [_normalize_sibling_entry(s, i) for i, s in enumerate(siblings or [])]
+    if len(items) < 2:
+        return {
+            "overall_pass": True,
+            "passed": True,
+            "status": "PASS",
+            "sibling_count": len(items),
+            "min_hamming_distance_observed": 64 if items else 0,
+            "max_shingle_overlap_observed": 0.0,
+            "violations": [],
+            "pair_audits": [],
+        }
+
+    violations: List[str] = []
+    pair_audits: List[Dict[str, Any]] = []
+    min_obs_hamming = 64
+    max_obs_overlap = 0.0
+
+    for i in range(len(items)):
+        a = items[i]
+        for j in range(i + 1, len(items)):
+            b = items[j]
+            pair_reasons: List[str] = []
+            if not a["html"].strip() or not b["html"].strip():
+                pair_reasons.append("empty_html_content")
+                hamming = 0
+                overlap = 1.0
+            else:
+                hamming = simhash_hamming_distance(a["simhash64"], b["simhash64"])
+                overlap = compute_delete_modifier_shingle_overlap(
+                    a["html"],
+                    b["html"],
+                    a["modifier"],
+                    b["modifier"],
+                )
+                if hamming < min_hamming_distance:
+                    pair_reasons.append(f"simhash_hamming_too_close ({hamming} <= 6)")
+                if overlap >= max_shingle_overlap:
+                    pair_reasons.append(f"delete_modifier_shingle_overlap_too_high ({overlap:.4f} >= {max_shingle_overlap})")
+
+            if (
+                a["norm_formula"]
+                and a["norm_formula"] == b["norm_formula"]
+                and a["norm_inputs"] == b["norm_inputs"]
+            ):
+                if not a["norm_constants"] or not b["norm_constants"] or a["norm_constants"] == b["norm_constants"]:
+                    pair_reasons.append("identical_formula_inputs_without_distinct_jurisdiction_or_entity_constants")
+
+            min_obs_hamming = min(min_obs_hamming, hamming)
+            max_obs_overlap = max(max_obs_overlap, overlap)
+
+            pair_passed = len(pair_reasons) == 0
+            if not pair_passed:
+                violations.append(
+                    f"Sibling pair '{a['slug']}' vs '{b['slug']}' failed uniqueness gate: {', '.join(pair_reasons)}"
+                )
+
+            pair_audits.append(
+                {
+                    "slug_a": a["slug"],
+                    "slug_b": b["slug"],
+                    "hamming_distance": hamming,
+                    "delete_modifier_shingle_overlap": overlap,
+                    "passed": pair_passed,
+                    "reasons": pair_reasons,
+                }
+            )
+
+    passed = len(violations) == 0
+    if fail_closed and not passed:
+        raise ValueError(violations[0])
+
+    return {
+        "overall_pass": passed,
+        "passed": passed,
+        "status": "PASS" if passed else "FAIL",
+        "sibling_count": len(items),
+        "min_hamming_distance_observed": min_obs_hamming,
+        "max_shingle_overlap_observed": round(max_obs_overlap, 4),
+        "violations": violations,
+        "pair_audits": pair_audits,
+    }

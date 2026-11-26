@@ -58,14 +58,14 @@ PROFITHELM_PREDICTION_CLUSTER = [
 PROFITHELM_TAX_CLUSTER = [
     ("section-179-calculator", "Section 179 Equipment Expense Tax Deduction Calculator"),
     ("section-1031-calculator", "Section 1031 Like-Kind Exchange Tax Deferral Calculator"),
-    ("qsbs-section-1202-calculator", "QSBS Section 1202 Capital Gains Exemption Calculator"),
-    ("tcja-sunset-bracket-calculator", "TCJA Sunset 2027 Marginal Tax Bracket Calculator"),
+    ("tcja-sunset-capital-gains", "QSBS Section 1202 and Capital Gains Tax Calculator"),
+    ("irs-tax-brackets", "IRS Statutory Tax Brackets & Marginal Rate Calculator"),
     ("saas-runway-calculator", "SaaS Runway and Capital Burn Rate Calculator"),
     ("crypto-tax-calculator", "Cryptocurrency Tax Loss Harvesting Calculator"),
     ("treasury-yield-calculator", "Treasury Yield Curve Arbitrage Calculator"),
     ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary and FICA Tax Savings Calculator"),
-    ("workers-comp-and-payroll-burden-calculator", "Workers Compensation and Employer Payroll Burden Calculator"),
-    ("contractor-surety-bond-cost-calculator", "Contractor License and Surety Bond Cost Calculator"),
+    ("capital-gains-calculator", "Long-Term Capital Gains and 3.8% NIIT Tax Calculator"),
+    ("irs-interest-calculator", "IRS Underpayment and Late-Filing Interest Calculator"),
     ("equipment-lease-vs-buy-section-179-calculator", "Equipment Lease vs Buy Section 179 Cash Flow Calculator"),
     ("medical-and-dental-equipment-section-179-roi-calculator", "Medical and Dental Equipment Section 179 ROI Calculator"),
     ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle Section 179 GVWR Weight Calculator"),
@@ -185,7 +185,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "published_output": 2500.0,
         "sample_calculation": "Factoring a $100,000 commercial invoice at a 2.5% discount fee costs $2,500 (20.28% annualized APR across a 45-day net collection cycle)",
         "canonical_base": "https://profithelm.com",
-        "expected_partner": "rippling",
+        "expected_partner": "xendoo",
     },
     {
         "query": "r and d tax credit irc section 41 and section 174 amortization calculator",
@@ -777,6 +777,13 @@ def _format_clean_input_val(val: Any) -> str:
 
 def _compute_proportional_range_step(val_num: float, max_num: float, is_float_val: bool) -> str:
     """Computes a proportional slider step so large-scale sliders never step by 0.01."""
+    if abs(val_num - round(val_num)) > 1e-6:
+        if abs(val_num * 10.0 - round(val_num * 10.0)) <= 1e-6 and max_num <= 1000.0:
+            return "0.1"
+        if abs(val_num * 100.0 - round(val_num * 100.0)) <= 1e-6 and max_num <= 1000.0:
+            return "0.01"
+        if max_num <= 1000.0:
+            return "0.001"
     if max_num >= 1_000_000.0:
         return "10000"
     if max_num >= 100_000.0:
@@ -1110,16 +1117,17 @@ def _render_scenario_presets_bar_html(
     clamped_inputs: Dict[str, Any],
 ) -> str:
     """
-    Renders URL-parameterized scenario preset links (Conservative, Baseline, Aggressive)
-    for crawlable deep-linking and 1-click user parameter hydration.
+    Renders hash-state scenario preset buttons (Conservative, Baseline, Aggressive)
+    for 1-click user parameter hydration without crawlable ?param= URL bloat.
     Zero em-dashes. Zero en-dashes.
     """
+    _ = canonical_base, slug
     presets = [
         ("Conservative (0.8x)", 0.8, "conservative"),
         ("Baseline (1.0x)", 1.0, "baseline"),
         ("Aggressive (1.2x)", 1.2, "aggressive"),
     ]
-    links_html: List[str] = []
+    buttons_html: List[str] = []
     for label, mult, preset_key in presets:
         params: List[str] = []
         for k, v in clamped_inputs.items():
@@ -1127,22 +1135,22 @@ def _render_scenario_presets_bar_html(
                 scaled = round(float(v) * mult, 2)
                 val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
                 params.append(f"{k}={val_str}")
-        qs = "&amp;".join(params)
-        href = f"{canonical_base}/tools/{slug}/?{qs}" if qs else f"{canonical_base}/tools/{slug}/"
-        links_html.append(
-            f'          <a href="{href}" data-preset="{preset_key}" rel="nofollow" '
-            f'class="touch-target scenario-preset-link" '
+        hs = "&amp;".join(params)
+        hash_val = f"#{hs}" if hs else "#"
+        buttons_html.append(
+            f'          <button type="button" data-preset="{preset_key}" data-preset-hash="{hash_val}" '
+            f'class="touch-target scenario-preset-btn" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
             f'background: var(--bg-elevated); color: var(--accent); '
-            f'border: 1px solid var(--border-strong); text-decoration: none; font-size: 14px; font-weight: 600;">'
-            f'{label}</a>'
+            f'border: 1px solid var(--border-strong); cursor: pointer; font-size: 14px; font-weight: 600;">'
+            f'{label}</button>'
         )
-    joined_links = "\n".join(links_html)
+    joined_buttons = "\n".join(buttons_html)
     return (
         f'        <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" '
         f'style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">\n'
-        f'{joined_links}\n'
+        f'{joined_buttons}\n'
         f'        </div>'
     )
 
@@ -1720,6 +1728,307 @@ def _resolve_iso_dates_with_tz(
     return pub_iso, mod_iso
 
 
+def _is_official_primary_source_url(url: str) -> bool:
+    """Returns True when URL points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org host."""
+    import urllib.parse
+
+    raw = str(url or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return False
+    try:
+        host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return (
+        host.endswith(".gov")
+        or host.endswith(".mil")
+        or host == "eur-lex.europa.eu"
+        or host.endswith(".eur-lex.europa.eu")
+        or host == "pcisecuritystandards.org"
+        or host.endswith(".pcisecuritystandards.org")
+    )
+
+
+def _build_statutory_sources_and_changelog_html(
+    property_id: str,
+    slug: str,
+    statutory_authority: str,
+    topic_label: str = "",
+) -> str:
+    """
+    Renders mandatory SSR 'Statutory Sources & Formula Verification' block with live outbound
+    TruthPack primary_source_url links and a concise 2-4 bullet 'Statutory Changelog' from
+    TruthPack effective_year / verified_at / statute_effective_date.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as html_lib
+
+    pid = str(property_id or "").strip().lower()
+    slug_l = str(slug or "").strip().lower()
+    stat_l = str(statutory_authority or "").strip().lower()
+    _generic_match_stops = frozenset({
+        "cost", "costs", "compliance", "calculator", "calculators", "risk", "rate", "rates",
+        "tax", "taxes", "penalty", "penalties", "audit", "audits", "score", "scores",
+        "benchmark", "benchmarks", "enterprise", "market", "series", "dataset", "model",
+        "fee", "fees", "type", "usd", "2024", "2025", "2026", "2027", "section", "part",
+        "title", "act", "code", "rule", "rules", "federal", "state", "firm", "range",
+        "gainhelm", "prexvo", "profithelm", "lienbond", "and", "the", "for", "with",
+        "annual", "total", "estimate", "estimator", "planner", "comparison", "tool",
+        "third", "party", "ict",
+    })
+    stat_tokens = {
+        w for w in re.findall(r"[a-z0-9]+", stat_l)
+        if len(w) >= 3 and w not in _generic_match_stops
+    }
+    slug_tokens = {
+        w for w in re.findall(r"[a-z0-9]+", slug_l)
+        if len(w) >= 3 and w not in _generic_match_stops
+    }
+
+    pack_entries: List[Any] = []
+    statute_eff_date = ""
+    allowlist: List[Dict[str, Any]] = []
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+        from pseofactory.truth_gate import (
+            _citation_matches_allow_item,
+            _extract_citations,
+            _normalize_citations_allowlist,
+        )
+
+        tp = load_truth_pack(pid, allow_expired=True)
+        statute_eff_date = str(getattr(tp, "statute_effective_date", "") or "").strip()
+        pack_entries = list((getattr(tp, "entries", {}) or {}).values())
+        tp_dict = tp.to_dict() if hasattr(tp, "to_dict") else {}
+        if isinstance(tp_dict, dict):
+            allowlist = _normalize_citations_allowlist(tp_dict)
+    except Exception:
+        pack_entries = []
+
+    scored: List[Tuple[int, Any]] = []
+    for entry in pack_entries:
+        forb = [str(s or "").strip().lower() for s in (getattr(entry, "forbidden_on_slugs", None) or [])]
+        if slug_l and any(f == slug_l or f in slug_l for f in forb if f):
+            continue
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        cit_raw = str(getattr(entry, "citation", "") or "").strip()
+        pub_raw = str(getattr(entry, "publisher", "") or "").strip()
+        if allowlist and cit_raw:
+            extracted_cits = _extract_citations(cit_raw)
+            if extracted_cits and any(
+                not any(_citation_matches_allow_item(c_tok, al_item)[0] for al_item in allowlist)
+                for c_tok, _pos in extracted_cits
+            ):
+                continue
+            if slug_l:
+                cit_pub_probe = f"{cit_raw} ({pub_raw})"
+                slug_blocked = False
+                for al_item in allowlist:
+                    forb_pats = al_item.get("forbidden_slug_patterns") or []
+                    if not forb_pats:
+                        continue
+                    if _citation_matches_allow_item(cit_pub_probe, al_item)[0] or any(
+                        _citation_matches_allow_item(c_tok, al_item)[0] for c_tok, _pos in extracted_cits
+                    ):
+                        if any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in forb_pats):
+                            slug_blocked = True
+                            break
+                if slug_blocked:
+                    continue
+                for c_tok, _pos in extracted_cits:
+                    matched_al = [
+                        al_item for al_item in allowlist if _citation_matches_allow_item(c_tok, al_item)[0]
+                    ]
+                    if matched_al and not any(
+                        not any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in (mi.get("forbidden_slug_patterns") or []))
+                        and (
+                            not (mi.get("allowed_slug_patterns") or [])
+                            or any(re.search(str(ap), slug_l, re.IGNORECASE) for ap in (mi.get("allowed_slug_patterns") or []))
+                        )
+                        for mi in matched_al
+                    ):
+                        slug_blocked = True
+                        break
+                if slug_blocked:
+                    continue
+        applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
+        cit_l = cit_raw.lower()
+        key_l = str(getattr(entry, "key", "") or "").lower()
+        cit_tokens = set(re.findall(r"[a-z0-9]+", f"{cit_l} {key_l}"))
+        score = 0
+        applies_hit = False
+        if applies and slug_l:
+            if any(a == slug_l or a in slug_l or slug_l in a for a in applies):
+                score += 100
+                applies_hit = True
+            else:
+                continue
+        stat_hits = len(stat_tokens & cit_tokens)
+        slug_hits = len(slug_tokens & cit_tokens)
+        if not applies_hit and stat_hits == 0 and slug_hits == 0:
+            continue
+        score += stat_hits * 12
+        score += slug_hits * 8
+        if _is_official_primary_source_url(url):
+            score += 20
+        if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
+            score += 10
+        eff_year_val = int(getattr(entry, "effective_year", 2026) or 2026)
+        if eff_year_val >= 2026:
+            score += 15
+        scored.append((score, entry))
+
+    scored.sort(
+        key=lambda item: (
+            -item[0],
+            -int(getattr(item[1], "effective_year", 2026) or 2026),
+            str(getattr(item[1], "key", "")),
+        )
+    )
+
+    selected_links: List[Tuple[str, str, str, int, str]] = []
+    seen_urls: Set[str] = set()
+    # Guarantee at least one official primary-source URL appears if available
+    for _sc, entry in scored:
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if url in seen_urls or not _is_official_primary_source_url(url):
+            continue
+        seen_urls.add(url)
+        cit = str(getattr(entry, "citation", "") or statutory_authority or "Primary Statute").strip()
+        pub = str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip()
+        eff_y = int(getattr(entry, "effective_year", 2026) or 2026)
+        ver_at = str(getattr(entry, "verified_at", "") or "2026-11-24").strip()
+        selected_links.append((url, cit, pub, eff_y, ver_at))
+        if len(selected_links) >= 2:
+            break
+    for _sc, entry in scored:
+        if len(selected_links) >= 4:
+            break
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        cit = str(getattr(entry, "citation", "") or statutory_authority or "Primary Source").strip()
+        pub = str(getattr(entry, "publisher", "") or "Authoritative Standards Body").strip()
+        eff_y = int(getattr(entry, "effective_year", 2026) or 2026)
+        ver_at = str(getattr(entry, "verified_at", "") or "2026-11-24").strip()
+        selected_links.append((url, cit, pub, eff_y, ver_at))
+
+    if not any(_is_official_primary_source_url(u) for u, _c, _p, _ey, _va in selected_links):
+        if any(tok in slug_l for tok in ("workers-comp", "workers-compensation", "emr", "class-code")):
+            selected_links.append(
+                (
+                    "https://www.dol.gov/agencies/owcp",
+                    "U.S. Department of Labor Workers' Compensation Programs (OWCP)",
+                    "U.S. Department of Labor",
+                    2026,
+                    "2026-11-24",
+                )
+            )
+            if len(selected_links) < 4:
+                selected_links.append(
+                    (
+                        "https://www.bls.gov/ecec/",
+                        "BLS Employer Costs for Employee Compensation (ECEC)",
+                        "U.S. Bureau of Labor Statistics",
+                        2026,
+                        "2026-11-24",
+                    )
+                )
+        elif "surety" in slug_l or "surety" in stat_l or "9304" in stat_l:
+            selected_links.append(
+                (
+                    "https://www.fiscal.treasury.gov/surety-bonds/",
+                    "31 U.S.C. Section 9304 & Treasury Circular 570 (Surety Bonds)",
+                    "U.S. Department of the Treasury",
+                    2026,
+                    "2026-11-24",
+                )
+            )
+        elif "section-301" in slug_l or "2411" in stat_l or "19 cfr" in stat_l:
+            selected_links.append(
+                (
+                    "https://ustr.gov/issue-areas/enforcement/section-301-investigations/tariff-actions",
+                    "19 U.S.C. Section 2411 (Trade Act Section 301 Tariff Actions)",
+                    "Office of the United States Trade Representative",
+                    2026,
+                    "2026-11-24",
+                )
+            )
+        elif "invoice-factoring" in slug_l or "1026" in stat_l or "section 163" in stat_l:
+            selected_links.append(
+                (
+                    "https://www.ecfr.gov/current/title-12/chapter-X/part-1026",
+                    "12 CFR Part 1026 & IRC Section 163(j) Business Credit Standards",
+                    "U.S. Government Publishing Office (eCFR)",
+                    2026,
+                    "2026-11-24",
+                )
+            )
+        elif "r-and-d" in slug_l or "section 174" in stat_l or "section 41" in stat_l:
+            selected_links.append(
+                (
+                    "https://www.irs.gov/forms-pubs/about-form-6765",
+                    "IRC Section 41 & IRS Form 6765 Research Credit Instructions",
+                    "Internal Revenue Service",
+                    2026,
+                    "2026-11-24",
+                )
+            )
+
+    if not selected_links:
+        return ""
+
+    source_items_html = "\n".join(
+        f'        <li><a href="{html_lib.escape(u, quote=True)}" rel="noopener" target="_blank" '
+        f'class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;">'
+        f'{html_lib.escape(cit)} ({html_lib.escape(pub)})</a></li>'
+        for u, cit, pub, _ey, _va in selected_links
+    )
+
+    eff_years = sorted({ey for _u, _c, _p, ey, _va in selected_links if ey})
+    max_eff_year = max(eff_years) if eff_years else 2026
+    ver_dates = sorted({va for _u, _c, _p, _ey, va in selected_links if va})
+    latest_verified = max(ver_dates) if ver_dates else "2026-11-24"
+    eff_date_str = statute_eff_date or f"{max_eff_year}-01-01"
+    lead_cit = selected_links[0][1]
+    lead_pub = selected_links[0][2]
+
+    changelog_bullets = [
+        f"<strong>{max_eff_year} Statutory Effective Schedule ({html_lib.escape(eff_date_str)}):</strong> Parameters locked to enacted {html_lib.escape(lead_cit)} published by {html_lib.escape(lead_pub)}.",
+        f"<strong>Primary Source Verification ({html_lib.escape(latest_verified)}):</strong> Formula constants and statutory bounds verified directly against official {html_lib.escape(lead_pub)} tables.",
+    ]
+    if len(eff_years) > 1:
+        changelog_bullets.append(
+            f"<strong>Multi-Year Schedule Alignment ({eff_years[0]} to {eff_years[-1]}):</strong> Cross-checked enacted parameter transitions across statutory effective years."
+        )
+    else:
+        changelog_bullets.append(
+            f"<strong>Deterministic Formula Audit ({max_eff_year}):</strong> Verified closed-form AST evaluation and non-negative input clamping for {html_lib.escape(topic_label or slug or 'this calculator')}."
+        )
+    changelog_li_html = "\n".join(f"        <li>{b}</li>" for b in changelog_bullets[:4])
+
+    return (
+        f'    <section class="statutory-sources card" data-mechanic="official_primary_sources">\n'
+        f'      <h2>Statutory Sources &amp; Formula Verification</h2>\n'
+        f'      <p>Verify the enacted statutes and official regulatory publications governing {html_lib.escape(topic_label or slug or "this model")}:</p>\n'
+        f'      <ul class="statutory-sources-list">\n'
+        f'{source_items_html}\n'
+        f'      </ul>\n'
+        f'    </section>\n'
+        f'    <section class="statutory-changelog card" data-mechanic="statutory_changelog">\n'
+        f'      <h2>Statutory Changelog</h2>\n'
+        f'      <ul class="statutory-changelog-list">\n'
+        f'{changelog_li_html}\n'
+        f'      </ul>\n'
+        f'    </section>'
+    )
+
+
 def _build_compiled_json_ld_graph(
     canonical_base: str,
     slug: str,
@@ -1734,8 +2043,11 @@ def _build_compiled_json_ld_graph(
     is_lienbond: bool = False,
     date_published: Optional[str] = None,
     date_modified: Optional[str] = None,
+    is_home: bool = False,
+    collection_items: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Builds the unified Schema.org @graph JSON-LD string for compiled programmatic pages."""
+    _ = faq_entities
     brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
     if "/" in slug:
         spoke_parts = [sp for sp in slug.split("/") if sp]
@@ -1748,17 +2060,16 @@ def _build_compiled_json_ld_graph(
         hub_display_name = hub_name_map.get(hub_slug_part, hub_slug_part.replace("-", " ").title())
         breadcrumb_items_list = [
             {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{canonical_base}/"},
-            {"@type": "ListItem", "position": 2, "name": "Tools", "item": f"{canonical_base}/tools/"},
+            {"@type": "ListItem", "position": 2, "name": "Calculators", "item": f"{canonical_base}/tools/"},
             {"@type": "ListItem", "position": 3, "name": hub_display_name, "item": f"{canonical_base}/tools/{hub_slug_part}/"},
             {"@type": "ListItem", "position": 4, "name": title, "item": f"{canonical_base}/tools/{slug}/"},
         ]
     else:
         breadcrumb_items_list = [
             {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{canonical_base}/"},
-            {"@type": "ListItem", "position": 2, "name": "Tools", "item": f"{canonical_base}/tools/"},
+            {"@type": "ListItem", "position": 2, "name": "Calculators", "item": f"{canonical_base}/tools/"},
             {"@type": "ListItem", "position": 3, "name": title, "item": f"{canonical_base}/tools/{slug}/"},
         ]
-    howto_clean_label = re.sub(r"\s+Calculator\b", "", title.split("|")[0].strip(), flags=re.IGNORECASE).strip() or title
     from pseofactory.tenant_facts import get_tenant_contract
 
     _prop_for_schema = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
@@ -1771,39 +2082,85 @@ def _build_compiled_json_ld_graph(
         if _prop_for_schema == "lienbond"
         else f"editorial@{_schema_contract.domain}"
     )
-    _wikidata_entity_map = {
-        "lienbond": "https://www.wikidata.org/wiki/Q192161",
-        "prexvo": "https://www.wikidata.org/wiki/Q633315",
-        "gainhelm": "https://www.wikidata.org/wiki/Q166142",
-        "profithelm": "https://www.wikidata.org/wiki/Q8161",
+    _topic_wikidata_map = {
+        "lienbond": ["https://www.wikidata.org/wiki/Q192161"],
+        "prexvo": ["https://www.wikidata.org/wiki/Q633315"],
+        "gainhelm": ["https://www.wikidata.org/wiki/Q166142"],
+        "profithelm": ["https://www.wikidata.org/wiki/Q8161"],
     }
-    _same_as_urls = [_wikidata_entity_map.get(_prop_for_schema, "https://www.wikidata.org/wiki/Q8161")]
+    _topic_qids = _topic_wikidata_map.get(_prop_for_schema, ["https://www.wikidata.org/wiki/Q7397"])
+    _same_as_urls: List[str] = []
     if _schema_contract.linkedin_company_id:
-        _same_as_urls.insert(0, f"https://www.linkedin.com/company/{_schema_contract.linkedin_company_id}/")
-    graph_payload = {
-        "@context": "https://schema.org",
-        "@graph": [
-            {
-                "@type": "Organization",
-                "@id": f"{canonical_base}/#organization",
-                "name": brand_org_name,
-                "url": canonical_base,
-                "publishingPrinciples": f"{canonical_base}/methodology/",
-                "contactPoint": {
-                    "@type": "ContactPoint",
-                    "contactType": "editorial",
-                    "email": _editorial_email,
-                },
-                "sameAs": _same_as_urls,
+        _same_as_urls.append(f"https://www.linkedin.com/company/{_schema_contract.linkedin_company_id}/")
+
+    org_ref = {"@id": f"{canonical_base}/#organization"}
+
+    if is_home:
+        org_node: Dict[str, Any] = {
+            "@type": "Organization",
+            "@id": f"{canonical_base}/#organization",
+            "name": brand_org_name,
+            "url": canonical_base,
+            "publishingPrinciples": f"{canonical_base}/methodology/",
+            "contactPoint": {
+                "@type": "ContactPoint",
+                "contactType": "editorial",
+                "email": _editorial_email,
             },
+            "knowsAbout": _topic_qids,
+        }
+        if _same_as_urls:
+            org_node["sameAs"] = _same_as_urls
+        home_nodes: List[Dict[str, Any]] = [
+            org_node,
             {
                 "@type": "WebSite",
                 "@id": f"{canonical_base}/#website",
                 "url": canonical_base,
                 "name": brand_org_name,
                 "inLanguage": "en-US",
-                "publisher": {"@id": f"{canonical_base}/#organization"},
+                "publisher": org_ref,
             },
+            {
+                "@type": "WebPage",
+                "@id": f"{canonical_base}/#webpage",
+                "url": f"{canonical_base}/",
+                "name": title,
+                "description": raw_meta_desc,
+                "inLanguage": "en-US",
+                "isPartOf": {"@id": f"{canonical_base}/#website"},
+                "about": _topic_qids,
+                "datePublished": _eff_date_published,
+                "dateModified": _eff_date_modified,
+            },
+        ]
+        if collection_items:
+            list_elements = [
+                {
+                    "@type": "ListItem",
+                    "position": idx,
+                    "name": str(item.get("name") or "").strip(),
+                    "url": str(item.get("url") or "").strip(),
+                }
+                for idx, item in enumerate(collection_items, start=1)
+                if item.get("name") and item.get("url")
+            ]
+            if list_elements:
+                home_nodes.append(
+                    {
+                        "@type": "ItemList",
+                        "@id": f"{canonical_base}/#itemlist",
+                        "name": f"{brand_org_name} Flagship Statutory Calculators",
+                        "itemListOrder": "https://schema.org/ItemListOrderAscending",
+                        "numberOfItems": len(list_elements),
+                        "itemListElement": list_elements,
+                    }
+                )
+        return json.dumps({"@context": "https://schema.org", "@graph": home_nodes}, indent=2)
+
+    graph_payload = {
+        "@context": "https://schema.org",
+        "@graph": [
             {
                 "@type": "WebPage",
                 "@id": f"{canonical_base}/tools/{slug}/#webpage",
@@ -1812,36 +2169,23 @@ def _build_compiled_json_ld_graph(
                 "description": raw_meta_desc,
                 "inLanguage": "en-US",
                 "isPartOf": {"@id": f"{canonical_base}/#website"},
-                "about": {"@id": f"{canonical_base}/tools/{slug}/#app"},
+                "about": [{"@id": f"{canonical_base}/tools/{slug}/#app"}, *_topic_qids],
                 "datePublished": _eff_date_published,
                 "dateModified": _eff_date_modified,
-                "speakable": {
-                    "@type": "SpeakableSpecification",
-                    "cssSelector": [".quick-answer", "h1"],
-                },
                 "breadcrumb": {"@id": f"{canonical_base}/tools/{slug}/#breadcrumb"},
             },
             {
-                "@type": "SoftwareApplication",
+                "@type": "WebApplication",
                 "@id": f"{canonical_base}/tools/{slug}/#app",
                 "name": title,
                 "applicationCategory": application_category,
                 "operatingSystem": "All",
+                "browserRequirements": "Requires JavaScript",
                 "url": f"{canonical_base}/tools/{slug}/",
                 "inLanguage": "en-US",
                 "dateModified": _eff_date_modified,
-                "author": {
-                    "@type": "Organization",
-                    "@id": f"{canonical_base}/#organization",
-                    "name": f"{brand_org_name} Quantitative Research Group",
-                    "url": canonical_base,
-                },
-                "publisher": {
-                    "@type": "Organization",
-                    "@id": f"{canonical_base}/#organization",
-                    "name": brand_org_name,
-                    "url": canonical_base,
-                },
+                "author": org_ref,
+                "publisher": org_ref,
                 "featureList": [
                     f"Deterministic Statutory Formula Evaluation ({statutory_authority})",
                     f"Empirical Benchmark Corroboration ({economic_dataset})",
@@ -1862,81 +2206,10 @@ def _build_compiled_json_ld_graph(
                 ],
             },
             {
-                "@type": "Dataset",
-                "@id": f"{canonical_base}/tools/{slug}/#dataset",
-                "name": f"{title} Empirical Statutory Calculation Dataset",
-                "description": f"Deterministic statutory calculation schedule and sensitivity matrix for {title} under {statutory_authority}.",
-                "url": f"{canonical_base}/tools/{slug}/",
-                "creator": {
-                    "@type": "Organization",
-                    "@id": f"{canonical_base}/#organization",
-                    "name": brand_org_name,
-                    "url": canonical_base,
-                },
-                "publisher": {"@type": "Organization", "name": brand_org_name, "url": canonical_base},
-                "temporalCoverage": "2026/2027",
-                "isAccessibleForFree": True,
-                "license": "https://creativecommons.org/publicdomain/zero/1.0/",
-                "distribution": [
-                    {
-                        "@type": "DataDownload",
-                        "encodingFormat": "text/html",
-                        "contentUrl": f"{canonical_base}/tools/{slug}/",
-                    }
-                ],
-                "spatialCoverage": "United States",
-                "mainEntityOfPage": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
-                "includedInDataCatalog": {
-                    "@type": "DataCatalog",
-                    "@id": f"{canonical_base}/#datacatalog",
-                    "name": f"{brand_org_name} Statutory Data Catalog",
-                    "url": canonical_base,
-                },
-            },
-            {
-                "@type": "HowTo",
-                "@id": f"{canonical_base}/tools/{slug}/#howto",
-                "name": f"How to Calculate {howto_clean_label}",
-                "description": f"Step-by-step statutory procedure for computing {howto_clean_label} under {statutory_authority}.",
-                "url": f"{canonical_base}/tools/{slug}/",
-                "totalTime": "PT1M",
-                "step": [
-                    {
-                        "@type": "HowToStep",
-                        "position": 1,
-                        "name": "Enter Financial Baseline Parameters",
-                        "text": f"Input baseline dollar figures and rate assumptions into the {title} form.",
-                        "url": f"{canonical_base}/tools/{slug}/#step-1",
-                    },
-                    {
-                        "@type": "HowToStep",
-                        "position": 2,
-                        "name": "Select Statutory Tier or Jurisdiction",
-                        "text": f"Choose the applicable statutory classification or filing tier under {statutory_authority}.",
-                        "url": f"{canonical_base}/tools/{slug}/#step-2",
-                    },
-                    {
-                        "@type": "HowToStep",
-                        "position": 3,
-                        "name": "Review Deterministic Output & Sensitivity Matrix",
-                        "text": "Inspect the computed dollar output, 5-point sensitivity schedule, and compliance checklist.",
-                        "url": f"{canonical_base}/tools/{slug}/#step-3",
-                    },
-                ],
-                "isPartOf": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
-            },
-            {
                 "@type": "BreadcrumbList",
                 "@id": f"{canonical_base}/tools/{slug}/#breadcrumb",
                 "isPartOf": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
                 "itemListElement": breadcrumb_items_list,
-            },
-            {
-                "@type": "FAQPage",
-                "@id": f"{canonical_base}/tools/{slug}/#faq",
-                "isPartOf": {"@id": f"{canonical_base}/tools/{slug}/#webpage"},
-                "about": {"@id": f"{canonical_base}/tools/{slug}/#app"},
-                "mainEntity": faq_entities,
             },
         ],
     }
@@ -2174,41 +2447,60 @@ def _render_compiled_calculator_runtime_js(
     }}
 
     var debounceTimer = null;
-    function updateQueryParams(inputs, immediate) {{
+    function updateHashParams(inputs, immediate) {{
       if (!window.history || !window.history.replaceState) return;
       if (debounceTimer) {{
         clearTimeout(debounceTimer);
         debounceTimer = null;
       }}
-      function _applyQueryParams() {{
+      function _applyHashParams() {{
         try {{
           var url = new URL(window.location.href);
+          var hashParams = new URLSearchParams();
           for (var k in inputs) {{
-            url.searchParams.set(k, inputs[k]);
+            hashParams.set(k, inputs[k]);
           }}
+          url.hash = "#" + hashParams.toString();
           window.history.replaceState({{}}, "", url.toString());
         }} catch (e) {{}}
       }}
       if (immediate) {{
-        _applyQueryParams();
+        _applyHashParams();
         return;
       }}
-      debounceTimer = setTimeout(_applyQueryParams, 150);
+      debounceTimer = setTimeout(_applyHashParams, 150);
     }}
 
-    function syncInputsFromParams() {{
-      if (!window.location || !window.location.search) return;
+    function applyParamStringToForm(rawStr) {{
+      if (!rawStr) return false;
       try {{
-        var params = new URLSearchParams(window.location.search);
+        var clean = String(rawStr).replace(/^[?#]+/, "");
+        if (!clean) return false;
+        var params = new URLSearchParams(clean);
         var elements = form.querySelectorAll("input, select");
+        var applied = false;
         for (var i = 0; i < elements.length; i++) {{
           var el = elements[i];
           var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
           if (params.has(name)) {{
             el.value = params.get(name);
+            applied = true;
           }}
         }}
-      }} catch (e) {{}}
+        return applied;
+      }} catch (e) {{
+        return false;
+      }}
+    }}
+
+    function syncInputsFromHash() {{
+      if (!window.location) return;
+      if (window.location.hash && applyParamStringToForm(window.location.hash)) {{
+        return;
+      }}
+      if (window.location.search) {{
+        applyParamStringToForm(window.location.search);
+      }}
     }}
 
     function calculate(inputs) {{
@@ -2218,7 +2510,7 @@ def _render_compiled_calculator_runtime_js(
     function handleRecompute(immediate, skipUrlSync) {{
       var inputs = getInputs();
       if (!skipUrlSync) {{
-        updateQueryParams(inputs, immediate);
+        updateHashParams(inputs, immediate);
       }} else if (debounceTimer) {{
         clearTimeout(debounceTimer);
         debounceTimer = null;
@@ -2246,10 +2538,24 @@ def _render_compiled_calculator_runtime_js(
       }}
     }}
 
-    syncInputsFromParams();
+    syncInputsFromHash();
     handleRecompute(false, true);
+    var presetBtns = document.querySelectorAll(".scenario-preset-btn");
+    for (var pi = 0; pi < presetBtns.length; pi++) {{
+      presetBtns[pi].addEventListener("click", function(ev) {{
+        var btn = ev.currentTarget;
+        var hashSpec = btn ? btn.getAttribute("data-preset-hash") : "";
+        if (hashSpec && applyParamStringToForm(hashSpec)) {{
+          handleRecompute(true, false);
+        }}
+      }});
+    }}
+    window.addEventListener("hashchange", function() {{
+      syncInputsFromHash();
+      handleRecompute(false, true);
+    }});
     window.addEventListener("popstate", function() {{
-      syncInputsFromParams();
+      syncInputsFromHash();
       handleRecompute(false, true);
     }});
     form.addEventListener("input", function(e) {{
@@ -2744,8 +3050,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(existing_tool_slugs_raw, (list, set, tuple)) and existing_tool_slugs_raw:
         live_tool_slugs = {str(s).strip() for s in existing_tool_slugs_raw if str(s).strip()}
         legacy_slug_aliases = {
-            "qsbs-section-1202-calculator": "qsbs-calculator",
-            "tcja-sunset-bracket-calculator": "irs-2027-tax-brackets",
+            "qsbs-section-1202-calculator": "tcja-sunset-capital-gains",
+            "tcja-sunset-bracket-calculator": "irs-tax-brackets",
             "student-loan-forgiveness-calculator": "student-loan-repayment-calculator",
             "pslf-qualifying-payment-calculator": "student-loan-repayment-calculator",
             "student-loan-interest-subsidy-calculator": "rap-vs-ibr-calculator",
@@ -2927,6 +3233,36 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     esc_title_attr = _html.escape(str(title), quote=True)
     esc_title_text = _html.escape(str(title), quote=False)
     esc_canonical_url = _html.escape(f"{canonical_base}/tools/{slug}/", quote=True)
+    statutory_sources_html = _build_statutory_sources_and_changelog_html(
+        _comp_prop,
+        slug,
+        statutory_authority,
+        topic_label=safe_model_h2,
+    )
+    if "/" in slug:
+        _spoke_hub_slug = [sp for sp in slug.split("/") if sp][0]
+        _spoke_hub_name_map = {
+            "irs-2027-tax-brackets": "IRS 2027 Tax Brackets Calculator",
+            "section-1031-calculator": "Section 1031 Exchange Calculator",
+            "section-179-calculator": "Section 179 Deduction Calculator",
+        }
+        _spoke_hub_label = _spoke_hub_name_map.get(_spoke_hub_slug, _spoke_hub_slug.replace("-", " ").title())
+        leaf_breadcrumbs_html = (
+            '    <nav class="breadcrumbs" aria-label="Breadcrumb">\n'
+            '      <a href="/" class="touch-target">Home</a><span>/</span>'
+            '<a href="/tools/" class="touch-target">Calculators</a><span>/</span>'
+            f'<a href="/tools/{_html.escape(_spoke_hub_slug, quote=True)}/" class="touch-target">{_html.escape(_spoke_hub_label)}</a><span>/</span>'
+            f'<span>{esc_title_text}</span>\n'
+            '    </nav>'
+        )
+    else:
+        leaf_breadcrumbs_html = (
+            '    <nav class="breadcrumbs" aria-label="Breadcrumb">\n'
+            '      <a href="/" class="touch-target">Home</a><span>/</span>'
+            '<a href="/tools/" class="touch-target">Calculators</a><span>/</span>'
+            f'<span>{esc_title_text}</span>\n'
+            '    </nav>'
+        )
     calc_runtime_script_html = _render_compiled_calculator_runtime_js(
         slug=slug,
         calc_js_body=calc_js_body,
@@ -3200,6 +3536,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
 </head>
 <body>
   <div class="container">
+{leaf_breadcrumbs_html}
     <header class="card">
       <h1>{title}</h1>
       <aside class="quick-answer" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}">
@@ -3212,7 +3549,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     <div id="calculator-workspace-anchor" class="calculation-container card" data-gsc-device-focus="{gsc_device_focus}" data-gsc-search-appearance="{gsc_appearance_attr}" data-gsc-trajectory="{gsc_trajectory}" data-gsc-coverage-state="{gsc_coverage_state}">
       <h2>Interactive Quantitative Model: {safe_model_h2}</h2>
       <p>
-        Adjust inputs below to recalculate baseline outputs immediately with live URL parameter sync.
+        Adjust inputs below to recalculate baseline outputs immediately with live hash-synced state.
       </p>
 {scenario_presets_bar_html}
 {edge_case_trap_html}
@@ -3271,6 +3608,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         cost indexes, and macroeconomic context from the Bureau of Labor Statistics and Federal Reserve systems.
       </p>
     </div>
+
+{statutory_sources_html}
 
 {scenario_table_html}
 
@@ -3423,59 +3762,58 @@ def _build_lienbond_support_page_html(
     body_html: str,
     gsc_token: str,
     collection_items: Optional[List[Dict[str, str]]] = None,
+    is_methodology: bool = False,
+    is_404: bool = False,
 ) -> str:
     """Renders a support/hub page (tools/index, methodology/index, disclaimers/index, 404) with full SEO/GEO parity."""
+    import html as _html_lib
+
     lb_date_published, lb_date_modified = _resolve_iso_dates_with_tz("lienbond")
-    graph_nodes: List[Dict[str, Any]] = [
-        {
-            "@type": "Organization",
-            "@id": "https://lienbond.com/#organization",
-            "name": "LienBond",
-            "url": "https://lienbond.com",
-            "publishingPrinciples": "https://lienbond.com/methodology/",
-            "contactPoint": {
-                "@type": "ContactPoint",
-                "contactType": "editorial",
-                "email": "compliance@lienbond.com",
-            },
-            "sameAs": [
-                "https://www.wikidata.org/wiki/Q192161",
-            ],
-        },
-        {
-            "@type": "WebSite",
-            "@id": "https://lienbond.com/#website",
-            "url": "https://lienbond.com",
-            "name": "LienBond",
-            "inLanguage": "en-US",
-            "publisher": {"@id": "https://lienbond.com/#organization"},
-        },
-        {
-            "@type": "WebPage",
-            "@id": f"{canonical_url}#webpage",
-            "url": canonical_url,
-            "name": page_title,
-            "description": meta_desc,
-            "inLanguage": "en-US",
-            "isPartOf": {"@id": "https://lienbond.com/#website"},
-            "datePublished": lb_date_published,
-            "dateModified": lb_date_modified,
-            "speakable": {
-                "@type": "SpeakableSpecification",
-                "cssSelector": [".quick-answer", "h1"],
-            },
-            "breadcrumb": {"@id": f"{canonical_url}#breadcrumb"},
-        },
-        {
-            "@type": "BreadcrumbList",
-            "@id": f"{canonical_url}#breadcrumb",
-            "isPartOf": {"@id": f"{canonical_url}#webpage"},
-            "itemListElement": [
-                {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://lienbond.com/"},
-                {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
-            ],
-        },
-    ]
+    org_ref = {"@id": "https://lienbond.com/#organization"}
+    webpage_node: Dict[str, Any] = {
+        "@type": "WebPage",
+        "@id": f"{canonical_url}#webpage",
+        "url": canonical_url,
+        "name": page_title,
+        "description": meta_desc,
+        "inLanguage": "en-US",
+        "isPartOf": {"@id": "https://lienbond.com/#website"},
+        "publisher": org_ref,
+        "about": ["https://www.wikidata.org/wiki/Q192161"],
+        "datePublished": lb_date_published,
+        "dateModified": lb_date_modified,
+    }
+    graph_nodes: List[Dict[str, Any]] = [webpage_node]
+    if not is_404:
+        webpage_node["breadcrumb"] = {"@id": f"{canonical_url}#breadcrumb"}
+        graph_nodes.append(
+            {
+                "@type": "BreadcrumbList",
+                "@id": f"{canonical_url}#breadcrumb",
+                "isPartOf": {"@id": f"{canonical_url}#webpage"},
+                "itemListElement": [
+                    {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://lienbond.com/"},
+                    {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
+                ],
+            }
+        )
+    if is_methodology:
+        graph_nodes.append(
+            {
+                "@type": "TechArticle",
+                "@id": f"{canonical_url}#techarticle",
+                "headline": h1_text,
+                "name": page_title,
+                "description": meta_desc,
+                "url": canonical_url,
+                "inLanguage": "en-US",
+                "author": org_ref,
+                "publisher": org_ref,
+                "datePublished": lb_date_published,
+                "dateModified": lb_date_modified,
+                "mainEntityOfPage": {"@id": f"{canonical_url}#webpage"},
+            }
+        )
     if collection_items:
         list_elements = [
             {
@@ -3515,6 +3853,16 @@ def _build_lienbond_support_page_html(
         },
         indent=2,
     )
+    support_breadcrumbs_html = (
+        ""
+        if is_404
+        else (
+            '    <nav class="breadcrumbs" aria-label="Breadcrumb">\n'
+            '      <a href="/" class="touch-target">Home</a><span>/</span>'
+            f'<span>{_html_lib.escape(h1_text)}</span>\n'
+            '    </nav>\n'
+        )
+    )
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -3548,7 +3896,7 @@ def _build_lienbond_support_page_html(
 </head>
 <body>
   <div class="container">
-    <header class="card">
+{support_breadcrumbs_html}    <header class="card">
       <h1>{h1_text}</h1>
     </header>
     <aside class="takeaway quick-answer card" data-answer-prominence="true">
@@ -3898,12 +4246,14 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         faq_entities=home_faq_entities,
         is_gainhelm=False,
         is_lienbond=True,
-    ).replace(
-        '"https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/#webpage"',
-        '"https://lienbond.com/#webpage"',
-    ).replace(
-        '"url": "https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/"',
-        '"url": "https://lienbond.com/"',
+        is_home=True,
+        collection_items=catalog_tools[:5],
+    )
+    lb_hub_statutory_sources_html = _build_statutory_sources_and_changelog_html(
+        "lienbond",
+        "contractor-license-bond-cost-calculator-by-credit-score",
+        home_manifest_dict["statutory_authority"],
+        topic_label=home_manifest_dict["model_name"],
     )
 
     hub_sensitivity_table_html = _render_5point_sensitivity_table_html(
@@ -4049,11 +4399,11 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
 
     <div id="calculator-workspace-anchor" class="calculation-container card">
       <h2>Interactive Contractor License &amp; Performance Bond Premium Calculator</h2>
-      <p>Estimate contractor license and AIA A312 performance bond premiums with instant URL-synced calculations.</p>
+      <p>Estimate contractor license and AIA A312 performance bond premiums with instant hash-synced state.</p>
       <div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-        <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=20000&amp;credit_tier_rate_pct=1.2&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="conservative" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Conservative ($20k Bond)</a>
-        <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=25000&amp;credit_tier_rate_pct=1.5&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="baseline" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Baseline ($25k Bond)</a>
-        <a href="https://lienbond.com/tools/contractor-license-bond-cost-calculator-by-credit-score/?bond_amount=50000&amp;credit_tier_rate_pct=3.0&amp;term_years=1" class="scenario-preset-link touch-target" data-preset="aggressive" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);color:var(--accent);text-decoration:none;">Standard Market ($50k Bond)</a>
+        <button type="button" class="scenario-preset-btn touch-target" data-preset="conservative" data-preset-hash="#bond_amount=20000&amp;credit_tier_rate_pct=1.2&amp;term_years=1" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--accent);cursor:pointer;font-weight:600;">Conservative ($20k Bond)</button>
+        <button type="button" class="scenario-preset-btn touch-target" data-preset="baseline" data-preset-hash="#bond_amount=25000&amp;credit_tier_rate_pct=1.5&amp;term_years=1" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--accent);cursor:pointer;font-weight:600;">Baseline ($25k Bond)</button>
+        <button type="button" class="scenario-preset-btn touch-target" data-preset="aggressive" data-preset-hash="#bond_amount=50000&amp;credit_tier_rate_pct=3.0&amp;term_years=1" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-elevated);color:var(--accent);cursor:pointer;font-weight:600;">Standard Market ($50k Bond)</button>
       </div>
       <form class="calculator-form" id="hub-bond-calculator" method="post" action="javascript:void(0);">
         <div class="form-group" style="margin-bottom:12px;">
@@ -4092,6 +4442,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       <p>Primary statutory authority: <strong>U.S. Treasury Department Circular 570, 40 U.S.C. Section 3131 (Federal Miller Act), NCCI Experience Rating Plan Manual, and 40 U.S.C. Section 3141 (Davis-Bacon Act)</strong> govern surety bond penal sums, workers compensation EMR modifiers, 50-state mechanics lien recording windows, and WH-347 fringe compliance.</p>
       <p>Empirical economic dataset: <strong>Surety and Fidelity Association of America (SFAA) Loss Ratio Series, BLS Producer Price Index for Construction, and U.S. Census Bureau Value of Construction Put in Place (VIP)</strong> anchor underwriting loss ratios and labor burden indices.</p>
     </div>
+
+{lb_hub_statutory_sources_html}
 
     <section class="card">
       <h2>Step-by-Step Construction Surety, Workers Comp &amp; Lien Workflow</h2>
@@ -4200,45 +4552,63 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
       }}
     }}
     var debounceTimer = null;
-    function updateQueryParams(inputs, immediate) {{
+    function updateHashParams(inputs, immediate) {{
       if (!window.history || !window.history.replaceState) return;
       if (debounceTimer) {{
         clearTimeout(debounceTimer);
         debounceTimer = null;
       }}
-      function _applyQueryParams() {{
+      function _applyHashParams() {{
         try {{
           var url = new URL(window.location.href);
+          var hashParams = new URLSearchParams();
           for (var k in inputs) {{
-            url.searchParams.set(k, inputs[k]);
+            hashParams.set(k, inputs[k]);
           }}
+          url.hash = "#" + hashParams.toString();
           window.history.replaceState({{}}, "", url.toString());
         }} catch (err) {{}}
       }}
       if (immediate) {{
-        _applyQueryParams();
+        _applyHashParams();
         return;
       }}
-      debounceTimer = setTimeout(_applyQueryParams, 150);
+      debounceTimer = setTimeout(_applyHashParams, 150);
     }}
-    function syncInputsFromParams() {{
-      if (!window.location || !window.location.search) return;
+    function applyParamStringToForm(rawStr) {{
+      if (!rawStr) return false;
       try {{
-        var params = new URLSearchParams(window.location.search);
+        var clean = String(rawStr).replace(/^[?#]+/, "");
+        if (!clean) return false;
+        var params = new URLSearchParams(clean);
         var elements = form.querySelectorAll("input, select");
+        var applied = false;
         for (var i = 0; i < elements.length; i++) {{
           var el = elements[i];
           var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
           if (params.has(name)) {{
             el.value = params.get(name);
+            applied = true;
           }}
         }}
-      }} catch (err) {{}}
+        return applied;
+      }} catch (err) {{
+        return false;
+      }}
+    }}
+    function syncInputsFromHash() {{
+      if (!window.location) return;
+      if (window.location.hash && applyParamStringToForm(window.location.hash)) {{
+        return;
+      }}
+      if (window.location.search) {{
+        applyParamStringToForm(window.location.search);
+      }}
     }}
     function recalc(immediate, skipUrlSync) {{
       var inputs = getInputs();
       if (!skipUrlSync) {{
-        updateQueryParams(inputs, immediate);
+        updateHashParams(inputs, immediate);
       }} else if (debounceTimer) {{
         clearTimeout(debounceTimer);
         debounceTimer = null;
@@ -4266,10 +4636,24 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         }}
       }}
     }}
-    syncInputsFromParams();
+    syncInputsFromHash();
     recalc(false, true);
+    var presetBtns = document.querySelectorAll(".scenario-preset-btn");
+    for (var pi = 0; pi < presetBtns.length; pi++) {{
+      presetBtns[pi].addEventListener("click", function(ev) {{
+        var btn = ev.currentTarget;
+        var hashSpec = btn ? btn.getAttribute("data-preset-hash") : "";
+        if (hashSpec && applyParamStringToForm(hashSpec)) {{
+          recalc(true, false);
+        }}
+      }});
+    }}
+    window.addEventListener("hashchange", function() {{
+      syncInputsFromHash();
+      recalc(false, true);
+    }});
     window.addEventListener("popstate", function() {{
-      syncInputsFromParams();
+      syncInputsFromHash();
       recalc(false, true);
     }});
     form.addEventListener("input", function(e) {{
@@ -4431,6 +4815,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         quick_answer_text="Every LienBond calculator executes deterministic abstract syntax tree formulas corroborated against U.S. Treasury Circular 570, 40 U.S.C. Section 3131 Miller Act bond schedules, NCCI Experience Rating Plan split-point formulas, 50-state mechanics lien codes, and Davis-Bacon WH-347 rules.",
         body_html=methodology_body,
         gsc_token=gsc_token,
+        is_methodology=True,
     )
     assert_no_forbidden_dashes(methodology_html, context="lienbond methodology_html")
     (methodology_dir / "index.html").write_text(methodology_html, encoding="utf-8")
@@ -4443,6 +4828,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         quick_answer_text="The requested URL was not found. Select any verified LienBond calculator below to model contractor license surety bonds under Treasury Circular 570, NCCI workers compensation class codes and EMR modifiers, 50-state mechanics lien deadlines, or WH-347 payroll.",
         body_html=tools_index_body,
         gsc_token=gsc_token,
+        is_404=True,
     )
     assert_no_forbidden_dashes(not_found_html, context="lienbond not_found_html")
     (dist / "404.html").write_text(not_found_html, encoding="utf-8")

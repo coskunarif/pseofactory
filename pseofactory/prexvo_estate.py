@@ -58,7 +58,7 @@ from pseofactory.visual_primitives import (
 PREXVO_DOMAIN = "prexvo.com"
 PREXVO_CANONICAL_BASE = f"https://{PREXVO_DOMAIN}"
 PREXVO_SITE_NAME = "Prexvo"
-PREXVO_SITE_TITLE = "Prexvo | Free Student Loan Calculators & Comparison"
+PREXVO_SITE_TITLE = "Prexvo | Title IV Federal Student Loan Repayment Calculators"
 PREXVO_SITE_DESCRIPTION = (
     "Compare 2026 student loan repayment plans with exact Title IV calculations. "
     "Free interactive tools for RAP, IBR, PAYE, ICR, PSLF, and consolidation."
@@ -83,6 +83,9 @@ DISCLAIMER_NO_ADVICE = PREXVO_DISCLOSURES["disclaimer_no_advice"]
 
 QUARANTINED_ROGUE_SLUGS: Set[str] = {
     "tax-deduction-for-car-loan-interest",
+    "student-loans-gov",
+    "parent-plus-double-consolidation-loophole-2026-calculator",
+    "student-loan-forgiveness-2026",
 }
 
 
@@ -849,12 +852,10 @@ _TITLE_ACRONYM_MAP: Tuple[Tuple[re.Pattern[str], str], ...] = (
 _TITLE_OVERRIDE_BY_SLUG: Dict[str, str] = {
     "pslf-buyback-months-reconsideration-student-loan-calculator": "PSLF Buyback Months & Reconsideration Calculator",
     "student-loan-forgiveness-tax-bomb-insolvency-calculator": "Student Loan Forgiveness Tax Bomb & Insolvency Calculator",
-    "parent-plus-double-consolidation-loophole-2026-calculator": "Parent PLUS Double Consolidation Loophole 2026 Calculator",
     "how-do-you-calculate-student-loan-repayments": "Student Loan Repayment Calculation Guide & Estimator",
-    "student-loans-gov": "StudentLoans.gov Federal Repayment Estimator",
     "repayment-estimator-student-loans": "Student Loan Repayment Estimator",
     "parent-plus-loan-payment-calculator": "Parent PLUS Loan Payment Calculator",
-    "student-loan-forgiveness-2026": "2026 Federal Student Loan Forgiveness Calculator",
+    "student-loan-forgiveness": "Federal Student Loan Forgiveness Calculator",
     "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator": "NHSC & Health Professions Loan Forgiveness Calculator",
     "physician-resident-student-loan-refinance-vs-rap-calculator": "Physician Resident Refinance vs RAP Subsidy Calculator",
     "discretionary-income-calculator-for-student-loans": "Student Loan Discretionary Income Calculator",
@@ -1108,12 +1109,10 @@ PREXVO_STATUTORY_VOIDS: List[Dict[str, Any]] = [
 ]
 
 _FALLBACK_DEPLOYED_VOID_SLUGS: List[Dict[str, Any]] = [
-    {"slug": "student-loan-forgiveness-2026", "title": "2026 Federal Student Loan Forgiveness Calculator"},
+    {"slug": "student-loan-forgiveness", "title": "Federal Student Loan Forgiveness Calculator"},
     {"slug": "pslf-buyback-months-reconsideration-student-loan-calculator", "title": "PSLF Buyback Months & Reconsideration Calculator"},
     {"slug": "student-loan-forgiveness-tax-bomb-insolvency-calculator", "title": "Student Loan Forgiveness Tax Bomb & Insolvency Calculator"},
-    {"slug": "parent-plus-double-consolidation-loophole-2026-calculator", "title": "Parent PLUS Double Consolidation Loophole 2026 Calculator"},
     {"slug": "repayment-estimator-student-loans", "title": "Student Loan Repayment Estimator"},
-    {"slug": "student-loans-gov", "title": "StudentLoans.gov Federal Repayment Estimator"},
     {"slug": "how-do-you-calculate-student-loan-repayments", "title": "Student Loan Repayment Calculation Guide & Estimator"},
     {"slug": "parent-plus-loan-payment-calculator", "title": "Parent PLUS Loan Payment Calculator"},
     {"slug": "health-professions-student-loan-hpsl-nhsc-forgiveness-calculator", "title": "NHSC & Health Professions Loan Forgiveness Calculator"},
@@ -1505,6 +1504,17 @@ def _render_manifest_driven_widget(
 
     js_fpl_json = json.dumps(_serialize_poverty_table_for_js(poverty_table), separators=(",", ":"))
     fields_html: List[str] = []
+    if slug == "student-loan-forgiveness":
+        fields_html.append(
+            '<div class="calc-field-group">\n'
+            '  <label for="field-plan_year" class="calc-label">Statutory Schedule Year</label>\n'
+            '  <select id="field-plan_year" name="plan_year" data-calc-input="plan_year" class="calc-select touch-target">\n'
+            '    <option value="2026" selected="selected">2026 Statutory Rules (91 FR 1797 $15,960 FPL &amp; P.L. 119-21 RAP)</option>\n'
+            '    <option value="2027">2027 Projected Schedule (CPI-Indexed $16,407 FPL Benchmark)</option>\n'
+            '  </select>\n'
+            '  <p class="calc-tooltip">Switch between 2026 enacted 91 FR 1797 guidelines and 2027 CPI-indexed projections inside the evergreen forgiveness calculator.</p>\n'
+            '</div>'
+        )
     input_names = list(inputs_dict.keys())
     for k, v in inputs_dict.items():
         num_v = float(v) if isinstance(v, (int, float)) else 0.0
@@ -1682,7 +1692,12 @@ def _render_manifest_driven_widget(
           const el = document.getElementById('field-' + k);
           if (el) p.set(k, el.value);
         }}
-        window.history.replaceState({{}}, '', window.location.pathname + '?' + p.toString());
+        const yrEl = document.getElementById('field-plan_year');
+        if (yrEl && yrEl.value) p.set('plan_year', yrEl.value);
+        const hStr = p.toString();
+        if (hStr) {{
+          window.history.replaceState({{}}, '', window.location.pathname + (window.location.search || '') + '#' + hStr);
+        }}
       }}
     }}, 120);
   }}
@@ -1739,15 +1754,36 @@ def _render_manifest_driven_widget(
   }}
 
   function hydrateFromURL() {{
-    const p = new URLSearchParams((typeof window !== 'undefined' && window.location && window.location.search) || '');
-    for (let i = 0; i < INPUT_KEYS.length; i++) {{
-      const k = INPUT_KEYS[i];
-      if (p.has(k)) {{
+    if (typeof window === 'undefined' || !window.location) return;
+    const rawHash = window.location.hash || '';
+    const rawSearch = window.location.search || '';
+    const hashP = (rawHash.length > 1 && rawHash.indexOf('=') !== -1) ? new URLSearchParams(rawHash.slice(1)) : new URLSearchParams();
+    const searchP = (rawSearch.length > 1) ? new URLSearchParams(rawSearch) : new URLSearchParams();
+    const keysToCheck = INPUT_KEYS.concat(['plan_year']);
+    let migrated = false;
+    const migHash = new URLSearchParams(hashP.toString());
+    for (let i = 0; i < keysToCheck.length; i++) {{
+      const k = keysToCheck[i];
+      let val = null;
+      if (hashP.has(k)) {{
+        val = hashP.get(k);
+      }} else if (searchP.has(k)) {{
+        val = searchP.get(k);
+        migHash.set(k, val);
+        searchP.delete(k);
+        migrated = true;
+      }}
+      if (val !== null) {{
         const el = document.getElementById('field-' + k);
         const rng = document.getElementById('range-' + k);
-        if (el) el.value = p.get(k);
-        if (rng) rng.value = p.get(k);
+        if (el) el.value = val;
+        if (rng) rng.value = val;
       }}
+    }}
+    if (migrated && window.history && typeof window.history.replaceState === 'function') {{
+      const remQs = searchP.toString();
+      const migHashStr = migHash.toString();
+      window.history.replaceState({{}}, '', window.location.pathname + (remQs ? '?' + remQs : '') + (migHashStr ? '#' + migHashStr : ''));
     }}
   }}
 
@@ -1761,6 +1797,25 @@ def _render_manifest_driven_widget(
         if (e && e.preventDefault) e.preventDefault();
         recalculate();
       }});
+    }}
+    const planYearEl = document.getElementById('field-plan_year');
+    if (planYearEl) {{
+      const onYearChange = function() {{
+        const yr = String(planYearEl.value || '2026');
+        const fpl1 = document.getElementById('field-fpl_1person');
+        const rng1 = document.getElementById('range-fpl_1person');
+        const fplA = document.getElementById('field-fpl_per_add');
+        const rngA = document.getElementById('range-fpl_per_add');
+        const v1 = yr === '2027' ? '16407' : '15960';
+        const vA = yr === '2027' ? '5839' : '5680';
+        if (fpl1) fpl1.value = v1;
+        if (rng1) rng1.value = v1;
+        if (fplA) fplA.value = vA;
+        if (rngA) rngA.value = vA;
+        recalculate();
+      }};
+      planYearEl.addEventListener('change', onYearChange);
+      planYearEl.addEventListener('input', onYearChange);
     }}
     root.querySelectorAll('[data-calc-input]').forEach(function(inp) {{
       const onChange = function() {{
@@ -1782,6 +1837,10 @@ def _render_manifest_driven_widget(
       rng.addEventListener('input', onRange);
       rng.addEventListener('change', onRange);
     }});
+    if (typeof window !== 'undefined' && window.addEventListener) {{
+      window.addEventListener('hashchange', function() {{ hydrateFromURL(); recalculate(); }});
+      window.addEventListener('popstate', function() {{ hydrateFromURL(); recalculate(); }});
+    }}
   }}
 
   if (document.readyState === 'loading') {{
@@ -2037,7 +2096,7 @@ def render_calculator_widget(
         p.set('interest_rate', (rate * 100).toFixed(1));
         p.set('family_size', size);
         p.set('state_group', region);
-        const newUrl = window.location.pathname + '?' + p.toString();
+        const newUrl = window.location.pathname + (window.location.search || '') + '#' + p.toString();
         window.history.replaceState({{}}, '', newUrl);
       }}
     }}, 120);
@@ -2139,14 +2198,37 @@ def render_calculator_widget(
   }}
 
   function hydrateFromURL() {{
-    const p = new URLSearchParams(window.location.search);
+    if (typeof window === 'undefined' || !window.location) return;
+    const rawHash = window.location.hash || '';
+    const rawSearch = window.location.search || '';
+    const hashP = (rawHash.length > 1 && rawHash.indexOf('=') !== -1) ? new URLSearchParams(rawHash.slice(1)) : new URLSearchParams();
+    const searchP = (rawSearch.length > 1) ? new URLSearchParams(rawSearch) : new URLSearchParams();
     const root = document.getElementById('calculator-{spec.id}') || document;
+    let migrated = false;
+    const migHash = new URLSearchParams(hashP.toString());
     root.querySelectorAll('[data-calc-input]').forEach(function(inp) {{
       const key = inp.getAttribute('data-calc-input') || inp.name;
-      if (key && p.has(key)) {{
-        inp.value = p.get(key);
+      if (!key) return;
+      let val = null;
+      if (hashP.has(key)) {{
+        val = hashP.get(key);
+      }} else if (searchP.has(key)) {{
+        val = searchP.get(key);
+        migHash.set(key, val);
+        searchP.delete(key);
+        migrated = true;
+      }}
+      if (val !== null) {{
+        inp.value = val;
+        const rng = document.getElementById('range-' + key);
+        if (rng) rng.value = val;
       }}
     }});
+    if (migrated && window.history && typeof window.history.replaceState === 'function') {{
+      const remQs = searchP.toString();
+      const migHashStr = migHash.toString();
+      window.history.replaceState({{}}, '', window.location.pathname + (remQs ? '?' + remQs : '') + (migHashStr ? '#' + migHashStr : ''));
+    }}
   }}
 
   function initCalc() {{
@@ -2190,6 +2272,10 @@ def render_calculator_widget(
         }} catch (err) {{}}
       }});
     }});
+    if (typeof window !== 'undefined' && window.addEventListener) {{
+      window.addEventListener('hashchange', function() {{ hydrateFromURL(); recalculate(); }});
+      window.addEventListener('popstate', function() {{ hydrateFromURL(); recalculate(); }});
+    }}
   }}
 
   if (document.readyState === 'loading') {{
@@ -2207,7 +2293,7 @@ def get_calculator_schemas(
     canonical_path: str,
 ) -> List[Dict[str, Any]]:
     """
-    Generates a single clean SoftwareApplication node and FAQPage schema.
+    Generates a single clean WebApplication node for calculator pages.
     Uses canonical '#softwareapplication' @id so compile_schema_graph never duplicates nodes.
     """
     clean_path = canonical_path if canonical_path.startswith("/") else f"/{canonical_path}"
@@ -2217,7 +2303,7 @@ def get_calculator_schemas(
 
     app_schema = {
         "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
+        "@type": "WebApplication",
         "@id": f"{full_url}#softwareapplication",
         "name": spec.title,
         "description": spec.description,
@@ -2232,28 +2318,8 @@ def get_calculator_schemas(
             "priceCurrency": "USD",
         },
         "featureList": [f.label for f in spec.fields],
-        "speakable": {
-            "@type": "SpeakableSpecification",
-            "cssSelector": [".calc-geo-answer-box"],
-        },
     }
-
-    faq_entities = [
-        {
-            "@type": "Question",
-            "name": faq["question"],
-            "acceptedAnswer": {"@type": "Answer", "text": faq["answer"]},
-        }
-        for faq in spec.faqs
-    ]
-    faq_schema = {
-        "@context": "https://schema.org",
-        "@type": "FAQPage",
-        "@id": f"{full_url}#faq",
-        "isPartOf": {"@id": f"{full_url}#webpage"},
-        "mainEntity": faq_entities,
-    }
-    return [app_schema, faq_schema]
+    return [app_schema]
 
 
 # ---------------------------------------------------------------------------
@@ -2472,13 +2538,141 @@ def _build_workpaper_unlock_cta(
 # ---------------------------------------------------------------------------
 
 
+def _sanitize_prexvo_graph_nodes(
+    graph: Sequence[Dict[str, Any]],
+    *,
+    is_home: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Normalizes Prexvo JSON-LD @graph nodes:
+    - Strips generic topic Wikidata QIDs from Organization.sameAs and moves them to knowsAbout.
+    - Removes HowTo, FAQPage, Dataset, TechArticle, and SpeakableSpecification nodes/properties.
+    - Emits WebApplication (not SoftwareApplication/TechArticle) on calculator leaves and WebSite on / only.
+    - Omits BreadcrumbList on /.
+    """
+    def _clean_props(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            cleaned: Dict[str, Any] = {}
+            for k, v in obj.items():
+                if k == "speakable":
+                    continue
+                if k == "isPartOf" and not is_home and isinstance(v, dict) and str(v.get("@id") or "").endswith("#website"):
+                    continue
+                if k == "breadcrumb" and is_home:
+                    continue
+                cleaned[k] = _clean_props(v)
+            return cleaned
+        if isinstance(obj, list):
+            return [_clean_props(item) for item in obj]
+        return obj
+
+    cleaned_graph: List[Dict[str, Any]] = []
+    seen_app = False
+    for raw_node in graph:
+        if not isinstance(raw_node, dict):
+            continue
+        ntype = raw_node.get("@type")
+        types = [ntype] if isinstance(ntype, str) else ([str(x) for x in ntype] if isinstance(ntype, list) else [])
+        if any(t in ("HowTo", "FAQPage", "Dataset", "TechArticle", "SpeakableSpecification") for t in types):
+            continue
+        if "WebSite" in types and not is_home:
+            continue
+        if "BreadcrumbList" in types and is_home:
+            continue
+
+        node = _clean_props(raw_node)
+        if "Organization" in types:
+            same_as = node.get("sameAs")
+            if isinstance(same_as, str):
+                same_as_list = [same_as]
+            elif isinstance(same_as, list):
+                same_as_list = [str(u) for u in same_as if str(u).strip()]
+            else:
+                same_as_list = []
+            kept_same_as: List[str] = []
+            moved_qids: List[str] = []
+            for u in same_as_list:
+                if re.search(r"wikidata\.org/(?:wiki|entity)/Q\d+", u, re.IGNORECASE):
+                    moved_qids.append(u)
+                else:
+                    kept_same_as.append(u)
+            if kept_same_as:
+                node["sameAs"] = kept_same_as
+            else:
+                node.pop("sameAs", None)
+            existing_knows = node.get("knowsAbout")
+            knows_list: List[Any] = list(existing_knows) if isinstance(existing_knows, list) else ([existing_knows] if existing_knows else [])
+            existing_knows_str = json.dumps(knows_list)
+            for qurl in moved_qids:
+                if qurl not in existing_knows_str:
+                    knows_list.append({"@type": "Thing", "name": "Student Loan Repayment & Title IV Finance", "sameAs": qurl})
+            if knows_list:
+                node["knowsAbout"] = knows_list
+
+        if any(t in ("SoftwareApplication", "WebApplication") for t in types):
+            if seen_app:
+                continue
+            seen_app = True
+            new_types = ["WebApplication" if t == "SoftwareApplication" else t for t in types]
+            node["@type"] = new_types[0] if len(new_types) == 1 else new_types
+
+        cleaned_graph.append(node)
+    return cleaned_graph
+
+
+def _sanitize_prexvo_jsonld_and_dom(
+    html_text: str,
+    *,
+    is_home: bool = False,
+    dist_dir: Optional[Path] = None,
+) -> str:
+    """Applies JSON-LD schema hygiene and button preset conversion on compiled Prexvo HTML."""
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    ld_re = re.compile(
+        r'(<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+        re.IGNORECASE,
+    )
+
+    def _rewrite_ld(m: re.Match) -> str:
+        raw_json = (m.group(2) or "").strip()
+        if not raw_json:
+            return m.group(0)
+        try:
+            payload = json.loads(raw_json)
+        except Exception:
+            return m.group(0)
+        if not isinstance(payload, dict) or not isinstance(payload.get("@graph"), list):
+            return m.group(0)
+        payload["@graph"] = _sanitize_prexvo_graph_nodes(payload["@graph"], is_home=is_home)
+        return f"{m.group(1)}\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n{m.group(3)}"
+
+    updated = ld_re.sub(_rewrite_ld, html_text)
+    if re.search(r'<a\b[^>]*\bscenario-preset-link\b', updated, re.IGNORECASE):
+        updated, _ = normalize_html_visual_primitives(
+            updated,
+            is_tenant_porcelain=True,
+            dist_dir=dist_dir,
+            property_id="prexvo",
+        )
+    return updated
+
+
 def _get_prexvo_organization_schema() -> Dict[str, Any]:
-    return build_organization_schema(
+    org = build_organization_schema(
         canonical_base=PREXVO_CANONICAL_BASE,
         site_name=PREXVO_SITE_NAME,
         site_description=PREXVO_SITE_DESCRIPTION,
-        same_as=[PREXVO_LINKEDIN_URL, PREXVO_WIKIDATA_URL],
+        same_as=[PREXVO_LINKEDIN_URL],
     )
+    org["knowsAbout"] = [
+        {
+            "@type": "Thing",
+            "name": "Student Loan Repayment & Title IV Finance",
+            "sameAs": PREXVO_WIKIDATA_URL,
+        }
+    ]
+    return org
 
 
 def _get_webpage_schema(title: str, description: str, url: str) -> Dict[str, Any]:
@@ -2535,18 +2729,14 @@ def _render_base_html(
         title=clean_title,
         meta_description=clean_desc,
     )
-    # Guarantee at most one SoftwareApplication/WebApplication node in @graph
-    deduped_graph: List[Dict[str, Any]] = []
-    seen_app = False
-    for node in graph_payload.get("@graph", []):
-        ntype = node.get("@type")
-        types = ntype if isinstance(ntype, list) else ([ntype] if ntype else [])
-        if any(t in ("SoftwareApplication", "WebApplication") for t in types):
-            if seen_app:
-                continue
-            seen_app = True
-        deduped_graph.append(node)
-    graph_payload["@graph"] = deduped_graph
+    # Guarantee WebApplication on leaves, WebSite on / only, no HowTo/FAQPage/Dataset/SpeakableSpecification,
+    # no BreadcrumbList on /, and no Wikidata QIDs in Organization.sameAs (moved to knowsAbout).
+    clean_canon = canonical_url.split("#")[0].rstrip("/")
+    is_home_page = clean_canon == PREXVO_CANONICAL_BASE.rstrip("/")
+    graph_payload["@graph"] = _sanitize_prexvo_graph_nodes(
+        graph_payload.get("@graph", []),
+        is_home=is_home_page,
+    )
 
     schema_json = json.dumps(graph_payload, indent=2)
     style_tag = f"\n  <style>\n{css_text}\n  </style>" if css_text else ""
@@ -2669,7 +2859,6 @@ def _build_retro_reflection_block(manifest_spec: Dict[str, Any], canonical_url: 
         r = round(float(val), 2)
         return f"{r:,.0f}" if r.is_integer() else f"{r:,.2f}"
 
-    base_href = canonical_url.split("?")[0]
     preset_links = []
     for label, mult, p_key in (
         ("Conservative (0.8x)", 0.8, "conservative"),
@@ -2683,13 +2872,14 @@ def _build_retro_reflection_block(manifest_spec: Dict[str, Any], canonical_url: 
                 val_s = str(int(scaled)) if scaled.is_integer() else str(scaled)
                 params.append(f"{k}={val_s}")
         qs = "&amp;".join(params)
-        href = f"{base_href}?{qs}" if qs else base_href
+        preset_val = qs or p_key
         preset_links.append(
-            f'        <a href="{href}" data-preset="{p_key}" '
-            f'class="touch-target scenario-preset-link" '
+            f'        <button type="button" data-preset="{preset_val}" data-preset-tier="{p_key}" '
+            f'class="touch-target scenario-preset-btn scenario-preset-link" '
             f'style="display: inline-flex; align-items: center; justify-content: center; '
             f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
-            f'text-decoration: none; font-size: 14px; font-weight: 600;">{label}</a>'
+            f'background: var(--bg-elevated); color: var(--accent); border: 1px solid var(--border-strong); '
+            f'cursor: pointer; font-size: 14px; font-weight: 600;">{label}</button>'
         )
     manifest_json = json.dumps(spec_payload, ensure_ascii=False, indent=2)
 
@@ -2918,8 +3108,6 @@ def build_tool_page(
     schemas = get_calculator_schemas(page_spec, f"/tools/{slug}/")
     schemas.append(_get_prexvo_organization_schema())
     schemas.append(_get_webpage_schema(f"{clean_title} | Prexvo", clean_desc, canonical_url))
-    schemas.append(_build_howto_schema(clean_title, canonical_url))
-    schemas.append(_build_dataset_schema(clean_title, canonical_url))
     schemas.append(
         {
             "@context": "https://schema.org",
@@ -3227,6 +3415,14 @@ def _build_home_html(
       <p class="ymyl-refinance-warning">{html.escape(YMYL_FORFEITURE_DISCLOSURE)}</p>
     </section>
 
+    <section class="statutory-provenance-box">
+      <h2 class="section-title">Primary Statutory Authority &amp; Federal Data Sources</h2>
+      <ul>
+        <li><strong>Dataset 1:</strong> <a href="https://studentaid.gov/idr/" target="_blank" rel="noopener noreferrer">P.L. 119-21 Section 82001 &amp; 34 CFR Part 685 (Title IV Direct Loans)</a></li>
+        <li><strong>Dataset 2:</strong> <a href="https://www.federalregister.gov/d/2026-00690" target="_blank" rel="noopener noreferrer">2026 HHS Poverty Guidelines (91 FR 1797, 42 U.S.C. 9902(2))</a></li>
+      </ul>
+    </section>
+
     {_build_retro_reflection_block(home_manifest, f"{PREXVO_CANONICAL_BASE}/")}
     """
     return _render_base_html(
@@ -3510,6 +3706,12 @@ def _post_porcelain_truth_hygiene(dist: Path, all_tools: Sequence[Dict[str, Any]
         if 'id="pseo-runtime-sync"' not in updated and "</body>" in updated:
             updated = updated.replace("</body>", f"{sync_tag}\n</body>", 1)
 
+        updated = _sanitize_prexvo_jsonld_and_dom(
+            updated,
+            is_home=(html_file == dist / "index.html"),
+            dist_dir=dist,
+        )
+
         if updated != raw:
             assert_no_forbidden_dashes(updated, context=str(html_file))
             html_file.write_text(updated, encoding="utf-8")
@@ -3544,6 +3746,8 @@ def _discover_prexvo_tools(
     def _add_tool(item: Dict[str, Any]) -> None:
         slug = str(item.get("slug") or "").strip().lower()
         if not slug or slug in QUARANTINED_ROGUE_SLUGS:
+            return
+        if re.search(r"(?:^|-)202[67](?:-|$)", slug):
             return
         title = _clean_tool_title(str(item.get("title") or slug), slug)
         desc = _clean_tool_description(str(item.get("description") or ""), title, slug)
@@ -3606,6 +3810,12 @@ _PREXVO_REDIRECTS = (
     "/tools/pslf-buyback-calculator/ /tools/pslf-qualifying-payment-simulator/ 301\n"
     "/tools/tax-deduction-for-car-loan-interest /tools/ 301\n"
     "/tools/tax-deduction-for-car-loan-interest/ /tools/ 301\n"
+    "/tools/student-loans-gov /tools/ 301\n"
+    "/tools/student-loans-gov/ /tools/ 301\n"
+    "/tools/parent-plus-double-consolidation-loophole-2026-calculator /tools/parent-plus-double-consolidation/ 301\n"
+    "/tools/parent-plus-double-consolidation-loophole-2026-calculator/ /tools/parent-plus-double-consolidation/ 301\n"
+    "/tools/student-loan-forgiveness-2026 /tools/student-loan-forgiveness/ 301\n"
+    "/tools/student-loan-forgiveness-2026/ /tools/student-loan-forgiveness/ 301\n"
     "/student-loan-repayment-calculator /tools/student-loan-repayment-calculator/ 301\n"
     "/student-loan-repayment-calculator/ /tools/student-loan-repayment-calculator/ 301\n"
     "/how-it-works /methodology/ 301\n"
@@ -3731,11 +3941,13 @@ def compile_prexvo_estate_impl(
             }
         )
 
-    # Prune orphaned sidecar manifests (e.g., statutory-repayment-assistance-plan.json)
+    # Prune orphaned sidecar manifests and decommissioned/year-stamped tool directories
     expected_manifest_names = {f"{s}.json" for s in all_slugs}
     for old_mf in list(manifests_dir.glob("*.json")):
         if old_mf.name not in expected_manifest_names:
             old_mf.unlink(missing_ok=True)
+    for decomm_slug in QUARANTINED_ROGUE_SLUGS:
+        shutil.rmtree(tools_dir / decomm_slug, ignore_errors=True)
 
     # Directory, Methodology, Disclaimers, 404
     (tools_dir / "index.html").write_text(_build_tools_directory_html(all_tools, css_text), encoding="utf-8")

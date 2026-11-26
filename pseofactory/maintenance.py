@@ -4046,6 +4046,7 @@ class AssetIntegrityEvaluator:
                         domain=adapter.domain,
                         brand_name=adapter.brand_name,
                         tools=getattr(adapter, "tools", None),
+                        allow_mutations=False,
                     )
                     self._seo_verifiers[dist_key] = v
                 self._seo_verifier = v
@@ -7057,8 +7058,15 @@ def _needs_page_structure_geo_normalization_impl(
     ):
         return True
 
+    is_calc_leaf_chk = "/tools/" in canon_url and not canon_url.rstrip("/").endswith("/tools")
     schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(html_content)
-    if schema_faqs or body_faqs:
+    if is_calc_leaf_chk and (
+        '"SpeakableSpecification"' in html_content
+        or '"HowTo"' in html_content
+        or '"FAQPage"' in html_content
+    ):
+        return True
+    if not is_calc_leaf_chk and schema_faqs:
         schema_q_set = {q.replace("&amp;", "&").strip().lower() for q, _ in schema_faqs}
         body_q_set = {q.replace("&amp;", "&").strip().lower() for q, _ in body_faqs}
         if schema_q_set != body_q_set or len(schema_faqs) != len(body_faqs):
@@ -7079,7 +7087,6 @@ def _needs_page_structure_geo_normalization_impl(
     if check_aeo_geo_graph and '"@graph"' in html_content and (
         '"inLanguage"' not in html_content
         or '"dateModified"' not in html_content
-        or ('class="quick-answer"' in html_content and '"SpeakableSpecification"' not in html_content)
         or (
             canon_url.rstrip("/") in ("https://profithelm.com", "https://prexvo.com", "https://gainhelm.com", "https://lienbond.com")
             and '"ItemList"' not in html_content
@@ -7237,22 +7244,14 @@ def _needs_page_structure_geo_normalization_impl(
             ):
                 return True
 
-    if 'class="touch-target scenario-preset-link"' in html_content and bool(
-        re.search(r'<a\b(?![^>]*\brel=["\']nofollow["\'])[^>]*\bscenario-preset-link\b', html_content, re.IGNORECASE)
+    if 'class="touch-target scenario-preset-link"' in html_content or bool(
+        re.search(r'<a\b[^>]*\bscenario-preset-link\b', html_content, re.IGNORECASE)
     ):
         return True
 
     if (
         canon_url.endswith("/404.html") or canon_url.rstrip("/").endswith("/404")
     ) and re.search(r'<meta\s+name=["\']robots["\']\s+content=["\']index,', html_content, re.IGNORECASE):
-        return True
-
-    if (
-        "/tools/" in canon_url
-        and not canon_url.rstrip("/").endswith("/tools")
-        and '"@graph"' in html_content
-        and ('"@type": "Dataset"' not in html_content or '"@type": "HowTo"' not in html_content)
-    ):
         return True
 
     if (
@@ -7270,9 +7269,9 @@ def _needs_page_structure_geo_normalization_impl(
         if _prexvo_workbench_needs_refresh(canon_url, html_content):
             return True
         if (
-            "parent-plus-double-consolidation-loophole-2026-calculator" not in canon_url
+            "parent-plus-double-consolidation" not in canon_url
             and 'id="topic-cluster-hub"' in html_content
-            and "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" not in html_content
+            and "/tools/parent-plus-double-consolidation/" not in html_content
         ):
             return True
         if (
@@ -8254,7 +8253,7 @@ def _normalize_page_structure_and_geo_parity(
             ]
         else:
             m_peers = [
-                ("irs-2027-tax-brackets", "Federal Tax Bracket Model"),
+                ("irs-tax-brackets", "Federal Tax Bracket Model"),
                 ("section-179-calculator", "Section 179 Depreciation Model"),
                 ("section-1031-calculator", "Section 1031 Exchange Model"),
             ]
@@ -8407,10 +8406,12 @@ def _normalize_page_structure_and_geo_parity(
         changed = True
         schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(updated)
 
-    if body_faqs:
+    # Keep visible HTML <details> FAQs; never force FAQPage JSON-LD injection on calculator leaves.
+    _is_tool_faq_route = "/tools/" in (canonical_url or "") and not (canonical_url or "").rstrip("/").endswith("/tools")
+    if body_faqs and not _is_tool_faq_route:
         schema_q_list = [_html_lib.unescape(q).strip() for q, _ in schema_faqs]
         body_q_list = [_html_lib.unescape(q).strip() for q, _ in body_faqs]
-        if schema_q_list != body_q_list:
+        if schema_faqs and schema_q_list != body_q_list:
             faq_entities = [
                 {
                     "@type": "Question",
@@ -8429,19 +8430,9 @@ def _normalize_page_structure_and_geo_parity(
                     data = json.loads(raw_j.strip())
                     if isinstance(data, dict):
                         if "@graph" in data and isinstance(data["@graph"], list):
-                            found_faq = False
                             for node in data["@graph"]:
                                 if isinstance(node, dict) and node.get("@type") == "FAQPage":
                                     node["mainEntity"] = faq_entities
-                                    found_faq = True
-                            if not found_faq:
-                                data["@graph"].append(
-                                    {
-                                        "@type": "FAQPage",
-                                        "@id": f"{canonical_url.split('#')[0]}#faqpage",
-                                        "mainEntity": faq_entities,
-                                    }
-                                )
                             return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
                         elif data.get("@type") == "FAQPage":
                             data["mainEntity"] = faq_entities
@@ -8813,158 +8804,12 @@ def _normalize_page_structure_and_geo_parity(
                         updated = og_synced
                         changed = True
 
-    if 'class="touch-target scenario-preset-link"' in updated:
-        nof_updated = re.sub(
-            r'(<a\b(?![^>]*\brel=["\']nofollow["\'])[^>]*\bdata-preset=["\'][^"\']+["\'])\s+(class=["\']touch-target\s+scenario-preset-link["\'])',
-            r'\1 rel="nofollow" \2',
-            updated,
-            flags=re.IGNORECASE,
-        )
-        if nof_updated != updated:
-            updated = nof_updated
-            changed = True
+    if "scenario-preset-link" in updated:
+        from pseofactory.porcelain_shell import _convert_preset_anchors_to_hash_buttons
 
-    if (
-        slug
-        and slug not in (
-            "index",
-            "tools-directory",
-            "tools",
-            "about",
-            "methodology",
-            "privacy",
-            "terms",
-            "disclaimers",
-            "contact",
-            "partners",
-            "404",
-        )
-        and ('/tools/' in canonical_url or property_id.lower() in ("profithelm", "prexvo", "gainhelm", "lienbond"))
-        and '"@graph"' in updated
-        and ('"@type": "Dataset"' not in updated or '"@type": "HowTo"' not in updated)
-    ):
-        def _inject_dataset_howto_graph(m_ld: re.Match) -> str:
-            o_tag, raw_j, c_tag = m_ld.group(1), m_ld.group(2), m_ld.group(3)
-            try:
-                parsed_j = json.loads(raw_j.strip())
-                if not isinstance(parsed_j, dict) or not isinstance(parsed_j.get("@graph"), list):
-                    return m_ld.group(0)
-                g_nodes = parsed_j["@graph"]
-                existing_types = {
-                    str(t)
-                    for n in g_nodes
-                    if isinstance(n, dict)
-                    for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
-                    if t
-                }
-                page_u = canonical_url.split("#")[0].rstrip("/") + "/"
-                base_u = (
-                    page_u.split("/tools/")[0]
-                    if "/tools/" in page_u
-                    else (
-                        "https://prexvo.com"
-                        if property_id.lower() == "prexvo"
-                        else (
-                            "https://gainhelm.com"
-                            if property_id.lower() == "gainhelm"
-                            else ("https://lienbond.com" if property_id.lower() == "lienbond" else "https://profithelm.com")
-                        )
-                    )
-                )
-                clean_lbl = topic_label or slug.replace("-", " ").title()
-                modified_g = False
-                if "Dataset" not in existing_types:
-                    g_nodes.append(
-                        {
-                            "@type": "Dataset",
-                            "@id": f"{page_u}#dataset",
-                            "name": f"{clean_lbl} Empirical Statutory Calculation Dataset",
-                            "description": f"Deterministic statutory calculation schedule and sensitivity matrix for {clean_lbl} under {stat_auth}.",
-                            "url": page_u,
-                            "creator": {
-                                "@type": "Organization",
-                                "@id": f"{base_u}/#organization",
-                                "name": brand_label,
-                                "url": base_u,
-                            },
-                            "publisher": {
-                                "@type": "Organization",
-                                "name": brand_label,
-                                "url": base_u,
-                            },
-                            "temporalCoverage": "2026/2027",
-                            "isAccessibleForFree": True,
-                            "license": "https://creativecommons.org/publicdomain/zero/1.0/",
-                            "distribution": [
-                                {
-                                    "@type": "DataDownload",
-                                    "encodingFormat": "text/html",
-                                    "contentUrl": page_u,
-                                }
-                            ],
-                            "spatialCoverage": "United States",
-                            "mainEntityOfPage": {"@id": f"{page_u}#webpage"},
-                            "includedInDataCatalog": {
-                                "@type": "DataCatalog",
-                                "@id": f"{base_u}/#datacatalog",
-                                "name": f"{brand_label} Statutory Data Catalog",
-                                "url": base_u,
-                            },
-                        }
-                    )
-                    modified_g = True
-                if "HowTo" not in existing_types:
-                    howto_lbl = re.sub(r"\s+Calculator\b", "", clean_lbl, flags=re.IGNORECASE).strip() or clean_lbl
-                    g_nodes.append(
-                        {
-                            "@type": "HowTo",
-                            "@id": f"{page_u}#howto",
-                            "name": f"How to Calculate {howto_lbl}",
-                            "description": f"Step-by-step statutory procedure for computing {howto_lbl} under {stat_auth}.",
-                            "url": page_u,
-                            "totalTime": "PT1M",
-                            "step": [
-                                {
-                                    "@type": "HowToStep",
-                                    "position": 1,
-                                    "name": "Enter Financial Baseline Parameters",
-                                    "text": f"Input baseline dollar figures and rate assumptions into the {clean_lbl} form.",
-                                    "url": f"{page_u}#step-1",
-                                },
-                                {
-                                    "@type": "HowToStep",
-                                    "position": 2,
-                                    "name": "Select Statutory Tier or Jurisdiction",
-                                    "text": f"Choose the applicable statutory classification or filing tier under {stat_auth}.",
-                                    "url": f"{page_u}#step-2",
-                                },
-                                {
-                                    "@type": "HowToStep",
-                                    "position": 3,
-                                    "name": "Review Deterministic Output & Sensitivity Matrix",
-                                    "text": "Inspect the computed dollar output, 5-point sensitivity schedule, and compliance checklist.",
-                                    "url": f"{page_u}#step-3",
-                                },
-                            ],
-                            "isPartOf": {"@id": f"{page_u}#webpage"},
-                        }
-                    )
-                    modified_g = True
-                if modified_g:
-                    return f"{o_tag}\n{json.dumps(parsed_j, indent=2)}\n  {c_tag}"
-            except Exception:
-                pass
-            return m_ld.group(0)
-
-        ld_updated = re.sub(
-            r'(<script[^>]+type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
-            _inject_dataset_howto_graph,
-            updated,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        if ld_updated != updated:
-            updated = ld_updated
+        conv_btn = _convert_preset_anchors_to_hash_buttons(updated)
+        if conv_btn != updated:
+            updated = conv_btn
             changed = True
 
     if property_id.lower() == "prexvo":
@@ -8988,15 +8833,15 @@ def _normalize_page_structure_and_geo_parity(
                     updated = wb_replaced
                     changed = True
         if (
-            slug != "parent-plus-double-consolidation-loophole-2026-calculator"
+            slug != "parent-plus-double-consolidation"
             and 'id="topic-cluster-hub"' in updated
-            and "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" not in updated
+            and "/tools/parent-plus-double-consolidation/" not in updated
         ):
             pp_li = (
-                '          <li><a href="https://prexvo.com/tools/parent-plus-double-consolidation-loophole-2026-calculator/" '
+                '          <li><a href="https://prexvo.com/tools/parent-plus-double-consolidation/" '
                 'class="touch-target cluster-link" style="display: inline-flex; align-items: center; min-height: 44px; '
                 'padding: 8px 12px; text-decoration: none; font-weight: 600;">'
-                'Parent PLUS Double Consolidation Loophole 2026 Sunset &amp; ICR vs IDR Calculator</a></li>\n'
+                'Parent PLUS Double Consolidation &amp; ICR vs RAP Calculator</a></li>\n'
             )
             pp_updated = re.sub(
                 r'(id=["\']topic-cluster-hub["\'][\s\S]*?<ul[^>]*>\s*)',
@@ -9330,13 +9175,13 @@ def _normalize_page_structure_and_geo_parity(
                     ]
                 else:
                     peer_candidates = [
-                        ("irs-2027-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
+                        ("irs-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
                         ("section-179-calculator", "Section 179 Equipment Depreciation Calculator"),
                         ("section-1031-calculator", "Section 1031 Real Estate Exchange Calculator"),
                     ]
                 related_apps = [
                     {
-                        "@type": "SoftwareApplication",
+                        "@type": "WebApplication",
                         "name": p_lbl,
                         "url": f"{base_u}/tools/{p_s}/",
                         "applicationCategory": "FinanceApplication",
@@ -9349,13 +9194,39 @@ def _normalize_page_structure_and_geo_parity(
                 existing_types: Set[str] = set()
                 stamped_lang = False
                 stamped_date = False
-                has_speakable = '"SpeakableSpecification"' in raw_j
+                cleaned_nodes: List[Dict[str, Any]] = []
 
                 for n in g_nodes:
                     if not isinstance(n, dict):
                         continue
                     nt = n.get("@type")
                     nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+                    if "speakable" in n:
+                        n.pop("speakable", None)
+                        mod_g = True
+                    if any(t in ("HowTo", "SpeakableSpecification") for t in nt_list):
+                        mod_g = True
+                        continue
+                    if is_tool_route and "FAQPage" in nt_list:
+                        mod_g = True
+                        continue
+                    if "Dataset" in nt_list:
+                        raw_dist = n.get("distribution")
+                        dist_items = raw_dist if isinstance(raw_dist, list) else ([raw_dist] if isinstance(raw_dist, dict) else [])
+                        has_real_dl = any(
+                            isinstance(dl, dict)
+                            and str(dl.get("encodingFormat") or "").strip().lower() != "text/html"
+                            and str(dl.get("contentUrl") or "").strip().lower().split("?", 1)[0].endswith((".csv", ".json"))
+                            for dl in dist_items
+                        )
+                        if not has_real_dl:
+                            mod_g = True
+                            continue
+                    if is_tool_route and "SoftwareApplication" in nt_list:
+                        new_t = ["WebApplication" if t == "SoftwareApplication" else t for t in nt_list]
+                        n["@type"] = new_t[0] if len(new_t) == 1 else new_t
+                        nt_list = new_t
+                        mod_g = True
                     existing_types.update(nt_list)
                     if any(
                         t in nt_list
@@ -9414,13 +9285,6 @@ def _normalize_page_structure_and_geo_parity(
                             if "priceCurrency" not in offers_obj:
                                 offers_obj["priceCurrency"] = "USD"
                             mod_g = True
-                        if has_qa_dom and not n.get("speakable"):
-                            n["speakable"] = {
-                                "@type": "SpeakableSpecification",
-                                "cssSelector": [".quick-answer", "h1"],
-                            }
-                            has_speakable = True
-                            mod_g = True
                         if is_tool_route and related_apps:
                             existing_rel = n.get("isRelatedTo")
                             if not existing_rel and not page_has_related_to:
@@ -9442,29 +9306,6 @@ def _normalize_page_structure_and_geo_parity(
                                     n["isRelatedTo"] = deduped_rel
                                     mod_g = True
                                 page_has_related_to = True
-                    if "HowTo" in nt_list:
-                        ht_name = str(n.get("name") or "")
-                        if re.search(r"^How to Calculate\s+.+\bCalculator(?:\s+202\d|\s+Engine|\s+Model|\s+Analysis\s+Model)?\s*$", ht_name, re.IGNORECASE):
-                            cleaned_ht_name = re.sub(
-                                r"\s+Calculator(?:\s+202\d|\s+Engine|\s+Model|\s+Analysis\s+Model)?\s*$",
-                                "",
-                                ht_name,
-                                flags=re.IGNORECASE,
-                            ).strip()
-                            if cleaned_ht_name and cleaned_ht_name != ht_name:
-                                n["name"] = cleaned_ht_name
-                                mod_g = True
-                        ht_desc = str(n.get("description") or "")
-                        if re.search(r"\bcomputing\s+[^.]*?\bCalculator\b", ht_desc, re.IGNORECASE):
-                            cleaned_ht_desc = re.sub(
-                                r"(\bcomputing\s+.+?)\s+Calculator(?:\s+202\d|\s+Engine|\s+Model)?(?=\s+under\b|\.)",
-                                r"\1",
-                                ht_desc,
-                                flags=re.IGNORECASE,
-                            )
-                            if cleaned_ht_desc != ht_desc:
-                                n["description"] = cleaned_ht_desc
-                                mod_g = True
                     from pseofactory.contracts import normalize_statutory_acronym_casing
                     for str_field in ("name", "headline", "description"):
                         if isinstance(n.get(str_field), str):
@@ -9479,32 +9320,20 @@ def _normalize_page_structure_and_geo_parity(
                                 if norm_il != il_item["name"]:
                                     il_item["name"] = norm_il
                                     mod_g = True
+                    cleaned_nodes.append(n)
 
-                if not stamped_lang and isinstance(g_nodes[0], dict):
+                if len(cleaned_nodes) != len(g_nodes):
+                    parsed_j["@graph"] = cleaned_nodes
+                    g_nodes = parsed_j["@graph"]
+
+                if g_nodes and not stamped_lang and isinstance(g_nodes[0], dict):
                     g_nodes[0]["inLanguage"] = "en-US"
                     mod_g = True
-                if not stamped_date and isinstance(g_nodes[0], dict):
+                if g_nodes and not stamped_date and isinstance(g_nodes[0], dict):
                     if not g_nodes[0].get("datePublished"):
                         g_nodes[0]["datePublished"] = "2026-01-15"
                     g_nodes[0]["dateModified"] = "2026-10-31"
                     mod_g = True
-                if has_qa_dom and not has_speakable:
-                    target_sp = next(
-                        (
-                            n
-                            for n in g_nodes
-                            if isinstance(n, dict)
-                            and n.get("@type")
-                            in ("WebPage", "AboutPage", "ContactPage", "SoftwareApplication", "WebApplication")
-                        ),
-                        g_nodes[0] if isinstance(g_nodes[0], dict) else None,
-                    )
-                    if isinstance(target_sp, dict):
-                        target_sp["speakable"] = {
-                            "@type": "SpeakableSpecification",
-                            "cssSelector": [".quick-answer", "h1"],
-                        }
-                        mod_g = True
 
                 if is_root_home and "ItemList" not in existing_types:
                     item_elements = [
@@ -9781,7 +9610,7 @@ def _normalize_page_structure_and_geo_parity(
             updated = th_scoped
             changed = True
 
-    if '"@graph"' in updated and slug.lower() not in ("404", "signal") and (
+    if '"@graph"' in updated and slug.lower() not in ("404", "signal", "index", "root", "") and (
         '"BreadcrumbList"' not in updated
         or (
             "/tools/" in (canonical_url or "")
@@ -11303,7 +11132,7 @@ class RetroReflectionEngine:
 
         if (
             'data-mechanic="deep_link_scenario_presets"' not in html_content
-            or "scenario-preset-link" not in html_content
+            or ("scenario-preset-btn" not in html_content and "scenario-preset-link" not in html_content)
         ):
             missing.append("deep_link_scenario_presets")
 
@@ -11654,6 +11483,7 @@ class RetroReflectionEngine:
             or "/tools/saas-burn-multiple-benchmarks-2026/" in html_content
             or (
                 "/tools/irs-2027-tax-brackets/" not in cluster_body
+                and "/tools/irs-tax-brackets/" not in cluster_body
                 and "Income-Based" not in cluster_body
                 and "/tools/soc-2-audit-cost-calculator/" not in cluster_body
                 and "/tools/cmmc-2-0-compliance-cost-calculator/" not in cluster_body
@@ -11664,7 +11494,7 @@ class RetroReflectionEngine:
                 and "/tools/workers-compensation-class-code-rate-calculator-by-state/" not in cluster_body
             )
             or (
-                "/tools/irs-2027-tax-brackets/" in cluster_body
+                ("/tools/irs-2027-tax-brackets/" in cluster_body or "/tools/irs-tax-brackets/" in cluster_body)
                 and sum(
                     1
                     for req_u in (
@@ -11672,6 +11502,9 @@ class RetroReflectionEngine:
                         "/tools/crypto-tax-form-1099-da-mandatory-reporting/",
                         "/tools/r-and-d-tax-credit-section-174-amortization-calculator/",
                         "/tools/section-179-calculator/gmc-yukon-xl/",
+                        "/tools/section-179-calculator/",
+                        "/tools/section-1031-calculator/",
+                        "/tools/capital-gains-calculator/",
                     )
                     if req_u in cluster_body
                 )
@@ -11689,6 +11522,7 @@ class RetroReflectionEngine:
                 and (
                     "/tools/pslf-buyback-months-reconsideration-student-loan-calculator/" not in cluster_body
                     and "/tools/student-loan-forgiveness-2026/" not in cluster_body
+                    and "/tools/student-loan-forgiveness/" not in cluster_body
                 )
             )
             or (spoke_state and f"/{spoke_state}/" not in cluster_body)
@@ -12042,7 +11876,10 @@ class RetroReflectionEngine:
         if not manifests_dir.is_dir() or _is_live_repo_mutation_blocked(d):
             return 0
         synced = 0
-        for html_file in sorted(d.rglob("*.html")):
+        for html_file in sorted(
+            d.rglob("*.html"),
+            key=lambda p: (1 if p.relative_to(d).as_posix() == "index.html" else 0, p.relative_to(d).as_posix()),
+        ):
             if html_file.name.startswith("."):
                 continue
             rel = html_file.relative_to(d).as_posix()
@@ -12729,7 +12566,7 @@ class RetroReflectionEngine:
                             missing.append("calculation_manifest")
             except Exception:
                 missing.append("calculation_manifest")
-        if not missing and dist_dir is not None:
+        if dist_dir is not None and "calculation_manifest" not in missing:
             sidecar_pre = Path(dist_dir) / "manifests" / f"{slug.replace('/', '-')}.json"
             if cls._sidecar_needs_sync(sidecar_pre, html_content):
                 missing.append("calculation_manifest")
@@ -13018,7 +12855,6 @@ class RetroReflectionEngine:
                 ("Aggressive (1.2x)", 1.2, "aggressive"),
             ]
             p_links: List[str] = []
-            base_href = canonical_url.split("?")[0]
             for label, mult, p_key in presets:
                 params: List[str] = []
                 for k, v in clamped_inputs.items():
@@ -13026,16 +12862,16 @@ class RetroReflectionEngine:
                         scaled = round(float(v) * mult, 4 if (0 < abs(float(v)) < 1) else 2)
                         val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
                         params.append(f"{k}={val_str}")
-                qs = "&amp;".join(params)
-                href = f"{base_href}?{qs}" if qs else base_href
+                hs = "&amp;".join(params)
+                hash_val = f"#{hs}" if hs else "#"
                 p_links.append(
-                    f'        <a href="{href}" data-preset="{p_key}" rel="nofollow" '
-                    f'class="touch-target scenario-preset-link" '
+                    f'        <button type="button" data-preset="{p_key}" data-preset-hash="{hash_val}" '
+                    f'class="touch-target scenario-preset-btn scenario-preset-link" '
                     f'style="display: inline-flex; align-items: center; justify-content: center; '
                     f'min-height: 44px; min-width: 44px; padding: 10px 14px; border-radius: 8px; '
                     f'background: var(--bg-elevated); color: var(--accent); '
                     f'border: 1px solid var(--border-strong); '
-                    f'text-decoration: none; font-size: 14px; font-weight: 600;">{label}</a>'
+                    f'cursor: pointer; font-size: 14px; font-weight: 600;">{label}</button>'
                 )
             joined_p_links = "\n".join(p_links)
             updated_no_scripts = re.sub(r"<(script|style)\b[^>]*>[\s\S]*?</\1>", "", updated, flags=re.IGNORECASE)
@@ -15884,7 +15720,7 @@ class RetroReflectionEngine:
                             property_id.lower() == "prexvo"
                             and (
                                 int(in_deg_map.get("/tools/student-loan-refinance-break-even-calculator", 99) or 0) <= 1
-                                or int(in_deg_map.get("/tools/parent-plus-double-consolidation-loophole-2026-calculator", 99) or 0) <= 1
+                                or int(in_deg_map.get("/tools/parent-plus-double-consolidation", 99) or 0) <= 1
                             )
                         )
                     ):
@@ -16288,7 +16124,10 @@ class RetroReflectionEngine:
                 except Exception:
                     pass
 
-        for html_file in sorted(d.rglob("*.html")):
+        for html_file in sorted(
+            d.rglob("*.html"),
+            key=lambda p: (1 if p.relative_to(d).as_posix() == "index.html" else 0, p.relative_to(d).as_posix()),
+        ):
             if html_file.name.startswith("."):
                 continue
             try:
@@ -17325,12 +17164,6 @@ class RetroReflectionEngine:
                     if str(mut_rel).endswith(".html") and mut_rel not in retrofitted_paths:
                         retrofitted_paths.append(mut_rel)
                 if porc_res.get("governance_written"):
-                    if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
-                        cls.sync_tenant_publisher_prerequisites(
-                            dist_dir=d,
-                            property_id=property_id,
-                            canonical_base=canonical_base,
-                        )
                     try:
                         from pseofactory.tenant_facts import TruthReconciliationEngine
 
@@ -17357,6 +17190,19 @@ class RetroReflectionEngine:
                                         retrofitted_paths.append(rel_gov)
                     except Exception:
                         pass
+                    if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
+                        cls.sync_tenant_publisher_prerequisites(
+                            dist_dir=d,
+                            property_id=property_id,
+                            canonical_base=canonical_base,
+                        )
+                elif "sitemap.xml" in (porc_res.get("mutated_paths") or []):
+                    if (d / "index.html").is_file() and (d / "tools" / "index.html").is_file():
+                        cls.sync_tenant_publisher_prerequisites(
+                            dist_dir=d,
+                            property_id=property_id,
+                            canonical_base=canonical_base,
+                        )
         except Exception:
             pass
 

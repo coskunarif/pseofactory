@@ -93,9 +93,9 @@ def test_required_reexports_and_2026_truth_pack_math():
     assert "16120" not in widget_html
 
     schemas = get_calculator_schemas(REPAYMENT_CALCULATOR_SPEC, "/tools/student-loan-repayment-calculator/")
-    assert len(schemas) == 2
-    assert schemas[0]["@type"] == "SoftwareApplication"
-    assert schemas[1]["@type"] == "FAQPage"
+    assert len(schemas) == 1
+    assert schemas[0]["@type"] == "WebApplication"
+    assert "speakable" not in schemas[0]
 
 
 def test_ymyl_refinance_cta_suppression_on_public_service():
@@ -194,19 +194,71 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
         # Serialized 2026 FPL in inline JS
         assert "15960" in raw and "5680" in raw
 
-        # Single SoftwareApplication node in JSON-LD
+        # Single WebApplication node in JSON-LD (no SoftwareApplication, HowTo, FAQPage, Dataset, SpeakableSpecification, WebSite, or Wikidata in sameAs)
         ld_matches = re.findall(
             r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
             raw,
             flags=re.IGNORECASE,
         )
         assert len(ld_matches) == 1
+        assert "SpeakableSpecification" not in ld_matches[0]
         graph = json.loads(ld_matches[0]).get("@graph", [])
-        app_nodes = [
-            n for n in graph
-            if "SoftwareApplication" in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+        graph_types = [
+            t
+            for n in graph
+            for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
         ]
-        assert len(app_nodes) == 1
+        assert "WebApplication" in graph_types
+        assert graph_types.count("WebApplication") == 1
+        for banned_t in ("SoftwareApplication", "TechArticle", "HowTo", "FAQPage", "Dataset", "WebSite"):
+            assert banned_t not in graph_types, f"Unexpected {banned_t} in leaf JSON-LD for {slug}"
+
+        # Zero crawlable <a href="...?..."> preset links; button presets used instead
+        assert not re.search(r'<a\b[^>]*class=["\'][^"\']*scenario-preset-link[^"\']*["\']', raw, re.IGNORECASE)
+        assert "scenario-preset-btn" in raw
+        assert "history.pushState" not in raw
+
+    # Verify homepage emits WebSite, omits BreadcrumbList, and moves Wikidata QIDs from Organization.sameAs to knowsAbout
+    home_raw = (dist_dir / "index.html").read_text(encoding="utf-8")
+    home_ld = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        home_raw,
+        flags=re.IGNORECASE,
+    )
+    assert len(home_ld) == 1
+    home_graph = json.loads(home_ld[0]).get("@graph", [])
+    home_types = [
+        t
+        for n in home_graph
+        for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+    ]
+    assert "WebSite" in home_types
+    assert "BreadcrumbList" not in home_types
+    home_orgs = [n for n in home_graph if "Organization" in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])]
+    assert len(home_orgs) == 1
+    assert not any("wikidata.org" in str(u).lower() for u in (home_orgs[0].get("sameAs") or []))
+    assert "wikidata.org" in json.dumps(home_orgs[0].get("knowsAbout") or [])
+
+    # Verify decommissioned/consolidated/year-stamped slugs absent from dist/tools & sitemap.xml, and 301 redirects present
+    for legacy_slug in (
+        "student-loans-gov",
+        "parent-plus-double-consolidation-loophole-2026-calculator",
+        "student-loan-forgiveness-2026",
+    ):
+        assert not (dist_dir / "tools" / legacy_slug / "index.html").exists()
+    assert (dist_dir / "tools" / "student-loan-forgiveness" / "index.html").is_file()
+    forgiveness_html = (dist_dir / "tools" / "student-loan-forgiveness" / "index.html").read_text(encoding="utf-8")
+    assert 'id="field-plan_year"' in forgiveness_html
+
+    sitemap_xml = (dist_dir / "sitemap.xml").read_text(encoding="utf-8")
+    assert "/tools/student-loan-forgiveness/" in sitemap_xml
+    assert not re.search(r"/tools/[^<]*202[67][^<]*</loc>", sitemap_xml)
+    assert "student-loans-gov" not in sitemap_xml
+
+    redirects_norm = "\n".join(re.sub(r"\s+", " ", ln.strip()) for ln in (dist_dir / "_redirects").read_text(encoding="utf-8").splitlines())
+    assert "/tools/student-loans-gov/ /tools/ 301" in redirects_norm
+    assert "/tools/parent-plus-double-consolidation-loophole-2026-calculator/ /tools/parent-plus-double-consolidation/ 301" in redirects_norm
+    assert "/tools/student-loan-forgiveness-2026/ /tools/student-loan-forgiveness/ 301" in redirects_norm
 
     # Verify llms.txt & sanitized catalog.json cleanliness
     llms_txt = (dist_dir / "llms.txt").read_text(encoding="utf-8")

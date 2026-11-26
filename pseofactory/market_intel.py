@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import assert_no_forbidden_dashes, sanitize_url_slug
 
@@ -322,10 +323,107 @@ STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {
 }
 
 
-def assert_candidate_domain_eligible(domain: str) -> str:
+MAX_ACTIVE_YMYL_DOMAINS: int = int(os.environ.get("PSEOFACTORY_MAX_ACTIVE_YMYL_DOMAINS", "4") or 4)
+
+_KNOWN_COMPOUND_HEAD_TERMS: Dict[str, Tuple[str, ...]] = {
+    "lienbond": ("lien", "bond"),
+    "profithelm": ("profit", "helm"),
+    "gainhelm": ("gain", "helm"),
+}
+
+
+def _resolve_projects_root(projects_root: Optional[Union[str, Path]] = None) -> Path:
+    """Resolves workspace root containing tenant .pseofactory.json directories (works inside worktrees too)."""
+    if projects_root is not None:
+        return Path(projects_root).resolve()
+    env_root = os.environ.get("PSEOFACTORY_PROJECTS_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).resolve()
+    cur = Path(__file__).resolve().parent
+    for _ in range(7):
+        try:
+            if cur.is_dir() and any(
+                child.is_dir()
+                and not child.name.startswith(".")
+                and (child / ".pseofactory.json").is_file()
+                for child in cur.iterdir()
+            ):
+                return cur
+        except OSError:
+            pass
+        if cur.parent == cur:
+            break
+        cur = cur.parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def discover_active_tenant_manifests(
+    projects_root: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, Any]]:
     """
-    Enforces that decommissioned retired domains and personal infrastructure domains
-    can never be selected or proposed as programmatic SEO tenant candidates.
+    Dynamically discovers all active tenants via <repo>/.pseofactory.json manifests.
+    Zero hardcoded tenant lists. Zero em-dashes. Zero en-dashes.
+    """
+    root = _resolve_projects_root(projects_root)
+    manifests: List[Dict[str, Any]] = []
+    if not root.is_dir():
+        return manifests
+    for child in sorted(root.iterdir(), key=lambda p: p.name):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        mf = child / ".pseofactory.json"
+        if not mf.is_file():
+            continue
+        try:
+            data = json.loads(mf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(data, dict) and (data.get("property_id") or data.get("domain")):
+            entry = dict(data)
+            entry["_repo_dir"] = str(child)
+            manifests.append(entry)
+    return manifests
+
+
+def _extract_tenant_head_terms(manifest: Dict[str, Any]) -> Set[str]:
+    """Extracts normalized head terms from an active tenant's brand, property_id, and domain."""
+    terms: Set[str] = set()
+    raw_fields = [
+        str(manifest.get("property_id") or "").strip(),
+        str(manifest.get("brand_name") or "").strip(),
+        str(manifest.get("package_name") or "").strip(),
+        str(manifest.get("domain") or "").strip().split(".")[0],
+    ]
+    for val in raw_fields:
+        if not val:
+            continue
+        low_full = re.sub(r"[^a-z0-9]", "", val.lower())
+        if len(low_full) >= 4:
+            terms.add(low_full)
+        if low_full in _KNOWN_COMPOUND_HEAD_TERMS:
+            terms.update(_KNOWN_COMPOUND_HEAD_TERMS[low_full])
+        camel_split = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", val)
+        for tok in re.findall(r"[a-z0-9]+", camel_split.lower()):
+            if len(tok) >= 4:
+                terms.add(tok)
+    return terms
+
+
+def assert_candidate_domain_eligible(
+    domain: str,
+    *,
+    projects_root: Optional[Union[str, Path]] = None,
+    max_active_domains: Optional[int] = None,
+    allow_over_cap: bool = False,
+    allow_head_term_overlap: bool = False,
+    enforce_fortress_guard: bool = True,
+) -> str:
+    """
+    Enforces:
+      1. Decommissioned retired domains and personal infrastructure domains are strictly blocked.
+      2. 4-Domain Fortress Guard: fails closed if candidate domain overlaps any head term of an
+         active .pseofactory.json tenant OR if active tenant count >= MAX_ACTIVE_YMYL_DOMAINS
+         (unless explicitly overridden).
     Zero em-dashes. Zero en-dashes.
     """
     clean = (domain or "").strip().lower()
@@ -340,6 +438,47 @@ def assert_candidate_domain_eligible(domain: str) -> str:
         raise ValueError(
             f"Personal infrastructure domain '{clean}' is strictly isolated from commercial pSEO tenants"
         )
+
+    if not enforce_fortress_guard:
+        return clean
+
+    active_manifests = discover_active_tenant_manifests(projects_root=projects_root)
+    active_domains = {
+        str(m.get("domain") or "").strip().lower()
+        for m in active_manifests
+        if str(m.get("domain") or "").strip()
+    }
+    if clean in active_domains:
+        return clean
+
+    cand_stem = re.sub(r"[^a-z0-9]", "", clean.split(".")[0])
+    if not allow_head_term_overlap and cand_stem:
+        for manifest in active_manifests:
+            pid = str(manifest.get("property_id") or manifest.get("domain") or "active_tenant")
+            dom = str(manifest.get("domain") or "")
+            head_terms = _extract_tenant_head_terms(manifest)
+            for term in sorted(head_terms):
+                if len(term) >= 4 and (term == cand_stem or term in cand_stem):
+                    raise ValueError(
+                        f"Candidate domain '{clean}' overlaps head term '{term}' of active tenant "
+                        f"'{pid}' ({dom}); blocked to prevent cross-estate cannibalization"
+                    )
+
+    if not allow_over_cap:
+        if max_active_domains is not None:
+            eff_cap = int(max_active_domains)
+        else:
+            eff_cap = int(
+                os.environ.get("PSEOFACTORY_MAX_ACTIVE_YMYL_DOMAINS", str(MAX_ACTIVE_YMYL_DOMAINS))
+                or MAX_ACTIVE_YMYL_DOMAINS
+            )
+        if len(active_manifests) >= eff_cap:
+            raise ValueError(
+                f"4-Domain Fortress Guard active: {len(active_manifests)} active .pseofactory.json "
+                f"tenants >= MAX_ACTIVE_YMYL_DOMAINS ({eff_cap}); cold-domain spawning for '{clean}' "
+                "is paused unless explicitly overridden"
+            )
+
     return clean
 
 
@@ -2081,7 +2220,15 @@ class MarketIntelligenceEngine:
         if raw_rec_domain.strip().lower() in NON_DEPLOYABLE_CANDIDATE_DOMAINS:
             rec_domain = "gainhelm.com"
         else:
-            rec_domain = assert_candidate_domain_eligible(raw_rec_domain)
+            rec_domain = assert_candidate_domain_eligible(raw_rec_domain, enforce_fortress_guard=False)
+
+        spawning_eligible = True
+        spawning_block_reason = ""
+        try:
+            assert_candidate_domain_eligible(rec_domain)
+        except ValueError as exc:
+            spawning_eligible = False
+            spawning_block_reason = str(exc)
 
         return {
             "query": q_clean,
@@ -2090,6 +2237,8 @@ class MarketIntelligenceEngine:
             "recommended_tenant_id": v_match["tenant_id"] if v_match else f"tenant-{slug[:16]}",
             "recommended_brand_name": v_match["brand_name"] if v_match else slug.split("-")[0].capitalize(),
             "recommended_domain": rec_domain,
+            "domain_spawning_eligible": spawning_eligible,
+            "domain_spawning_block_reason": spawning_block_reason,
             "staged_reserve_domain": "gainhelm.com",
             "search_volume": vol,
             "cpc_usd": round(cpc, 2),
@@ -2582,7 +2731,7 @@ def evaluate_greenfield_tenant_candidates(
 
 # Module-level self-attestation: enforce zero forbidden dashes and domain eligibility across all catalog entries
 for _v_id, _v_spec in GREENFIELD_VERTICAL_CATALOG.items():
-    assert_candidate_domain_eligible(_v_spec["recommended_domain"])
+    assert_candidate_domain_eligible(_v_spec["recommended_domain"], enforce_fortress_guard=False)
     assert_no_forbidden_dashes(_v_spec["brand_name"], f"catalog.{_v_id}.brand_name")
     assert_no_forbidden_dashes(_v_spec["vertical_name"], f"catalog.{_v_id}.vertical_name")
     assert_no_forbidden_dashes(_v_spec["why_it_wins_fastest"], f"catalog.{_v_id}.why_it_wins_fastest")

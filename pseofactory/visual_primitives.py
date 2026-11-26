@@ -575,7 +575,7 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       min-width: 44px !important;
       box-sizing: border-box !important;
     }
-    a.touch-target, button.touch-target, .scenario-preset-link, .cluster-link,
+    a.touch-target, button.touch-target, .scenario-preset-btn, .scenario-preset-link, .cluster-link,
     .on-this-page-nav a, .overlay-hub-list a, .partner-btn, .btn-cta, a[data-cta-slot],
     .btn-preset, .calc-switcher-btn, .calc-scenario-btn, .preset-btn, .canonical-tool-link {
       display: inline-flex !important;
@@ -591,11 +591,12 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       box-sizing: border-box !important;
       transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1), background-color 160ms ease, border-color 160ms ease;
     }
-    .scenario-preset-link, .on-this-page-nav a, .cluster-link, .overlay-hub-list a,
+    .scenario-preset-btn, .scenario-preset-link, .on-this-page-nav a, .cluster-link, .overlay-hub-list a,
     .calc-switcher-btn, .calc-scenario-btn, .preset-btn {
       background-color: var(--bg-elevated) !important;
       color: var(--accent) !important;
       border: 1px solid var(--border-strong) !important;
+      cursor: pointer;
     }
     .cluster-link, .overlay-hub-list a {
       display: flex !important;
@@ -614,24 +615,24 @@ def _render_visual_primitives_interactive_and_mobile_css() -> str:
       margin: 0 !important;
       padding: 0 !important;
     }
-    .scenario-preset-link:hover, .on-this-page-nav a:hover, .cluster-link:hover,
+    .scenario-preset-btn:hover, .scenario-preset-link:hover, .on-this-page-nav a:hover, .cluster-link:hover,
     .overlay-hub-list a:hover, .calc-switcher-btn:hover, .calc-scenario-btn:hover, .preset-btn:hover {
       background-color: var(--accent-subtle) !important;
       border-color: var(--accent) !important;
     }
-    .scenario-preset-link.active, .calc-switcher-btn.active, .calc-scenario-btn.active, .preset-btn.active {
+    .scenario-preset-btn.active, .scenario-preset-link.active, .calc-switcher-btn.active, .calc-scenario-btn.active, .preset-btn.active {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border-color: var(--accent) !important;
     }
-    .partner-btn, .btn-cta, a[data-cta-slot], .btn-preset, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip) {
+    .partner-btn, .btn-cta, a[data-cta-slot], .btn-preset, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip):not(.scenario-preset-btn):not(.scenario-preset-link) {
       background-color: var(--accent) !important;
       color: var(--cta-fg, #ffffff) !important;
       border: 1px solid var(--accent) !important;
       justify-content: center !important;
       cursor: pointer;
     }
-    .partner-btn:hover, .btn-cta:hover, a[data-cta-slot]:hover, .btn-preset:hover, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip):hover {
+    .partner-btn:hover, .btn-cta:hover, a[data-cta-slot]:hover, .btn-preset:hover, button.touch-target:not(.calc-switcher-btn):not(.calc-scenario-btn):not(.preset-btn):not(.runway-chip):not(.scenario-preset-btn):not(.scenario-preset-link):hover {
       background-color: var(--accent-hover) !important;
       border-color: var(--accent-hover) !important;
     }
@@ -3597,18 +3598,40 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
 
     function hydrateInputsFromLocationSearch() {
       try {
+        var rawHash = (window.location && window.location.hash) ? window.location.hash : "";
         var rawSearch = (window.location && window.location.search) ? window.location.search : "";
-        if (!rawSearch || rawSearch.length <= 1) return 0;
-        var qs = new URLSearchParams(rawSearch);
+        var hashParams = (rawHash && rawHash.length > 1 && rawHash.indexOf("=") !== -1)
+          ? new URLSearchParams(rawHash.slice(1))
+          : new URLSearchParams();
+        var searchParams = (rawSearch && rawSearch.length > 1)
+          ? new URLSearchParams(rawSearch)
+          : new URLSearchParams();
         var ignoreParams = {
           "utm_source": 1, "utm_medium": 1, "utm_campaign": 1, "utm_content": 1, "utm_term": 1,
           "fbclid": 1, "gclid": 1, "li_fat_id": 1, "twclid": 1, "ref": 1, "source_tool": 1,
           "subid": 1, "cta_slot": 1, "traffic_source": 1, "ph_tier": 1, "wb_state": 1, "ai_mode": 1,
           "checkout_status": 1, "checkout_fulfilled": 1, "lead_id": 1, "sku": 1, "session_id": 1
         };
-        var hydratedCount = 0;
-        qs.forEach(function(rawVal, rawKey) {
+        var mergedPairs = [];
+        var seenMergedKeys = {};
+        hashParams.forEach(function(rawVal, rawKey) {
           if (!rawKey || ignoreParams[rawKey.toLowerCase()] || rawVal === null || rawVal === "") return;
+          seenMergedKeys[rawKey] = 1;
+          mergedPairs.push([rawKey, rawVal, false]);
+        });
+        searchParams.forEach(function(rawVal, rawKey) {
+          if (!rawKey || ignoreParams[rawKey.toLowerCase()] || rawVal === null || rawVal === "" || seenMergedKeys[rawKey]) return;
+          seenMergedKeys[rawKey] = 1;
+          mergedPairs.push([rawKey, rawVal, true]);
+        });
+        if (!mergedPairs.length) return 0;
+        var hydratedCount = 0;
+        var migratedKeys = [];
+        var migratedHash = new URLSearchParams(hashParams.toString());
+        for (var mpIdx = 0; mpIdx < mergedPairs.length; mpIdx++) {
+          var rawKey = mergedPairs[mpIdx][0];
+          var rawVal = mergedPairs[mpIdx][1];
+          var fromSearch = mergedPairs[mpIdx][2];
           var k = String(rawKey);
           var dashK = k.replace(/_/g, "-");
           var candidates = [k, dashK].concat(PRESET_KEY_ALIASES[k] || []).concat(PRESET_KEY_ALIASES[dashK] || []);
@@ -3660,8 +3683,23 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
               el.dispatchEvent(new Event("change", { bubbles: true }));
             }
           }
-          if (matchedThisKey) hydratedCount++;
-        });
+          if (matchedThisKey) {
+            hydratedCount++;
+            if (fromSearch) {
+              migratedKeys.push(rawKey);
+              migratedHash.set(rawKey, String(rawVal));
+            }
+          }
+        }
+        if (migratedKeys.length > 0 && window.history && typeof window.history.replaceState === "function" && window.location) {
+          for (var mkIdx = 0; mkIdx < migratedKeys.length; mkIdx++) {
+            searchParams.delete(migratedKeys[mkIdx]);
+          }
+          var remSearch = searchParams.toString();
+          var migHashStr = migratedHash.toString();
+          var migUrl = (window.location.pathname || "/") + (remSearch ? "?" + remSearch : "") + (migHashStr ? "#" + migHashStr : "");
+          window.history.replaceState({}, "", migUrl);
+        }
         if (hydratedCount > 0) {
           _userInteracted = true;
           var statusEl = resolveBlueprintStatusNode();
@@ -3689,14 +3727,17 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         }
         if (!paramKey) return;
         var valStr = changedEl.type === "checkbox" ? (changedEl.checked ? "1" : "0") : String(changedEl.value !== undefined ? changedEl.value : "").trim();
-        var qs = new URLSearchParams(window.location.search || "");
+        var rawHash = (window.location && window.location.hash) ? window.location.hash : "";
+        var qs = (rawHash && rawHash.length > 1 && rawHash.indexOf("=") !== -1)
+          ? new URLSearchParams(rawHash.slice(1))
+          : new URLSearchParams();
         if (valStr !== "") {
           qs.set(paramKey, valStr);
         } else {
           qs.delete(paramKey);
         }
-        var nextQs = qs.toString();
-        var nextUrl = (window.location.pathname || "/") + (nextQs ? "?" + nextQs : "") + (window.location.hash || "");
+        var nextHash = qs.toString();
+        var nextUrl = (window.location.pathname || "/") + (window.location.search || "") + (nextHash ? "#" + nextHash : "");
         window.history.replaceState({}, "", nextUrl);
       } catch (urlErr) {}
     }
@@ -3730,6 +3771,9 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
 
     window.__pseoHydrateFromUrl = hydrateInputsFromLocationSearch;
     window.addEventListener("popstate", function() {
+      hydrateInputsFromLocationSearch();
+    });
+    window.addEventListener("hashchange", function() {
       hydrateInputsFromLocationSearch();
     });
 
@@ -4016,9 +4060,13 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
           }
           try {
             if (window.history && window.history.replaceState && stVal) {
-              var u = new URL(window.location.href);
-              u.searchParams.set("state", stVal);
-              window.history.replaceState({}, "", u.toString());
+              var curStHash = (window.location && window.location.hash) ? window.location.hash : "";
+              var stQs = (curStHash && curStHash.length > 1 && curStHash.indexOf("=") !== -1)
+                ? new URLSearchParams(curStHash.slice(1))
+                : new URLSearchParams();
+              stQs.set("state", stVal);
+              var nextStUrl = (window.location ? window.location.pathname + (window.location.search || "") : "/") + "#" + stQs.toString();
+              window.history.replaceState({}, "", nextStUrl);
             }
           } catch (uErr) {}
           _userInteracted = true;
@@ -4446,9 +4494,10 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
                 qs.set(ik, String(bpState.inputs[ik]));
               }
             }
-            var shareUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + qs.toString();
+            var shareHash = qs.toString();
+            var shareUrl = (window.location ? window.location.origin + window.location.pathname + (window.location.search || "") : "/") + (shareHash ? "#" + shareHash : "");
             if (window.history && window.history.replaceState) {
-              window.history.replaceState({}, "", window.location.pathname + "?" + qs.toString());
+              window.history.replaceState({}, "", (window.location ? window.location.pathname + (window.location.search || "") : "/") + (shareHash ? "#" + shareHash : ""));
             }
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(shareUrl).catch(function() {});
@@ -4544,9 +4593,9 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
               sQs.set(sik, String(sBpState.inputs[sik]));
             }
           }
-          var sUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + sQs.toString();
+          var sUrl = (window.location ? window.location.origin + window.location.pathname + (window.location.search || "") : "/") + (sQs.toString() ? "#" + sQs.toString() : "");
           if (window.history && window.history.replaceState) {
-            window.history.replaceState({}, "", window.location.pathname + "?" + sQs.toString());
+            window.history.replaceState({}, "", (window.location ? window.location.pathname + (window.location.search || "") : "/") + (sQs.toString() ? "#" + sQs.toString() : ""));
           }
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(sUrl).catch(function() {});
@@ -4805,29 +4854,65 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         return;
       }
 
-      var scenarioLink = e.target && e.target.closest ? e.target.closest("a.scenario-preset-link, a[data-preset]") : null;
+      var scenarioLink = e.target && e.target.closest ? e.target.closest("button.scenario-preset-btn, .scenario-preset-link, [data-preset]") : null;
       if (scenarioLink) {
         var href = scenarioLink.getAttribute("href") || "";
         var qIdx = href.indexOf("?");
-        var rawTargetPath = (qIdx !== -1 ? href.slice(0, qIdx) : href).split("#")[0];
-        var curLocPath = (window.location && window.location.pathname) ? window.location.pathname : "";
-        if (rawTargetPath && rawTargetPath.charAt(0) === "/" && rawTargetPath.replace(/\\/+$/, "") !== curLocPath.replace(/\\/+$/, "")) {
-          return;
+        var hIdx = href.indexOf("#");
+        if (scenarioLink.tagName === "A" && href) {
+          var rawTargetPath = (qIdx !== -1 ? href.slice(0, qIdx) : href).split("#")[0];
+          var curLocPath = (window.location && window.location.pathname) ? window.location.pathname : "";
+          if (rawTargetPath && rawTargetPath.charAt(0) === "/" && rawTargetPath.replace(/\\/+$/, "") !== curLocPath.replace(/\\/+$/, "")) {
+            return;
+          }
         }
         e.preventDefault();
         _userInteracted = true;
         initBaseValues();
-        var presetType = (scenarioLink.getAttribute("data-preset") || "baseline").toLowerCase();
+        var rawPresetAttr = (scenarioLink.getAttribute("data-preset") || "").trim();
+        var rawParamsAttr = (scenarioLink.getAttribute("data-preset-params") || "").trim();
+        var tierAttr = (scenarioLink.getAttribute("data-preset-tier") || "").trim().toLowerCase();
+        var lblLow = String(scenarioLink.textContent || "").toLowerCase();
+        var presetType = tierAttr || (
+          (rawPresetAttr === "conservative" || rawPresetAttr === "baseline" || rawPresetAttr === "aggressive")
+            ? rawPresetAttr
+            : (lblLow.indexOf("conservative") !== -1 ? "conservative" : (lblLow.indexOf("aggressive") !== -1 ? "aggressive" : "baseline"))
+        );
         var mult = presetType === "conservative" ? 0.8 : (presetType === "aggressive" ? 1.2 : 1.0);
-        var params = qIdx !== -1 ? new URLSearchParams(href.slice(qIdx + 1).replace(/&amp;/g, "&")) : new URLSearchParams();
+        var params = new URLSearchParams();
+        if (rawPresetAttr.charAt(0) === "{") {
+          try {
+            var pObj = JSON.parse(rawPresetAttr);
+            if (pObj && typeof pObj === "object") {
+              for (var pk in pObj) {
+                if (Object.prototype.hasOwnProperty.call(pObj, pk) && pObj[pk] !== undefined && pObj[pk] !== null) {
+                  params.set(pk, String(pObj[pk]));
+                }
+              }
+            }
+          } catch (pErr) {}
+        } else if (rawPresetAttr.indexOf("=") !== -1) {
+          params = new URLSearchParams(rawPresetAttr.replace(/^[?#]+/, "").replace(/&amp;/g, "&"));
+        } else if (rawParamsAttr.indexOf("=") !== -1) {
+          params = new URLSearchParams(rawParamsAttr.replace(/^[?#]+/, "").replace(/&amp;/g, "&"));
+        } else if (qIdx !== -1) {
+          params = new URLSearchParams(href.slice(qIdx + 1).split("#")[0].replace(/&amp;/g, "&"));
+        } else if (hIdx !== -1 && href.slice(hIdx + 1).indexOf("=") !== -1) {
+          params = new URLSearchParams(href.slice(hIdx + 1).replace(/&amp;/g, "&"));
+        }
         var matchedParam = false;
         params.forEach(function(v, k) {
-          var cands = [k].concat(PRESET_KEY_ALIASES[k] || []);
+          var dashK = String(k).replace(/_/g, "-");
+          var cands = [k, dashK].concat(PRESET_KEY_ALIASES[k] || []).concat(PRESET_KEY_ALIASES[dashK] || []);
           for (var i = 0; i < cands.length; i++) {
             var ck = cands[i];
-            var inp = document.getElementById("field-" + ck) || document.getElementById("input-" + ck) || document.getElementById(ck) || document.querySelector('input[name="' + ck + '"]');
-            if (inp && (inp.type === "number" || inp.type === "range")) {
-              inp.value = v;
+            var inp = document.getElementById("field-" + ck) || document.getElementById("input-" + ck) || document.getElementById("calc-input-" + ck) || document.getElementById(ck) || document.querySelector('[name="' + ck + '"]');
+            if (inp && (inp.tagName === "INPUT" || inp.tagName === "SELECT")) {
+              if (inp.type === "checkbox") {
+                inp.checked = (v === "true" || v === "1" || v === "yes");
+              } else {
+                inp.value = v;
+              }
               var pr = findPairedRangeInput(inp);
               if (pr) pr.value = v;
               inp.dispatchEvent(new Event("input", { bubbles: true }));
@@ -4849,15 +4934,23 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
             }
           }
         }
-        var allLinks = document.querySelectorAll("a.scenario-preset-link");
+        var allLinks = document.querySelectorAll(".scenario-preset-btn, .scenario-preset-link");
         for (var l = 0; l < allLinks.length; l++) {
           allLinks[l].classList.remove("active");
         }
         scenarioLink.classList.add("active");
         updateOutputsSynchronously(mult);
         try {
-          if (window.history && window.history.replaceState && qIdx !== -1) {
-            window.history.replaceState({}, "", window.location.pathname + href.slice(qIdx).replace(/&amp;/g, "&"));
+          if (window.history && typeof window.history.replaceState === "function" && window.location) {
+            var hashOut = new URLSearchParams();
+            params.forEach(function(pv, pk) {
+              if (pk && pv !== "") hashOut.set(pk, pv);
+            });
+            var hashStr = hashOut.toString();
+            if (hashStr) {
+              var nextHashUrl = (window.location.pathname || "/") + (window.location.search || "") + "#" + hashStr;
+              window.history.replaceState({}, "", nextHashUrl);
+            }
           }
         } catch (err) {}
         return;
@@ -5356,9 +5449,9 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
               sQs.set(sik, String(sBpState.inputs[sik]));
             }
           }
-          var sUrl = (window.location ? window.location.origin + window.location.pathname : "/") + "?" + sQs.toString();
+          var sUrl = (window.location ? window.location.origin + window.location.pathname + (window.location.search || "") : "/") + (sQs.toString() ? "#" + sQs.toString() : "");
           if (window.history && window.history.replaceState) {
-            window.history.replaceState({}, "", window.location.pathname + "?" + sQs.toString());
+            window.history.replaceState({}, "", (window.location ? window.location.pathname + (window.location.search || "") : "/") + (sQs.toString() ? "#" + sQs.toString() : ""));
           }
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(sUrl).catch(function() {});
@@ -6172,10 +6265,19 @@ def _detect_visual_and_ux_contract_issues_cached(
 
         if tag_name == "a" and "scenario-preset-link" in cls_val:
             href_val = _extract_attr(tag, "href") or ""
-            preset_attr = _extract_attr(tag, "data-preset") or ""
-            if "?" not in href_val and not preset_attr.strip():
+            if "?" in href_val:
                 issues.append(
-                    f"[{rel_path}] Broken .scenario-preset-link anchor missing both query parameters and data-preset attribute."
+                    f"[{rel_path}] Crawlable .scenario-preset-link anchor with query href must be a <button type=\"button\" class=\"scenario-preset-btn scenario-preset-link\" data-preset=\"...\">."
+                )
+            else:
+                issues.append(
+                    f"[{rel_path}] Legacy .scenario-preset-link anchor must be converted to <button type=\"button\" class=\"scenario-preset-btn scenario-preset-link\" data-preset=\"...\">."
+                )
+        elif tag_name == "button" and ("scenario-preset-btn" in cls_val or "scenario-preset-link" in cls_val):
+            preset_attr = _extract_attr(tag, "data-preset") or ""
+            if not preset_attr.strip():
+                issues.append(
+                    f"[{rel_path}] Broken .scenario-preset-btn button missing data-preset attribute."
                 )
 
     if expect_primitives and ('class="result-box"' in html_content or 'class="pseo-result-box"' in html_content):
@@ -6629,11 +6731,12 @@ def _repair_html_tags_pass(updated: str) -> Tuple[str, set[str]]:
                 except ValueError:
                     pass
 
-        if tag_name == "a" and "scenario-preset-link" in cls_val:
-            href_val = _extract_attr(tag, "href") or ""
+        if tag_name == "button" and ("scenario-preset-btn" in cls_val or "scenario-preset-link" in cls_val):
             preset_attr = _extract_attr(tag, "data-preset") or ""
-            if "?" not in href_val and not preset_attr.strip():
-                tag = _set_or_replace_attr(tag, "href", "?scenario=baseline")
+            if not _extract_attr(tag, "type"):
+                tag = _set_or_replace_attr(tag, "type", "button")
+                tag_repairs.add("interactive_control_sanitization")
+            if not preset_attr.strip():
                 tag = _set_or_replace_attr(tag, "data-preset", "baseline")
                 tag_repairs.add("interactive_control_sanitization")
 
@@ -7247,12 +7350,21 @@ def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List
             rb_span = (
                 _find_balanced_tag_span(updated, "result-box", tag_name="div", attr_name="class")
                 or _find_balanced_tag_span(updated, "pseo-result-box", tag_name="div", attr_name="class")
+                or _find_balanced_tag_span(updated, "calc-results-column", tag_name="div", attr_name="class")
+                or _find_balanced_tag_span(updated, "calc-results", tag_name="div", attr_name="class")
             )
             if rb_span:
                 close_idx = updated.rfind("</div>", rb_span[0], rb_span[1])
                 if close_idx != -1:
                     updated = updated[:close_idx] + "\n" + step1_html + "\n      " + updated[close_idx:]
                     actions.append("inject_step1_preview_controls")
+            elif '<div class="workpaper-unlock-actions">' in updated:
+                updated = updated.replace(
+                    '<div class="workpaper-unlock-actions">',
+                    step1_html + '\n      <div class="workpaper-unlock-actions">',
+                    1,
+                )
+                actions.append("inject_step1_preview_controls")
 
     if 'id="workpaper-unlock-card"' not in updated and "id='workpaper-unlock-card'" not in updated:
         step2_html = build_workpaper_unlock_card_html(
@@ -7839,6 +7951,58 @@ def normalize_html_visual_primitives(
     if wrapped_tables and "table_wrapper_normalization" not in repaired:
         repaired.append("table_wrapper_normalization")
 
+    def _convert_scenario_preset_anchors_to_buttons(doc: str) -> Tuple[str, bool]:
+        import html as _html_mod
+
+        anchor_re = re.compile(
+            r'<a\b([^>]*\bclass=["\'][^"\']*\bscenario-preset-link\b[^"\']*["\'][^>]*)>([\s\S]*?)</a>',
+            re.IGNORECASE,
+        )
+
+        def _replace_anchor(m: re.Match) -> str:
+            attrs_raw = m.group(1) or ""
+            inner = m.group(2) or ""
+            tag = f"<a{attrs_raw}>"
+            href_val = _html_mod.unescape(_extract_attr(tag, "href") or "").strip()
+            preset_val = _html_mod.unescape(_extract_attr(tag, "data-preset") or "").strip()
+            cls_val = (_extract_attr(tag, "class") or "").strip()
+            cls_tokens = [tok for tok in cls_val.split() if tok]
+            if "scenario-preset-btn" not in cls_tokens:
+                cls_tokens.append("scenario-preset-btn")
+            if "scenario-preset-link" not in cls_tokens:
+                cls_tokens.append("scenario-preset-link")
+            if "touch-target" not in cls_tokens:
+                cls_tokens.append("touch-target")
+
+            qs_val = ""
+            if "?" in href_val:
+                qs_val = href_val.split("?", 1)[1].split("#", 1)[0].strip()
+            elif "#" in href_val and "=" in href_val.split("#", 1)[1]:
+                qs_val = href_val.split("#", 1)[1].strip()
+
+            tier_val = preset_val if preset_val in ("conservative", "baseline", "aggressive") else ""
+            final_preset = qs_val or preset_val or "baseline"
+            clean_attrs = re.sub(
+                r'\s+\b(?:href|rel|target)\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)',
+                "",
+                attrs_raw,
+                flags=re.IGNORECASE,
+            )
+            btn_tag = f"<button{clean_attrs}>"
+            btn_tag = _set_or_replace_attr(btn_tag, "type", "button")
+            btn_tag = _set_or_replace_attr(btn_tag, "class", " ".join(cls_tokens))
+            btn_tag = _set_or_replace_attr(btn_tag, "data-preset", _html_mod.escape(final_preset, quote=True))
+            if tier_val and not _extract_attr(btn_tag, "data-preset-tier"):
+                btn_tag = _set_or_replace_attr(btn_tag, "data-preset-tier", tier_val)
+            return f"{btn_tag}{inner}</button>"
+
+        converted = anchor_re.sub(_replace_anchor, doc)
+        return converted, converted != doc
+
+    updated, converted_preset_btns = _convert_scenario_preset_anchors_to_buttons(updated)
+    if converted_preset_btns and "scenario_preset_button_normalization" not in repaired:
+        repaired.append("scenario_preset_button_normalization")
+
     # 3, 4, 5. Linear tag sanitizer
     updated, tag_repairs = _repair_html_tags_pass(updated)
     for r_key in sorted(tag_repairs):
@@ -8057,6 +8221,7 @@ function createSimulatedDom(tenantConfig) {
   const beaconPayloads = [];
   const storage = {};
   let currentSearch = tenantConfig.initialSearch || '';
+  let currentHash = tenantConfig.initialHash || '';
 
   class SimElement {
     constructor(tagName, attrs = {}, textContent = '') {
@@ -8249,7 +8414,7 @@ function createSimulatedDom(tenantConfig) {
     main.appendChild(new SimElement('INPUT', { id: 'pm-tax-gain', type: 'number', value: '50000', min: '0', max: '1000000' }));
     main.appendChild(new SimElement('BUTTON', { id: 'pm-gain-preset-100k', type: 'button', class: 'touch-target', 'data-preset-pm-gain': '100000' }, '$100k Gain'));
     main.appendChild(new SimElement('BUTTON', { id: 'btn-legacy-share', type: 'button', class: 'btn-share touch-target', onclick: 'copyScenarioLink(this)' }, 'Share Scenario'));
-    main.appendChild(new SimElement('A', { id: 'scenario-pill-aggressive', href: '?gross_income=250000', class: 'scenario-preset-link touch-target', 'data-preset': 'aggressive' }, 'Aggressive Scenario'));
+    main.appendChild(new SimElement('BUTTON', { id: 'scenario-pill-aggressive', type: 'button', class: 'scenario-preset-btn scenario-preset-link touch-target', 'data-preset': 'gross_income=250000', 'data-preset-tier': 'aggressive' }, 'Aggressive Scenario'));
   }
 
   main.appendChild(new SimElement('DIV', { id: 'primary-output', class: 'output-value', 'data-baseline-output': '42500' }, '$42,500'));
@@ -8396,13 +8561,20 @@ function createSimulatedDom(tenantConfig) {
       hostname: tenantConfig.host,
       pathname: `/tools/${tenantConfig.slug}`,
       search: currentSearch,
-      href: `https://${tenantConfig.host}/tools/${tenantConfig.slug}${currentSearch}`
+      hash: currentHash,
+      href: `https://${tenantConfig.host}/tools/${tenantConfig.slug}${currentSearch}${currentHash}`
     },
     history: {
       replaceState(_st, _title, url) {
-        const qIdx = String(url).indexOf('?');
-        currentSearch = qIdx !== -1 ? String(url).slice(qIdx) : '';
+        const rawU = String(url || '');
+        const hIdx = rawU.indexOf('#');
+        const beforeH = hIdx !== -1 ? rawU.slice(0, hIdx) : rawU;
+        const qIdx = beforeH.indexOf('?');
+        currentSearch = qIdx !== -1 ? beforeH.slice(qIdx) : '';
+        currentHash = hIdx !== -1 ? rawU.slice(hIdx) : '';
         windowObj.location.search = currentSearch;
+        windowObj.location.hash = currentHash;
+        windowObj.location.href = `https://${tenantConfig.host}/tools/${tenantConfig.slug}${currentSearch}${currentHash}`;
       }
     },
     localStorage: {
@@ -8556,7 +8728,7 @@ async function runSimulationForTenant(tenantConfig) {
       ].join('|'));
     }
     workbenchSelectsDistinct = seen.size === 4;
-    urlSyncPassed = String(sim.windowObj.location.search || '').includes('serp-loan-filing=pslf_track');
+    urlSyncPassed = String(sim.windowObj.location.hash || '').includes('serp-loan-filing=pslf_track') && String(sim.windowObj.location.search || '') === '';
   } else if (tenantConfig.mode === 'tax_brackets') {
     const sel = sim.elementsById['serp-tax-regime'];
     const seen = new Set();
@@ -8570,7 +8742,7 @@ async function runSimulationForTenant(tenantConfig) {
       ].join('|'));
     }
     workbenchSelectsDistinct = seen.size === 3;
-    urlSyncPassed = String(sim.windowObj.location.search || '').includes('serp-tax-regime=ptet_shield');
+    urlSyncPassed = String(sim.windowObj.location.hash || '').includes('serp-tax-regime=ptet_shield') && String(sim.windowObj.location.search || '') === '';
   } else {
     const sel = sim.elementsById['serp-b2b-regime'];
     const seen = new Set();
@@ -8583,7 +8755,7 @@ async function runSimulationForTenant(tenantConfig) {
       ].join('|'));
     }
     workbenchSelectsDistinct = seen.size === 3;
-    urlSyncPassed = String(sim.windowObj.location.search || '').includes('serp-b2b-regime=stress_case');
+    urlSyncPassed = String(sim.windowObj.location.hash || '').includes('serp-b2b-regime=stress_case') && String(sim.windowObj.location.search || '') === '';
   }
 
   // 2. Click Scenario Pin A, Pin B, Reset

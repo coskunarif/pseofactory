@@ -1325,10 +1325,10 @@ def _audit_schema_and_fact_gates(
     try:
         jsonld_blocks = assert_valid_jsonld(html_content, context="ContentAccuracyAuditStage")
         has_app = False
-        has_faq = False
         for block in jsonld_blocks:
             b_type = block.get("@type")
-            if b_type == "SoftwareApplication" or (isinstance(b_type, list) and "SoftwareApplication" in b_type):
+            b_types = [str(t) for t in b_type] if isinstance(b_type, list) else ([str(b_type)] if b_type else [])
+            if any(t in ("WebApplication", "SoftwareApplication") for t in b_types):
                 has_app = True
                 app_name = block.get("name")
                 h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html_content, re.IGNORECASE | re.DOTALL)
@@ -1343,7 +1343,7 @@ def _audit_schema_and_fact_gates(
                 if not app_matches:
                     g9_ok = False
                     violations.append(
-                        f"Gate 9 (Schema.org): SoftwareApplication name '{app_name}' does not match title '{expected_title or h1_str or t_str}'"
+                        f"Gate 9 (Schema.org): WebApplication name '{app_name}' does not match title '{expected_title or h1_str or t_str}'"
                     )
                 app_url = block.get("url", "")
                 if slug and f"/tools/{slug}" not in app_url and slug not in app_url:
@@ -1352,83 +1352,33 @@ def _audit_schema_and_fact_gates(
                     if not (slug_toks and slug_toks.issubset(url_toks)):
                         g9_ok = False
                         violations.append(
-                            f"Gate 9 (Schema.org): SoftwareApplication url '{app_url}' does not reference '/tools/{slug}'"
+                            f"Gate 9 (Schema.org): WebApplication url '{app_url}' does not reference '/tools/{slug}'"
                         )
-            elif b_type == "FAQPage":
-                has_faq = True
-                main_entity = block.get("mainEntity", [])
-                if not main_entity or not isinstance(main_entity, list):
-                    g9_ok = False
-                    violations.append("Gate 9 (Schema.org): FAQPage mainEntity is empty or invalid")
-                faq_text = " ".join(
-                    q.get("acceptedAnswer", {}).get("text", "")
-                    for q in main_entity
-                    if isinstance(q, dict) and isinstance(q.get("acceptedAnswer"), dict)
+            elif any(t in ("FAQPage", "HowTo", "SpeakableSpecification") for t in b_types):
+                g9_ok = False
+                violations.append(
+                    f"Gate 9 (Schema.org): Deprecated/forbidden schema type {b_types} emitted on calculator leaf"
                 )
-                if statutory and statutory not in faq_text:
-                    stat_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', statutory.lower()) if len(w) > 2}
-                    faq_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', faq_text.lower()) if len(w) > 2}
-                    if not (stat_tokens & faq_tokens) and statutory.lower() not in faq_text.lower():
-                        if statutory not in html_content and not (stat_tokens & set(re.findall(r'\b[a-zA-Z0-9]+\b', html_content.lower()))):
-                            g9_ok = False
-                            violations.append(
-                                f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote statutory authority '{statutory}'"
-                            )
-                if economic and economic not in faq_text:
-                    econ_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', economic.lower()) if len(w) > 2}
-                    faq_tokens = {w for w in re.findall(r'\b[a-zA-Z0-9]+\b', faq_text.lower()) if len(w) > 2}
-                    if not (econ_tokens & faq_tokens) and economic.lower() not in faq_text.lower():
-                        if economic not in html_content and not (econ_tokens & set(re.findall(r'\b[a-zA-Z0-9]+\b', html_content.lower()))):
-                            g9_ok = False
-                            violations.append(
-                                f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote economic dataset '{economic}'"
-                            )
-                if formula and formula not in faq_text:
-                    form_tokens = set()
-                    for w in re.findall(r'[a-zA-Z_]+', formula):
-                        for part in w.split('_'):
-                            p = part.lower()
-                            if len(p) > 3 and p not in ("round", "min", "max", "float", "int"):
-                                form_tokens.add(p)
-                    faq_words = set(re.findall(r'[a-zA-Z0-9]+', faq_text.lower()))
-                    math_terms = (
-                        "formula", "calculate", "limit", "cap", "rate", "deduction", "payment",
-                        "subsidy", "percent", "threshold", "model", "math", "arithmetic",
-                        "defer", "tax", "rule", "computation", "recapture", "basis", "cost"
+            elif "Dataset" in b_types:
+                raw_dist = block.get("distribution")
+                dist_items = raw_dist if isinstance(raw_dist, list) else ([raw_dist] if isinstance(raw_dist, dict) else [])
+                has_real_dl = any(
+                    isinstance(dl, dict)
+                    and str(dl.get("encodingFormat") or "").strip().lower() != "text/html"
+                    and str(dl.get("contentUrl") or "").strip().lower().endswith((".csv", ".json"))
+                    for dl in dist_items
+                )
+                if not has_real_dl:
+                    g9_ok = False
+                    violations.append(
+                        "Gate 9 (Schema.org): Leaf Dataset JSON-LD forbidden without real .csv/.json distribution[].contentUrl"
                     )
-                    has_math_terms = any(term in faq_text.lower() for term in math_terms)
-                    if not (form_tokens & faq_words) and not has_math_terms:
-                        g9_ok = False
-                        violations.append(
-                            f"Gate 9 (Schema.org): FAQPage acceptedAnswer text does not quote formula or mathematical parameters for '{formula}'"
-                        )
-                for q_item in main_entity:
-                    if isinstance(q_item, dict):
-                        q_name = q_item.get("name", "").strip()
-                        ans_obj = q_item.get("acceptedAnswer", {})
-                        a_ans = ans_obj.get("text", "").strip() if isinstance(ans_obj, dict) else ""
-                        norm_body = " ".join(html.unescape(no_scripts_text).split())
-                        q_clean = html.unescape(q_name)
-                        if q_name and q_name not in no_scripts_text and " ".join(q_name.split()) not in norm_body and q_clean not in norm_body:
-                            g9_ok = False
-                            violations.append(
-                                f"Gate 9 (Schema.org): FAQPage question '{q_name}' not found in visible HTML body"
-                            )
-                        if a_ans and a_ans not in no_scripts_text and " ".join(a_ans.split()) not in norm_body and html.unescape(a_ans) not in norm_body:
-                            a_words = [w for w in re.findall(r'\b[a-zA-Z0-9]+\b', a_ans.lower()) if len(w) > 2]
-                            body_words = set(re.findall(r'\b[a-zA-Z0-9]+\b', norm_body.lower()))
-                            matched_words = [w for w in a_words if w in body_words]
-                            if not a_words or (len(matched_words) / len(a_words) < 0.6):
-                                g9_ok = False
-                                violations.append(
-                                    "Gate 9 (Schema.org): FAQPage acceptedAnswer text not found in visible HTML body"
-                                )
+            if "speakable" in block:
+                g9_ok = False
+                violations.append("Gate 9 (Schema.org): Forbidden speakable property in JSON-LD")
         if not has_app:
             g9_ok = False
-            violations.append("Gate 9 (Schema.org): Missing SoftwareApplication JSON-LD block")
-        if not has_faq:
-            g9_ok = False
-            violations.append("Gate 9 (Schema.org): Missing FAQPage JSON-LD block")
+            violations.append("Gate 9 (Schema.org): Missing WebApplication JSON-LD block")
     except Exception as ex:
         g9_ok = False
         violations.append(f"Gate 9 (Schema.org): JSON-LD parsing/validation failed: {ex}")
@@ -2523,7 +2473,7 @@ def audit_estate_accuracy(
       1. Top-level calculator hubs (dist/tools/*/index.html)
       2. Nested spoke pages (dist/tools/*/*/index.html, e.g. state and vehicle spokes)
       3. Guides, comparison, directory, and institutional HTML pages (all dist/**/*.html)
-      4. Embedded JSON-LD schema blocks (FAQPage, HowTo, Dataset, SoftwareApplication)
+      4. Embedded JSON-LD schema blocks (WebApplication, WebPage, BreadcrumbList, Organization @id)
       5. Curated LLM summary manifest (dist/llms.txt) when present (dist/llms-full.txt is forbidden)
       6. Calculation manifests and catalogs (dist/manifests/*.json, dist/catalog.json with zero raw formula/quick_answer/published_output leaks; dist/ai-benchmarks/* is forbidden)
       7. Multi-channel syndication packs (syndication/**/*)

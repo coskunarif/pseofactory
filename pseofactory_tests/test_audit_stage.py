@@ -325,7 +325,7 @@ def test_audit_gate_8_missing_structural_component(profithelm_spec):
 def test_audit_gate_9_corrupted_schema_jsonld(profithelm_spec):
     """Corrupted Schema.org JSON-LD (e.g. invalid type or missing FAQ answers) triggers Gate 9."""
     res = compile_high_effort_page(profithelm_spec)
-    tampered_html = res["html"].replace('"SoftwareApplication"', '"CorruptedApplication"')
+    tampered_html = res["html"].replace('"WebApplication"', '"CorruptedApplication"')
 
     report = audit_rendered_asset(tampered_html, profithelm_spec, "profithelm")
     assert report.passed is False
@@ -521,7 +521,7 @@ def test_pipeline_fail_closed_corrupted_schema_jsonld_zero_disk(tmp_path, monkey
     """
     def _corrupted_compile(spec):
         res = compile_high_effort_page(spec)
-        bad_html = res["html"].replace('"SoftwareApplication"', '"TamperedApplication"')
+        bad_html = res["html"].replace('"WebApplication"', '"TamperedApplication"')
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
@@ -761,8 +761,9 @@ def test_page_structure_geo_immediacy_and_vertical_isolation(profithelm_spec):
         slug="s-corp-reasonable-salary-tax-calculator",
     )
     schema_faqs, body_faqs = _extract_faq_schema_and_body_counts(retro_html)
-    assert len(schema_faqs) == len(body_faqs)
-    assert [q for q, _ in schema_faqs] == [q for q, _ in body_faqs]
+    # Calculator leaves omit FAQPage JSON-LD while preserving visible <details> FAQs.
+    assert len(schema_faqs) == 0
+    assert len(body_faqs) >= 4
     assert "Statutory analysis and compliance guidelines for " not in retro_html
     assert "IRC Section 1(j) Marginal Rate Tiers" not in retro_html
     assert "Revenue Ruling 74-44" in retro_html

@@ -2647,6 +2647,38 @@ class MasterSEOVerifier:
                     for yr_err in detect_title_year_conflict_issues(title, context=rel):
                         issues.append(yr_err)
 
+                    h1_m = re.search(r'<h1\b[^>]*>(.*?)</h1>', content, re.IGNORECASE | re.DOTALL)
+                    if h1_m:
+                        h1_text = html.unescape(re.sub(r'<[^>]+>', ' ', h1_m.group(1))).strip()
+                        _title_stopwords = {
+                            "a", "an", "and", "are", "as", "at", "by", "for", "from",
+                            "how", "in", "is", "it", "of", "on", "or", "the", "to",
+                            "with", "your", "this", "that",
+                        }
+                        h1_tokens = [
+                            t for t in re.findall(r'[a-z0-9]+', h1_text.lower())
+                            if len(t) >= 2 and t not in _title_stopwords
+                        ]
+                        title_tokens = set(re.findall(r'[a-z0-9]+', title.lower()))
+                        # Preserve unique order of H1 core tokens
+                        seen_h1 = set()
+                        h1_core = []
+                        for tok in h1_tokens:
+                            if tok not in seen_h1:
+                                seen_h1.add(tok)
+                                h1_core.append(tok)
+                        is_calc_leaf = rel.startswith("tools/") and rel.endswith("/index.html") and rel.count("/") >= 2
+                        min_tokens = 2 if is_calc_leaf else 3
+                        if len(h1_core) >= min_tokens:
+                            matched = [tok for tok in h1_core if tok in title_tokens]
+                            coverage = len(matched) / float(len(h1_core))
+                            required = (0.6 if len(h1_core) >= 3 else 0.5) if is_calc_leaf else 0.3
+                            if coverage < required:
+                                missing = [tok for tok in h1_core if tok not in title_tokens][:5]
+                                issues.append(
+                                    f"Low <h1>-to-<title> core token coverage ({len(matched)}/{len(h1_core)} = {coverage:.0%} < {required:.0%}) in {rel}: missing {missing}"
+                                )
+
         return {
             "status": "PASS" if not issues else "FAIL",
             "gate": "check_page_titles_gate",
@@ -3119,6 +3151,32 @@ class MasterSEOVerifier:
                         continue
                     if not kebab_seg_re.match(seg):
                         issues.append(f"Non-readable URL path segment '{seg}' in {rel} (must be lowercase kebab-case)")
+
+                content = self._read_cached_html(p)
+                for a_match in re.finditer(r'<a\b([^>]*?)href\s*=\s*["\']([^"\']+)["\']([^>]*)>', content, re.IGNORECASE | re.DOTALL):
+                    attrs_all = f"{a_match.group(1)} {a_match.group(3)}"
+                    href_val = html.unescape(a_match.group(2).strip())
+                    if "?" not in href_val:
+                        continue
+                    is_preset_anchor = (
+                        "scenario-preset" in attrs_all
+                        or "data-preset" in attrs_all
+                        or href_val.startswith("?")
+                    )
+                    if is_preset_anchor:
+                        issues.append(
+                            f"Query-string preset anchor <a href='{href_val}'> forbidden in {rel}; use #hash button state instead"
+                        )
+                        continue
+                    # Forbid internal ?query links inside dist/, while permitting redirect/API routes or external non-tool links
+                    if href_val.startswith("/") and not (
+                        href_val.startswith("/r/")
+                        or href_val.startswith("/api/")
+                        or href_val.startswith("//")
+                    ):
+                        issues.append(
+                            f"Internal query-string link <a href='{href_val}'> forbidden in {rel}; use clean path or #hash state"
+                        )
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -4635,6 +4693,7 @@ class MasterSEOVerifier:
                     rel_path=rel,
                     require_strict=require_strict,
                     require_free_app_schema=require_free_app_schema,
+                    dist_dir=target,
                 )
                 if res["issues"]:
                     issues.extend(res["issues"])
@@ -4656,6 +4715,105 @@ class MasterSEOVerifier:
     check_schema_graphs_gate = check_structured_data_gate
     check_target_entity_schemas_gate = check_structured_data_gate
     check_machine_readable_schemas_gate = check_structured_data_gate
+
+    def check_enacted_law_primary_source_links_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+        property_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fail-closed gate verifying every enacted-law calculator page includes >= 1
+        outbound official primary-source link (.gov, .mil, eur-lex.europa.eu, or
+        pcisecuritystandards.org).
+        Zero em-dashes. Zero en-dashes.
+        """
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues: List[str] = []
+        pages_checked = 0
+
+        from pseofactory.truth_pack import (
+            discover_truth_pack_ids,
+            load_truth_pack,
+            _canonicalize_property_id,
+        )
+        from pseofactory.truth_gate import (
+            _check_enacted_law_primary_source_links,
+            _extract_slug_from_context,
+            _parse_html_dom,
+        )
+
+        pack_dict: Optional[Dict[str, Any]] = None
+        candidates: List[str] = []
+        if property_id:
+            candidates.append(_canonicalize_property_id(property_id))
+        if self.repo_root is not None:
+            candidates.append(_canonicalize_property_id(self.repo_root.name))
+        if self.domain:
+            candidates.append(_canonicalize_property_id(self.domain.split(".")[0]))
+
+        def _norm_host(val: str) -> str:
+            raw = str(val or "").strip().lower()
+            if "://" in raw:
+                return (urllib.parse.urlparse(raw).hostname or "").strip().lower().removeprefix("www.")
+            return raw.split("/")[0].removeprefix("www.")
+
+        self_host = _norm_host(self.domain or self.canonical_base or "")
+
+        for cand_pid in candidates:
+            if not cand_pid:
+                continue
+            try:
+                pack_obj = load_truth_pack(cand_pid, allow_expired=True)
+                if pack_obj is not None and (
+                    not self_host
+                    or _norm_host(pack_obj.canonical_domain) == self_host
+                    or bool(property_id)
+                ):
+                    pack_dict = pack_obj.to_dict() if hasattr(pack_obj, "to_dict") else dict(pack_obj)
+                    break
+            except Exception:
+                continue
+
+        if pack_dict is None and self_host:
+            for pid in discover_truth_pack_ids():
+                try:
+                    pack_obj = load_truth_pack(pid, allow_expired=True)
+                    if pack_obj is not None and _norm_host(pack_obj.canonical_domain) == self_host:
+                        pack_dict = pack_obj.to_dict() if hasattr(pack_obj, "to_dict") else dict(pack_obj)
+                        break
+                except Exception:
+                    continue
+
+        if pack_dict is not None and target.exists():
+            for p in self._iter_html_files(target):
+                if p.name == "404.html" or "signal" in p.parts or "static" in p.parts:
+                    continue
+                rel = p.relative_to(target).as_posix()
+                is_tool_page = rel.startswith("tools/") and rel != "tools/index.html" and rel.endswith("/index.html")
+                if not is_tool_page:
+                    continue
+                pages_checked += 1
+                raw_html = self._read_cached_html(p)
+                clean_html = raw_html.replace("\u2014", "-").replace("\u2013", "-")
+                dom = _parse_html_dom(clean_html)
+                slug = _extract_slug_from_context(rel, canonical_url=dom.canonical_url)
+                viols = _check_enacted_law_primary_source_links(
+                    dom=dom,
+                    pack_dict=pack_dict,
+                    file_path=rel,
+                    slug=slug,
+                    is_tool_page=True,
+                )
+                for v in viols:
+                    issues.append(v.message)
+
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_enacted_law_primary_source_links_gate",
+            "pages_checked": pages_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
 
     def verify_structured_data(
         self,
@@ -5980,6 +6138,7 @@ class MasterSEOVerifier:
                 ("g_extractable_structure", "check_extractable_content_structure_gate", False),
                 ("g_answer_prominence", "check_answer_prominence_gate", False),
                 ("g_structured_data", "check_structured_data_gate", False),
+                ("g_enacted_primary_links", "check_enacted_law_primary_source_links_gate", False),
                 ("g_forbidden_ai_artifacts_and_catalog", "check_forbidden_ai_artifacts_and_catalog_gate", False),
                 ("g_ftc_post_calc_slot_order", "check_ftc_and_post_calc_slot_order_gate", False),
                 ("g_tool_utility", "check_tool_utility_gate", False),
@@ -6065,6 +6224,7 @@ class MasterSEOVerifier:
             g_extractable_structure = gate_results["g_extractable_structure"]
             g_answer_prominence = gate_results["g_answer_prominence"]
             g_structured_data = gate_results["g_structured_data"]
+            g_enacted_primary_links = gate_results["g_enacted_primary_links"]
             g_forbidden_ai_artifacts_and_catalog = gate_results["g_forbidden_ai_artifacts_and_catalog"]
             g_ftc_post_calc_slot_order = gate_results["g_ftc_post_calc_slot_order"]
             g_llms_txt = g_forbidden_ai_artifacts_and_catalog
@@ -6155,6 +6315,7 @@ class MasterSEOVerifier:
             "check_calculation_widget_prominence_gate": g_answer_prominence,
             "check_early_answer_block_gate": g_answer_prominence,
             "check_structured_data_gate": g_structured_data,
+            "check_enacted_law_primary_source_links_gate": g_enacted_primary_links,
             "check_schema_org_structured_data_gate": g_structured_data,
             "check_jsonld_structured_data_gate": g_structured_data,
             "check_schema_graphs_gate": g_structured_data,
@@ -6216,6 +6377,7 @@ class MasterSEOVerifier:
             "check_http_link_canonical_gate",
             "check_snippet_eligibility_gate",
             "check_structured_data_gate",
+            "check_enacted_law_primary_source_links_gate",
             "check_query_answer_match_gate",
             "check_brand_entity_in_llm_memory_gate",
             "check_citable_specific_facts_gate",
@@ -6816,6 +6978,75 @@ def verify_html_brand_entity_in_llm_memory(
         brand_domain=brand_domain,
     )
 
+    rel_norm = str(rel_path or "").strip().lstrip("/").lower()
+    is_org_home_or_about = rel_norm in ("", "index.html", "about/index.html")
+
+    def _has_org_id_ref(node: Any) -> bool:
+        if isinstance(node, dict):
+            node_id = str(node.get("@id") or "").strip()
+            if node_id.endswith("/#organization") or node_id == "#organization":
+                return True
+            return any(_has_org_id_ref(v) for v in node.values())
+        if isinstance(node, (list, tuple)):
+            return any(_has_org_id_ref(v) for v in node)
+        return False
+
+    from pseofactory.contracts import (
+        BRAND_ENTITY_TAXONOMY,
+        assert_authoritative_same_as,
+        assert_canonical_entity_definition,
+    )
+
+    # Always enforce sameAs hygiene across every entity in structured data (never allow
+    # generic topic Wikidata QIDs, ccfs.sos.wa.gov, github.com/coskunarif, or personal profiles).
+    def _collect_same_as_nodes(node: Any) -> List[Any]:
+        found: List[Any] = []
+        if isinstance(node, dict):
+            if "sameAs" in node:
+                found.append(node)
+            for v in node.values():
+                found.extend(_collect_same_as_nodes(v))
+        elif isinstance(node, (list, tuple)):
+            for v in node:
+                found.extend(_collect_same_as_nodes(v))
+        return found
+
+    for sa_node in _collect_same_as_nodes(parsed_blocks):
+        try:
+            assert_authoritative_same_as(
+                sa_node.get("sameAs"),
+                entity_url=sa_node.get("url"),
+                entity_domain=brand_domain,
+                context=f"Page {rel_path}",
+                require_wikidata=False,
+            )
+        except Exception as ex:
+            err_msg = f"Page {rel_path}: {ex}"
+            if err_msg not in issues:
+                issues.append(err_msg)
+
+    brand_candidates = [
+        cand for cand in candidates
+        if any(
+            t in BRAND_ENTITY_TAXONOMY
+            for t in (
+                [cand.get("@type")]
+                if isinstance(cand.get("@type"), str)
+                else list(cand.get("@type") or [])
+            )
+        )
+    ]
+
+    if not brand_candidates:
+        if not is_org_home_or_about and _has_org_id_ref(parsed_blocks):
+            return {
+                "status": "PASS" if not issues else "FAIL",
+                "gate": "check_brand_entity_in_llm_memory_gate",
+                "violations_count": len(issues),
+                "issues": issues,
+                "entities_count": 1,
+            }
+
     if not candidates:
         issues.append(
             f"Page {rel_path}: Missing canonical brand or organization entity definition in structured data"
@@ -6828,17 +7059,21 @@ def verify_html_brand_entity_in_llm_memory(
             "entities_count": 0,
         }
 
-    from pseofactory.contracts import assert_canonical_entity_definition
-
+    eval_candidates = brand_candidates if brand_candidates else candidates
     valid_entities = 0
     candidate_errors: List[str] = []
-    for cand in candidates:
+    for cand in eval_candidates:
         try:
+            allow_no_sameas = bool(
+                cand.get("@id") and cand.get("knowsAbout") and not cand.get("sameAs")
+            )
             assert_canonical_entity_definition(
                 cand,
                 brand_name=brand_name,
                 brand_domain=brand_domain,
                 context=f"Page {rel_path}",
+                require_wikidata=False,
+                allow_missing_same_as=allow_no_sameas,
             )
             valid_entities += 1
         except Exception as ex:
@@ -6846,7 +7081,8 @@ def verify_html_brand_entity_in_llm_memory(
 
     if valid_entities == 0:
         for err in candidate_errors:
-            issues.append(f"Page {rel_path}: {err}")
+            if f"Page {rel_path}: {err}" not in issues:
+                issues.append(f"Page {rel_path}: {err}")
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -7713,15 +7949,18 @@ def verify_html_structured_data(
     rel_path: str = "index.html",
     require_strict: bool = False,
     require_free_app_schema: bool = False,
+    dist_dir: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Mechanical single-page verification function for Factor 12: Structured Data (+0.80).
     Verifies:
     1. Zero em-dashes and zero en-dashes.
     2. Machine-readable Schema.org JSON-LD markup with valid syntax.
-    3. Valid entity structures across SoftwareApplication, WebApplication,
-       Product, FAQPage, HowTo, and Dataset schemas.
-    4. Clean graph architecture without unanchored leaf entities or broken references.
+    3. Valid entity structures across WebApplication, Product, and downloadable Dataset schemas,
+       with HowTo, SpeakableSpecification, and FAQPage forbidden on calculator leaves.
+    4. Clean graph architecture without unanchored leaf entities or broken references, plus
+       WebSite scoped to /, TechArticle scoped to /methodology/ and /guides/, and
+       BreadcrumbList 1:1 DOM-to-JSON-LD parity.
     5. Consolidated unified graphs without disconnected script tags.
     Zero em-dashes. Zero en-dashes.
     """
@@ -7754,6 +7993,7 @@ def verify_html_structured_data(
         html_content,
         rel_path=rel_path,
         require_strict=require_strict,
+        dist_dir=dist_dir,
     )
     issues.extend(detected)
 
@@ -7775,6 +8015,87 @@ def verify_html_structured_data(
                 issues.append(err_msg)
 
     meta = _extract_structured_data_metadata_ro(html_content)
+
+    # Enforce schema page-type scoping and BreadcrumbList 1:1 DOM-to-JSON-LD parity
+    rel_norm = str(rel_path or "").strip().lstrip("/").lower()
+    is_home_page = rel_norm in ("", "index.html")
+    is_editorial_guide = rel_norm.startswith(("methodology/", "guides/")) or rel_norm in (
+        "methodology/index.html",
+        "guides/index.html",
+    )
+    breadcrumb_nodes: List[Dict[str, Any]] = []
+    for ent in meta.get("entities", []):
+        stype = ent.get("@type")
+        types = [stype] if isinstance(stype, str) else (stype if isinstance(stype, list) else [])
+        if "WebSite" in types and not is_home_page:
+            msg = f"Page {rel_path}: Forbidden WebSite schema on non-root page (scope WebSite to / only)"
+            if msg not in issues:
+                issues.append(msg)
+        if "TechArticle" in types and not is_editorial_guide:
+            msg = f"Page {rel_path}: Forbidden TechArticle schema outside /methodology/ and /guides/"
+            if msg not in issues:
+                issues.append(msg)
+        if "BreadcrumbList" in types:
+            breadcrumb_nodes.append(ent)
+
+    nav_m = re.search(
+        r'<nav\b[^>]*class\s*=\s*["\'][^"\']*\bbreadcrumbs\b[^"\']*["\'][^>]*>(.*?)</nav>',
+        html_content,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if nav_m:
+        nav_inner = nav_m.group(1)
+        dom_crumbs: List[Tuple[Optional[str], str]] = []
+        for token_m in re.finditer(
+            r'<a\b([^>]*?)href\s*=\s*["\']([^"\']+)["\']([^>]*)>(.*?)</a>|<span\b([^>]*)>(.*?)</span>',
+            nav_inner,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            if token_m.group(2) is not None:
+                lbl = " ".join(html.unescape(re.sub(r'<[^>]+>', ' ', token_m.group(4))).split())
+                href = html.unescape(token_m.group(2).strip())
+                if lbl:
+                    dom_crumbs.append((href, lbl))
+            else:
+                span_attrs = token_m.group(5) or ""
+                if re.search(r'aria-hidden\s*=\s*["\']true["\']', span_attrs, re.IGNORECASE):
+                    continue
+                lbl = " ".join(html.unescape(re.sub(r'<[^>]+>', ' ', token_m.group(6) or "")).split())
+                if lbl and lbl not in ("/", ">", "»"):
+                    dom_crumbs.append((None, lbl))
+        if dom_crumbs:
+            if not breadcrumb_nodes:
+                issues.append(
+                    f"Page {rel_path}: DOM <nav class='breadcrumbs'> rendered without matching JSON-LD BreadcrumbList"
+                )
+            else:
+                raw_elems = breadcrumb_nodes[0].get("itemListElement") or []
+                ld_elems = sorted(
+                    [el for el in raw_elems if isinstance(el, dict)],
+                    key=lambda x: int(x.get("position") or 0) if str(x.get("position") or "").isdigit() else 0,
+                )
+                if len(ld_elems) != len(dom_crumbs):
+                    issues.append(
+                        f"Page {rel_path}: BreadcrumbList count mismatch between DOM ({len(dom_crumbs)}) and JSON-LD ({len(ld_elems)})"
+                    )
+                else:
+                    for idx, ((dom_href, dom_lbl), ld_item) in enumerate(zip(dom_crumbs, ld_elems), start=1):
+                        ld_lbl = " ".join(str(ld_item.get("name") or "").split())
+                        if dom_lbl.lower() != ld_lbl.lower():
+                            issues.append(
+                                f"Page {rel_path}: BreadcrumbList position {idx} label mismatch (DOM '{dom_lbl}' != JSON-LD '{ld_lbl}')"
+                            )
+                        if dom_href is not None:
+                            ld_ref = ld_item.get("item")
+                            ld_url = str(
+                                ld_ref.get("@id") if isinstance(ld_ref, dict) else (ld_ref or "")
+                            ).strip()
+                            dom_path = urllib.parse.urlparse(dom_href).path.rstrip("/") or "/"
+                            ld_path = urllib.parse.urlparse(ld_url).path.rstrip("/") or "/"
+                            if not ld_url or dom_path != ld_path:
+                                issues.append(
+                                    f"Page {rel_path}: BreadcrumbList position {idx} URL mismatch (DOM '{dom_path}' != JSON-LD '{ld_path}')"
+                                )
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -9874,12 +10195,36 @@ def audit_single_page_aeo_geo_readiness(
             issues.append(f"Plane 1 ({eff_rel}): Missing inLanguage='en-US' in JSON-LD")
         if '"dateModified":' not in joined_ld and '"dateModified" :' not in joined_ld:
             issues.append(f"Plane 1 ({eff_rel}): Missing dateModified in JSON-LD")
-        if '"SpeakableSpecification"' not in joined_ld:
-            issues.append(f"Plane 1 ({eff_rel}): Missing SpeakableSpecification in tool JSON-LD")
+        for forbidden_schema in ('"SpeakableSpecification"', '"HowTo"', '"FAQPage"'):
+            if forbidden_schema in joined_ld:
+                issues.append(
+                    f"Plane 1 ({eff_rel}): Forbidden deprecated/bloated schema {forbidden_schema} on tool JSON-LD"
+                )
         if '"isRelatedTo"' not in joined_ld:
             issues.append(f"Plane 1 ({eff_rel}): Missing isRelatedTo complementary tool links in JSON-LD")
         if '"https://schema.org/InStock"' not in joined_ld:
             issues.append(f"Plane 1 ({eff_rel}): Missing Offer availability='https://schema.org/InStock'")
+
+    try:
+        from pseofactory.truth_pack import load_truth_pack, _canonicalize_property_id
+        from pseofactory.truth_gate import _check_enacted_law_primary_source_links, _parse_html_dom
+
+        pid = _canonicalize_property_id(prop)
+        if pid:
+            pack_obj = load_truth_pack(pid, allow_expired=True)
+            if pack_obj is not None:
+                dom = _parse_html_dom(raw_h.replace("\u2014", "-").replace("\u2013", "-"))
+                pack_dict = pack_obj.to_dict() if hasattr(pack_obj, "to_dict") else dict(pack_obj)
+                for viol in _check_enacted_law_primary_source_links(
+                    dom=dom,
+                    pack_dict=pack_dict,
+                    file_path=eff_rel,
+                    slug=eff_slug,
+                    is_tool_page=True,
+                ):
+                    issues.append(f"Plane 3 ({eff_rel}): {viol.message}")
+    except Exception:
+        pass
 
     if 'rel="tool-catalog"' not in raw_h and "rel='tool-catalog'" not in raw_h:
         issues.append(f"Plane 2 ({eff_rel}): Missing <link rel='tool-catalog' href='/catalog.json'> in <head>")
@@ -9987,6 +10332,8 @@ def audit_aeo_geo_three_plane_readiness(
                 root_itemlist_present = True
             else:
                 issues.append("Plane 1 (index.html): Missing ItemList schema on root hub")
+            if '"BreadcrumbList"' in joined_ld:
+                issues.append("Plane 1 (index.html): Forbidden BreadcrumbList schema on root hub /")
 
         is_tool_leaf = (
             rel_p.startswith("tools/")
@@ -9995,10 +10342,13 @@ def audit_aeo_geo_three_plane_readiness(
         )
         if is_tool_leaf:
             tool_pages_scanned += 1
-            if '"SpeakableSpecification"' in joined_ld:
+            for forbidden_schema in ('"SpeakableSpecification"', '"HowTo"', '"FAQPage"'):
+                if forbidden_schema in joined_ld:
+                    issues.append(
+                        f"Plane 1 ({rel_p}): Forbidden deprecated/bloated schema {forbidden_schema} in tool JSON-LD"
+                    )
+            if '"SpeakableSpecification"' not in joined_ld:
                 speakable_tool_pages += 1
-            else:
-                issues.append(f"Plane 1 ({rel_p}): Missing SpeakableSpecification in tool JSON-LD")
             if '"isRelatedTo"' in joined_ld:
                 related_tool_pages += 1
             else:
@@ -10011,6 +10361,14 @@ def audit_aeo_geo_three_plane_readiness(
                 issues.append(f"Plane 3 ({rel_p}): Missing SSR .quick-answer block")
             if 'id="calculation-manifest"' not in raw_h and 'class="calculation-manifest"' not in raw_h:
                 issues.append(f"Plane 3 ({rel_p}): Missing embedded calculation-manifest JSON")
+
+    enacted_link_res = MasterSEOVerifier(dist_dir=d_path).check_enacted_law_primary_source_links_gate(
+        dist_dir=d_path,
+        property_id=prop,
+    )
+    if enacted_link_res.get("issues"):
+        for err_msg in enacted_link_res["issues"]:
+            issues.append(f"Plane 3: {err_msg}")
 
     # Plane 2: Catalog Feeds & Machine Manifests
     tools_dir = d_path / "tools"

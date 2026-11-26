@@ -92,8 +92,15 @@ def test_single_asset_clean_compilation_passes(compliance_matrix, clean_spec):
 def test_single_asset_hidden_faq_schema_rejected(compliance_matrix, clean_spec):
     """Fails GSC-SPAM-03 when FAQPage schema exists but FAQ accordions are absent from DOM."""
     res = compile_high_effort_page(clean_spec)
-    # Strip visible FAQ accordion from HTML body
+    # Strip visible FAQ accordion from HTML body and ensure an FAQPage schema block is present
     tampered_html = res["html"].replace('<details class="faq-accordion">', '<div class="hidden-accordion" style="display:none;">')
+    if '"FAQPage"' not in tampered_html:
+        faq_ld = (
+            '<script type="application/ld+json">'
+            '{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Hidden Q?","acceptedAnswer":{"@type":"Answer","text":"Hidden A."}}]}'
+            "</script></head>"
+        )
+        tampered_html = tampered_html.replace("</head>", faq_ld, 1)
 
     report = compliance_matrix.audit_single_asset(tampered_html, clean_spec)
     assert report.overall_pass is False
@@ -249,3 +256,89 @@ def test_audit_indexing_preflight_soft_404(compliance_matrix, tmp_path):
     assert report.blocked_count == 2
     assert "https://profithelm.com/tools/soft404/" in report.blocked_urls
     assert "https://profithelm.com/tools/multicanon/" in report.blocked_urls
+
+
+def test_simhash64_delete_modifier_and_sibling_uniqueness_gate():
+    """Verifies SimHash64, Delete-the-Modifier shingle overlap, and fail-closed cohort checker."""
+    from pseofactory.compliance import (
+        audit_sibling_programmatic_uniqueness,
+        compute_delete_modifier_shingle_overlap,
+        compute_simhash64,
+        simhash_hamming_distance,
+    )
+
+    h1 = compute_simhash64("California income tax bracket calculator under IRC Section 1")
+    h2 = compute_simhash64("California income tax bracket calculator under IRC Section 1")
+    assert h1 == h2
+    assert simhash_hamming_distance(h1, h2) == 0
+
+    shared_template = (
+        "<html><body><main><h1>{state} Tax Calculator</h1>"
+        "<p>Compute federal income tax liability under permanent 10% to 37% brackets, "
+        "standard deduction thresholds, marginal tax schedules, and effective rates for residents.</p>"
+        "</main></body></html>"
+    )
+    overlap = compute_delete_modifier_shingle_overlap(
+        shared_template.format(state="California"),
+        shared_template.format(state="Texas"),
+        "California",
+        "Texas",
+    )
+    assert overlap >= 0.90
+
+    # Near-duplicate spokes with identical formula/inputs and no distinct constants must fail closed
+    clone_res = audit_sibling_programmatic_uniqueness(
+        [
+            {
+                "slug": "irs-tax-brackets-california",
+                "modifier": "California",
+                "html": shared_template.format(state="California"),
+                "formula": "round(gross_income * 0.22, 2)",
+                "inputs": {"gross_income": 100000.0},
+            },
+            {
+                "slug": "irs-tax-brackets-texas",
+                "modifier": "Texas",
+                "html": shared_template.format(state="Texas"),
+                "formula": "round(gross_income * 0.22, 2)",
+                "inputs": {"gross_income": 100000.0},
+            },
+        ]
+    )
+    assert clone_res["overall_pass"] is False
+    assert len(clone_res["violations"]) >= 1
+
+    # Distinct content (hamming > 6, overlap < 0.55) + distinct jurisdiction constants passes
+    distinct_res = audit_sibling_programmatic_uniqueness(
+        [
+            {
+                "slug": "section-179-heavy-suv",
+                "modifier": "Heavy SUV",
+                "html": (
+                    "<html><body><main><h1>Heavy SUV Depreciation</h1>"
+                    "<p>Passenger sport utility vehicles rated between 6,001 and 14,000 pounds GVWR "
+                    "trigger the strict $32,000 Section 179(b)(5)(A) statutory ceiling paired with 100% "
+                    "bonus depreciation on Form 4562.</p></main></body></html>"
+                ),
+                "formula": "round(min(cost, cap), 2)",
+                "inputs": {"cost": 85000.0},
+                "jurisdiction_constants": {"suv_cap": 32000.0},
+            },
+            {
+                "slug": "section-1031-exchange-boot",
+                "modifier": "Like-Kind Exchange",
+                "html": (
+                    "<html><body><main><h1>Section 1031 Real Estate Swap</h1>"
+                    "<p>Investment property owners deferring capital gains under Form 8824 must identify "
+                    "replacement real estate within 45 calendar days and close within 180 days while "
+                    "avoiding net mortgage debt relief or cash proceeds.</p></main></body></html>"
+                ),
+                "formula": "round(min(cost, cap), 2)",
+                "inputs": {"cost": 85000.0},
+                "jurisdiction_constants": {"exchange_window_days": 180},
+            },
+        ]
+    )
+    assert distinct_res["overall_pass"] is True
+    assert distinct_res["min_hamming_distance_observed"] > 6
+    assert distinct_res["max_shingle_overlap_observed"] < 0.55

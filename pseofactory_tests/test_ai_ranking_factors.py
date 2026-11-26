@@ -7108,5 +7108,78 @@ def test_zyppy_2026_empirical_ranking_evidence_spec_and_blind_spot_contracts(tmp
     assert any("Unmeasured zero-lift baseline" in issue for issue in faked_contract_res["issues"])
 
 
+def test_batch2a_title_h1_coverage_hash_presets_and_schema_hygiene(tmp_path):
+    """Verifies H1-to-title token coverage, #hash preset enforcement, sameAs topic-QID rejection, and BreadcrumbList parity."""
+    dist = tmp_path / "dist_b2a"
+    (dist / "tools" / "lien-deadline-calculator").mkdir(parents=True)
+
+    bad_tool = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>Generic Brand Portal Overview Page For Contractors</title>'
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@graph":['
+        '{"@type":"WebApplication","@id":"https://lienbond.com/tools/lien-deadline-calculator/#app","name":"Lien Calc","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"provider":{"@id":"https://lienbond.com/#organization"}},'
+        '{"@type":"BreadcrumbList","itemListElement":['
+        '{"@type":"ListItem","position":1,"name":"Home","item":"https://lienbond.com/"},'
+        '{"@type":"ListItem","position":2,"name":"Wrong Crumb","item":"https://lienbond.com/wrong/"},'
+        '{"@type":"ListItem","position":3,"name":"Lien Deadline Calculator"}'
+        ']}'
+        ']}</script></head><body>'
+        '<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a> <span aria-hidden="true">/</span> <a href="/tools/">Calculators</a> <span aria-hidden="true">/</span> <span>Lien Deadline Calculator</span></nav>'
+        '<h1>Florida Construction Lien Deadline Calculator</h1>'
+        '<a href="?state=FL&amount=50000" class="scenario-preset-link" data-preset="fl">Florida Preset</a>'
+        '</body></html>'
+    )
+    (dist / "tools" / "lien-deadline-calculator" / "index.html").write_text(bad_tool, encoding="utf-8")
+
+    v = MasterSEOVerifier(dist_dir=dist, domain="lienbond.com", brand_name="LienBond")
+
+    # 1. H1-to-title coverage fails on mismatched generic title
+    title_res = v.check_page_titles_gate(dist)
+    assert title_res["status"] == "FAIL"
+    assert any("core token coverage" in i for i in title_res["issues"])
+
+    # 2. Query-string preset link <a href="?..."> fails readable URLs gate
+    url_res = v.check_readable_urls_gate(dist)
+    assert url_res["status"] == "FAIL"
+    assert any("preset anchor" in i.lower() or "query-string" in i.lower() for i in url_res["issues"])
+
+    # 3. BreadcrumbList DOM-to-JSON-LD parity mismatch fails
+    sd_res = verify_html_structured_data(bad_tool, rel_path="tools/lien-deadline-calculator/index.html", dist_dir=dist)
+    assert sd_res["status"] == "FAIL"
+    assert any("BreadcrumbList" in i for i in sd_res["issues"])
+
+    # 4. Interior page with {"@id": "https://lienbond.com/#organization"} ref passes brand entity memory gate
+    ent_res = verify_html_brand_entity_in_llm_memory(
+        bad_tool,
+        brand_name="LienBond",
+        brand_domain="lienbond.com",
+        rel_path="tools/lien-deadline-calculator/index.html",
+    )
+    assert ent_res["status"] == "PASS"
+
+    # 5. Topic Wikidata QID or coskunarif GitHub in sameAs fails brand entity gate
+    poisoned = (
+        '<!DOCTYPE html><html lang="en"><head><title>LienBond Hub</title>'
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@type":"Organization","@id":"https://lienbond.com/#organization",'
+        '"name":"LienBond","url":"https://lienbond.com",'
+        '"sameAs":["https://www.wikidata.org/wiki/Q192161","https://github.com/coskunarif/lienbond"]}'
+        '</script></head><body><h1>LienBond Hub</h1></body></html>'
+    )
+    poisoned_res = verify_html_brand_entity_in_llm_memory(
+        poisoned,
+        brand_name="LienBond",
+        brand_domain="lienbond.com",
+        rel_path="index.html",
+    )
+    assert poisoned_res["status"] == "FAIL"
+
+    # 6. Enacted-law calculator missing outbound .gov link fails check_enacted_law_primary_source_links_gate
+    enacted_res = v.check_enacted_law_primary_source_links_gate(dist, property_id="lienbond")
+    assert enacted_res["status"] == "FAIL"
+    assert enacted_res["violations_count"] >= 1
+
+
 
 

@@ -1172,9 +1172,10 @@ def test_empirical_cohort_truth_emergency_rollback_consolidation_and_probe_filte
         None,
     )
     assert wy_cand is not None
-    assert wy_cand["status"] == "CONSOLIDATED_NOINDEX_301"
+    assert wy_cand["status"] == "CONSOLIDATED_301_SEMANTIC_PARENT"
     assert wy_cand["recommended_consolidation_target"] == "/tools/irs-2027-tax-brackets/"
-    assert wy_cand["noindex_applied"] is True
+    assert wy_cand["noindex_applied"] is False
+    assert wy_cand["http_status"] == 301
 
     ns_rep = evaluate_north_star_targets(
         property_id="profithelm",
@@ -1323,6 +1324,12 @@ def test_search_mechanics_heuristics_contextual_links_impression_split_and_crawl
     assert split_audit["dominant_winner_noise_suppressed_count"] == 1
     assert split_audit["true_cannibalization_splits"][0]["query"] == "section 179 bonus depreciation"
     assert split_audit["dominant_winner_suppressed"][0]["query"] == "s corp tax calculator"
+    assert split_audit["true_cannibalization_splits"][0]["winner_url"].endswith("/tools/contextual-winner/")
+    assert split_audit["true_cannibalization_splits"][0]["loser_urls"] == ["https://profithelm.com/tools/nav-only-spoke/"]
+    assert len(split_audit["merge_directives"]) == 1
+    assert split_audit["merge_directives"][0]["http_redirect"] == 301
+    assert len(split_audit["internal_anchor_rewrite_directives"]) == 1
+    assert split_audit["internal_anchor_rewrite_directives"][0]["action"] == "REWRITE_INTERNAL_ANCHORS"
 
     # Verify qualify_search_intent preserves plain URL list behavior while suppressing >80% dominant noise when telemetry is present
     plain_verdict = qualify_search_intent(
@@ -1578,9 +1585,11 @@ def test_quantitative_revenue_forecast_and_competitive_incumbent_upgrades(tmp_pa
     assert "Model Tool" not in healed_html
     assert "Tool Guide" not in healed_html
     assert "Calculate S-Corp Reasonable Salary Tax Calculator" not in healed_html
-    assert 'rel="nofollow" class="touch-target scenario-preset-link"' in healed_html
-    assert '"@type": "Dataset"' in healed_html
-    assert '"@type": "HowTo"' in healed_html
+    assert 'class="touch-target scenario-preset-btn' in healed_html
+    assert 'data-preset="baseline"' in healed_html
+    assert '"@type": "WebApplication"' in healed_html
+    assert '"@type": "Dataset"' not in healed_html
+    assert '"@type": "HowTo"' not in healed_html
 
     ph_forecast = compile_quantitative_revenue_forecast(
         property_id="profithelm",
@@ -1677,57 +1686,32 @@ def test_quantitative_revenue_forecast_and_competitive_incumbent_upgrades(tmp_pa
     )
 
 
-def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: Path) -> None:
+def test_zero_income_tax_state_spoke_no_longer_inflates_coverage_and_anomaly_quarantine(tmp_path: Path) -> None:
     """
-    Verifies that the 8 zero-income-tax state spokes (Alaska, Florida, Nevada, South Dakota,
-    Tennessee, Texas, Washington, Wyoming) are re-angled toward 0% state income tax + federal
-    IRC Section 1(j) take-home pay with 50-60 char titles, 120-155 char meta descriptions,
-    and 40-60 word 2-sentence quick answers using each state's exact SSR Census median income,
-    while evaluate_content_portfolio_decisions exempts re-angled zero-tax spokes from the
-    zero-impression prune queue and unfreezes cluster expansion above the 55.0% threshold.
+    Verifies:
+      1. R1_PROTECTED_REANGLED_ZERO_TAX_SPOKE inflation is removed: zero-impression pages
+         never inflate active_impression_routes_count and profithelm uses honest >= 60.0%
+         coverage threshold (no 55.0% exception).
+      2. GSC_IMPRESSION_ANOMALY_WINDOW = ('2025-05-13', '2026-04-27') quarantines impression
+         drops inside that window from automated pruning and triages on 6-12mo clicks /
+         conversions / backlinks + 'Crawled - currently not indexed'.
+      3. Clean separation of CONSOLIDATED_301_SEMANTIC_PARENT vs PRUNE_410_GONE_STRIP_LINKS
+         (never combining noindex + 301).
     """
-    from pseofactory.contracts import count_quick_answer_sentences
-    from pseofactory.gsc_remediation import (
-        ZERO_INCOME_TAX_STATES,
-        build_zero_tax_state_spoke_copy,
-    )
+    from pseofactory.gsc_remediation import ZERO_INCOME_TAX_STATES
     from pseofactory.maintenance import RetroReflectionEngine
+    from pseofactory.seo_growth_loops import GSC_IMPRESSION_ANOMALY_WINDOW
 
-    assert len(ZERO_INCOME_TAX_STATES) == 8
-    for st in ZERO_INCOME_TAX_STATES:
-        cp = build_zero_tax_state_spoke_copy(
-            st,
-            inc_val="$73,035",
-            tot_val="$10,539",
-            eff_val="14.4%",
-            th_val="$62,496",
-        )
-        assert 50 <= len(cp["title"]) <= 60
-        assert "0% State" in cp["title"]
-        assert cp["title"].endswith("| ProfitHelm")
-        assert 120 <= len(cp["meta_description"]) <= 155
-        assert "0% state income tax" in cp["meta_description"]
-        assert "IRC Section 1(j)" in cp["meta_description"]
-        qa_words = len(cp["quick_answer"].split())
-        assert 40 <= qa_words <= 60
-        assert 1 <= count_quick_answer_sentences(cp["quick_answer"]) <= 2
-        assert "0% state individual income tax" in cp["quick_answer"]
+    assert GSC_IMPRESSION_ANOMALY_WINDOW == ("2025-05-13", "2026-04-27")
 
-    # Verify RetroReflectionEngine.retrofit_html extracts id="tax-income" and re-angles zero-tax state HTML
     tx_raw = (
         '<!DOCTYPE html><html lang="en"><head>'
         "<title>Texas 2027 Tax Brackets (2026 Brackets) | ProfitHelm</title>"
         '<meta name="description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
-        '<meta property="og:title" content="Texas 2027 Tax Brackets">'
-        '<meta property="og:description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
-        '<meta name="twitter:title" content="Texas 2027 Tax Brackets">'
-        '<meta name="twitter:description" content="Calculate Texas 2026-2027 state and federal tax brackets.">'
         '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/texas/">'
         "</head><body><main>"
         "<h1>Texas 2027 Tax Brackets &amp; Calculator</h1>"
-        '<p class="hero-subtitle">Interactive 2026-2027 federal and Texas statutory tax bracket calculator.</p>'
-        '<aside class="quick-answer"><div class="quick-answer-title">Key Finding</div>'
-        '<div class="quick-answer-body"><p>Old generic quick answer.</p></div></aside>'
+        '<aside class="quick-answer"><p>Old quick answer.</p></aside>'
         '<input id="tax-income" value="73035">'
         '<div id="res-total-tax">$10,539</div>'
         '<div id="res-effective-rate">14.4%</div>'
@@ -1739,13 +1723,15 @@ def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: 
         property_id="profithelm",
         slug="irs-2027-tax-brackets/texas",
     )
-    assert "<title>Texas 2027 Tax Calculator (0% State Tax) | ProfitHelm</title>" in tx_retro
-    assert "0% state individual income tax ($0 state tax)" in tx_retro
-    assert "$73,035 median wage benchmark" in tx_retro
 
-    # Seed a portfolio with 8 re-angled zero-tax state spokes + 2 low-demand income-tax spokes
     repo_root = tmp_path / "profithelm_zt"
     old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).timestamp()
+    parent_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets"
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    parent_hf = parent_dir / "index.html"
+    parent_hf.write_text("<html><head><title>IRS Tax Brackets</title></head><body><h1>IRS Tax Brackets</h1></body></html>", encoding="utf-8")
+    os.utime(parent_hf, (old_ts, old_ts))
+
     for st in ZERO_INCOME_TAX_STATES:
         st_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / st
         st_dir.mkdir(parents=True, exist_ok=True)
@@ -1753,22 +1739,19 @@ def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: 
         hf.write_text(tx_retro.replace("/texas/", f"/{st}/"), encoding="utf-8")
         os.utime(hf, (old_ts, old_ts))
 
-    for low_st in ("alabama", "wyoming-non-reangled"):
-        st_dir = repo_root / "dist" / "tools" / "irs-2027-tax-brackets" / low_st
-        st_dir.mkdir(parents=True, exist_ok=True)
-        hf = st_dir / "index.html"
-        hf.write_text(
-            f"<html><head><title>{low_st.title()} 2027 Tax Brackets | ProfitHelm</title></head>"
-            f"<body><main><h1>{low_st.title()} 2027 Tax Brackets</h1></main></body></html>",
-            encoding="utf-8",
-        )
-        os.utime(hf, (old_ts, old_ts))
+    orphan_dir = repo_root / "dist" / "tools" / "orphan-zero-value"
+    orphan_dir.mkdir(parents=True, exist_ok=True)
+    orphan_hf = orphan_dir / "index.html"
+    orphan_hf.write_text("<html><head><title>Orphan</title></head><body><h1>Orphan</h1></body></html>", encoding="utf-8")
+    os.utime(orphan_hf, (old_ts, old_ts))
 
+    # Outside anomaly window: zero-impression re-angled spokes are NOT protected by R1 and NOT inflated
     port_rep = evaluate_content_portfolio_decisions(
         property_id="profithelm",
         repo_root=repo_root,
         dist_dir=repo_root / "dist",
         consolidated_gsc={
+            "date_range": ("2026-05-01", "2026-05-28"),
             "current_rows": [
                 {
                     "query": "tax brackets in texas",
@@ -1776,24 +1759,68 @@ def test_zero_income_tax_state_spoke_reangling_and_portfolio_unfreeze(tmp_path: 
                     "impressions": 4,
                     "clicks": 0,
                     "position": 6.0,
-                }
+                },
+                {
+                    "query": "federal tax brackets",
+                    "canonical_path": "/tools/irs-2027-tax-brackets",
+                    "impressions": 120,
+                    "clicks": 10,
+                    "position": 4.0,
+                },
             ],
-            "impressions_by_path": {"/tools/irs-2027-tax-brackets/texas": 4},
-            "clicks_by_path": {},
+            "impressions_by_path": {
+                "/tools/irs-2027-tax-brackets/texas": 4,
+                "/tools/irs-2027-tax-brackets": 120,
+            },
+            "clicks_by_path": {"/tools/irs-2027-tax-brackets": 10},
         },
         max_age_days=30.0,
-        persist=True,
+        persist=False,
     )
-    assert port_rep["zero_tax_reangled_spokes_count"] == 8
-    assert port_rep["flagged_count"] == 2
-    assert port_rep["pre_consolidation_indexed_coverage_pct"] == 80.0
-    assert port_rep["post_consolidation_indexed_coverage_pct"] == 100.0
-    assert port_rep["cluster_expansion_frozen"] is False
+    assert port_rep["target_indexed_coverage_pct"] == 60.0
+    assert port_rep["active_impression_routes_count"] == 2
+    assert port_rep["cluster_expansion_frozen"] is True
     by_path = {d["url_path"]: d for d in port_rep["decisions"]}
-    for st in ZERO_INCOME_TAX_STATES:
-        assert by_path[f"/tools/irs-2027-tax-brackets/{st}"]["portfolio_action"] == "OPTIMIZE_STRIKING_DISTANCE"
-        assert by_path[f"/tools/irs-2027-tax-brackets/{st}"]["decision"] == "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
-    assert by_path["/tools/irs-2027-tax-brackets/alabama"]["portfolio_action"] == "PRUNE_NOINDEX"
+    assert by_path["/tools/irs-2027-tax-brackets/wyoming"]["matched_rule"] != "R1_PROTECTED_REANGLED_ZERO_TAX_SPOKE"
+    assert by_path["/tools/irs-2027-tax-brackets/wyoming"]["portfolio_action"] == "CONSOLIDATE_301"
+    assert by_path["/tools/irs-2027-tax-brackets/wyoming"]["decision"] == "CONSOLIDATED_301_SEMANTIC_PARENT"
+    assert by_path["/tools/orphan-zero-value"]["portfolio_action"] == "PRUNE_410_GONE"
+    assert by_path["/tools/orphan-zero-value"]["decision"] == "PRUNE_410_GONE_STRIP_LINKS"
+    for cand in port_rep["zero_impression_candidates"]:
+        assert not (cand.get("noindex_applied") and cand.get("http_status") == 301)
+
+    # Inside anomaly window: routes without 'Crawled - currently not indexed' or with 6-12mo value are protected
+    anom_rep = evaluate_content_portfolio_decisions(
+        property_id="profithelm",
+        repo_root=repo_root,
+        dist_dir=repo_root / "dist",
+        consolidated_gsc={
+            "date_range": ("2026-03-01", "2026-03-28"),
+            "current_rows": [
+                {
+                    "query": "federal tax brackets",
+                    "canonical_path": "/tools/irs-2027-tax-brackets",
+                    "impressions": 120,
+                    "clicks": 10,
+                    "position": 4.0,
+                }
+            ],
+            "impressions_by_path": {"/tools/irs-2027-tax-brackets": 120},
+            "clicks_6_12m_by_path": {"/tools/irs-2027-tax-brackets/florida": 5},
+            "backlinks_by_path": {"/tools/irs-2027-tax-brackets/nevada": 3},
+            "coverage_by_path": {
+                "/tools/orphan-zero-value": "Crawled - currently not indexed",
+                "/tools/irs-2027-tax-brackets/wyoming": "Submitted and indexed",
+            },
+        },
+        max_age_days=30.0,
+        persist=False,
+    )
+    anom_by_path = {d["url_path"]: d for d in anom_rep["decisions"]}
+    assert anom_by_path["/tools/irs-2027-tax-brackets/florida"]["portfolio_action"] == "INCUBATE_MONITOR"
+    assert anom_by_path["/tools/irs-2027-tax-brackets/nevada"]["portfolio_action"] == "INCUBATE_MONITOR"
+    assert anom_by_path["/tools/irs-2027-tax-brackets/wyoming"]["portfolio_action"] == "INCUBATE_MONITOR"
+    assert anom_by_path["/tools/orphan-zero-value"]["portfolio_action"] == "PRUNE_410_GONE"
 
 
 def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierarchy(tmp_path: Path) -> None:
@@ -1973,9 +2000,9 @@ def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierar
         slug="save-plan-forbearance-interest-calculator",
     )
     assert bool(changed_px)
-    assert "/tools/parent-plus-double-consolidation-loophole-2026-calculator/" in healed_px
+    assert "/tools/parent-plus-double-consolidation/" in healed_px
 
-    # Verify compile_high_effort_page emits @graph with Dataset, HowTo, and 4-item BreadcrumbList on nested spokes
+    # Verify compile_high_effort_page emits @graph with WebApplication and 4-item BreadcrumbList on nested spokes
     compiled_spoke_res = compile_high_effort_page(
         {
             "query": "arizona 2027 tax brackets calculator",
@@ -1991,8 +2018,9 @@ def test_zero_click_crawl_budget_triage_404_noindex_and_schema_breadcrumb_hierar
     )
     compiled_spoke = compiled_spoke_res["html"]
     assert '"@graph"' in compiled_spoke
-    assert '"@type": "Dataset"' in compiled_spoke
-    assert '"@type": "HowTo"' in compiled_spoke
+    assert '"@type": "WebApplication"' in compiled_spoke
+    assert '"@type": "Dataset"' not in compiled_spoke
+    assert '"@type": "HowTo"' not in compiled_spoke
     assert '"@type": "BreadcrumbList"' in compiled_spoke
     assert '"https://profithelm.com/tools/irs-2027-tax-brackets/"' in compiled_spoke
 

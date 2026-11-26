@@ -508,3 +508,16 @@ def test_resolve_html_property_id_preserves_leading_w_domains(tmp_path: Path, mo
     assert _resolve_html_property_id("<html></html>", "https://windpower.com/tools/turbine-roi/") == "windpower_calc"
     assert _resolve_html_property_id("<html></html>", "https://www.wealthcalc.com/tools/net-worth/") == "wealth_hq"
     assert _resolve_html_property_id("<html></html>", "https://wealthcalc.com/tools/net-worth/") == "wealth_hq"
+
+
+def test_browser_verifier_b2_hash_state_and_history_length_contracts() -> None:
+    """Verifies B2 probe in browser_verifier.py enforces #hash state, zero pushState history growth, and zero crawlable ? preset links."""
+    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+
+    e2e_js = UnifiedBrowserAuditor.JS_RUN_E2E_INTERACTIVE_SURFACE
+    assert "window.location.hash" in e2e_js
+    assert "history_length_preserved" in e2e_js
+    assert "zero_crawlable_preset_links" in e2e_js
+    assert "button.scenario-preset-btn" in e2e_js
+    assert "reload_expected_output" in e2e_js
+    assert "window.history.pushState" not in e2e_js

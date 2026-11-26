@@ -299,7 +299,7 @@ def _build_compliant_tax_html(
 </head>
 <body>
   <h1>{title}</h1>
-  <p>Evaluated under 26 U.S.C. Section 1(j), P.L. 119-21, and Rev. Proc. 2025-32 ($16,100 standard deduction).</p>
+  <p>Evaluated under 26 U.S.C. Section 1(j), P.L. 119-21, and Rev. Proc. 2025-32 ($16,100 standard deduction). Official guidance: <a href="https://www.irs.gov/pub/irs-drop/rp-25-32.pdf" rel="noopener">IRS Rev. Proc. 2025-32</a>.</p>
   <form class="calculator-form" id="{slug}-calculator">
     <input type="number" id="input-gross_income" name="gross_income" value="{gross_income}" />
     <input type="number" id="input-standard_deduction_2026" name="standard_deduction_2026" value="{std_ded}" />
@@ -1065,7 +1065,7 @@ def test_real_truth_pack_integration_and_missing_site(tmp_path):
 
     # Real profithelm TruthPack passes clean Section 179 page with live JS parity
     clean_179 = f"""<!DOCTYPE html><html><head><title>Section 179 Heavy SUV</title></head><body>
-    <p>Under P.L. 119-21 and Rev. Proc. 2025-32, heavy SUVs are capped at $32,000 before bonus depreciation.</p>
+    <p>Under P.L. 119-21 and Rev. Proc. 2025-32, heavy SUVs are capped at $32,000 before bonus depreciation. Primary source: <a href="https://www.irs.gov/pub/irs-drop/rp-25-32.pdf" rel="noopener">IRS Rev. Proc. 2025-32</a>.</p>
     <form class="calculator-form" id="section-179-calculator-calculator">
       <input type="number" id="input-equipment_cost" name="equipment_cost" value="85000" />
       <input type="number" id="input-business_use_pct" name="business_use_pct" value="0.8" />
@@ -1286,3 +1286,23 @@ def test_adversarial_bid_bond_375_generic_formula_fails_closed():
     )
     assert rep.passed is False
     assert any(v.code == "TOPIC_FORMULA_MISMATCH" for v in rep.violations)
+
+
+def test_enacted_law_missing_primary_source_link_fails_closed():
+    """Enacted-law calculator page with zero outbound .gov/official links MUST fail closed."""
+    gate = UnifiedTruthGate()
+    html_no_gov = _build_compliant_tax_html().replace(
+        '<a href="https://www.irs.gov/pub/irs-drop/rp-25-32.pdf" rel="noopener">IRS Rev. Proc. 2025-32</a>',
+        "<span>IRS Rev. Proc. 2025-32</span>",
+    )
+    pack = _make_tax_pack()
+    rep = gate.audit_html_content(
+        html_no_gov,
+        property_id="profithelm",
+        file_path="tools/irs-2027-tax-brackets/index.html",
+        truth_pack=pack,
+        as_of=date(2026, 11, 26),
+        run_js_parity=False,
+    )
+    assert rep.passed is False
+    assert any(v.code == "MISSING_PRIMARY_SOURCE_LINK" for v in rep.violations)

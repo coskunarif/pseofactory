@@ -190,9 +190,17 @@ def test_compiler_html_structure_and_touch_targets():
     assert "#0f172a" in html
     assert "--card-bg" in html
 
-    # Schema.org JSON-LD blocks check
-    assert '"@type": "SoftwareApplication"' in html
-    assert '"@type": "FAQPage"' in html
+    # Schema.org JSON-LD blocks check (clean WebApplication, zero deprecated/bloated schemas)
+    assert '"@type": "WebApplication"' in html
+    assert '"@type": "SoftwareApplication"' not in html
+    assert '"@type": "FAQPage"' not in html
+    assert '"@type": "HowTo"' not in html
+    assert '"@type": "SpeakableSpecification"' not in html
+    assert '"@type": "Dataset"' not in html
+    assert "<details" in html
+    assert 'class="statutory-sources"' in html or "statutory-sources" in html
+    assert "updateHashParams" in html
+    assert 'class="touch-target scenario-preset-btn"' in html or "scenario-preset-btn" in html
 
     # Embedded calculation manifest check
     assert 'class="calculation-manifest"' in html

@@ -53,6 +53,42 @@ def _clean_dashes(text: str) -> str:
     return str(text).replace("\u2014", "-").replace("\u2013", "-")
 
 
+GSC_IMPRESSION_ANOMALY_WINDOW: Tuple[str, str] = ("2025-05-13", "2026-04-27")
+
+
+def is_in_gsc_impression_anomaly_window(date_or_range: Any) -> bool:
+    """
+    Returns True when a date (YYYY-MM-DD / ISO timestamp) or (start, end) window
+    overlaps the quarantined GSC_IMPRESSION_ANOMALY_WINDOW (2025-05-13 to 2026-04-27).
+    Zero em-dashes. Zero en-dashes.
+    """
+    w_start, w_end = GSC_IMPRESSION_ANOMALY_WINDOW
+
+    def _norm_d(val: Any) -> str:
+        s = str(val or "").strip()
+        m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+        return m.group(1) if m else ""
+
+    if isinstance(date_or_range, (tuple, list)) and len(date_or_range) >= 2:
+        d0 = _norm_d(date_or_range[0])
+        d1 = _norm_d(date_or_range[1])
+        if d0 and d1:
+            return not (d1 < w_start or d0 > w_end)
+        d0 = d0 or d1
+        return bool(d0 and w_start <= d0 <= w_end)
+
+    if isinstance(date_or_range, dict):
+        d0 = _norm_d(date_or_range.get("start_date") or date_or_range.get("window_start") or date_or_range.get("date"))
+        d1 = _norm_d(date_or_range.get("end_date") or date_or_range.get("window_end") or date_or_range.get("date"))
+        if d0 and d1:
+            return not (d1 < w_start or d0 > w_end)
+        d_single = d0 or d1
+        return bool(d_single and w_start <= d_single <= w_end)
+
+    d_single = _norm_d(date_or_range)
+    return bool(d_single and w_start <= d_single <= w_end)
+
+
 def _resolve_property_id(property_id: str = "profithelm", repo_root: Optional[Union[str, Path]] = None) -> str:
     combined = f"{property_id or ''} {repo_root or ''}".lower()
     return resolve_canonical_property_id(combined, default="profithelm")
@@ -4585,23 +4621,66 @@ def evaluate_content_portfolio_decisions(
         "REFRESH_DECAY": 0,
         "CONSOLIDATE_301": 0,
         "INCUBATE_MONITOR": 0,
-        "PRUNE_NOINDEX": 0,
+        "PRUNE_410_GONE": 0,
     }
-
-    from pseofactory.gsc_remediation import ZERO_INCOME_TAX_STATES
 
     now_ts = datetime.now(timezone.utc).timestamp()
     active_impression_routes_count = 0
-    zero_tax_reangled_spokes: List[str] = []
     aged_zero_click_bleeders: List[Dict[str, Any]] = []
+    anomaly_quarantined_routes: List[Dict[str, Any]] = []
     zero_click_triage_counts: Dict[str, int] = {
         "ACCRETIVE_CLICK_EARNING": 0,
-        "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME": 0,
         "IMPROVE_CTR_STRIKING_DISTANCE": 0,
         "REANGLE_OR_CONSOLIDATE_HUB": 0,
         "INCUBATE_MONITOR": 0,
-        "PRUNE_NOINDEX": 0,
+        "CONSOLIDATE_301": 0,
+        "PRUNE_410_GONE": 0,
     }
+
+    coverage_by_path: Dict[str, str] = {}
+    for k_cov, v_cov in (gsc_bundle.get("coverage_by_path") or {}).items():
+        coverage_by_path[str(k_cov or "").rstrip("/") or "/"] = _clean_dashes(str(v_cov or ""))
+    for insp in (
+        list((md_port or {}).get("url_inspections") or [])
+        + list(gsc_bundle.get("url_inspections") or [])
+    ):
+        if isinstance(insp, dict):
+            ip = str(insp.get("canonical_path") or insp.get("url") or "").strip()
+            if "://" in ip:
+                ip = urllib.parse.urlsplit(ip).path
+            ip_norm = ip.rstrip("/") or "/"
+            cov_s = _clean_dashes(str(insp.get("coverage_state") or insp.get("coverageState") or ""))
+            if cov_s:
+                coverage_by_path[ip_norm] = cov_s
+
+    clicks_6_12m_by_path: Dict[str, int] = {
+        str(k or "").rstrip("/") or "/": int(float(v or 0))
+        for k, v in (gsc_bundle.get("clicks_6_12m_by_path") or clicks_by_path).items()
+    }
+    conversions_by_path: Dict[str, int] = {
+        str(k or "").rstrip("/") or "/": int(float(v or 0))
+        for k, v in (
+            gsc_bundle.get("conversions_6_12m_by_path")
+            or gsc_bundle.get("conversions_by_path")
+            or {}
+        ).items()
+    }
+    backlinks_by_path: Dict[str, int] = {
+        str(k or "").rstrip("/") or "/": int(float(v or 0))
+        for k, v in (
+            gsc_bundle.get("backlinks_by_path")
+            or gsc_bundle.get("referring_domains_by_path")
+            or {}
+        ).items()
+    }
+    obs_window = (
+        gsc_bundle.get("date_range")
+        or gsc_bundle.get("observation_window")
+        or gsc_bundle.get("impression_drop_date")
+        or gsc_bundle.get("observation_date")
+        or (gsc_bundle.get("window_start"), gsc_bundle.get("window_end"))
+    )
+    in_anomaly_window = is_in_gsc_impression_anomaly_window(obs_window)
 
     if d_dir.is_dir():
         for hf in sorted(d_dir.rglob("*.html")):
@@ -4636,14 +4715,6 @@ def evaluate_content_portfolio_decisions(
             if impr > 0:
                 active_impression_routes_count += 1
 
-            is_reangled_zero_tax_spoke = False
-            st_slug_zt = ""
-            if site_p.startswith("/tools/irs-2027-tax-brackets/"):
-                st_slug_zt = site_p.split("/tools/irs-2027-tax-brackets/", 1)[1].strip("/").lower()
-                if st_slug_zt in ZERO_INCOME_TAX_STATES:
-                    if 'id="res-total-tax"' in raw_hf and "0% state individual income tax" in raw_hf:
-                        is_reangled_zero_tax_spoke = True
-
             path_parts = [seg for seg in site_p.strip("/").split("/") if seg]
             if len(path_parts) >= 3 and path_parts[0] == "tools":
                 parent_hub = f"/tools/{path_parts[1]}/"
@@ -4652,20 +4723,17 @@ def evaluate_content_portfolio_decisions(
             else:
                 parent_hub = "/"
 
-            if is_reangled_zero_tax_spoke:
-                zero_tax_reangled_spokes.append(site_p)
-                if impr == 0:
-                    active_impression_routes_count += 1
-                st_display = st_slug_zt.replace("-", " ").title()
-                action = "OPTIMIZE_STRIKING_DISTANCE"
-                decision_label = "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
-                matched_rule = "R1_PROTECTED_REANGLED_ZERO_TAX_SPOKE"
-                rationale = (
-                    f"Zero-income-tax state spoke ({st_display} 0% state tax) re-angled toward high-intent "
-                    f"federal IRC Section 1(j) tax brackets and net take-home pay ({impr} impressions); "
-                    f"exempted from zero-impression prune queue."
-                )
-            elif site_p in decaying_paths:
+            parent_rel = parent_hub.strip("/")
+            parent_html_file = d_dir / parent_rel / "index.html" if parent_rel else d_dir / "index.html"
+            dest_exists = parent_html_file.is_file()
+            cov_state = coverage_by_path.get(site_p) or coverage_by_path.get(site_p + "/") or ""
+            clicks_6_12m = int(clicks_6_12m_by_path.get(site_p, clicks) or clicks)
+            conversions_6_12m = int(conversions_by_path.get(site_p, 0) or 0)
+            backlinks_cnt = int(backlinks_by_path.get(site_p, 0) or 0)
+            has_6_12m_value = bool(clicks_6_12m > 0 or conversions_6_12m > 0 or backlinks_cnt > 0)
+            is_crawled_not_indexed = "crawled - currently not indexed" in cov_state.lower()
+
+            if site_p in decaying_paths:
                 action = "REFRESH_DECAY"
                 decision_label = "REFRESH_AND_SHARPEN"
                 matched_rule = "R2_REFRESH_HISTORICAL_DECAY"
@@ -4680,25 +4748,89 @@ def evaluate_content_portfolio_decisions(
                 decision_label = "REFRESH_AND_SHARPEN"
                 matched_rule = "R4_OPTIMIZE_STRIKING_DISTANCE"
                 rationale = f"Striking-distance asset (best pos {best_pos:.1f}, {impr} impressions); inject CTR overlay and hub links."
-            elif impr == 0 and age_days >= eff_max_age:
-                action = "PRUNE_NOINDEX"
-                decision_label = "NOINDEX_OR_CONSOLIDATE"
-                matched_rule = "R8_NOINDEX_OR_CONSOLIDATE_AGED_ZERO_IMPRESSION"
-                rationale = f"Zero impressions after {age_days:.1f} days (>= {eff_max_age:.0f}d threshold); execute noindex/301 consolidation into parent hub."
-                zero_candidates.append(
+            elif impr == 0 and age_days >= eff_max_age and has_6_12m_value:
+                action = "INCUBATE_MONITOR"
+                decision_label = "PROTECT_ANOMALY_QUARANTINED"
+                matched_rule = "R_PROTECT_6_12M_CLICKS_CONVERSIONS_BACKLINKS"
+                rationale = (
+                    f"Protected from pruning despite {impr} recent impressions: holds 6-12mo value "
+                    f"(clicks={clicks_6_12m}, conversions={conversions_6_12m}, backlinks={backlinks_cnt})."
+                )
+            elif impr == 0 and age_days >= eff_max_age and in_anomaly_window and not is_crawled_not_indexed:
+                action = "INCUBATE_MONITOR"
+                decision_label = "QUARANTINE_GSC_IMPRESSION_ANOMALY_WINDOW"
+                matched_rule = "R_QUARANTINE_GSC_IMPRESSION_ANOMALY_WINDOW"
+                rationale = (
+                    f"Observation falls inside GSC_IMPRESSION_ANOMALY_WINDOW {GSC_IMPRESSION_ANOMALY_WINDOW} "
+                    f"without 'Crawled - currently not indexed' signal; quarantined from automated pruning."
+                )
+                anomaly_quarantined_routes.append(
                     {
-                        "file": str(rel),
                         "url_path": site_p,
-                        "target_url": f"https://{domain}{site_p}/",
-                        "age_days": round(age_days, 1),
-                        "impressions": 0,
-                        "status": "CONSOLIDATED_NOINDEX_301",
-                        "consolidation_queue_status": "EXECUTED_301_HUB_CONSOLIDATION_AND_SITEMAP_EXCLUSION",
-                        "recommended_consolidation_target": parent_hub,
-                        "noindex_applied": True,
-                        "consolidation_executed": True,
+                        "coverage_state": cov_state or "Unknown",
+                        "clicks_6_12m": clicks_6_12m,
+                        "conversions_6_12m": conversions_6_12m,
+                        "backlinks": backlinks_cnt,
+                        "window": list(GSC_IMPRESSION_ANOMALY_WINDOW),
                     }
                 )
+            elif impr == 0 and age_days >= eff_max_age:
+                has_semantic_parent = bool(parent_hub != "/" and dest_exists and len(path_parts) >= 3)
+                if has_semantic_parent:
+                    action = "CONSOLIDATE_301"
+                    decision_label = "CONSOLIDATED_301_SEMANTIC_PARENT"
+                    matched_rule = "R8_CONSOLIDATE_301_SEMANTIC_PARENT"
+                    rationale = (
+                        f"Zero impressions and zero 6-12mo clicks/conversions/backlinks after {age_days:.1f} days "
+                        f"(>= {eff_max_age:.0f}d threshold); execute clean 1-hop 301 redirect to semantic parent {parent_hub} (never combine noindex + 301)."
+                    )
+                    zero_candidates.append(
+                        {
+                            "file": str(rel),
+                            "url_path": site_p,
+                            "target_url": f"https://{domain}{site_p}/",
+                            "age_days": round(age_days, 1),
+                            "impressions": 0,
+                            "clicks_6_12m": clicks_6_12m,
+                            "conversions_6_12m": conversions_6_12m,
+                            "backlinks": backlinks_cnt,
+                            "coverage_state": cov_state or "Unknown",
+                            "status": "CONSOLIDATED_301_SEMANTIC_PARENT",
+                            "http_status": 301,
+                            "consolidation_queue_status": "EXECUTED_301_HUB_CONSOLIDATION_AND_SITEMAP_EXCLUSION",
+                            "recommended_consolidation_target": parent_hub,
+                            "noindex_applied": False,
+                            "consolidation_executed": True,
+                        }
+                    )
+                else:
+                    action = "PRUNE_410_GONE"
+                    decision_label = "PRUNE_410_GONE_STRIP_LINKS"
+                    matched_rule = "R8_PRUNE_410_GONE_STRIP_LINKS"
+                    rationale = (
+                        f"Zero impressions and zero 6-12mo clicks/conversions/backlinks after {age_days:.1f} days "
+                        f"with no semantic parent; return 410 Gone via edgeGone middleware and strip internal links."
+                    )
+                    zero_candidates.append(
+                        {
+                            "file": str(rel),
+                            "url_path": site_p,
+                            "target_url": f"https://{domain}{site_p}/",
+                            "age_days": round(age_days, 1),
+                            "impressions": 0,
+                            "clicks_6_12m": clicks_6_12m,
+                            "conversions_6_12m": conversions_6_12m,
+                            "backlinks": backlinks_cnt,
+                            "coverage_state": cov_state or "Unknown",
+                            "status": "PRUNE_410_GONE_STRIP_LINKS",
+                            "http_status": 410,
+                            "strip_internal_links": True,
+                            "consolidation_queue_status": "EXECUTED_410_GONE_AND_LINK_STRIP",
+                            "recommended_consolidation_target": "",
+                            "noindex_applied": False,
+                            "consolidation_executed": False,
+                        }
+                    )
             else:
                 action = "INCUBATE_MONITOR"
                 decision_label = "RETAIN_AND_MONITOR"
@@ -4712,9 +4844,7 @@ def evaluate_content_portfolio_decisions(
                     matched_rule = "R5_INCUBATE_RECENT_ASSET"
                     rationale = f"Active indexation incubation (age {age_days:.1f}d, {impr} impressions, best pos {best_pos:.1f})."
 
-            if is_reangled_zero_tax_spoke:
-                zero_click_triage = "REANGLE_ZERO_TAX_FEDERAL_TAKE_HOME"
-            elif clicks > 0:
+            if clicks > 0:
                 zero_click_triage = "ACCRETIVE_CLICK_EARNING"
             elif impr > 0 and best_pos <= 30.0:
                 zero_click_triage = "IMPROVE_CTR_STRIKING_DISTANCE"
@@ -4733,14 +4863,12 @@ def evaluate_content_portfolio_decisions(
                         "triage_action": "REANGLE_INTENT_OR_301_HUB_CONSOLIDATE",
                     }
                 )
-            elif impr == 0 and age_days >= eff_max_age:
-                zero_click_triage = "PRUNE_NOINDEX"
+            elif action == "CONSOLIDATE_301":
+                zero_click_triage = "CONSOLIDATE_301"
+            elif action == "PRUNE_410_GONE":
+                zero_click_triage = "PRUNE_410_GONE"
             else:
                 zero_click_triage = "INCUBATE_MONITOR"
-
-            parent_rel = parent_hub.strip("/")
-            parent_html_file = d_dir / parent_rel / "index.html" if parent_rel else d_dir / "index.html"
-            dest_exists = parent_html_file.is_file()
             supporting_signals = [
                 f"impressions={impr}",
                 f"clicks={clicks}",
@@ -4957,13 +5085,10 @@ def evaluate_content_portfolio_decisions(
     }
 
     active_indexable_pages = max(1, pages_audited - len(zero_candidates)) if pages_audited > 0 else 0
-    if zero_tax_reangled_spokes:
-        pre_consolidation_striking_routes = active_impression_routes_count
-    else:
-        pre_consolidation_striking_routes = (
-            int(counts_by_action.get("SCALE_EXPAND", 0) or 0)
-            + int(counts_by_action.get("OPTIMIZE_STRIKING_DISTANCE", 0) or 0)
-        )
+    pre_consolidation_striking_routes = (
+        int(counts_by_action.get("SCALE_EXPAND", 0) or 0)
+        + int(counts_by_action.get("OPTIMIZE_STRIKING_DISTANCE", 0) or 0)
+    )
     pre_consolidation_coverage_pct = (
         round((pre_consolidation_striking_routes / float(max(1, pages_audited))) * 100.0, 2)
         if pages_audited > 0
@@ -4974,34 +5099,29 @@ def evaluate_content_portfolio_decisions(
         if active_indexable_pages > 0
         else 100.0
     )
-    target_cov_pct = 55.0 if prop == "profithelm" else 65.0
-    if zero_tax_reangled_spokes:
-        cluster_expansion_frozen = bool(pre_consolidation_coverage_pct < target_cov_pct)
-    else:
-        cluster_expansion_frozen = bool(len(zero_candidates) > 0 or pre_consolidation_coverage_pct < target_cov_pct)
+    target_cov_pct = 60.0
+    cluster_expansion_frozen = bool(len(zero_candidates) > 0 or pre_consolidation_coverage_pct < target_cov_pct)
 
     report = {
         "workflow": "content_portfolio_decisions",
         "status": "PASS",
         "property_id": prop,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "gsc_impression_anomaly_window": list(GSC_IMPRESSION_ANOMALY_WINDOW),
+        "anomaly_quarantined_routes_count": len(anomaly_quarantined_routes),
+        "anomaly_quarantined_routes": anomaly_quarantined_routes,
         "pages_audited": pages_audited,
         "raw_pages_scanned": pages_audited,
         "active_indexable_pages": active_indexable_pages,
         "active_impression_routes_count": active_impression_routes_count,
-        "zero_tax_reangled_spokes_count": len(zero_tax_reangled_spokes),
-        "zero_tax_reangled_spokes": zero_tax_reangled_spokes,
+        "target_indexed_coverage_pct": target_cov_pct,
         "pre_consolidation_indexed_coverage_pct": pre_consolidation_coverage_pct,
         "post_consolidation_indexed_coverage_pct": post_consolidation_coverage_pct,
         "cluster_expansion_frozen": cluster_expansion_frozen,
         "cluster_expansion_freeze_reason": (
-            f"Frozen new spoke cluster expansion while consolidating {len(zero_candidates)} aged zero-impression pages (pre-consolidation striking coverage {pre_consolidation_coverage_pct}% vs {target_cov_pct}% target; post-consolidation active coverage {post_consolidation_coverage_pct}%)."
+            f"Frozen new spoke cluster expansion while consolidating/pruning {len(zero_candidates)} aged zero-impression pages (pre-consolidation striking coverage {pre_consolidation_coverage_pct}% vs {target_cov_pct}% target; post-consolidation active coverage {post_consolidation_coverage_pct}%)."
             if cluster_expansion_frozen
-            else (
-                f"Active coverage meets threshold ({pre_consolidation_coverage_pct}% >= {target_cov_pct}% after re-angling {len(zero_tax_reangled_spokes)} zero-tax state spokes toward 0% state income tax + federal IRC Section 1(j) take-home pay and consolidating {len(zero_candidates)} low-demand spokes; post-consolidation active coverage {post_consolidation_coverage_pct}%); spoke expansion permitted."
-                if zero_tax_reangled_spokes
-                else "Active coverage meets threshold; spoke expansion permitted."
-            )
+            else "Active coverage meets >= 60.0% threshold; spoke expansion permitted."
         ),
         "total_routes_evaluated": len(decisions),
         "action_breakdown": counts_by_action,
@@ -5026,8 +5146,8 @@ def evaluate_content_portfolio_decisions(
                 "queued_count": len(zero_candidates),
                 "aged_zero_click_bleeders_count": len(aged_zero_click_bleeders),
                 "aged_zero_click_bleeder_candidates": aged_zero_click_bleeders,
-                "zero_tax_reangled_spokes_count": len(zero_tax_reangled_spokes),
-                "zero_tax_reangled_spokes": zero_tax_reangled_spokes,
+                "anomaly_quarantined_routes_count": len(anomaly_quarantined_routes),
+                "anomaly_quarantined_routes": anomaly_quarantined_routes,
                 "consolidation_executed": True,
                 "cluster_expansion_frozen": cluster_expansion_frozen,
                 "candidates": zero_candidates,
@@ -6699,12 +6819,17 @@ def audit_gsc_cannibalization_splits(
             redirect_map=redirect_map,
             min_split_share=min_split_share,
             dominance_threshold=dominance_threshold,
+            query=q_text,
         )
         record = {
             "query": q_text,
             "total_impressions": split_res.get("total_impressions", 0),
             "dominant_url": split_res.get("dominant_url", ""),
             "dominant_share": split_res.get("dominant_share", 0.0),
+            "winner_url": split_res.get("winner_url", split_res.get("dominant_url", "")),
+            "loser_urls": split_res.get("loser_urls", []),
+            "merge_directives": split_res.get("merge_directives", []),
+            "internal_anchor_rewrite_directives": split_res.get("internal_anchor_rewrite_directives", []),
             "classification": split_res.get("classification", ""),
             "qualifying_split_urls": split_res.get("qualifying_split_urls", []),
             "incidental_noise_urls": split_res.get("incidental_noise_urls", []),
@@ -6770,6 +6895,13 @@ def audit_gsc_cannibalization_splits(
     dup_metas = {k: v for k, v in metas_seen.items() if len(v) > 1}
     dup_h1s = {k: v for k, v in h1s_seen.items() if len(v) > 1}
 
+    all_merge_directives = [
+        d for rec in true_splits for d in (rec.get("merge_directives") or [])
+    ]
+    all_anchor_rewrites = [
+        d for rec in true_splits for d in (rec.get("internal_anchor_rewrite_directives") or [])
+    ]
+
     return {
         "status": "PASS",
         "property_id": prop,
@@ -6781,6 +6913,8 @@ def audit_gsc_cannibalization_splits(
         "duplicate_title_clusters": dup_titles,
         "duplicate_meta_description_clusters": dup_metas,
         "duplicate_h1_clusters": dup_h1s,
+        "merge_directives": all_merge_directives[:50],
+        "internal_anchor_rewrite_directives": all_anchor_rewrites[:50],
         "true_cannibalization_splits": true_splits[:25],
         "cross_device_splits": cross_device_splits[:25],
         "dominant_winner_suppressed": dominant_winner_suppressed[:25],
@@ -7501,7 +7635,7 @@ def evaluate_north_star_targets(
                 ),
                 "pre_consolidation_indexed_coverage_pct": pre_consolidation_cov_pct,
                 "indexed_impression_ratio_pct": indexed_coverage_ratio_pct,
-                "target_30d_indexed_coverage_pct": 55.0 if prop == "profithelm" else 65.0,
+                "target_30d_indexed_coverage_pct": 60.0,
                 "target_60d_indexed_coverage_pct": 80.0 if prop == "profithelm" else 85.0,
                 "cluster_expansion_frozen": cluster_expansion_frozen,
                 "consolidate_301_routes_count": consolidate_301_count,

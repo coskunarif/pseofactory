@@ -24,7 +24,8 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Set, Optional, Sequence, Tuple, Callable, Union, Iterable
+from pathlib import Path
+from typing import List, Dict, Any, Set, FrozenSet, Optional, Sequence, Tuple, Callable, Union, Iterable
 
 FORBIDDEN_JARGON: List[str] = [
     "synergistic alignment 1791603786",
@@ -1770,6 +1771,27 @@ WIKIDATA_URI_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+GENERIC_TOPIC_WIKIDATA_QIDS: FrozenSet[str] = frozenset(
+    {
+        "Q192161",
+        "Q633315",
+        "Q166142",
+        "Q8161",
+        "Q7443105",
+        "Q4546416",
+        "Q43261623",
+        "Q1048600",
+        "Q7397",
+    }
+)
+
+FORBIDDEN_SAMEAS_DOMAINS: FrozenSet[str] = frozenset({"ccfs.sos.wa.gov"})
+
+
+def _extract_wikidata_qid(uri: str) -> Optional[str]:
+    m = re.search(r"wikidata\.org/(?:wiki|entity)/(Q[1-9][0-9]*)/?$", str(uri or "").strip(), re.IGNORECASE)
+    return m.group(1).upper() if m else None
+
 
 def assert_wikidata_uri(uri: str, context: str = "") -> bool:
     """
@@ -1871,6 +1893,17 @@ def assert_authoritative_same_as(
                 f"sameAs link '{item}' uses unverified or placeholder domain '{netloc}'{ctx}"
             )
 
+        # Forbidden generic portal / personal profile checks
+        if netloc in FORBIDDEN_SAMEAS_DOMAINS or netloc_clean in FORBIDDEN_SAMEAS_DOMAINS:
+            raise ValueError(
+                f"sameAs link '{item}' uses forbidden generic registry domain '{netloc}'{ctx}"
+            )
+        low_item = item.lower()
+        if ("github.com/" + "coskunarif") in low_item or ("linkedin.com" + "/in/") in low_item:
+            raise ValueError(
+                f"sameAs link '{item}' uses personal profile URL instead of corporate entity profile{ctx}"
+            )
+
         # Authoritative domain verification
         is_auth = any(netloc == d or netloc.endswith("." + d) for d in AUTHORITATIVE_PROFILE_DOMAINS)
         if not is_auth:
@@ -1878,9 +1911,14 @@ def assert_authoritative_same_as(
                 f"sameAs link '{item}' from unauthoritative domain '{netloc}'{ctx}; must be in recognized profile registry"
             )
 
-        # Wikidata check
+        # Wikidata check (forbid generic topic QIDs in sameAs)
         if "wikidata.org" in netloc:
             assert_wikidata_uri(item, context=context)
+            qid = _extract_wikidata_qid(item)
+            if qid and qid in GENERIC_TOPIC_WIKIDATA_QIDS:
+                raise ValueError(
+                    f"sameAs link '{item}' uses generic topic Wikidata QID '{qid}'{ctx}; move topic QIDs to knowsAbout or WebPage.about"
+                )
             has_wikidata = True
 
     if require_wikidata and not has_wikidata:
@@ -1938,6 +1976,8 @@ def assert_canonical_entity_definition(
     brand_name: Optional[str] = None,
     brand_domain: Optional[str] = None,
     context: str = "",
+    require_wikidata: bool = False,
+    allow_missing_same_as: bool = False,
 ) -> bool:
     """
     Mechanical contract validating canonical brand entity definition for Factor 3: Brand / Entity in LLM Memory (+2.08).
@@ -2011,16 +2051,18 @@ def assert_canonical_entity_definition(
 
     # 5. sameAs check
     if "sameAs" not in entity:
-        raise ValueError(
-            f"Brand entity '{clean_name}' missing 'sameAs' array linking to Wikidata and authoritative profiles{ctx}"
+        if not allow_missing_same_as:
+            raise ValueError(
+                f"Brand entity '{clean_name}' missing 'sameAs' array linking to authoritative profiles{ctx}"
+            )
+    else:
+        assert_authoritative_same_as(
+            entity["sameAs"],
+            entity_url=clean_url,
+            entity_domain=brand_domain,
+            context=f"entity '{clean_name}'{ctx}",
+            require_wikidata=require_wikidata,
         )
-    assert_authoritative_same_as(
-        entity["sameAs"],
-        entity_url=clean_url,
-        entity_domain=brand_domain,
-        context=f"entity '{clean_name}'{ctx}",
-        require_wikidata=True,
-    )
 
     return True
 
@@ -6029,12 +6071,25 @@ def _extract_author_and_publisher_metadata_cached(content: str) -> Dict[str, Any
                 if "author" in obj:
                     author_val = obj["author"]
                     if isinstance(author_val, dict):
-                        if ("@type" in author_val or "name" in author_val) and author_val not in authors:
+                        a_id = str(author_val.get("@id") or "").strip().lower()
+                        if (
+                            "@type" in author_val
+                            or "name" in author_val
+                            or a_id.endswith("/#organization")
+                            or a_id == "#organization"
+                        ) and author_val not in authors:
                             authors.append(author_val)
                     elif isinstance(author_val, list):
                         for a in author_val:
-                            if isinstance(a, dict) and ("@type" in a or "name" in a) and a not in authors:
-                                authors.append(a)
+                            if isinstance(a, dict):
+                                a_id = str(a.get("@id") or "").strip().lower()
+                                if (
+                                    "@type" in a
+                                    or "name" in a
+                                    or a_id.endswith("/#organization")
+                                    or a_id == "#organization"
+                                ) and a not in authors:
+                                    authors.append(a)
                             elif isinstance(a, str):
                                 authors.append({"@type": "Person", "name": a})
                     elif isinstance(author_val, str):
@@ -6044,7 +6099,13 @@ def _extract_author_and_publisher_metadata_cached(content: str) -> Dict[str, Any
                 if "publisher" in obj:
                     pub_val = obj["publisher"]
                     if isinstance(pub_val, dict):
-                        if ("@type" in pub_val or "name" in pub_val) and pub_val not in publishers:
+                        p_id = str(pub_val.get("@id") or "").strip().lower()
+                        if (
+                            "@type" in pub_val
+                            or "name" in pub_val
+                            or p_id.endswith("/#organization")
+                            or p_id == "#organization"
+                        ) and pub_val not in publishers:
                             publishers.append(pub_val)
                     elif isinstance(pub_val, str):
                         publishers.append({"@type": "Organization", "name": pub_val})
@@ -6184,6 +6245,15 @@ def detect_publisher_reputation_issues(
         )
         return issues
 
+    rel_norm_pub = str(rel_path or "").strip().lstrip("/").lower()
+    is_org_root_or_about = rel_norm_pub in ("", "index.html", "about/index.html", "about")
+
+    def _is_org_id_ref_dict(d_obj: Dict[str, Any]) -> bool:
+        if d_obj.get("@type") or d_obj.get("name"):
+            return False
+        ref_id = str(d_obj.get("@id") or "").strip().lower()
+        return ref_id.endswith("/#organization") or ref_id == "#organization"
+
     # 3. Publisher / Organization check
     publishers = meta["publishers"]
     if not publishers:
@@ -6192,6 +6262,8 @@ def detect_publisher_reputation_issues(
         )
     else:
         for pub in publishers:
+            if not is_org_root_or_about and _is_org_id_ref_dict(pub):
+                continue
             pname = str(pub.get("name", "")).strip()
             if not pname:
                 issues.append(f"Page {rel_path}: Invalid Organization schema: missing or empty 'name'")
@@ -6213,6 +6285,8 @@ def detect_publisher_reputation_issues(
         )
     elif authors:
         for auth in authors:
+            if not is_org_root_or_about and _is_org_id_ref_dict(auth):
+                continue
             aname = str(auth.get("name", "")).strip()
             if not aname:
                 issues.append(f"Page {rel_path}: Invalid Person schema: missing or empty 'name'")
@@ -7942,7 +8016,15 @@ def _extract_structured_data_metadata_raw(content: Any) -> Dict[str, Any]:
                             for target_ent in id_to_entities.get(resolved_id, []):
                                 entity_incoming_refs[id(target_ent)].append(ent)
                         else:
-                            if prop not in ("sameAs", "url", "isBasedOn", "citation") and ("#" in target_id or not target_id.startswith("http")):
+                            is_site_root_ref = bool(
+                                target_id.startswith(("http://", "https://"))
+                                and re.match(r"^https?://[^/]+/#(?:organization|website)$", target_id, re.IGNORECASE)
+                            )
+                            if (
+                                not is_site_root_ref
+                                and prop not in ("sameAs", "url", "isBasedOn", "citation", "knowsAbout")
+                                and ("#" in target_id or not target_id.startswith("http"))
+                            ):
                                 broken_refs.append((str(ent_type), target_id))
                     for sub_v in v.values():
                         _find_id_refs(sub_v)
@@ -8078,6 +8160,7 @@ def detect_structured_data_issues(
     rel_path: str = "index.html",
     require_strict: bool = False,
     allowed_schemas: Optional[Set[str]] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
 ) -> List[str]:
     """
     Detects structured data violations for Factor 12:
@@ -8150,6 +8233,27 @@ def detect_structured_data_issues(
         issues.append(
             f"Page {rel_path}: Broken graph reference in '{src_type}': references unresolved @id '{target_id}' without parent relationship"
         )
+
+    rel_norm = str(rel_path or "").strip().lstrip("/").lower()
+    is_home_page = rel_norm in ("", "index.html")
+    is_calculator_leaf = rel_norm.startswith("tools/") and rel_norm not in ("tools/index.html", "tools")
+
+    for ent in meta.get("entities", []):
+        stype = ent.get("@type")
+        types = [stype] if isinstance(stype, str) else (stype if isinstance(stype, list) else [])
+        if is_home_page and "BreadcrumbList" in types:
+            issues.append(f"Page {rel_path}: Forbidden BreadcrumbList schema on homepage /")
+        if is_calculator_leaf:
+            if "SpeakableSpecification" in types or "speakable" in ent:
+                issues.append(f"Page {rel_path}: Forbidden SpeakableSpecification schema on calculator leaf")
+            if "HowTo" in types:
+                issues.append(f"Page {rel_path}: Forbidden HowTo schema on calculator leaf")
+            if "FAQPage" in types:
+                issues.append(f"Page {rel_path}: Forbidden FAQPage schema on calculator leaf")
+            if "TechArticle" in types:
+                issues.append(f"Page {rel_path}: Forbidden TechArticle schema on calculator leaf")
+            if "WebSite" in types:
+                issues.append(f"Page {rel_path}: Forbidden WebSite schema on calculator leaf (scope WebSite to / only)")
 
     # 9. Target entity schema specific validation
     target_entities = meta.get("target_entities", [])
@@ -8226,6 +8330,30 @@ def detect_structured_data_issues(
                     desc = str(ent.get("description", "")).strip()
                     if not desc:
                         issues.append(f"Page {rel_path}: Invalid Dataset schema: missing or empty 'description'")
+                    raw_dist = ent.get("distribution")
+                    dist_items = raw_dist if isinstance(raw_dist, list) else ([raw_dist] if isinstance(raw_dist, dict) else [])
+                    has_real_download = False
+                    for dl in dist_items:
+                        if not isinstance(dl, dict):
+                            continue
+                        enc_fmt = str(dl.get("encodingFormat") or "").strip().lower()
+                        if enc_fmt == "text/html":
+                            issues.append(
+                                f"Page {rel_path}: Invalid Dataset schema: distribution encodingFormat must not be 'text/html'; requires real .csv or .json download"
+                            )
+                        c_url = str(dl.get("contentUrl") or "").strip()
+                        c_path = urllib.parse.urlsplit(c_url).path.lower()
+                        if c_path.endswith((".csv", ".json")):
+                            if dist_dir is not None:
+                                local_rel = c_path.lstrip("/")
+                                if local_rel and (Path(dist_dir) / local_rel).is_file():
+                                    has_real_download = True
+                            else:
+                                has_real_download = True
+                    if is_calculator_leaf and not has_real_download:
+                        issues.append(
+                            f"Page {rel_path}: Forbidden leaf Dataset schema without real free downloadable .csv/.json distribution[].contentUrl in dist/"
+                        )
                     is_part_of = ent.get("isPartOf")
                     if is_part_of:
                         ipo_items = is_part_of if isinstance(is_part_of, list) else [is_part_of]

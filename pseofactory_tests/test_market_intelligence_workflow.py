@@ -495,3 +495,39 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
         assert retired in report["decommissioned_domains"]
 
 
+def test_four_domain_fortress_guard_and_zero_head_term_overlap(tmp_path: Path, monkeypatch):
+    """
+    Verifies:
+      1. MAX_ACTIVE_YMYL_DOMAINS defaults to 4 (configurable env override).
+      2. assert_candidate_domain_eligible fails closed if candidate overlaps any head term
+         of an active .pseofactory.json tenant (e.g. suretylien.com / statutebond.com /
+         bondandlien.com overlapping lienbond).
+      3. Fails closed when active .pseofactory.json tenant count >= MAX_ACTIVE_YMYL_DOMAINS
+         unless explicitly overridden.
+    """
+    from pseofactory.market_intel import (
+        MAX_ACTIVE_YMYL_DOMAINS,
+        assert_candidate_domain_eligible,
+        discover_active_tenant_manifests,
+    )
+
+    assert MAX_ACTIVE_YMYL_DOMAINS == 4
+    active = discover_active_tenant_manifests()
+    assert len(active) >= 4
+
+    for overlap_dom in ("suretylien.com", "statutebond.com", "bondandlien.com"):
+        with pytest.raises(ValueError, match="overlaps head term"):
+            assert_candidate_domain_eligible(overlap_dom)
+
+    with pytest.raises(ValueError, match="4-Domain Fortress Guard"):
+        assert_candidate_domain_eligible("freighttariff.com")
+
+    # Explicit override allows non-overlapping candidate above 4-domain cap
+    assert assert_candidate_domain_eligible("freighttariff.com", allow_over_cap=True) == "freighttariff.com"
+    monkeypatch.setenv("PSEOFACTORY_MAX_ACTIVE_YMYL_DOMAINS", "5")
+    assert assert_candidate_domain_eligible("freighttariff.com") == "freighttariff.com"
+    # Even with cap override, overlapping head terms remain blocked
+    with pytest.raises(ValueError, match="overlaps head term"):
+        assert_candidate_domain_eligible("suretylien.com", allow_over_cap=True)
+
+

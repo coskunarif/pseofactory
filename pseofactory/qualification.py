@@ -16,7 +16,7 @@ import re
 import shutil
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Union, Set
+from typing import List, Dict, Any, Optional, Tuple, Union, Set, Sequence
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -377,9 +377,141 @@ class SearchIntentVerdict(dict):
     @property
     def status(self) -> str:
         act = str(self.get("action", "MONITOR"))
-        if act in ("PRUNE_PAGE", "PRUNE", "REJECT_SYNTHETIC", "REJECT_LISTICLE_ARCHETYPE", "REJECT_OFF_JURISDICTION"):
+        if act in (
+            "PRUNE_PAGE",
+            "PRUNE",
+            "REJECT_SYNTHETIC",
+            "REJECT_LISTICLE_ARCHETYPE",
+            "REJECT_OFF_JURISDICTION",
+            "REJECT_YEAR_SLUG",
+            "REJECT_NEAR_DUPLICATE_SPOKE",
+        ):
             return "PRUNE"
         return str(self.get("status") or act)
+
+
+YEAR_TOKEN_SLUG_RE = re.compile(r"\b20[1-3]\d\b")
+
+
+def validate_new_tool_slug(slug: str) -> Dict[str, Any]:
+    """
+    Validates that a proposed new tool slug is non-empty and evergreen,
+    banning year tokens matching \\b20[1-3]\\d\\b (e.g. 2021, 2026, 2027).
+    Zero em-dashes. Zero en-dashes.
+    """
+    raw_slug = str(slug or "").strip().lower()
+    if not raw_slug:
+        return {
+            "valid": False,
+            "slug": raw_slug,
+            "year_tokens": [],
+            "reason": "New tool slug must be non-empty",
+        }
+    norm_for_year = re.sub(r"[_/]+", "-", raw_slug)
+    year_tokens = YEAR_TOKEN_SLUG_RE.findall(norm_for_year)
+    if year_tokens:
+        return {
+            "valid": False,
+            "slug": raw_slug,
+            "year_tokens": year_tokens,
+            "reason": f"Year-stamped tool slug '{raw_slug}' banned by evergreen slug policy (found {year_tokens})",
+        }
+    return {
+        "valid": True,
+        "slug": raw_slug,
+        "year_tokens": [],
+        "reason": "OK",
+    }
+
+
+def assert_valid_new_tool_slug(slug: str) -> str:
+    """Fail-closed slug validator banning year tokens (\\b20[1-3]\\d\\b) on new tool slugs."""
+    res = validate_new_tool_slug(slug)
+    if not res["valid"]:
+        raise ValueError(str(res["reason"]))
+    return str(res["slug"])
+
+
+def qualify_programmatic_child_spokes(
+    spokes: Sequence[Any],
+    *,
+    existing_siblings: Optional[Sequence[Any]] = None,
+    min_hamming_distance: int = 7,
+    max_shingle_overlap: float = 0.55,
+    enforce_evergreen_slug: bool = True,
+    fail_closed: bool = False,
+) -> Dict[str, Any]:
+    """
+    Enforces Delete-the-Modifier shingle overlap (< 0.55), SimHash64 Hamming distance (> 6),
+    statutory/entity constant delta, and evergreen slug validation before approving
+    programmatic child spokes. Fails closed if sibling comparison corpus is missing.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.compliance import audit_sibling_programmatic_uniqueness
+
+    combined = list(spokes or []) + list(existing_siblings or [])
+    slug_violations: List[str] = []
+    if enforce_evergreen_slug:
+        for idx, item in enumerate(spokes or []):
+            s_slug = (
+                str(item[0] or "")
+                if isinstance(item, (tuple, list)) and item
+                else (str(item.get("slug") or "") if isinstance(item, dict) else "")
+            )
+            if s_slug:
+                v_res = validate_new_tool_slug(s_slug)
+                if not v_res["valid"]:
+                    slug_violations.append(str(v_res["reason"]))
+            elif isinstance(item, dict) and item.get("is_programmatic_child_spoke"):
+                slug_violations.append(f"Programmatic child spoke at index {idx} missing slug")
+
+    if len(combined) < 2:
+        violations = slug_violations + ["Programmatic child spoke uniqueness check requires >= 2 sibling assets (fail-closed)"]
+        if fail_closed:
+            raise ValueError(violations[0])
+        return {
+            "approved": False,
+            "status": "REJECT_NEAR_DUPLICATE_SPOKE",
+            "violations": violations,
+            "uniqueness_audit": None,
+        }
+
+    uniq_audit = audit_sibling_programmatic_uniqueness(
+        combined,
+        min_hamming_distance=min_hamming_distance,
+        max_shingle_overlap=max_shingle_overlap,
+        fail_closed=False,
+    )
+    all_violations = slug_violations + list(uniq_audit.get("violations") or [])
+    approved = len(all_violations) == 0
+    if fail_closed and not approved:
+        raise ValueError(all_violations[0])
+    return {
+        "approved": approved,
+        "status": "APPROVED" if approved else "REJECT_NEAR_DUPLICATE_SPOKE",
+        "violations": all_violations,
+        "uniqueness_audit": uniq_audit,
+    }
+
+
+def assert_programmatic_child_spokes_approved(
+    spokes: Sequence[Any],
+    *,
+    existing_siblings: Optional[Sequence[Any]] = None,
+    min_hamming_distance: int = 7,
+    max_shingle_overlap: float = 0.55,
+    enforce_evergreen_slug: bool = True,
+) -> bool:
+    """Raises ValueError if programmatic child spokes fail Delete-the-Modifier / SimHash64 / evergreen checks."""
+    qualify_programmatic_child_spokes(
+        spokes,
+        existing_siblings=existing_siblings,
+        min_hamming_distance=min_hamming_distance,
+        max_shingle_overlap=max_shingle_overlap,
+        enforce_evergreen_slug=enforce_evergreen_slug,
+        fail_closed=True,
+    )
+    return True
 
 
 def is_thin_affiliate_listicle_candidate(query_or_slug: str, spec: Optional[Dict[str, Any]] = None) -> bool:
@@ -1552,15 +1684,21 @@ def evaluate_query_impression_split(
     redirect_map: Optional[Dict[str, Any]] = None,
     min_split_share: float = 0.10,
     dominance_threshold: float = 0.80,
+    min_total_impressions: int = 100,
+    query: str = "",
 ) -> Dict[str, Any]:
     """
     Evaluates whether a set of URLs competing for a query represents a true
-    cannibalization split or a single dominant winner with incidental (<10%) noise.
+    cannibalization split or a single dominant winner with incidental (<10%) or
+    low-volume (<100 impr/28d) noise.
     Heuristic derived from high-signal GSC impression-share triage:
       - Filters out secondary URLs already 301-redirected in redirect_map.
+      - Filters out low-volume noise when total query impressions < min_total_impressions (100/28d).
       - When impression telemetry is present on competing_pages, a query is a true
-        cannibalization split only when >=2 active URLs each hold >=min_split_share (10%)
-        of total query impressions AND no single URL dominates with >dominance_threshold (80%) share.
+        cannibalization split only when total_impressions >= 100 AND >=2 active URLs
+        each hold >=min_split_share (10%) of total query impressions AND no single URL
+        dominates with >dominance_threshold (80%) share (or cross-device split holds).
+      - Outputs explicit winner/loser merge + internal-anchor rewrite directives.
       - When competing_pages are plain URL strings without impression counts, assumes
         equal split share so legacy callers trigger CONSOLIDATE_PAGES unchanged.
     Zero em-dashes. Zero en-dashes.
@@ -1636,6 +1774,10 @@ def evaluate_query_impression_split(
             "redirected_301_Filtered_count": len(redirected_entries),
             "dominant_url": winner,
             "dominant_share": 1.0 if active_entries else 0.0,
+            "winner_url": winner,
+            "loser_urls": [],
+            "merge_directives": [],
+            "internal_anchor_rewrite_directives": [],
             "qualifying_split_urls": [winner] if winner else [],
             "incidental_noise_urls": [e["url"] for e in redirected_entries],
             "url_shares": [
@@ -1646,14 +1788,41 @@ def evaluate_query_impression_split(
 
     if not has_impression_telemetry:
         equal_share = round(1.0 / float(len(active_entries)), 4)
+        winner_u = active_entries[0]["url"]
+        loser_us = [e["url"] for e in active_entries[1:]]
+        anchor_lbl = str(query or "").strip() or "canonical calculator"
         return {
             "is_true_cannibalization_split": True,
             "classification": "UNWEIGHTED_MULTI_URL_COMPETITION",
             "has_impression_telemetry": False,
             "active_url_count": len(active_entries),
             "redirected_301_Filtered_count": len(redirected_entries),
-            "dominant_url": active_entries[0]["url"],
+            "dominant_url": winner_u,
             "dominant_share": equal_share,
+            "winner_url": winner_u,
+            "loser_urls": loser_us,
+            "merge_directives": [
+                {
+                    "action": "MERGE_AND_301_REDIRECT",
+                    "winner_url": winner_u,
+                    "loser_url": lu,
+                    "loser_share": equal_share,
+                    "loser_impressions": 0,
+                    "http_redirect": 301,
+                    "directive": f"Merge overlapping sections from {lu} into {winner_u} and configure a 1-hop 301 redirect.",
+                }
+                for lu in loser_us
+            ],
+            "internal_anchor_rewrite_directives": [
+                {
+                    "action": "REWRITE_INTERNAL_ANCHORS",
+                    "from_target_url": lu,
+                    "to_target_url": winner_u,
+                    "recommended_anchor_text": anchor_lbl,
+                    "directive": f"Rewrite internal links pointing to {lu} so anchors point to {winner_u}.",
+                }
+                for lu in loser_us
+            ],
             "qualifying_split_urls": [e["url"] for e in active_entries],
             "incidental_noise_urls": [e["url"] for e in redirected_entries],
             "url_shares": [
@@ -1700,8 +1869,14 @@ def evaluate_query_impression_split(
         and (float(mob_leader["mobile_impressions"]) + float(desk_leader["desktop_impressions"])) >= 3.0
     )
 
-    is_true_split = bool((len(qualifying_split) >= 2 and dominant_share <= dominance_threshold) or cross_device_split)
-    if len(qualifying_split) >= 2 and dominant_share <= dominance_threshold:
+    below_min_impr_noise = bool(total_impr < float(min_total_impressions))
+    is_true_split = bool(
+        not below_min_impr_noise
+        and ((len(qualifying_split) >= 2 and dominant_share <= dominance_threshold) or cross_device_split)
+    )
+    if below_min_impr_noise:
+        classification = "BELOW_MIN_IMPRESSIONS_NOISE" if dominant_share <= dominance_threshold else "DOMINANT_WINNER_INCIDENTAL_NOISE"
+    elif len(qualifying_split) >= 2 and dominant_share <= dominance_threshold:
         classification = "TRUE_CANNIBALIZATION_SPLIT"
     elif cross_device_split:
         classification = "CROSS_DEVICE_CANNIBALIZATION_SPLIT"
@@ -1713,6 +1888,42 @@ def evaluate_query_impression_split(
     else:
         classification = "SUB_THRESHOLD_SECONDARY_SHARE"
 
+    winner_url = dominant["url"]
+    loser_entries = (
+        [e for e in qualifying_split if e["url"] != winner_url]
+        if is_true_split
+        else []
+    )
+    anchor_lbl = str(query or "").strip() or "canonical calculator"
+    merge_directives = [
+        {
+            "action": "MERGE_AND_301_REDIRECT",
+            "winner_url": winner_url,
+            "loser_url": le["url"],
+            "loser_share": float(le.get("share", 0.0)),
+            "loser_impressions": int(le.get("impressions", 0)),
+            "http_redirect": 301,
+            "directive": (
+                f"Merge unique content/tables from {le['url']} ({int(le.get('impressions', 0))} impr, "
+                f"{float(le.get('share', 0.0)) * 100:.1f}% share) into {winner_url} and emit a 1-hop 301 redirect."
+            ),
+        }
+        for le in loser_entries
+    ]
+    anchor_rewrite_directives = [
+        {
+            "action": "REWRITE_INTERNAL_ANCHORS",
+            "from_target_url": le["url"],
+            "to_target_url": winner_url,
+            "recommended_anchor_text": anchor_lbl,
+            "directive": (
+                f"Rewrite all internal links pointing to {le['url']} to point directly to {winner_url} "
+                f"using anchor text '{anchor_lbl}'."
+            ),
+        }
+        for le in loser_entries
+    ]
+
     return {
         "is_true_cannibalization_split": is_true_split,
         "cross_device_split_detected": cross_device_split,
@@ -1720,11 +1931,16 @@ def evaluate_query_impression_split(
         "desktop_leader_url": desk_leader["url"] if desk_leader else "",
         "classification": classification,
         "has_impression_telemetry": True,
+        "min_total_impressions": int(min_total_impressions),
         "total_impressions": int(total_impr),
         "active_url_count": len(active_entries),
         "redirected_301_Filtered_count": len(redirected_entries),
         "dominant_url": dominant["url"],
         "dominant_share": dominant_share,
+        "winner_url": winner_url,
+        "loser_urls": [le["url"] for le in loser_entries],
+        "merge_directives": merge_directives,
+        "internal_anchor_rewrite_directives": anchor_rewrite_directives,
         "qualifying_split_urls": [e["url"] for e in qualifying_split],
         "incidental_noise_urls": [e["url"] for e in incidental_noise if e not in qualifying_split] + [e["url"] for e in redirected_entries],
         "url_shares": [
@@ -2203,6 +2419,48 @@ def qualify_search_intent(
             "reason": ev_gate["reason"],
         })
 
+    # Evergreen slug check + Delete-the-Modifier uniqueness check for programmatic child spokes
+    cand_slug_new = str(query_data.get("slug") or "").strip()
+    if cand_slug_new:
+        slug_val = validate_new_tool_slug(cand_slug_new)
+        if not slug_val["valid"]:
+            return SearchIntentVerdict({
+                "action": "REJECT_YEAR_SLUG",
+                "status": "PRUNE",
+                "query": q_text,
+                "slug": cand_slug_new,
+                "position": pos,
+                "impressions": impr,
+                "year_tokens": slug_val["year_tokens"],
+                "reason": slug_val["reason"],
+            })
+
+    sib_spokes = query_data.get("sibling_spokes") or query_data.get("programmatic_spokes")
+    if sib_spokes or query_data.get("is_programmatic_child_spoke"):
+        spokes_to_check = [query_data] if query_data.get("html") or query_data.get("body_html") else []
+        existing_sibs = list(sib_spokes or [])
+        if not spokes_to_check and existing_sibs:
+            spokes_to_check = existing_sibs
+            existing_sibs = []
+        spoke_qual = qualify_programmatic_child_spokes(
+            spokes_to_check,
+            existing_siblings=existing_sibs,
+            enforce_evergreen_slug=True,
+            fail_closed=False,
+        )
+        if not spoke_qual["approved"]:
+            return SearchIntentVerdict({
+                "action": "REJECT_NEAR_DUPLICATE_SPOKE",
+                "status": "PRUNE",
+                "query": q_text,
+                "slug": cand_slug_new,
+                "position": pos,
+                "impressions": impr,
+                "violations": spoke_qual["violations"],
+                "uniqueness_audit": spoke_qual["uniqueness_audit"],
+                "reason": "; ".join(spoke_qual["violations"]),
+            })
+
     # Qualified unserved void
     candidate_spec = {
         "query": q_text,
@@ -2485,6 +2743,23 @@ def assert_search_intent_qualified(
             f"Search intent cannibalization detected for candidate '{query}': "
             f"matches existing tool '{cannibal.get('parent_slug')}' ({cannibal.get('reason')}). "
             f"Search Intent Doctrine: An impression is not proof that a new page is missing."
+        )
+
+    cand_slug_req = str(candidate_spec.get("slug") or "").strip()
+    if cand_slug_req:
+        assert_valid_new_tool_slug(cand_slug_req)
+
+    sib_spokes = candidate_spec.get("sibling_spokes") or candidate_spec.get("programmatic_spokes")
+    if sib_spokes or candidate_spec.get("is_programmatic_child_spoke"):
+        spokes_to_check = [candidate_spec] if candidate_spec.get("html") or candidate_spec.get("body_html") else []
+        existing_sibs = list(sib_spokes or [])
+        if not spokes_to_check and existing_sibs:
+            spokes_to_check = existing_sibs
+            existing_sibs = []
+        assert_programmatic_child_spokes_approved(
+            spokes_to_check,
+            existing_siblings=existing_sibs,
+            enforce_evergreen_slug=True,
         )
 
     # High-effort content qualification check

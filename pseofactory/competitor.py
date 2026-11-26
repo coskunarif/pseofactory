@@ -2689,9 +2689,9 @@ PROFITHELM_SECTION_179_VEHICLES: Tuple[Tuple[str, str], ...] = (
 
 
 def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[str, str]]]]:
-    """Builds context-aware 3-tier topic cluster links covering all 21 canonical root calculators plus state and vehicle rings."""
+    """Builds context-aware 3-tier topic cluster links covering canonical ProfitHelm root calculators."""
     tier_1 = [
-        ("irs-2027-tax-brackets", "IRS 2027 Statutory Tax Brackets & Marginal Rate Calculator"),
+        ("irs-tax-brackets", "IRS Statutory Tax Brackets & Marginal Rate Calculator"),
         ("section-179-calculator", "Section 179 Equipment Expense & Phaseout Calculator"),
         ("section-1031-calculator", "Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
         ("s-corp-reasonable-salary-tax-calculator", "S-Corp Reasonable Salary & FICA Tax Savings Calculator"),
@@ -2704,81 +2704,16 @@ def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[
         ("equipment-lease-tax-deduction", "Equipment Lease Tax Deduction & Operating vs Capital Lease Calculator"),
         ("invoice-factoring-vs-business-line-of-credit-calculator", "Invoice Factoring vs Business Line of Credit APR Matrix"),
         ("saas-runway-calculator", "SaaS Cash Runway, Net Burn & Burn Multiple Benchmarks Calculator"),
-        ("prediction-market-odds", "Prediction Market Implied Probability & Fee Drag Matrix"),
-        ("prediction-market-tax", "Prediction Market Section 1256 vs Ordinary Income Tax Calculator"),
+        ("capital-gains-calculator", "Long-Term Capital Gains & 3.8% NIIT Tax Calculator"),
+        ("irs-interest-calculator", "IRS Underpayment & Late-Filing Interest Calculator"),
         ("r-and-d-tax-credit-section-174-amortization-calculator", "IRC Section 41 R&D Tax Credit & Section 174 Amortization Calculator"),
     ]
     tier_3: List[Tuple[str, str]] = []
-    if "/" in s_low:
-        parts = [p for p in s_low.split("/") if p]
-        if len(parts) == 2 and parts[0] in ("irs-2027-tax-brackets", "section-1031-calculator"):
-            state_slug = parts[1]
-            state_label = state_slug.replace("-", " ").title()
-            tier_3.append(
-                (
-                    f"irs-2027-tax-brackets/{state_slug}",
-                    f"{state_label} 2027 Tax Brackets & Marginal Income Tax Rate Calculator",
-                )
-            )
-            tier_3.append(
-                (
-                    f"section-1031-calculator/{state_slug}",
-                    f"{state_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
-                )
-            )
-            if state_slug in PROFITHELM_US_STATES:
-                st_idx = PROFITHELM_US_STATES.index(state_slug)
-                n_states = len(PROFITHELM_US_STATES)
-                for offset in (-2, -1, 1, 2):
-                    adj_state = PROFITHELM_US_STATES[(st_idx + offset) % n_states]
-                    adj_label = adj_state.replace("-", " ").title()
-                    if parts[0] == "irs-2027-tax-brackets":
-                        tier_3.append(
-                            (
-                                f"irs-2027-tax-brackets/{adj_state}",
-                                f"{adj_label} 2027 Tax Brackets & Marginal Income Tax Rate Calculator",
-                            )
-                        )
-                    else:
-                        tier_3.append(
-                            (
-                                f"section-1031-calculator/{adj_state}",
-                                f"{adj_label} Section 1031 Like-Kind Exchange & Boot Tax Calculator",
-                            )
-                        )
-        elif len(parts) == 2 and parts[0] == "section-179-calculator":
-            veh_slug = parts[1]
-            veh_map = dict(PROFITHELM_SECTION_179_VEHICLES)
-            veh_keys = [k for k, _ in PROFITHELM_SECTION_179_VEHICLES]
-            veh_label = veh_map.get(
-                veh_slug,
-                f"{veh_slug.replace('-', ' ').title()} Section 179 & Bonus Depreciation Calculator",
-            )
-            tier_3.append((f"section-179-calculator/{veh_slug}", veh_label))
-            if veh_slug in veh_keys:
-                v_idx = veh_keys.index(veh_slug)
-                n_vehs = len(veh_keys)
-                for offset in (-3, -2, -1, 1, 2, 3):
-                    adj_v = veh_keys[(v_idx + offset) % n_vehs]
-                    tier_3.append((f"section-179-calculator/{adj_v}", veh_map[adj_v]))
     striking_state_and_asset_spokes = [
-        ("irs-2027-tax-brackets/california", "California 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("irs-2027-tax-brackets/connecticut", "Connecticut 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("irs-2027-tax-brackets/maine", "Maine 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("irs-2027-tax-brackets/new-jersey", "New Jersey 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("irs-2027-tax-brackets/new-york", "New York 2027 Tax Brackets & Marginal Tax Rate Calculator"),
-        ("section-1031-calculator/texas", "Texas Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
-        ("section-1031-calculator/arizona", "Arizona Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
-        ("section-1031-calculator/california", "California Section 1031 Like-Kind Exchange & FTB 3840 Calculator"),
-        ("section-1031-calculator/alabama", "Alabama Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
-        ("section-1031-calculator/maine", "Maine Section 1031 Like-Kind Exchange & Boot Tax Calculator"),
-        ("section-179-calculator/gmc-yukon-xl", "GMC Yukon XL Heavy SUV Section 179 & Bonus Depreciation Calculator"),
         ("commercial-heavy-vehicle-section-179-weight-calculator", "Commercial Heavy Vehicle 6,000+ lbs GVWR Section 179 Calculator"),
         ("section-179-vehicle-equipment-deduction", "Section 179 Commercial Vehicle & Equipment Deduction Calculator"),
         ("medical-and-dental-equipment-section-179-roi-calculator", "Medical & Dental Equipment Section 179 Tax ROI Calculator"),
         ("crypto-tax-form-1099-da-mandatory-reporting", "IRS Form 1099-DA Digital Asset Broker Basis Reconciliation Calculator"),
-        ("workers-comp-and-payroll-burden-calculator", "Workers' Compensation & Employer Payroll Tax Burden Calculator"),
-        ("contractor-surety-bond-cost-calculator", "Contractor License & Commercial Surety Bond Cost Calculator"),
         ("section-301-tariff-landed-cost-calculator", "Section 301 Tariff Duty & Import Landed Cost Calculator"),
     ]
     existing_slugs = {slug_key for slug_key, _ in tier_3}
@@ -3596,7 +3531,7 @@ def _resolve_prexvo_vertical_content(slug: str, s_low: str) -> Dict[str, Any]:
             [
                 ("pslf-qualifying-payment-simulator", "PSLF 120 Qualifying Payments Verification Simulator"),
                 ("pslf-buyback-months-reconsideration-student-loan-calculator", "PSLF Hold Harmless Buyback & Reconsideration Months Calculator"),
-                ("student-loan-forgiveness-2026", "2026 Federal Student Loan Forgiveness Pathways & Discharge Estimator"),
+                ("student-loan-forgiveness", "Federal Student Loan Forgiveness Pathways & Discharge Estimator"),
                 ("student-loan-forgiveness-tax-bomb-insolvency-calculator", "Student Loan Forgiveness Tax Bomb & IRS Form 982 Insolvency Calculator"),
                 ("save-plan-litigation-transition", "SAVE Plan Forbearance to IBR/RAP Transition Calculator"),
                 ("paye-sunset-calculator", "PAYE Sunset & Statutory Repayment Plan Transition Calculator"),
@@ -3609,7 +3544,6 @@ def _resolve_prexvo_vertical_content(slug: str, s_low: str) -> Dict[str, Any]:
                 ("married-filing-separately-student-loan-calculator", "Married Filing Separately (MFS) vs Joint Income-Driven Repayment Tax Model"),
                 ("icr-repayment-calculator", "Income-Contingent Repayment (ICR) & Parent PLUS Statutory Calculator"),
                 ("parent-plus-double-consolidation", "Parent PLUS Double Consolidation Statutory Deadlines Model"),
-                ("parent-plus-double-consolidation-loophole-2026-calculator", "Parent PLUS Double Consolidation Loophole 2026 Sunset & ICR vs IDR Calculator"),
                 ("grad-plus-borrowing-cap-calculator", "Grad PLUS Sunset and Borrowing Cap Calculator"),
             ],
         ),
@@ -8708,14 +8642,21 @@ def filter_rankable_tool_keywords(
     - Step 4: Accepts expanded universe terms from matching_terms, related_terms, and questions.
     - Step 5: Filters for 'we can actually rank':
       * Drops off-vertical social/consumer tools.
-      * Drops keywords where SERP is all video or news (serp_dominant_format in ('video', 'news')).
+      * Drops keywords where SERP is all video, news, or non-transactional AIO-dominated SERPs.
+      * Drops keywords where .gov hosts an interactive calculator on Page 1.
       * Drops keywords dominated by mega-DR sites (avg_top10_dr > 80) with zero visible tool-page
         intent in top 10 (tool_results_in_top10 == 0).
-      * Drops keywords where KD exceeds tenant_dr + max_kd_delta.
+      * Drops keywords where KD > 30 or KD exceeds tenant_dr + max_kd_delta.
+      * Requires lowest_dr <= tenant_dr + 15 when provided.
+      * Requires >= 3 user inputs when input count is provided.
+      * Sorts surviving keywords by Traffic Potential (fallback to volume).
     Zero em-dashes. Zero en-dashes.
     """
+    import urllib.parse
+
     prop = str(tenant_id or "profithelm").strip().lower()
-    kd_ceiling = float(tenant_dr) + float(max_kd_delta)
+    kd_ceiling = min(30.0, float(tenant_dr) + float(max_kd_delta))
+    lowest_dr_ceiling = float(tenant_dr) + 15.0
     surviving: List[Dict[str, Any]] = []
     dropped: List[Dict[str, Any]] = []
 
@@ -8728,11 +8669,15 @@ def filter_rankable_tool_keywords(
         kw_low = kw.lower()
         pos = int(float(row.get("position", 10) or 10))
         vol = int(float(row.get("volume", 0) or 0))
+        tp_raw = row.get("traffic_potential")
+        traffic_potential = int(float(tp_raw)) if tp_raw is not None else vol
         traffic = int(float(row.get("traffic", 0) or 0))
         kd = float(row.get("kd", 25.0) or 25.0)
         tool_top10 = int(float(row.get("tool_results_in_top10", 3) or 0))
         avg_dr = float(row.get("avg_top10_dr", 50.0) or 50.0)
         dom_fmt = str(row.get("serp_dominant_format") or "interactive_tool").strip().lower()
+        intent_val = str(row.get("intent") or "tool").strip().lower()
+        top10_urls = [str(u).strip() for u in (row.get("top10_urls") or []) if str(u).strip()]
 
         if any(off_tok in kw_low for off_tok in OFF_VERTICAL_CONSUMER_TOOL_PATTERNS):
             dropped.append({"keyword": kw, "reason": "OFF_VERTICAL_CONSUMER_QUERY"})
@@ -8746,14 +8691,75 @@ def filter_rankable_tool_keywords(
         if dom_fmt in ("video", "news", "video_carousel", "top_stories"):
             dropped.append({"keyword": kw, "reason": f"SERP_DOMINATED_BY_{dom_fmt.upper()}"})
             continue
+
+        is_aio_non_trans = bool(
+            row.get("aio_dominated")
+            or row.get("ai_overview_dominated")
+            or row.get("serp_has_aio_non_transactional")
+            or dom_fmt in ("aio", "ai_overview", "ai_overviews", "informational_aio")
+            or (
+                (row.get("aio_present") or row.get("has_ai_overview"))
+                and intent_val not in ("tool", "transactional", "calculator", "commercial_tool")
+            )
+        )
+        if is_aio_non_trans:
+            dropped.append({"keyword": kw, "reason": "NON_TRANSACTIONAL_AIO_DOMINATED_SERP"})
+            continue
+
+        has_gov_calc = bool(
+            row.get("gov_calculator_on_page1")
+            or row.get("has_gov_interactive_calculator")
+            or row.get("gov_interactive_calculator_in_top10")
+        )
+        if not has_gov_calc:
+            for u_item in top10_urls:
+                parsed_u = urllib.parse.urlsplit(u_item)
+                host = parsed_u.netloc.lower()
+                path_q = f"{parsed_u.path} {parsed_u.query}".lower()
+                if host.endswith(".gov") and any(
+                    tok in path_q for tok in ("calculator", "simulator", "estimator", "/calc", "/tool", "worksheet")
+                ):
+                    has_gov_calc = True
+                    break
+        if has_gov_calc:
+            dropped.append({"keyword": kw, "reason": "GOV_INTERACTIVE_CALCULATOR_ON_PAGE_1"})
+            continue
+
         if tool_top10 <= 0:
             dropped.append({"keyword": kw, "reason": "ZERO_TOOL_INTENT_IN_TOP_10"})
             continue
         if avg_dr > 80.0 and tool_top10 < 2:
             dropped.append({"keyword": kw, "reason": f"MEGA_DR_NO_TOOL_INTENT (avg_dr={avg_dr})"})
             continue
-        if kd > kd_ceiling:
+
+        if kd > 30.0 or kd > kd_ceiling:
             dropped.append({"keyword": kw, "reason": f"KD_EXCEEDS_RANKABLE_CEILING ({kd} > {kd_ceiling})"})
+            continue
+
+        raw_lowest_dr = row.get("lowest_dr", row.get("lowest_top10_dr", row.get("min_top10_dr")))
+        if raw_lowest_dr is None and isinstance(row.get("top10_drs"), list) and row["top10_drs"]:
+            raw_lowest_dr = min(float(x) for x in row["top10_drs"])
+        if raw_lowest_dr is not None:
+            lowest_dr = float(raw_lowest_dr)
+            if lowest_dr > lowest_dr_ceiling:
+                dropped.append(
+                    {
+                        "keyword": kw,
+                        "reason": f"LOWEST_DR_EXCEEDS_TENANT_CEILING ({lowest_dr} > {lowest_dr_ceiling})",
+                    }
+                )
+                continue
+
+        raw_inputs_cnt = row.get("input_count", row.get("user_inputs_count", row.get("num_inputs")))
+        if raw_inputs_cnt is None and isinstance(row.get("inputs"), (dict, list)):
+            raw_inputs_cnt = len(row["inputs"])
+        if raw_inputs_cnt is not None and int(float(raw_inputs_cnt)) < 3:
+            dropped.append(
+                {
+                    "keyword": kw,
+                    "reason": f"INSUFFICIENT_USER_INPUTS ({int(float(raw_inputs_cnt))} < 3)",
+                }
+            )
             continue
 
         surviving.append(
@@ -8763,6 +8769,7 @@ def filter_rankable_tool_keywords(
                 "source_url": str(row.get("source_url") or ""),
                 "position": pos,
                 "volume": vol,
+                "traffic_potential": traffic_potential,
                 "traffic": traffic,
                 "kd": kd,
                 "intent": str(row.get("intent") or "tool"),
@@ -8770,15 +8777,16 @@ def filter_rankable_tool_keywords(
                 "tool_results_in_top10": tool_top10,
                 "avg_top10_dr": avg_dr,
                 "serp_dominant_format": dom_fmt,
-                "top10_urls": [str(u).strip() for u in (row.get("top10_urls") or []) if str(u).strip()],
+                "top10_urls": top10_urls,
             }
         )
 
-    surviving.sort(key=lambda x: (-int(x["volume"]), float(x["kd"]), x["keyword"]))
+    surviving.sort(key=lambda x: (-int(x["traffic_potential"]), -int(x["volume"]), float(x["kd"]), x["keyword"]))
     return {
         "property_id": prop,
         "tenant_dr": float(tenant_dr),
         "kd_ceiling": kd_ceiling,
+        "lowest_dr_ceiling": lowest_dr_ceiling,
         "total_evaluated": len(keyword_rows or []),
         "surviving_count": len(surviving),
         "dropped_count": len(dropped),
@@ -8990,30 +8998,6 @@ def cluster_keywords_by_serp_overlap(
 
 
 LOW_BUYER_INTENT_TOOL_FLOOR = 25.0
-
-
-def build_high_intent_comparison_targets(
-    category: str,
-    competitors: List[str],
-) -> List[Dict[str, str]]:
-    """
-    x-like:2108291159890014523: high-intent 'best X tools' and 'alternative to competitor'
-    keyword targets that convert and surface in AI search, versus low-intent free-tool traffic.
-    Zero em-dashes. Zero en-dashes.
-    """
-    cat = re.sub(r"\s+", " ", str(category or "").strip().lower())
-    targets: List[Dict[str, str]] = []
-    if cat:
-        targets.append({"keyword": f"best {cat} tools", "page_type": "best_of_roundup"})
-    seen: Set[str] = set()
-    for comp in competitors or []:
-        name = re.sub(r"\s+", " ", str(comp or "").strip())
-        if not name or name.lower() in seen:
-            continue
-        seen.add(name.lower())
-        targets.append({"keyword": f"{name.lower()} alternative", "page_type": "competitor_alternative"})
-        targets.append({"keyword": f"alternative to {name.lower()}", "page_type": "competitor_alternative"})
-    return targets
 
 
 def score_tool_cluster_roi_and_crawl_risk(
@@ -9272,7 +9256,6 @@ __all__ = [
     "filter_rankable_tool_keywords",
     "cluster_keywords_by_serp_overlap",
     "score_tool_cluster_roi_and_crawl_risk",
-    "build_high_intent_comparison_targets",
     "run_agentic_free_tool_keyword_pipeline",
 ]
 

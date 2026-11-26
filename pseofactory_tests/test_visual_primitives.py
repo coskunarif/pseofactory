@@ -615,5 +615,161 @@ console.log(JSON.stringify({{
     assert out["pbHtmlUsesCheckoutPaywall"] is True
 
 
+def test_hash_fragment_state_engine_migration_and_button_presets():
+    """
+    Verifies Batch 2B hash-fragment state engine and button preset conversion:
+    1. normalize_html_visual_primitives converts <a href="?..." class="scenario-preset-link">
+       to <button type="button" class="scenario-preset-btn scenario-preset-link" data-preset="...">
+       idempotently (zero crawlable ? preset anchors).
+    2. Runtime JS syncs input changes to #hash via replaceState ONLY (zero pushState),
+       migrates legacy ?k=v links into #k=v cleanly on load, and wires button preset clicks
+       to update inputs and #hash.
+    """
+    import subprocess
+    from pseofactory.visual_primitives import render_runtime_synchronizer_js
+
+    raw_html = """<!DOCTYPE html><html><head><title>Preset Test</title></head><body><main class="container">
+<h1>Preset Calc</h1>
+<div class="scenario-presets-bar" data-mechanic="deep_link_scenario_presets">
+  <a href="https://example.com/tools/calc/?gross_income=250000&amp;filing=single" data-preset="aggressive" rel="nofollow" class="touch-target scenario-preset-link">Aggressive (1.2x)</a>
+</div>
+<form class="calculator-form"><input type="number" id="field-gross_income" name="gross_income" value="150000"><div class="result-box"><div class="output-value">$30,000</div></div></form>
+</main></body></html>"""
+
+    norm_once, actions_once = normalize_html_visual_primitives(raw_html, is_tenant_porcelain=True)
+    assert "scenario_preset_button_normalization" in actions_once
+    assert "<a" not in norm_once.split('<div class="scenario-presets-bar"')[1].split("</div>")[0]
+    assert 'type="button"' in norm_once
+    assert "scenario-preset-btn" in norm_once
+    assert 'data-preset="gross_income=250000&amp;filing=single"' in norm_once
+    assert 'data-preset-tier="aggressive"' in norm_once
+    assert detect_visual_and_ux_contract_issues(norm_once, rel_path="tools/calc/index.html", require_primitives=True) == []
+
+    norm_twice, actions_twice = normalize_html_visual_primitives(norm_once, is_tenant_porcelain=True)
+    assert actions_twice == []
+    assert norm_twice == norm_once
+
+    runtime_js = render_runtime_synchronizer_js()
+    assert "history.pushState" not in runtime_js
+    assert "window.location.hash" in runtime_js
+
+    vm_script = """
+const vm = require('vm');
+const assert = require('assert');
+const code = require('fs').readFileSync(0, 'utf8');
+
+function runCase(initSearch, initHash) {
+  let pushCount = 0;
+  let replaceCount = 0;
+  const docListeners = {};
+  const winListeners = {};
+  const els = {};
+  const mkEl = (tag, attrs = {}, text = '') => {
+    const _attrs = { ...attrs };
+    const _cls = new Set(String(attrs.class || '').split(/\\s+/).filter(Boolean));
+    const el = {
+      tagName: tag.toUpperCase(),
+      nodeType: 1,
+      style: {},
+      value: attrs.value || '',
+      textContent: text,
+      children: [],
+      classList: {
+        contains: (c) => _cls.has(c),
+        add: (c) => _cls.add(c),
+        remove: (c) => _cls.delete(c),
+      },
+      get id() { return _attrs.id || ''; },
+      get name() { return _attrs.name || ''; },
+      get type() { return _attrs.type || ''; },
+      getAttribute: (k) => Object.prototype.hasOwnProperty.call(_attrs, k) ? String(_attrs[k]) : null,
+      setAttribute: (k, v) => { _attrs[k] = String(v); },
+      hasAttribute: (k) => Object.prototype.hasOwnProperty.call(_attrs, k),
+      removeAttribute: (k) => { delete _attrs[k]; },
+      closest: (sel) => {
+        if (sel.includes('scenario-preset-btn') && _cls.has('scenario-preset-btn')) return el;
+        return null;
+      },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      dispatchEvent: (ev) => {
+        ev.target = el;
+        (docListeners[ev.type] || []).forEach(fn => fn(ev));
+      },
+      click: () => {
+        const ev = { type: 'click', target: el, preventDefault() {} };
+        (docListeners.click || []).forEach(fn => fn(ev));
+      }
+    };
+    if (el.id) els[el.id] = el;
+    return el;
+  };
+  const inp = mkEl('INPUT', { id: 'field-gross_income', name: 'gross_income', type: 'number', value: '150000' });
+  const btn = mkEl('BUTTON', { id: 'btn-preset-agg', type: 'button', class: 'scenario-preset-btn scenario-preset-link touch-target', 'data-preset': 'gross_income=275000', 'data-preset-tier': 'aggressive' }, 'Aggressive');
+  const out = mkEl('DIV', { id: 'primary-out', class: 'output-value' }, '$30,000');
+  const loc = { origin: 'https://example.com', pathname: '/tools/calc/', search: initSearch, hash: initHash, href: 'https://example.com/tools/calc/' + initSearch + initHash };
+  const win = {
+    location: loc,
+    history: {
+      pushState() { pushCount++; },
+      replaceState(_s, _t, u) {
+        replaceCount++;
+        const s = String(u || '');
+        const hi = s.indexOf('#');
+        const bh = hi !== -1 ? s.slice(0, hi) : s;
+        const qi = bh.indexOf('?');
+        loc.search = qi !== -1 ? bh.slice(qi) : '';
+        loc.hash = hi !== -1 ? s.slice(hi) : '';
+        loc.href = loc.origin + loc.pathname + loc.search + loc.hash;
+      }
+    },
+    addEventListener: (t, fn) => { (winListeners[t] = winListeners[t] || []).push(fn); },
+    navigator: { sendBeacon: () => true, clipboard: { writeText: () => Promise.resolve() } },
+    Event: class { constructor(t, o = {}) { this.type = t; this.bubbles = Boolean(o.bubbles); } },
+    URLSearchParams,
+    setTimeout: (fn) => { fn(); return 1; },
+    clearTimeout: () => {},
+  };
+  win.window = win;
+  const doc = {
+    readyState: 'complete',
+    body: mkEl('BODY'),
+    getElementById: (id) => els[id] || null,
+    querySelector: (s) => s.includes('output-value') ? out : (s.includes('gross_income') ? inp : null),
+    querySelectorAll: (s) => {
+      if (s.includes('scenario-preset')) return [btn];
+      if (s.includes('output-value')) return [out];
+      if (s.includes('input')) return [inp];
+      return [];
+    },
+    createElement: (t) => mkEl(t),
+    addEventListener: (t, fn) => { (docListeners[t] = docListeners[t] || []).push(fn); }
+  };
+  win.document = doc;
+  vm.runInContext(code, vm.createContext({ window: win, document: doc, location: loc, history: win.history, navigator: win.navigator, Event: win.Event, URLSearchParams, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Date, Promise, parseFloat, parseInt, isNaN, encodeURIComponent, decodeURIComponent, setTimeout: win.setTimeout, clearTimeout: win.clearTimeout }));
+  return { inp, btn, loc, getCounts: () => ({ pushCount, replaceCount }) };
+}
+
+// Legacy ? migration -> #
+const c1 = runCase('?gross_income=199000', '');
+assert.strictEqual(c1.inp.value, '199000');
+assert.strictEqual(c1.loc.search, '');
+assert.ok(c1.loc.hash.includes('gross_income=199000'));
+assert.strictEqual(c1.getCounts().pushCount, 0);
+
+// Hash-first precedence + button preset click
+const c2 = runCase('?gross_income=111000', '#gross_income=222000');
+assert.strictEqual(c2.inp.value, '222000');
+c2.btn.click();
+assert.strictEqual(c2.inp.value, '275000');
+assert.ok(c2.btn.classList.contains('active'));
+assert.ok(c2.loc.hash.includes('gross_income=275000'));
+assert.strictEqual(c2.getCounts().pushCount, 0);
+console.log('HASH_AND_PRESET_OK');
+"""
+    proc = subprocess.run(["node", "-e", vm_script], input=runtime_js, capture_output=True, text=True, check=True)
+    assert "HASH_AND_PRESET_OK" in proc.stdout
+
+
 
 

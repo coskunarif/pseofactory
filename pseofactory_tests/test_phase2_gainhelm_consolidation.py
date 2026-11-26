@@ -834,3 +834,84 @@ print(json.dumps({{
     )
     assert ledger_after["total_assets"] > 0
 
+
+def test_gainhelm_batch2b_jsonld_primary_sources_and_hash_state(tmp_path: Path) -> None:
+    """
+    Verifies GainHelm Batch 2B cleanups across all 13 tools (10 core + 3 deployed voids):
+    1. Organization.sameAs has zero Wikidata QIDs (moved to knowsAbout).
+    2. Zero HowTo, SpeakableSpecification, FAQPage, TechArticle, or leaf Dataset JSON-LD nodes.
+    3. WebApplication on calculator leaves; WebSite on / only; BreadcrumbList omitted on /.
+    4. 100% (13/13) tools have official primary-source outbound links (incl. eur-lex.europa.eu on DORA/EU AI Act and sec.gov on SEC 8-K).
+    5. Hash-fragment state sync (#k=v) via replaceState only and zero crawlable <a href="...?..."> preset links.
+    """
+    from pseofactory.gainhelm_estate import compile_gainhelm_estate_impl
+
+    voids_src = Path("/home/ubuntuadmin/projects/gainhelm/content/deployed_voids.json")
+    if voids_src.is_file():
+        (tmp_path / "content").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(voids_src, tmp_path / "content" / "deployed_voids.json")
+
+    res = compile_gainhelm_estate_impl(tmp_path, run_retrofit=True)
+    assert res["status"] == "PASS", res
+    dist = tmp_path / "dist"
+
+    tool_pages = sorted((dist / "tools").glob("*/index.html"))
+    assert len(tool_pages) == 13
+
+    for page_path in tool_pages:
+        slug = page_path.parent.name
+        raw = page_path.read_text(encoding="utf-8")
+        assert "\u2014" not in raw and "\u2013" not in raw
+        assert "history.pushState" not in raw
+        assert not re.search(r'<a\b[^>]*class=["\'][^"\']*scenario-preset-link[^"\']*["\']', raw, re.IGNORECASE)
+
+        # Primary-source outbound provenance links on 13/13 tools
+        assert 'class="statutory-provenance-box' in raw, f"Missing statutory-provenance-box on {slug}"
+        if slug in (
+            "dora-ict-third-party-risk-compliance-cost-calculator",
+            "eu-ai-act-high-risk-conformity-assessment-cost-calculator",
+        ):
+            assert "https://eur-lex.europa.eu/" in raw, f"Missing EUR-Lex primary source on {slug}"
+        elif slug == "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator":
+            assert "https://www.sec.gov/" in raw, f"Missing SEC.gov primary source on {slug}"
+
+        ld_matches = re.findall(
+            r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+            raw,
+            flags=re.IGNORECASE,
+        )
+        assert len(ld_matches) == 1
+        assert "SpeakableSpecification" not in ld_matches[0]
+        graph = json.loads(ld_matches[0]).get("@graph", [])
+        graph_types = [
+            t
+            for n in graph
+            for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+        ]
+        assert "WebApplication" in graph_types
+        for banned_t in ("SoftwareApplication", "TechArticle", "HowTo", "FAQPage", "Dataset", "WebSite"):
+            assert banned_t not in graph_types, f"Unexpected {banned_t} in leaf JSON-LD for {slug}"
+
+    home_raw = (dist / "index.html").read_text(encoding="utf-8")
+    assert "window.location.hash" in home_raw
+    assert "history.pushState" not in home_raw
+    home_ld = re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        home_raw,
+        flags=re.IGNORECASE,
+    )
+    assert len(home_ld) == 1
+    assert "SpeakableSpecification" not in home_ld[0]
+    home_graph = json.loads(home_ld[0]).get("@graph", [])
+    home_types = [
+        t
+        for n in home_graph
+        for t in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])
+    ]
+    assert "WebSite" in home_types
+    assert "BreadcrumbList" not in home_types
+    home_orgs = [n for n in home_graph if "Organization" in (n.get("@type") if isinstance(n.get("@type"), list) else [n.get("@type")])]
+    assert len(home_orgs) == 1
+    assert not any("wikidata.org" in str(u).lower() for u in (home_orgs[0].get("sameAs") or []))
+    assert "wikidata.org" in json.dumps(home_orgs[0].get("knowsAbout") or [])
+

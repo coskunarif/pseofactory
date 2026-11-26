@@ -1157,6 +1157,7 @@ a.affiliate-cta-link:hover {{
 .btn-secondary,
 .btn-outline,
 .btn-preset,
+.scenario-preset-btn,
 .scenario-preset-link,
 .on-this-page-nav a,
 .cluster-link,
@@ -1183,6 +1184,7 @@ a.affiliate-cta-link:hover {{
 .btn-secondary:hover,
 .btn-outline:hover,
 .btn-preset:hover,
+.scenario-preset-btn:hover,
 .scenario-preset-link:hover,
 .on-this-page-nav a:hover,
 .cluster-link:hover,
@@ -1191,6 +1193,26 @@ a.affiliate-cta-link:hover {{
   background-color: var(--brand-soft);
   border-color: var(--brand-primary);
   color: var(--brand-hover);
+}}
+
+.statutory-sources,
+.statutory-changelog {{
+  margin-top: 1.25rem;
+}}
+
+.statutory-sources-list,
+.statutory-changelog-list {{
+  padding-left: 1.25rem;
+  margin: 0.5rem 0 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}}
+
+.verified-date-meta {{
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-top: 0.5rem;
 }}
 
 /* Calculator Grid, Inputs & Tabular Readouts */
@@ -4358,8 +4380,35 @@ _PERSONAL_MAKER_EMAIL_RE = re.compile(r"\barif\." + r"coskun@[a-zA-Z0-9._-]+\b",
 _PERSONAL_MAKER_MAILTO_RE = re.compile(r"mailto:arif\." + r"coskun@[a-zA-Z0-9._-]+", flags=re.IGNORECASE)
 
 
+_GENERIC_TOPIC_WIKIDATA_QIDS: FrozenSet[str] = frozenset(
+    {
+        "Q192161",
+        "Q633315",
+        "Q166142",
+        "Q8161",
+        "Q7443105",
+        "Q4546416",
+        "Q43261623",
+        "Q1048600",
+        "Q7397",
+        "Q499388",
+    }
+)
+_TOPIC_WIKIDATA_BY_PROP: Dict[str, str] = {
+    "lienbond": "https://www.wikidata.org/wiki/Q192161",
+    "prexvo": "https://www.wikidata.org/wiki/Q633315",
+    "gainhelm": "https://www.wikidata.org/wiki/Q166142",
+    "profithelm": "https://www.wikidata.org/wiki/Q8161",
+}
+
+
+def _extract_wikidata_qid_from_url(url: str) -> Optional[str]:
+    m = re.search(r"wikidata\.org/(?:wiki|entity)/(Q[1-9][0-9]*)/?$", str(url or "").strip(), flags=re.IGNORECASE)
+    return m.group(1).upper() if m else None
+
+
 def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
-    """Recursively scrubs personal maker/author/LinkedIn/email references inside JSON-LD structures."""
+    """Recursively scrubs personal maker/author/LinkedIn/email and topic-QID sameAs pollution inside JSON-LD."""
     li_id = str(profile.get("linkedin_company_id") or "").strip()
     expected_li = f"https://www.linkedin.com/company/{li_id}/" if li_id else ""
     corp_name = str(profile.get("legal_entity") or f"{profile.get('brand_name', 'ProfitHelm')} LLC")
@@ -4383,31 +4432,36 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
             return replacement_org
 
         out_dict: Dict[str, Any] = {}
-        wikidata_map = {
-            "lienbond": "https://www.wikidata.org/wiki/Q192161",
-            "prexvo": "https://www.wikidata.org/wiki/Q633315",
-            "gainhelm": "https://www.wikidata.org/wiki/Q166142",
-            "profithelm": "https://www.wikidata.org/wiki/Q8161",
-        }
-        canonical_wikidata = wikidata_map.get(
-            str(profile.get("property_id") or "").strip().lower(),
-            str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
-        )
+        nt_list = [str(x) for x in node_type] if isinstance(node_type, list) else ([str(node_type)] if node_type else [])
+        is_org_node = "Organization" in nt_list
+        moved_topic_qids: List[str] = []
         for k, v in value.items():
+            if k == "speakable":
+                continue
             if k == "sameAs":
                 urls = [v] if isinstance(v, str) else (list(v) if isinstance(v, list) else [])
                 filtered: List[str] = []
                 for u in urls:
                     u_str = str(u).strip()
-                    if "wikidata.org/wiki/Q499388" in u_str:
-                        if canonical_wikidata not in filtered:
-                            filtered.append(canonical_wikidata)
+                    if not u_str:
+                        continue
+                    u_low = u_str.lower()
+                    qid = _extract_wikidata_qid_from_url(u_str)
+                    if qid and qid in _GENERIC_TOPIC_WIKIDATA_QIDS:
+                        if qid != "Q499388":
+                            canon_q_url = f"https://www.wikidata.org/wiki/{qid}"
+                            if canon_q_url not in moved_topic_qids:
+                                moved_topic_qids.append(canon_q_url)
+                        continue
+                    if "ccfs.sos.wa.gov" in u_low:
+                        continue
+                    if "github.com/coskunarif" in u_low:
                         continue
                     if _PERSONAL_LINKEDIN_RE.search(u_str):
                         if expected_li and expected_li not in filtered:
                             filtered.append(expected_li)
                         continue
-                    if "linkedin.com/company/" in u_str.lower() and not li_id:
+                    if "linkedin.com/company/" in u_low and not li_id:
                         continue
                     if _PERSONAL_MAKER_HANDLE_RE.search(u_str):
                         continue
@@ -4417,6 +4471,18 @@ def _scrub_jsonld_value(value: Any, profile: Dict[str, Any]) -> Any:
                     out_dict["sameAs"] = filtered
                 continue
             out_dict[k] = _scrub_jsonld_value(v, profile)
+
+        if is_org_node and moved_topic_qids:
+            existing_ka = out_dict.get("knowsAbout")
+            ka_list = (
+                list(existing_ka)
+                if isinstance(existing_ka, list)
+                else ([existing_ka] if existing_ka else [])
+            )
+            for tq in moved_topic_qids:
+                if tq not in ka_list:
+                    ka_list.append(tq)
+            out_dict["knowsAbout"] = ka_list
         return out_dict
 
     if isinstance(value, list):
@@ -4452,8 +4518,91 @@ def _rewrite_localbusiness_id_refs(value: Any, org_id: str) -> Any:
     return value
 
 
-def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
-    """Consolidates multiple JSON-LD blocks into exact 1 @graph block, strips LocalBusiness bloat, and scrubs personal attribution."""
+def _collapse_nested_org_refs(value: Any, org_id: str) -> Any:
+    """Replaces inline Organization dicts inside author/publisher/creator/provider with @id ref."""
+    if isinstance(value, dict):
+        out: Dict[str, Any] = {}
+        for k, v in value.items():
+            if k in ("author", "publisher", "creator", "provider", "brand") and isinstance(v, dict):
+                v_type = v.get("@type")
+                v_types = [str(x) for x in v_type] if isinstance(v_type, list) else ([str(v_type)] if v_type else [])
+                v_id = str(v.get("@id") or "").strip().lower()
+                if "Organization" in v_types or v_id.endswith("#organization"):
+                    out[k] = {"@id": org_id}
+                    continue
+            out[k] = _collapse_nested_org_refs(v, org_id)
+        return out
+    if isinstance(value, list):
+        return [_collapse_nested_org_refs(v, org_id) for v in value]
+    return value
+
+
+def _extract_dom_breadcrumbs_for_jsonld(
+    inner_html: str,
+    canonical_base: str,
+    page_url: str,
+) -> List[Dict[str, Any]]:
+    """Extracts 1:1 (name, item) ListItem dicts from <nav class='breadcrumbs'>."""
+    bm = re.search(
+        r'<nav\b[^>]*class=["\'][^"\']*\bbreadcrumbs\b[^"\']*["\'][^>]*>([\s\S]*?)</nav>',
+        inner_html or "",
+        flags=re.IGNORECASE,
+    )
+    if not bm:
+        return []
+    nav_inner = bm.group(1)
+    base = str(canonical_base or "").rstrip("/")
+    items: List[Dict[str, Any]] = []
+    anchors = list(re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>', nav_inner, flags=re.IGNORECASE))
+    pos = 1
+    for am in anchors:
+        href = html_lib.unescape(am.group(1)).strip()
+        label = html_lib.unescape(re.sub(r"<[^>]+>", "", am.group(2))).strip()
+        if not label:
+            continue
+        full_url = f"{base}{href}" if href.startswith("/") and base else href
+        items.append({"@type": "ListItem", "position": pos, "name": label, "item": full_url})
+        pos += 1
+
+    spans = re.findall(r"<span\b[^>]*>([\s\S]*?)</span>", nav_inner, flags=re.IGNORECASE)
+    non_sep_spans = [
+        html_lib.unescape(re.sub(r"<[^>]+>", "", sp)).strip()
+        for sp in spans
+        if html_lib.unescape(re.sub(r"<[^>]+>", "", sp)).strip() not in ("/", ">", "|", "-")
+    ]
+    if non_sep_spans:
+        last_label = non_sep_spans[-1]
+        if page_url:
+            items.append({"@type": "ListItem", "position": pos, "name": last_label, "item": page_url})
+    return items
+
+
+def _is_real_downloadable_dataset(node: Dict[str, Any]) -> bool:
+    """Returns True only if Dataset.distribution[].contentUrl points to a real .csv/.json file (never text/html)."""
+    raw_dist = node.get("distribution")
+    dist_items = raw_dist if isinstance(raw_dist, list) else ([raw_dist] if isinstance(raw_dist, dict) else [])
+    if not dist_items:
+        return False
+    has_real = False
+    for dl in dist_items:
+        if not isinstance(dl, dict):
+            continue
+        enc = str(dl.get("encodingFormat") or "").strip().lower()
+        if enc == "text/html":
+            return False
+        curl = str(dl.get("contentUrl") or "").strip().lower().split("?", 1)[0].split("#", 1)[0]
+        if curl.endswith((".csv", ".json")):
+            has_real = True
+    return has_real
+
+
+def _consolidate_jsonld_head(
+    head_html: str,
+    profile: Dict[str, Any],
+    rel_path: str = "",
+    dom_breadcrumbs: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Consolidates JSON-LD into 1 @graph block, strips deprecated bloat & topic QIDs, and enforces @graph hygiene."""
     ld_pattern = re.compile(
         r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
         flags=re.IGNORECASE,
@@ -4464,7 +4613,29 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
 
     base = str(profile.get("canonical_base") or "").rstrip("/")
     brand = str(profile.get("brand_name") or "").strip() or "Publisher"
+    prop_key = str(profile.get("property_id") or "").strip().lower()
     org_id = f"{base}/#organization" if base else "#organization"
+    li_id = str(profile.get("linkedin_company_id") or "").strip()
+    topic_qid = _TOPIC_WIKIDATA_BY_PROP.get(prop_key, "https://www.wikidata.org/wiki/Q7397")
+
+    rel_norm = str(rel_path or "").strip().lstrip("/").lower()
+    has_rel = bool(rel_norm)
+    is_home = rel_norm in ("index.html", "index")
+    is_about = rel_norm in ("about/index.html", "about.html", "about")
+    is_methodology = rel_norm in ("methodology/index.html", "methodology.html", "methodology")
+    is_guide = rel_norm.startswith("guides/") and rel_norm != "guides/index.html"
+    is_calc_leaf = rel_norm.startswith("tools/") and rel_norm not in ("tools/index.html", "tools")
+    is_404 = rel_norm == "404.html"
+
+    page_rel_url = ""
+    if base and has_rel:
+        if is_home:
+            page_rel_url = f"{base}/"
+        elif is_404:
+            page_rel_url = f"{base}/404.html"
+        else:
+            clean_p = re.sub(r"(?:^|/)index\.html$", "", rel_norm).strip("/")
+            page_rel_url = f"{base}/{clean_p}/" if clean_p else f"{base}/"
 
     graph_nodes: List[Dict[str, Any]] = []
     stripped_local_business = False
@@ -4481,35 +4652,136 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
             if not isinstance(node, dict):
                 continue
             cleaned_node = _scrub_jsonld_value(dict(node), profile)
-            if isinstance(cleaned_node, dict):
-                cleaned_node.pop("@context", None)
-                nt = cleaned_node.get("@type")
-                nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
-                nid = str(cleaned_node.get("@id") or "").strip().lower()
-                if "LocalBusiness" in nt_list or nid.endswith("#localbusiness"):
-                    stripped_local_business = True
-                    if "Organization" in nt_list:
-                        kept_types = [t for t in nt_list if t != "LocalBusiness"]
-                        cleaned_node["@type"] = kept_types[0] if len(kept_types) == 1 else kept_types
-                        if nid.endswith("#localbusiness"):
-                            cleaned_node["@id"] = org_id
-                    else:
-                        continue
-                cleaned_node = _rewrite_localbusiness_id_refs(cleaned_node, org_id)
-                if cleaned_node.get("@type") == "FAQPage" and isinstance(cleaned_node.get("mainEntity"), list):
-                    cleaned_node["mainEntity"] = [
-                        q_item
-                        for q_item in cleaned_node["mainEntity"]
-                        if not (
-                            isinstance(q_item, dict)
-                            and str(q_item.get("name") or "").strip().lower() in ("menu", "navigation")
-                        )
-                    ]
-                    if not cleaned_node["mainEntity"]:
-                        continue
-                graph_nodes.append(cleaned_node)
+            if not isinstance(cleaned_node, dict):
+                continue
+            cleaned_node.pop("@context", None)
+            cleaned_node.pop("speakable", None)
+            nt = cleaned_node.get("@type")
+            nt_list = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+            nid = str(cleaned_node.get("@id") or "").strip().lower()
 
-    if stripped_local_business:
+            if any(t in ("HowTo", "SpeakableSpecification") for t in nt_list):
+                continue
+            if "Dataset" in nt_list and not _is_real_downloadable_dataset(cleaned_node):
+                continue
+            if is_calc_leaf and any(t in ("FAQPage", "TechArticle") for t in nt_list):
+                continue
+            if has_rel and not is_home and "WebSite" in nt_list:
+                continue
+            if (is_home or is_404) and "BreadcrumbList" in nt_list:
+                continue
+
+            if is_calc_leaf and "SoftwareApplication" in nt_list:
+                new_types = ["WebApplication" if t == "SoftwareApplication" else t for t in nt_list]
+                cleaned_node["@type"] = new_types[0] if len(new_types) == 1 else new_types
+                nt_list = new_types
+                cleaned_node.setdefault("browserRequirements", "Requires JavaScript")
+            elif has_rel and not is_calc_leaf and any(t in ("WebApplication", "SoftwareApplication") for t in nt_list):
+                continue
+
+            if is_calc_leaf and "WebApplication" in nt_list and org_id:
+                cleaned_node.setdefault("provider", {"@id": org_id})
+
+            if has_rel and not (is_methodology or is_guide) and "TechArticle" in nt_list:
+                continue
+
+            if "LocalBusiness" in nt_list or nid.endswith("#localbusiness"):
+                stripped_local_business = True
+                if "Organization" in nt_list:
+                    kept_types = [t for t in nt_list if t != "LocalBusiness"]
+                    cleaned_node["@type"] = kept_types[0] if len(kept_types) == 1 else kept_types
+                    nt_list = kept_types
+                    if nid.endswith("#localbusiness"):
+                        cleaned_node["@id"] = org_id
+                else:
+                    continue
+
+            if has_rel and not (is_home or is_about) and "Organization" in nt_list:
+                continue
+
+            cleaned_node = _rewrite_localbusiness_id_refs(cleaned_node, org_id)
+            if has_rel and not (is_home or is_about):
+                cleaned_node = _collapse_nested_org_refs(cleaned_node, org_id)
+
+            if "WebPage" in nt_list or "AboutPage" in nt_list or "ContactPage" in nt_list:
+                if is_home or is_404:
+                    cleaned_node.pop("breadcrumb", None)
+                if isinstance(cleaned_node.get("isPartOf"), dict) and str(cleaned_node["isPartOf"].get("@id") or "").endswith("#organization"):
+                    cleaned_node["isPartOf"] = {"@id": f"{base}/#website"} if base else {"@id": "#website"}
+                if "about" not in cleaned_node:
+                    cleaned_node["about"] = [topic_qid]
+
+            if "Organization" in nt_list and (is_home or is_about or not has_rel):
+                ka = cleaned_node.get("knowsAbout")
+                ka_l = list(ka) if isinstance(ka, list) else ([ka] if ka else [])
+                if topic_qid not in ka_l:
+                    ka_l.append(topic_qid)
+                cleaned_node["knowsAbout"] = ka_l
+
+            if "FAQPage" in nt_list and isinstance(cleaned_node.get("mainEntity"), list):
+                cleaned_node["mainEntity"] = [
+                    q_item
+                    for q_item in cleaned_node["mainEntity"]
+                    if not (
+                        isinstance(q_item, dict)
+                        and str(q_item.get("name") or "").strip().lower() in ("menu", "navigation")
+                    )
+                ]
+                if not cleaned_node["mainEntity"]:
+                    continue
+
+            graph_nodes.append(cleaned_node)
+
+    if dom_breadcrumbs and not is_home and not is_404:
+        bc_updated = False
+        for n in graph_nodes:
+            nt = n.get("@type")
+            nt_l = [str(x) for x in nt] if isinstance(nt, list) else ([str(nt)] if nt else [])
+            if "BreadcrumbList" in nt_l:
+                n["itemListElement"] = dom_breadcrumbs
+                bc_updated = True
+                break
+        if not bc_updated and page_rel_url:
+            graph_nodes.append(
+                {
+                    "@type": "BreadcrumbList",
+                    "@id": f"{page_rel_url}#breadcrumb",
+                    "itemListElement": dom_breadcrumbs,
+                }
+            )
+
+    if (is_methodology or is_guide) and page_rel_url:
+        has_tech_article = any(
+            (isinstance(n.get("@type"), str) and n.get("@type") == "TechArticle")
+            or (isinstance(n.get("@type"), list) and "TechArticle" in [str(x) for x in n.get("@type")])
+            for n in graph_nodes
+        )
+        if not has_tech_article:
+            wp_node = next(
+                (
+                    n
+                    for n in graph_nodes
+                    if isinstance(n, dict) and n.get("@type") in ("WebPage", "AboutPage", "ContactPage")
+                ),
+                None,
+            )
+            graph_nodes.append(
+                {
+                    "@type": "TechArticle",
+                    "@id": f"{page_rel_url}#techarticle",
+                    "headline": str((wp_node or {}).get("name") or brand),
+                    "description": str((wp_node or {}).get("description") or ""),
+                    "url": page_rel_url,
+                    "inLanguage": "en-US",
+                    "author": {"@id": org_id},
+                    "publisher": {"@id": org_id},
+                    "datePublished": str((wp_node or {}).get("datePublished") or "2026-01-15"),
+                    "dateModified": str((wp_node or {}).get("dateModified") or "2026-11-12"),
+                    "mainEntityOfPage": {"@id": f"{page_rel_url}#webpage"},
+                }
+            )
+
+    if stripped_local_business and (is_home or is_about or not has_rel):
         has_org = any(
             (
                 isinstance(n.get("@type"), str) and n.get("@type") == "Organization"
@@ -4526,7 +4798,10 @@ def _consolidate_jsonld_head(head_html: str, profile: Dict[str, Any]) -> str:
                 "@id": org_id,
                 "name": brand,
                 "url": base or "/",
+                "knowsAbout": [topic_qid],
             }
+            if li_id:
+                org_node["sameAs"] = [f"https://www.linkedin.com/company/{li_id}/"]
             if base:
                 org_node["publishingPrinciples"] = f"{base}/methodology/"
             graph_nodes.insert(0, org_node)
@@ -5718,6 +5993,245 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
     )
 
 
+def _is_official_primary_source_url_porcelain(url: str) -> bool:
+    """Returns True when URL points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org host."""
+    import urllib.parse
+
+    raw = str(url or "").strip()
+    if not raw.startswith(("http://", "https://")):
+        return False
+    try:
+        host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return (
+        host.endswith(".gov")
+        or host.endswith(".mil")
+        or host == "eur-lex.europa.eu"
+        or host.endswith(".eur-lex.europa.eu")
+        or host == "pcisecuritystandards.org"
+        or host.endswith(".pcisecuritystandards.org")
+    )
+
+
+def _build_porcelain_statutory_sources_html(
+    profile: Dict[str, Any],
+    rel_path: str,
+    inner_main: str,
+) -> str:
+    """Builds SSR Statutory Sources & Formula Verification + Statutory Changelog cards from TruthPack."""
+    prop = str(profile.get("property_id") or "").strip().lower()
+    slug = re.sub(r"(?:^|/)index\.html$", "", str(rel_path or "").strip().lstrip("/")).split("/")[-1].lower()
+    try:
+        from pseofactory.truth_pack import load_truth_pack
+        from pseofactory.truth_gate import (
+            _citation_matches_allow_item,
+            _extract_citations,
+            _normalize_citations_allowlist,
+        )
+
+        tp = load_truth_pack(prop, allow_expired=True)
+        statute_eff_date = str(getattr(tp, "statute_effective_date", "") or "").strip()
+        pack_entries = list((getattr(tp, "entries", {}) or {}).values())
+        tp_dict = tp.to_dict() if hasattr(tp, "to_dict") else {}
+        allowlist = _normalize_citations_allowlist(tp_dict) if isinstance(tp_dict, dict) else []
+    except Exception:
+        return ""
+
+    if not pack_entries:
+        return ""
+
+    h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", inner_main or "", flags=re.IGNORECASE)
+    topic_label = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip() if h1_m else slug.replace("-", " ").title()
+    _generic_match_stops = frozenset({
+        "cost", "costs", "compliance", "calculator", "calculators", "risk", "rate", "rates",
+        "tax", "taxes", "penalty", "penalties", "audit", "audits", "score", "scores",
+        "benchmark", "benchmarks", "enterprise", "market", "series", "dataset", "model",
+        "fee", "fees", "type", "usd", "2024", "2025", "2026", "2027", "section", "part",
+        "title", "act", "code", "rule", "rules", "federal", "state", "firm", "range",
+        "gainhelm", "prexvo", "profithelm", "lienbond", "and", "the", "for", "with",
+        "annual", "total", "estimate", "estimator", "planner", "comparison", "tool",
+        "third", "party", "ict", "assessment", "regulatory", "impact", "analysis",
+        "security", "cyber", "cybersecurity", "framework", "standard", "standards",
+        "governance", "program", "readiness", "scoping", "controls", "control",
+    })
+    slug_tokens = {
+        w for w in re.findall(r"[a-z0-9]+", slug)
+        if len(w) >= 3 and w not in _generic_match_stops
+    }
+    plain_main = re.sub(r"<[^>]+>", " ", (inner_main or "")[:2500]).lower()
+    text_tokens = {
+        w for w in re.findall(r"[a-z0-9]+", plain_main)
+        if len(w) >= 3 and w not in _generic_match_stops
+    }
+
+    scored: List[Tuple[int, Any]] = []
+    for entry in pack_entries:
+        forb = [str(s or "").strip().lower() for s in (getattr(entry, "forbidden_on_slugs", None) or [])]
+        if slug and any(f == slug or f in slug for f in forb if f):
+            continue
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if not url.startswith(("http://", "https://")):
+            continue
+        cit_raw = str(getattr(entry, "citation", "") or "").strip()
+        pub_raw = str(getattr(entry, "publisher", "") or "").strip()
+        if allowlist and cit_raw:
+            extracted_cits = _extract_citations(cit_raw)
+            if extracted_cits and any(
+                not any(_citation_matches_allow_item(c_tok, al_item)[0] for al_item in allowlist)
+                for c_tok, _pos in extracted_cits
+            ):
+                continue
+            if slug:
+                cit_pub_probe = f"{cit_raw} ({pub_raw})"
+                slug_blocked = False
+                for al_item in allowlist:
+                    forb_pats = al_item.get("forbidden_slug_patterns") or []
+                    if not forb_pats:
+                        continue
+                    if _citation_matches_allow_item(cit_pub_probe, al_item)[0] or any(
+                        _citation_matches_allow_item(c_tok, al_item)[0] for c_tok, _pos in extracted_cits
+                    ):
+                        if any(re.search(str(fp), slug, re.IGNORECASE) for fp in forb_pats):
+                            slug_blocked = True
+                            break
+                if slug_blocked:
+                    continue
+                for c_tok, _pos in extracted_cits:
+                    matched_al = [
+                        al_item for al_item in allowlist if _citation_matches_allow_item(c_tok, al_item)[0]
+                    ]
+                    if matched_al and not any(
+                        not any(re.search(str(fp), slug, re.IGNORECASE) for fp in (mi.get("forbidden_slug_patterns") or []))
+                        and (
+                            not (mi.get("allowed_slug_patterns") or [])
+                            or any(re.search(str(ap), slug, re.IGNORECASE) for ap in (mi.get("allowed_slug_patterns") or []))
+                        )
+                        for mi in matched_al
+                    ):
+                        slug_blocked = True
+                        break
+                if slug_blocked:
+                    continue
+        applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
+        cit_l = cit_raw.lower()
+        key_l = str(getattr(entry, "key", "") or "").lower()
+        cit_tokens = {
+            w for w in re.findall(r"[a-z0-9]+", f"{cit_l} {key_l}")
+            if len(w) >= 3 and w not in _generic_match_stops
+        }
+        score = 0
+        applies_hit = False
+        if applies and slug:
+            if any(a == slug or a in slug or slug in a for a in applies):
+                score += 100
+                applies_hit = True
+            else:
+                continue
+        text_hits = len(text_tokens & cit_tokens)
+        slug_hits = len(slug_tokens & cit_tokens)
+        if not applies_hit and slug_hits == 0 and text_hits == 0:
+            continue
+        score += text_hits * 6
+        score += slug_hits * 10
+        if _is_official_primary_source_url_porcelain(url):
+            score += 20
+        if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
+            score += 10
+        scored.append((score, entry))
+
+    scored.sort(key=lambda item: (-item[0], str(getattr(item[1], "key", ""))))
+    selected: List[Tuple[str, str, str, int, str]] = []
+    seen_urls: Set[str] = set()
+    for _sc, entry in scored:
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if url in seen_urls or not _is_official_primary_source_url_porcelain(url):
+            continue
+        seen_urls.add(url)
+        selected.append(
+            (
+                url,
+                str(getattr(entry, "citation", "") or "Primary Statute").strip(),
+                str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip(),
+                int(getattr(entry, "effective_year", 2026) or 2026),
+                str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
+            )
+        )
+        if len(selected) >= 2:
+            break
+    for _sc, entry in scored:
+        if len(selected) >= 4:
+            break
+        url = str(getattr(entry, "primary_source_url", "") or "").strip()
+        if url in seen_urls:
+            continue
+        seen_urls.add(url)
+        selected.append(
+            (
+                url,
+                str(getattr(entry, "citation", "") or "Primary Source").strip(),
+                str(getattr(entry, "publisher", "") or "Authoritative Standards Body").strip(),
+                int(getattr(entry, "effective_year", 2026) or 2026),
+                str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
+            )
+        )
+
+    if not selected:
+        return ""
+
+    items_html = "\n".join(
+        f'        <li><a href="{html_lib.escape(u, quote=True)}" rel="noopener" target="_blank" class="touch-target">{html_lib.escape(cit)} ({html_lib.escape(pub)})</a></li>'
+        for u, cit, pub, _ey, _va in selected
+    )
+    eff_years = sorted({ey for _u, _c, _p, ey, _va in selected if ey})
+    max_y = max(eff_years) if eff_years else 2026
+    latest_ver = max((va for _u, _c, _p, _ey, va in selected if va), default="2026-11-24")
+    eff_date = statute_eff_date or f"{max_y}-01-01"
+    lead_cit, lead_pub = selected[0][1], selected[0][2]
+    bullets = [
+        f"<strong>{max_y} Statutory Effective Schedule ({html_lib.escape(eff_date)}):</strong> Parameters locked to enacted {html_lib.escape(lead_cit)} published by {html_lib.escape(lead_pub)}.",
+        f"<strong>Primary Source Verification ({html_lib.escape(latest_ver)}):</strong> Formula constants verified directly against official {html_lib.escape(lead_pub)} tables.",
+        f"<strong>Deterministic Formula Audit ({max_y}):</strong> Verified closed-form evaluation and input clamping for {html_lib.escape(topic_label)}.",
+    ]
+    bullets_html = "\n".join(f"        <li>{b}</li>" for b in bullets)
+    return (
+        f'<section class="statutory-sources card" data-mechanic="official_primary_sources">\n'
+        f'  <h2>Statutory Sources &amp; Formula Verification</h2>\n'
+        f'  <p>Verify the enacted statutes and official regulatory publications governing {html_lib.escape(topic_label)}:</p>\n'
+        f'  <ul class="statutory-sources-list">\n{items_html}\n  </ul>\n'
+        f'</section>\n'
+        f'<section class="statutory-changelog card" data-mechanic="statutory_changelog">\n'
+        f'  <h2>Statutory Changelog</h2>\n'
+        f'  <ul class="statutory-changelog-list">\n{bullets_html}\n  </ul>\n'
+        f'</section>'
+    )
+
+
+def _convert_preset_anchors_to_hash_buttons(html_chunk: str) -> str:
+    """Converts legacy <a class='...scenario-preset-link...' href='...?...'> to <button type='button' class='touch-target scenario-preset-btn'>."""
+    if "scenario-preset-link" not in (html_chunk or ""):
+        return html_chunk
+
+    def _repl(m: re.Match[str]) -> str:
+        attrs = m.group(1)
+        label = m.group(2)
+        if "scenario-preset-link" not in attrs.lower():
+            return m.group(0)
+        href_m = re.search(r'\bhref=(["\'])(.*?)\1', attrs, flags=re.IGNORECASE)
+        preset_m = re.search(r'\bdata-preset=(["\'])(.*?)\1', attrs, flags=re.IGNORECASE)
+        style_m = re.search(r'\bstyle=(["\'])(.*?)\1', attrs, flags=re.IGNORECASE)
+        href_val = html_lib.unescape(href_m.group(2)) if href_m else ""
+        qs = href_val.split("?", 1)[1].split("#", 1)[0] if "?" in href_val else ""
+        hash_attr = f' data-preset-hash="#{html_lib.escape(qs, quote=True)}"' if qs else ' data-preset-hash="#"'
+        preset_attr = f' data-preset="{html_lib.escape(preset_m.group(2), quote=True)}"' if preset_m else ""
+        style_attr = f' style="{style_m.group(2)}"' if style_m else ""
+        return f'<button type="button" class="touch-target scenario-preset-btn"{preset_attr}{hash_attr}{style_attr}>{label}</button>'
+
+    return re.sub(r"<a\b([^>]*)>([\s\S]*?)</a>", _repl, html_chunk, flags=re.IGNORECASE)
+
+
 def normalize_html_to_porcelain_shell(
     html_content: str,
     rel_path: str,
@@ -5786,7 +6300,6 @@ def normalize_html_to_porcelain_shell(
         clean_head = clean_head.rstrip() + '\n  <link rel="icon" type="image/svg+xml" href="/favicon.svg">'
     if not re.search(r'<link\b[^>]*href=["\']/favicon\.ico["\']', clean_head, flags=re.IGNORECASE):
         clean_head = clean_head.rstrip() + '\n  <link rel="alternate icon" href="/favicon.ico">'
-    clean_head = _consolidate_jsonld_head(clean_head, profile)
     css_link = (
         f'  <link rel="stylesheet" id="pseo-visual-primitives" '
         f'data-version="{VISUAL_PRIMITIVES_LINK_VERSION}" href="{versioned_css_href}">'
@@ -5852,6 +6365,19 @@ def normalize_html_to_porcelain_shell(
 
     if blueprint == "calculator_leaf":
         inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile, body_attrs=body_attrs)
+        inner_main = _convert_preset_anchors_to_hash_buttons(inner_main)
+        if 'class="statutory-sources' not in inner_main and "class='statutory-sources" not in inner_main:
+            stat_block = _build_porcelain_statutory_sources_html(profile, rel_path, inner_main)
+            if stat_block:
+                faq_pos = inner_main.find('class="faq-section')
+                if faq_pos != -1:
+                    sec_start = inner_main.rfind("<section", 0, faq_pos)
+                    if sec_start != -1:
+                        inner_main = inner_main[:sec_start] + stat_block + "\n" + inner_main[sec_start:]
+                    else:
+                        inner_main = inner_main.rstrip() + "\n" + stat_block
+                else:
+                    inner_main = inner_main.rstrip() + "\n" + stat_block
     elif blueprint in ("comparison_leaf", "editorial_guide"):
         inner_main = _enforce_editorial_or_comparison_leaf_slot_order(
             inner_main,
@@ -5889,6 +6415,7 @@ def normalize_html_to_porcelain_shell(
         "pro-hook-link",
         "pro-hook-direct-checkout",
         "affiliate-cta-link",
+        "scenario-preset-btn",
         "scenario-preset-link",
         "contextual-cluster-link",
         "hero-register-firm-link",
@@ -5993,6 +6520,23 @@ def normalize_html_to_porcelain_shell(
         else:
             cleaned_scripts.append(render_runtime_synchronizer_script_stripped(property_id=rt_prop_id))
     scripts_tail = ("\n  " + "\n  ".join(cleaned_scripts)) if cleaned_scripts else ""
+
+    rel_norm_c = str(rel_path or "").strip().lstrip("/").lower()
+    base_c = str(profile.get("canonical_base") or "").rstrip("/")
+    if rel_norm_c in ("", "index.html", "index"):
+        page_url_c = f"{base_c}/" if base_c else "/"
+    elif rel_norm_c == "404.html":
+        page_url_c = f"{base_c}/404.html" if base_c else "/404.html"
+    else:
+        clean_p_c = re.sub(r"(?:^|/)index\.html$", "", rel_norm_c).strip("/")
+        page_url_c = f"{base_c}/{clean_p_c}/" if base_c else f"/{clean_p_c}/"
+    dom_breadcrumbs = _extract_dom_breadcrumbs_for_jsonld(inner_main, base_c, page_url_c)
+    clean_head = _consolidate_jsonld_head(
+        clean_head,
+        profile,
+        rel_path=rel_path,
+        dom_breadcrumbs=dom_breadcrumbs or None,
+    )
 
     assembled = (
         "<!DOCTYPE html>\n"
@@ -6127,24 +6671,8 @@ def _render_governance_document(
 
     li_id = str(profile.get("linkedin_company_id") or "").strip()
     prop_key = str(profile.get("property_id") or "").strip().lower()
-    wikidata_gov_map = {
-        "lienbond": "https://www.wikidata.org/wiki/Q192161",
-        "prexvo": "https://www.wikidata.org/wiki/Q633315",
-        "gainhelm": "https://www.wikidata.org/wiki/Q166142",
-        "profithelm": "https://www.wikidata.org/wiki/Q8161",
-    }
-    generic_wikidata = str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397").strip()
-    same_as_links: List[str] = [wikidata_gov_map.get(prop_key, generic_wikidata)]
-    if li_id:
-        same_as_links.append(f"https://www.linkedin.com/company/{li_id}/")
-    org_node: Dict[str, Any] = {
-        "@type": "Organization",
-        "@id": f"{base}/#organization",
-        "name": profile["legal_entity"],
-        "url": f"{base}/",
-        "email": profile["contact_email"],
-        "sameAs": same_as_links,
-    }
+    topic_qid = _TOPIC_WIKIDATA_BY_PROP.get(prop_key, "https://www.wikidata.org/wiki/Q7397")
+    org_ref = {"@id": f"{base}/#organization"}
 
     doc_date_modified = (
         "2026-10-31"
@@ -6158,33 +6686,66 @@ def _render_governance_document(
         else ""
     )
 
-    graph = {
-        "@context": "https://schema.org",
-        "@graph": [
-            org_node,
+    graph_nodes: List[Dict[str, Any]] = []
+    if route_slug == "about":
+        org_node: Dict[str, Any] = {
+            "@type": "Organization",
+            "@id": f"{base}/#organization",
+            "name": profile["legal_entity"],
+            "url": f"{base}/",
+            "email": profile["contact_email"],
+            "knowsAbout": [topic_qid],
+        }
+        if li_id:
+            org_node["sameAs"] = [f"https://www.linkedin.com/company/{li_id}/"]
+        graph_nodes.append(org_node)
+
+    graph_nodes.append(
+        {
+            "@type": schema_page_type,
+            "@id": f"{canonical_url}#webpage",
+            "url": canonical_url,
+            "name": seo_title,
+            "description": desc,
+            "inLanguage": "en-US",
+            "datePublished": "2026-01-15",
+            "dateModified": doc_date_modified,
+            "publisher": org_ref,
+            "about": [topic_qid],
+            "isPartOf": {"@id": f"{base}/#website"},
+            "breadcrumb": {"@id": f"{canonical_url}#breadcrumb"},
+        }
+    )
+    if route_slug == "methodology":
+        graph_nodes.append(
             {
-                "@type": schema_page_type,
-                "@id": f"{canonical_url}#webpage",
-                "url": canonical_url,
+                "@type": "TechArticle",
+                "@id": f"{canonical_url}#techarticle",
+                "headline": h1_text,
                 "name": seo_title,
                 "description": desc,
+                "url": canonical_url,
                 "inLanguage": "en-US",
+                "author": org_ref,
+                "publisher": org_ref,
                 "datePublished": "2026-01-15",
                 "dateModified": doc_date_modified,
-                "speakable": {
-                    "@type": "SpeakableSpecification",
-                    "cssSelector": [".quick-answer", "h1"],
-                },
-                "isPartOf": {"@id": f"{base}/#organization"},
-            },
-            {
-                "@type": "BreadcrumbList",
-                "itemListElement": [
-                    {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/"},
-                    {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
-                ],
-            },
-        ],
+                "mainEntityOfPage": {"@id": f"{canonical_url}#webpage"},
+            }
+        )
+    graph_nodes.append(
+        {
+            "@type": "BreadcrumbList",
+            "@id": f"{canonical_url}#breadcrumb",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/"},
+                {"@type": "ListItem", "position": 2, "name": h1_text, "item": canonical_url},
+            ],
+        }
+    )
+    graph = {
+        "@context": "https://schema.org",
+        "@graph": graph_nodes,
     }
 
     tool_links = "".join(
@@ -6605,20 +7166,9 @@ def build_porcelain_404_page(
     seo_title = _fit_seo_title(f"Status 404: Page Not Found | {brand} Calculators", brand)
     desc = f"Status 404: The requested route was not found on {profile['domain']}. Explore verified {brand} statutory calculators and directory hubs."
 
-    li_id = str(profile.get("linkedin_company_id") or "").strip()
-    org_node_404: Dict[str, Any] = {
-        "@type": "Organization",
-        "@id": f"{base}/#organization",
-        "name": profile["legal_entity"],
-        "url": f"{base}/",
-        "email": profile["contact_email"],
-    }
-    if li_id:
-        org_node_404["sameAs"] = [f"https://www.linkedin.com/company/{li_id}/"]
     graph_404 = {
         "@context": "https://schema.org",
         "@graph": [
-            org_node_404,
             {
                 "@type": "WebPage",
                 "@id": f"{canonical_url}#webpage",
@@ -6628,7 +7178,8 @@ def build_porcelain_404_page(
                 "inLanguage": "en-US",
                 "datePublished": "2026-01-15",
                 "dateModified": "2026-11-12",
-                "isPartOf": {"@id": f"{base}/#organization"},
+                "isPartOf": {"@id": f"{base}/#website"},
+                "publisher": {"@id": f"{base}/#organization"},
             },
         ],
     }
@@ -7933,18 +8484,14 @@ def _scrub_tenant_personal_maker_and_inline_js(repo_path: Path, profile: Dict[st
                 )
                 if _PERSONAL_MAKER_NAME_RE.search(b_new):
                     b_new = _PERSONAL_MAKER_NAME_RE.sub(profile["legal_entity"], b_new)
-            wikidata_builder_map = {
-                "lienbond": "https://www.wikidata.org/wiki/Q192161",
-                "prexvo": "https://www.wikidata.org/wiki/Q633315",
-                "gainhelm": "https://www.wikidata.org/wiki/Q166142",
-                "profithelm": "https://www.wikidata.org/wiki/Q8161",
-            }
-            target_wikidata = wikidata_builder_map.get(
-                str(profile.get("property_id") or "").strip().lower(),
-                str(profile.get("wikidata_url") or "https://www.wikidata.org/wiki/Q7397"),
+            li_id_b = str(profile.get("linkedin_company_id") or "").strip()
+            replacement_profile_url = (
+                f"https://www.linkedin.com/company/{li_id_b}/"
+                if li_id_b
+                else str(profile.get("canonical_base") or "").rstrip("/") + "/"
             )
             if "https://www.wikidata.org/wiki/Q499388" in b_new:
-                b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", target_wikidata)
+                b_new = b_new.replace("https://www.wikidata.org/wiki/Q499388", replacement_profile_url)
             if b_new != b_src:
                 b_file.write_text(b_new, encoding="utf-8")
                 updated.append(f"{pkg_name}/builder.py")

@@ -732,3 +732,52 @@ def test_calculator_leaf_strict_slot_order_partner_consolidation_and_no_http_can
     assert bad_rep["violations_count"] >= 2
 
 
+def test_porcelain_schema_hygiene_sameas_hash_presets_and_statutory_sources(tmp_path: Path):
+    """Verifies Porcelain shell strips topic QIDs/coskunarif from sameAs, strips deprecated calc schemas, converts ?presets to #hash buttons, and injects statutory sources."""
+    profile = get_porcelain_tenant_profile("lienbond")
+    dirty_calc_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        '<title>Florida Lien Deadline Calculator | LienBond</title>'
+        '<link rel="canonical" href="https://lienbond.com/tools/florida-lien-deadline-calculator/" />'
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@graph":['
+        '{"@type":"Organization","@id":"https://lienbond.com/#organization","name":"LienBond","url":"https://lienbond.com","sameAs":["https://www.wikidata.org/wiki/Q192161","https://ccfs.sos.wa.gov/","https://github.com/coskunarif/lienbond"]},'
+        '{"@type":"WebSite","@id":"https://lienbond.com/#website","url":"https://lienbond.com"},'
+        '{"@type":"SoftwareApplication","name":"Florida Lien Deadline Calculator","applicationCategory":"BusinessApplication","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}},'
+        '{"@type":"HowTo","name":"How to calculate","step":[{"@type":"HowToStep","text":"Step 1"}]},'
+        '{"@type":"SpeakableSpecification","cssSelector":[".quick-answer"]},'
+        '{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is it?","acceptedAnswer":{"@type":"Answer","text":"Deadline."}}]},'
+        '{"@type":"Dataset","name":"Schedule","description":"HTML only","distribution":[{"@type":"DataDownload","encodingFormat":"text/html","contentUrl":"https://lienbond.com/tools/florida-lien-deadline-calculator/"}]}'
+        ']}</script></head><body><main>'
+        '<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/">Home</a> <span aria-hidden="true">/</span> <a href="/tools/">Calculators</a> <span aria-hidden="true">/</span> <span>Florida Lien Deadline Calculator</span></nav>'
+        '<h1>Florida Lien Deadline Calculator</h1>'
+        '<div class="scenario-preset-bar"><a href="?state=FL&amount=50000" class="touch-target scenario-preset-link" data-preset="fl">Florida $50k</a></div>'
+        '<form class="calculator-form" id="calc"><input id="a" value="50000" /><button type="submit" id="calculate-btn">Calculate</button></form>'
+        '<section class="tool-faq"><details><summary class="touch-target">What is it?</summary><p>Deadline.</p></details></section>'
+        '</main></body></html>'
+    )
+    out, _bp = porcelain_shell.normalize_html_to_porcelain_shell(
+        dirty_calc_html,
+        "tools/florida-lien-deadline-calculator/index.html",
+        profile,
+    )
+    assert "Q192161" not in out
+    assert "ccfs.sos.wa.gov" not in out
+    assert "coskunarif" not in out
+    assert '"HowTo"' not in out
+    assert '"SpeakableSpecification"' not in out
+    assert '"FAQPage"' not in out
+    assert '"Dataset"' not in out
+    assert '"WebSite"' not in out
+    assert '"SoftwareApplication"' not in out
+    assert '"WebApplication"' in out
+    assert "https://lienbond.com/#organization" in out
+    assert "<details>" in out
+    assert "scenario-preset-btn" in out
+    assert '<a href="?state=FL' not in out
+    assert "statutory-sources" in out
+    assert "statutory-changelog" in out
+    assert ".gov" in out
+
+
+

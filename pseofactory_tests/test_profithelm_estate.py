@@ -122,14 +122,26 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
             "description": "Model post-OBBBA Section 1202 exclusion caps and 3-4-5 year holding tiers.",
         },
         {
-            "slug": "1031-exchange-capital-gains-calculator",
-            "title": "1031 Exchange Capital Gains Calculator",
-            "description": "Model like-kind exchange boot and recognized taxable gain.",
-        },
-        {
             "slug": "heavy-suv-section-179-calculator",
             "title": "Heavy SUV Section 179 Depreciation Calculator",
             "description": "Model 2026 Section 179 heavy SUV cap and 100% bonus depreciation.",
+        },
+        {
+            "slug": "contractor-surety-bond-cost-calculator",
+            "title": "Contractor Surety Bond Cost Calculator",
+            "description": "Off-vertical surety bond calculator that must be excluded.",
+            "calculation_manifest": {
+                "model_name": "SuretyBondModel",
+                "statutory_authority": "40 U.S.C. 3131 Miller Act",
+                "economic_dataset": "FRED Series",
+                "formula": "round(bond_amount * rate, 2)",
+                "inputs": {"bond_amount": 50000.0, "rate": 0.015},
+            },
+        },
+        {
+            "slug": "capital-gains-tax-rate-2021-calculator",
+            "title": "2021 Capital Gains Calculator",
+            "description": "Decommissioned year-stamped slug that must be excluded.",
         },
     ]
 
@@ -165,8 +177,14 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
             for rx, label in banned_regexes:
                 assert not re.search(rx, content), f"Banned legacy token {label!r} found in {path}"
 
-    # Verify IRS 2026/2027 constants from TruthPack
-    tax_html = (dist / "tools" / "irs-2027-tax-brackets" / "index.html").read_text(encoding="utf-8")
+    # Verify IRS 2026/2027 constants from TruthPack on evergreen /tools/irs-tax-brackets/
+    assert not (dist / "tools" / "irs-2027-tax-brackets").exists()
+    assert not (dist / "tools" / "contractor-surety-bond-cost-calculator").exists()
+    assert not (dist / "tools" / "capital-gains-tax-rate-2021-calculator").exists()
+    assert not (dist / "tools" / "prediction-market-odds").exists()
+    assert not (dist / "tools" / "prediction-market-tax").exists()
+
+    tax_html = (dist / "tools" / "irs-tax-brackets" / "index.html").read_text(encoding="utf-8")
     for expected in ("$16,100", "$32,200", "$24,150", "$12,400", "$50,400", "$105,700", "$201,775", "$256,225", "$640,600"):
         assert expected in tax_html, f"Missing 2026 threshold {expected}"
     for expected27 in ("$16,600", "$33,200", "$24,925", "$12,800", "$52,025", "$109,125", "$208,325", "$264,550", "$661,375"):
@@ -174,25 +192,28 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
     assert "$18,734.00" in tax_html
     assert "$18,389.50" in tax_html
     assert "Circular 230" in tax_html
+    assert 'id="preset-state-tax"' in tax_html
 
-    # Verify Section 179 constants + heavy SUV rule
+    # Verify Section 179 constants + heavy SUV rule + interactive vehicle preset
     s179_html = (dist / "tools" / "section-179-calculator" / "index.html").read_text(encoding="utf-8")
     for tok in ("$2,560,000", "$4,090,000", "$32,000", "100%", "$68,000.00"):
         assert tok in s179_html, f"Missing Section 179 token {tok}"
+    assert 'id="preset-vehicle-179"' in s179_html
 
     heavy_html = (dist / "tools" / "heavy-suv-section-179-calculator" / "index.html").read_text(encoding="utf-8")
     assert "$32,000" in heavy_html
     assert "$2,560,000" not in heavy_html
 
-    # Verify QSBS Section 1202 constants and non-bleed on 1031
+    # Verify QSBS Section 1202 constants and non-bleed on canonical Section 1031
     qsbs_html = (dist / "tools" / "qsbs-section-1202-exclusion-calculator" / "index.html").read_text(encoding="utf-8")
     for tok in ("$75,000,000", "$15,000,000", "50%", "75%", "100%", "$15,000,000.00"):
         assert tok in qsbs_html, f"Missing QSBS token {tok}"
 
-    ex1031_html = (dist / "tools" / "1031-exchange-capital-gains-calculator" / "index.html").read_text(encoding="utf-8")
+    ex1031_html = (dist / "tools" / "section-1031-calculator" / "index.html").read_text(encoding="utf-8")
     assert "1202" not in ex1031_html
     assert "total_federal_tax" not in ex1031_html
     assert "$100,000.00" in ex1031_html
+    assert 'id="preset-state-1031"' in ex1031_html
 
     # Verify QBI and R&D custom formulas bound strictly to their own widgets
     qbi_html = (dist / "tools" / "qbi-section-199a-deduction-calculator" / "index.html").read_text(encoding="utf-8")
@@ -214,7 +235,32 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
     assert "&amp;amp;" not in feed_text
     assert "R&D Tax Credit Calculator" in html_lib.unescape(feed_text)
 
-    # Verify single SoftwareApplication JSON-LD invariant & 40-60 word quick-answers on every tool page
+    # Verify homepage JSON-LD: WebSite on '/', NO BreadcrumbList on '/', clean Organization.sameAs + knowsAbout
+    home_html = (dist / "index.html").read_text(encoding="utf-8")
+    home_ld = re.search(r'<script type="application/ld\+json">(.*?)</script>', home_html, re.DOTALL)
+    assert home_ld
+    home_graph = json.loads(home_ld.group(1))["@graph"]
+    assert any(n.get("@type") == "WebSite" for n in home_graph)
+    assert not any(n.get("@type") == "BreadcrumbList" for n in home_graph)
+    home_org = next(n for n in home_graph if n.get("@type") == "Organization")
+    assert "https://github.com/coskunarif/profithelm-platform" not in home_org.get("sameAs", [])
+    assert "https://ccfs.sos.wa.gov/" not in home_org.get("sameAs", [])
+    assert not any("wikidata.org" in s for s in home_org.get("sameAs", []))
+    assert len(home_org.get("knowsAbout", [])) >= 3
+
+    # Verify sitemap.xml has ZERO year-stamped URLs and ZERO 127 thin spoke URLs
+    sitemap_xml = (dist / "sitemap.xml").read_text(encoding="utf-8")
+    locs = re.findall(r"<loc>(.*?)</loc>", sitemap_xml)
+    assert locs
+    for loc in locs:
+        assert not re.search(r"\b20[1-3]\d\b", loc.replace("/", " ").replace("-", " ")), f"Year-stamped URL in sitemap: {loc}"
+        assert "/irs-2027-tax-brackets/" not in loc
+        assert "/contractor-surety-bond-cost-calculator/" not in loc
+        assert "/workers-comp-and-payroll-burden-calculator/" not in loc
+        assert "/prediction-market-odds/" not in loc
+        assert "/prediction-market-tax/" not in loc
+
+    # Verify single WebApplication JSON-LD invariant & stripped bloat schemas on every tool page
     for tool_dir in (dist / "tools").iterdir():
         if not tool_dir.is_dir():
             continue
@@ -230,8 +276,10 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
         graph = json.loads(ld_match.group(1))["@graph"]
         app_nodes = [n for n in graph if n.get("@type") in ("SoftwareApplication", "WebApplication")]
         assert len(app_nodes) == 1, f"Expected 1 app node on {tool_dir.name}, got {len(app_nodes)}"
-        assert app_nodes[0]["@type"] == "SoftwareApplication"
-        assert not any(n.get("@type") == "LocalBusiness" for n in graph)
+        assert app_nodes[0]["@type"] == "WebApplication"
+        assert "speakable" not in app_nodes[0]
+        for forbidden_t in ("LocalBusiness", "HowTo", "FAQPage", "SpeakableSpecification", "Dataset", "TechArticle", "WebSite"):
+            assert not any(n.get("@type") == forbidden_t for n in graph), f"Forbidden {forbidden_t} on {tool_dir.name}"
 
         # Verify inline manifest agrees 100% with sidecar manifest and safe_eval_formula
         cm_match = re.search(r'<script type="application/json" id="calculation-manifest">(.*?)</script>', html_txt, re.DOTALL)
@@ -280,25 +328,74 @@ def test_unified_truth_gate_js_parity_and_runtime(tmp_path: Path) -> None:
     assert len(report.violations) == 0, f"Unexpected TruthGate violations: {report.violations}"
 
 
-def test_live_profithelm_route_parity_and_zero_truthgate_violations(tmp_path: Path) -> None:
+def test_live_profithelm_spoke_collapse_redirects_and_truthgate(tmp_path: Path) -> None:
+    from pseofactory.edge import parse_edge_redirects_rules, validate_edge_redirects_file
+
     live_root = Path("/home/ubuntuadmin/projects/profithelm-platform")
-    live_dist = live_root / "dist"
-    if not (live_root / "profithelm" / "data" / "us_states_tax.json").is_file() or not live_dist.is_dir():
-        pytest.skip("profithelm-platform source/dist not mounted on disk")
+    if not (live_root / "profithelm" / "data" / "us_states_tax.json").is_file():
+        pytest.skip("profithelm-platform data not mounted on disk")
 
     dist = pe.compile_profithelm_estate_impl(tmp_path, run_retrofit=True, repo_root=live_root)
-    live_htmls = {p.relative_to(live_dist).as_posix() for p in live_dist.rglob("*.html")}
-    built_htmls = {p.relative_to(dist).as_posix() for p in dist.rglob("*.html")}
-    missing = sorted(live_htmls - built_htmls)
-    assert not missing, f"Missing live HTML routes ({len(missing)}): {missing}"
 
-    # Spot-check matrix spokes use TruthPack $32,000 SUV cap & 100% bonus and zero legacy $30,500 / 20% bonus
-    suv_html = (dist / "tools" / "section-179-calculator" / "cadillac-escalade-esv" / "index.html").read_text(encoding="utf-8")
-    assert "$32,000" in suv_html
-    assert "100%" in suv_html
-    assert "$30,500" not in suv_html
-    assert "$2,560,000" not in suv_html
+    # 1. Verify all 127 thin spoke HTML directories are collapsed (0 generated)
+    assert not (dist / "tools" / "irs-2027-tax-brackets").exists()
+    assert not (dist / "tools" / "section-1031-calculator" / "california").exists()
+    assert not (dist / "tools" / "section-179-calculator" / "cadillac-escalade-esv").exists()
+    for parent_s in ("section-1031-calculator", "section-179-calculator"):
+        assert not any(p.is_dir() for p in (dist / "tools" / parent_s).iterdir())
 
+    # 2. Verify decommissioned cross-tenant / year-stamped / duplicate routes are absent from dist and sitemap.xml
+    for retired_slug in (
+        "irs-2027-tax-brackets",
+        "irs-interest-calculator-2027",
+        "capital-gains-tax-rate-2021-calculator",
+        "1031-exchange-capital-gains-calculator",
+        "contractor-surety-bond-cost-calculator",
+        "workers-comp-and-payroll-burden-calculator",
+        "prediction-market-odds",
+        "prediction-market-tax",
+    ):
+        assert not (dist / "tools" / retired_slug).exists(), f"Retired route still built: {retired_slug}"
+    assert (dist / "tools" / "irs-tax-brackets" / "index.html").is_file()
+    assert (dist / "tools" / "irs-interest-calculator" / "index.html").is_file()
+
+    sitemap_xml = (dist / "sitemap.xml").read_text(encoding="utf-8")
+    for loc in re.findall(r"<loc>(.*?)</loc>", sitemap_xml):
+        assert not re.search(r"\b20[1-3]\d\b", loc.replace("/", " ").replace("-", " ")), f"Year URL in sitemap: {loc}"
+
+    # 3. Verify 1-hop 301 redirects in _redirects (valid <= 95 active rules, zero 410s in _redirects)
+    red_path = dist / "_redirects"
+    assert red_path.is_file()
+    assert validate_edge_redirects_file(red_path)["status"] == "PASS"
+    red_txt = red_path.read_text(encoding="utf-8")
+    assert " 410" not in red_txt
+    all_rules = {src: dst for src, dst, code, _ in parse_edge_redirects_rules(red_txt, include_middleware_overflow=True) if code == "301"}
+    assert all_rules.get("/tools/irs-2027-tax-brackets/") == "/tools/irs-tax-brackets/"
+    assert all_rules.get("/tools/irs-interest-calculator-2027/") == "/tools/irs-interest-calculator/"
+    assert all_rules.get("/tools/capital-gains-tax-rate-2021-calculator/") == "/tools/capital-gains-calculator/"
+    assert all_rules.get("/tools/1031-exchange-capital-gains-calculator/") == "/tools/section-1031-calculator/"
+    assert all_rules.get("/tools/irs-2027-tax-brackets/california/") == "/tools/irs-tax-brackets/"
+    assert all_rules.get("/tools/section-1031-calculator/california/") == "/tools/section-1031-calculator/"
+    assert all_rules.get("/tools/section-179-calculator/cadillac-escalade-esv/") == "/tools/section-179-calculator/"
+
+    # 4. Verify edgeGone in functions/_middleware.js handles the 4 off-vertical / cross-tenant pages with 410
+    mw_txt = (tmp_path / "functions" / "_middleware.js").read_text(encoding="utf-8")
+    for gone_p in (
+        "/tools/contractor-surety-bond-cost-calculator/",
+        "/tools/workers-comp-and-payroll-burden-calculator/",
+        "/tools/prediction-market-odds/",
+        "/tools/prediction-market-tax/",
+    ):
+        assert gone_p in mw_txt
+
+    # 5. Verify preset buttons use <button type="button" class="...scenario-preset-btn..."> + #hash (no <a href="?...">)
+    brackets_html = (dist / "tools" / "irs-tax-brackets" / "index.html").read_text(encoding="utf-8")
+    assert 'id="preset-state-tax"' in brackets_html
+    assert "scenario-preset-btn" in brackets_html
+    assert not re.search(r'<a\b[^>]*class=["\'][^"\']*scenario-preset-link', brackets_html, re.IGNORECASE)
+    assert not re.search(r'<a\b[^>]*href=["\'][^"\']*\?[^"\']*["\'][^>]*data-preset', brackets_html, re.IGNORECASE)
+
+    # 6. Verify UnifiedTruthGate passes with zero violations
     report = UnifiedTruthGate().audit_estate(
         dist,
         property_id="profithelm",

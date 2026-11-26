@@ -89,7 +89,7 @@ GAINHELM_TOOLS: List[Dict[str, Any]] = [
     },
     {
         "slug": "cmmc-2-0-compliance-cost-calculator",
-        "title": "DoD CMMC 2.0 Level 2 C3PAO Compliance Cost Calculator",
+        "title": "CMMC 2.0 Compliance & C3PAO Cost Calculator",
         "short_title": "CMMC 2.0 Cost",
         "description": "Model DoD CMMC 2.0 Level 2 C3PAO assessment fees, NIST 800-171 control remediation hours, and FedRAMP enclave licensing under 32 CFR Part 170.",
         "primary_keyword": "cmmc compliance cost calculator",
@@ -614,12 +614,20 @@ def normalize_gainhelm_seo_title(
 
 
 def _get_gainhelm_organization_schema() -> Dict[str, Any]:
-    return build_organization_schema(
+    org = build_organization_schema(
         canonical_base=GAINHELM_CANONICAL_BASE,
         site_name=GAINHELM_SITE_NAME,
         site_description=GAINHELM_SITE_DESCRIPTION,
-        same_as=[GAINHELM_LINKEDIN_URL, "https://www.wikidata.org/wiki/Q166142"],
+        same_as=[GAINHELM_LINKEDIN_URL],
     )
+    org["knowsAbout"] = [
+        {
+            "@type": "Thing",
+            "name": "Information Security",
+            "sameAs": "https://www.wikidata.org/wiki/Q166142",
+        }
+    ]
+    return org
 
 
 _COMPLIANCE_FIELDS: List[Dict[str, Any]] = [
@@ -1437,7 +1445,10 @@ def _render_calculator_widget(
         function syncUrlState() {{
           try {{
             if (typeof window === "undefined" || !window.history || typeof window.history.replaceState !== "function" || !window.location) return;
-            var q = new URLSearchParams(window.location.search || "");
+            var rawHash = String(window.location.hash || "");
+            var q = (rawHash.length > 1 && rawHash.indexOf("=") !== -1)
+              ? new URLSearchParams(rawHash.slice(1))
+              : new URLSearchParams();
             var keys = ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"];
             for (var ki = 0; ki < keys.length; ki++) {{
               var k = keys[ki];
@@ -1448,7 +1459,7 @@ def _render_calculator_widget(
             }}
             var qs = q.toString();
             if (!qs) return;
-            var nextUrl = window.location.pathname + "?" + qs + (window.location.hash || "");
+            var nextUrl = window.location.pathname + (window.location.search || "") + "#" + qs;
             var curUrl = window.location.pathname + (window.location.search || "") + (window.location.hash || "");
             if (nextUrl === curUrl) return;
             var now = Date.now();
@@ -1482,8 +1493,51 @@ def _render_calculator_widget(
           _pendingUrl = "";
         }}
 
+        function hydrateFromHashOrSearch() {{
+          try {{
+            if (typeof window === "undefined" || !window.location) return;
+            var rawHash = String(window.location.hash || "");
+            var rawSearch = String(window.location.search || "");
+            var hashParams = (rawHash.length > 1 && rawHash.indexOf("=") !== -1)
+              ? new URLSearchParams(rawHash.slice(1))
+              : new URLSearchParams();
+            var searchParams = (rawSearch.length > 1)
+              ? new URLSearchParams(rawSearch)
+              : new URLSearchParams();
+            var calcKeys = ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"];
+            var migrated = false;
+            var migHash = new URLSearchParams(hashParams.toString());
+            calcKeys.forEach(function(k) {{
+              if (hashParams.has(k)) {{
+                setCalcInputVal("calc-input-" + k, Math.max(0, parseFloat(hashParams.get(k)) || 0));
+              }} else if (searchParams.has(k)) {{
+                var sv = Math.max(0, parseFloat(searchParams.get(k)) || 0);
+                setCalcInputVal("calc-input-" + k, sv);
+                migHash.set(k, String(searchParams.get(k)));
+                searchParams.delete(k);
+                migrated = true;
+              }}
+            }});
+            if (migrated && window.history && typeof window.history.replaceState === "function") {{
+              var remQs = searchParams.toString();
+              var migHashStr = migHash.toString();
+              var migUrl = window.location.pathname + (remQs ? "?" + remQs : "") + (migHashStr ? "#" + migHashStr : "");
+              window.history.replaceState(null, "", migUrl);
+            }}
+          }} catch (e) {{}}
+        }}
+
         if (typeof window !== "undefined" && typeof window.addEventListener === "function") {{
-          window.addEventListener("popstate", cancelPendingUrlSync);
+          window.addEventListener("popstate", function() {{
+            cancelPendingUrlSync();
+            hydrateFromHashOrSearch();
+            recompute();
+          }});
+          window.addEventListener("hashchange", function() {{
+            cancelPendingUrlSync();
+            hydrateFromHashOrSearch();
+            recompute();
+          }});
           window.addEventListener("pagehide", cancelPendingUrlSync);
         }}
 
@@ -1492,12 +1546,7 @@ def _render_calculator_widget(
           syncUrlState();
         }}
 
-        var params = new URLSearchParams((typeof window !== "undefined" && window.location && window.location.search) || "");
-        ["headcount", "extra_criteria", "unimplemented_5pt", "unimplemented_3pt", "unimplemented_1pt", "compromised_records"].forEach(function(k) {{
-          if (params.has(k)) {{
-            setCalcInputVal("calc-input-" + k, Math.max(0, parseFloat(params.get(k)) || 0));
-          }}
-        }});
+        hydrateFromHashOrSearch();
 
         form.addEventListener("input", handleUserRecompute);
         form.addEventListener("change", handleUserRecompute);
@@ -1718,7 +1767,7 @@ def _render_base_html(
         "GainHelm Editorial Policy: All calculations are deterministic and verified by statutory models pursuant to "
         "AICPA SSAE 18, 32 CFR Part 170, NIST SP 800-171 Rev 2, ISO/IEC 27006-1:2024, 45 CFR 160.404, and BLS OEWS SOC 15-1212 wage benchmarks."
     )
-    return render_base_html(
+    rendered = render_base_html(
         title=title,
         meta_description=meta_description,
         canonical_url=canonical_url,
@@ -1738,6 +1787,10 @@ def _render_base_html(
         jsonld_schemas=jsonld_schemas,
         css_text=css_text,
     )
+    clean_canon = canonical_url.split("#")[0].rstrip("/")
+    is_home = clean_canon == GAINHELM_CANONICAL_BASE.rstrip("/")
+    is_leaf = "/tools/" in clean_canon and not clean_canon.endswith("/tools")
+    return _sanitize_gainhelm_jsonld_and_dom(rendered, is_home=is_home, is_tool_leaf=is_leaf)
 
 
 _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
@@ -2019,12 +2072,12 @@ def _calculator_schemas(
     description: str,
     tool_slug: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    _ = tool_slug
     clean_route = route_path if route_path.startswith("/") else f"/{route_path}"
     full_url = f"{GAINHELM_CANONICAL_BASE}{clean_route}"
-    faqs = _resolve_tool_faqs(tool_slug)
     return [
         {
-            "@type": "SoftwareApplication",
+            "@type": "WebApplication",
             "@id": f"{full_url}#softwareapplication",
             "name": title,
             "applicationCategory": "BusinessApplication",
@@ -2034,14 +2087,6 @@ def _calculator_schemas(
             "datePublished": "2026-01-15",
             "dateModified": "2026-10-31",
             "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-        },
-        {
-            "@type": "FAQPage",
-            "@id": f"{full_url}#faq",
-            "mainEntity": [
-                {"@type": "Question", "name": item["question"], "acceptedAnswer": {"@type": "Answer", "text": item["answer"]}}
-                for item in faqs
-            ],
         },
     ]
 
@@ -2175,6 +2220,16 @@ def _build_home_html(benchmarks: Dict[str, Dict[str, Any]], all_tools: Sequence[
       </ul>
     </section>
 
+    <section class="statutory-provenance-box">
+      <h2 class="section-title">Primary Statutory &amp; Regulatory Sources</h2>
+      <ul>
+        <li><a href="https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170" target="_blank" rel="noopener noreferrer" class="touch-target">32 CFR Part 170 (DoD CMMC 2.0 Final Rule, eCFR)</a></li>
+        <li><a href="https://csrc.nist.gov/pubs/sp/800/171/r2/upd1/final" target="_blank" rel="noopener noreferrer" class="touch-target">NIST SP 800-171 Rev. 2 / SPRS Assessment Methodology (NIST CSRC)</a></li>
+        <li><a href="https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160/subpart-D/section-160.404" target="_blank" rel="noopener noreferrer" class="touch-target">45 CFR 160.404 HIPAA HITECH Civil Monetary Penalties (eCFR)</a></li>
+        <li><a href="https://www.pcisecuritystandards.org/standards/pci-dss/" target="_blank" rel="noopener noreferrer" class="touch-target">PCI DSS v4.0.1 Security Standard (PCI Security Standards Council)</a></li>
+      </ul>
+    </section>
+
     {_build_retro_reflection_block("soc-2-audit-cost-calculator", f"{GAINHELM_CANONICAL_BASE}/")}
     """
     schemas = _calculator_schemas("/", "Enterprise SOC 2 Type II, DoD CMMC 2.0 & NIST 800-171 SPRS Audit Calculator", GAINHELM_SITE_DESCRIPTION)
@@ -2303,41 +2358,9 @@ def _build_core_tool_html(
     fw_prof = get_gainhelm_framework_profile(slug=slug)
     content_spec = _CORE_TOOL_CONTENT_SPECS.get(slug)
 
-    default_howto_steps = (
-        ("Define Organizational Headcount & System Scope", "Specify employee headcount, cloud boundaries, and active Trust Services Criteria or NIST SP 800-171 domains."),
-        ("Compute Accredited External Audit & Assessor Fees", "Calculate CPA firm SSAE 18 fees, C3PAO assessments under 32 CFR Part 170, or ISO/IEC 27006-1 auditor days."),
-        ("Model Internal Engineering Remediation & GRC Costs", "Apply BLS OEWS SOC 15-1212 ($121.67/hr) loaded wages to remediation hours and GRC platform licensing."),
-        ("Evaluate Statutory Penalty Exposure & SPRS Risk", "Compare investment against DoD SPRS [-203, +110] bounds and HHS OCR 45 CFR 160.404 caps."),
-    )
-    howto_steps = (content_spec or {}).get("howto", default_howto_steps)
-
     schemas = _calculator_schemas(f"/tools/{slug}/", tool["title"], meta_desc, tool_slug=slug)
     schemas.append(_get_gainhelm_organization_schema())
     schemas.append({"@type": "WebPage", "@id": f"{canonical_url}#webpage", "name": title, "description": meta_desc, "url": canonical_url, "datePublished": "2026-01-15", "dateModified": "2026-10-31"})
-    schemas.append(
-        {
-            "@type": "HowTo",
-            "@id": f"{canonical_url}#howto",
-            "name": f"How to Calculate {tool['title']}",
-            "description": f"Step-by-step statutory procedure for computing {tool['title']}.",
-            "url": canonical_url,
-            "step": [
-                {"@type": "HowToStep", "position": idx, "name": step_name, "text": step_txt, "url": f"{canonical_url}#step-{idx}"}
-                for idx, (step_name, step_txt) in enumerate(howto_steps, start=1)
-            ],
-        }
-    )
-    schemas.append(
-        {
-            "@type": "Dataset",
-            "@id": f"{canonical_url}#dataset",
-            "name": f"{tool['title']} Statutory Compliance Matrix",
-            "description": f"Deterministic enterprise security compliance dataset for {tool['title']}.",
-            "url": canonical_url,
-            "creator": {"@type": "Organization", "@id": f"{GAINHELM_CANONICAL_BASE}/#organization", "name": GAINHELM_SITE_NAME, "url": GAINHELM_CANONICAL_BASE},
-            "license": "https://creativecommons.org/publicdomain/zero/1.0/",
-        }
-    )
     schemas.append(
         {
             "@type": "BreadcrumbList",
@@ -2804,6 +2827,170 @@ def _scrub_gainhelm_manifest_obj(obj: Any, hipaa_cap_int: int, hipaa_cap_float: 
     return obj
 
 
+_DEPLOYED_VOID_PROVENANCE_SPECS: Dict[str, Tuple[Tuple[str, str, str], ...]] = {
+    "dora-ict-third-party-risk-compliance-cost-calculator": (
+        ("Dataset 1:", "https://eur-lex.europa.eu/eli/reg/2022/2554/oj", "EU Digital Operational Resilience Act (Regulation (EU) 2022/2554)"),
+        ("Dataset 2:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+    ),
+    "eu-ai-act-high-risk-conformity-assessment-cost-calculator": (
+        ("Dataset 1:", "https://eur-lex.europa.eu/eli/reg/2024/1689/oj", "EU Artificial Intelligence Act (Regulation (EU) 2024/1689)"),
+        ("Dataset 2:", "https://www.nist.gov/itl/ai-risk-management-framework", "NIST AI Risk Management Framework (AI RMF 1.0, 15 U.S.C. 278h-1)"),
+        ("Dataset 3:", "https://www.bls.gov/oes/current/oes152051.htm", "BLS OEWS Data Scientists (SOC 15-2051) Wage Series"),
+    ),
+    "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": (
+        ("Dataset 1:", "https://www.sec.gov/rules-regulations/2023/07/cybersecurity-risk-management-strategy-governance-incident-disclosure", "SEC Final Rule 33-11216 (Form 8-K Item 1.05 &amp; Reg S-K Item 106)"),
+        ("Dataset 2:", "https://www.ecfr.gov/current/title-17/chapter-II/part-229/section-229.106", "17 CFR 229.106 Cybersecurity Risk Management Disclosures"),
+        ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+    ),
+}
+
+
+def _inject_gainhelm_void_provenance(html_text: str, slug: str) -> str:
+    """Ensures DORA, EU AI Act, and SEC Form 8-K pages render explicit official EUR-Lex/SEC outbound links."""
+    spec = _DEPLOYED_VOID_PROVENANCE_SPECS.get(str(slug or "").strip().lower())
+    if (
+        not spec
+        or "statutory-provenance-box" in html_text
+        or "Statutory Authority &amp; Primary Source Provenance" in html_text
+    ):
+        return html_text
+    items_html = "\n        ".join(
+        f'<li><strong>{lbl}</strong> <a href="{url}" target="_blank" rel="noopener noreferrer">{txt}</a></li>'
+        for lbl, url, txt in spec
+    )
+    box_html = (
+        '\n    <section class="statutory-provenance-box card pseo-card">\n'
+        '      <h2 class="section-title">Statutory Authority &amp; Primary Source Provenance</h2>\n'
+        '      <ul>\n'
+        f'        {items_html}\n'
+        '      </ul>\n'
+        '    </section>'
+    )
+    anchor_m = re.search(
+        r'(<div\b[^>]*class=["\'][^"\']*\bmulti-dataset-join\b[^"\']*["\'][^>]*>[\s\S]*?</div>)',
+        html_text,
+        re.IGNORECASE,
+    )
+    if anchor_m:
+        return html_text[: anchor_m.end()] + box_html + html_text[anchor_m.end() :]
+    if "</main>" in html_text:
+        return html_text.replace("</main>", f"{box_html}\n  </main>", 1)
+    return html_text
+
+
+def _sanitize_gainhelm_jsonld_and_dom(
+    html_text: str,
+    *,
+    is_home: bool = False,
+    is_tool_leaf: bool = False,
+    dist_dir: Optional[Path] = None,
+) -> str:
+    """
+    Enforces GainHelm JSON-LD hygiene and button preset discipline after Porcelain/retrofit:
+    - Strips generic topic Wikidata QIDs from Organization.sameAs and moves them to knowsAbout.
+    - Removes HowTo, SpeakableSpecification, FAQPage, TechArticle, and leaf Dataset nodes.
+    - Emits WebApplication on calculator leaves and WebSite on / only.
+    - Omits BreadcrumbList on /.
+    """
+    from pseofactory.visual_primitives import normalize_html_visual_primitives
+
+    ld_re = re.compile(
+        r'(<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+        re.IGNORECASE,
+    )
+
+    def _clean_node_props(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            cleaned: Dict[str, Any] = {}
+            for k, v in obj.items():
+                if k == "speakable":
+                    continue
+                if k == "isPartOf" and not is_home and isinstance(v, dict) and str(v.get("@id") or "").endswith("#website"):
+                    continue
+                if k == "breadcrumb" and is_home:
+                    continue
+                cleaned[k] = _clean_node_props(v)
+            return cleaned
+        if isinstance(obj, list):
+            return [_clean_node_props(item) for item in obj]
+        return obj
+
+    def _rewrite_ld(m: re.Match) -> str:
+        raw_json = (m.group(2) or "").strip()
+        if not raw_json:
+            return m.group(0)
+        try:
+            payload = json.loads(raw_json)
+        except Exception:
+            return m.group(0)
+        if not isinstance(payload, dict):
+            return m.group(0)
+        graph = payload.get("@graph")
+        if not isinstance(graph, list):
+            return m.group(0)
+
+        new_graph: List[Dict[str, Any]] = []
+        for node in graph:
+            if not isinstance(node, dict):
+                continue
+            raw_t = node.get("@type")
+            types = [raw_t] if isinstance(raw_t, str) else ([str(x) for x in raw_t] if isinstance(raw_t, list) else [])
+            if any(t in ("HowTo", "FAQPage", "Dataset", "TechArticle", "SpeakableSpecification") for t in types):
+                continue
+            if "WebSite" in types and not is_home:
+                continue
+            if "BreadcrumbList" in types and is_home:
+                continue
+
+            node = _clean_node_props(node)
+            if "Organization" in types:
+                same_as = node.get("sameAs")
+                if isinstance(same_as, str):
+                    same_as_list = [same_as]
+                elif isinstance(same_as, list):
+                    same_as_list = [str(u) for u in same_as if str(u).strip()]
+                else:
+                    same_as_list = []
+                kept_same_as: List[str] = []
+                moved_qids: List[str] = []
+                for u in same_as_list:
+                    if re.search(r"wikidata\.org/(?:wiki|entity)/Q\d+", u, re.IGNORECASE):
+                        moved_qids.append(u)
+                    else:
+                        kept_same_as.append(u)
+                if kept_same_as:
+                    node["sameAs"] = kept_same_as
+                else:
+                    node.pop("sameAs", None)
+                existing_knows = node.get("knowsAbout")
+                knows_list: List[Any] = list(existing_knows) if isinstance(existing_knows, list) else ([existing_knows] if existing_knows else [])
+                existing_knows_str = json.dumps(knows_list)
+                for qurl in moved_qids:
+                    if qurl not in existing_knows_str:
+                        knows_list.append({"@type": "Thing", "name": "Information Security", "sameAs": qurl})
+                if knows_list:
+                    node["knowsAbout"] = knows_list
+
+            if any(t in ("SoftwareApplication", "WebApplication") for t in types):
+                new_types = ["WebApplication" if t == "SoftwareApplication" else t for t in types]
+                node["@type"] = new_types[0] if len(new_types) == 1 else new_types
+
+            new_graph.append(node)
+
+        payload["@graph"] = new_graph
+        return f"{m.group(1)}\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n{m.group(3)}"
+
+    updated = ld_re.sub(_rewrite_ld, html_text)
+    if re.search(r'<a\b[^>]*\bscenario-preset-link\b', updated, re.IGNORECASE):
+        updated, _ = normalize_html_visual_primitives(
+            updated,
+            is_tenant_porcelain=True,
+            dist_dir=dist_dir,
+            property_id="gainhelm",
+        )
+    return updated
+
+
 def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
     """
     Reconciles GainHelm embedded HTML calculation manifests, sidecar dist/manifests/*.json,
@@ -2883,6 +3070,8 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
                     scrubbed_html = script_rx.sub(lambda _m: replacement_tag, scrubbed_html, count=1)
                 else:
                     scrubbed_html = scrubbed_html.replace("</body>", f"{replacement_tag}\n</body>", 1)
+                scrubbed_html = _inject_gainhelm_void_provenance(scrubbed_html, slug)
+                scrubbed_html = _sanitize_gainhelm_jsonld_and_dom(scrubbed_html, is_home=False, is_tool_leaf=True, dist_dir=dist)
                 assert_no_forbidden_dashes(scrubbed_html, context=f"gainhelm reconciled html '{slug}'")
                 html_path.write_text(scrubbed_html, encoding="utf-8")
 
@@ -2933,12 +3122,25 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
             )
             if home_tag is not None:
                 cleaned_text = script_rx.sub(lambda _m: home_tag, cleaned_text, count=1)
+            is_home_html = (asset_path == dist / "index.html")
+            cleaned_text = _sanitize_gainhelm_jsonld_and_dom(cleaned_text, is_home=is_home_html, is_tool_leaf=False, dist_dir=dist)
         else:
             cleaned_text = _scrub_gainhelm_text_for_truth(
                 raw_text, hipaa_cap_int, hipaa_cap_float, is_html=False, apply_bls_qualifier=True
             )
         if cleaned_text != raw_text:
             asset_path.write_text(cleaned_text, encoding="utf-8")
+
+    try:
+        from pseofactory.maintenance import RetroReflectionEngine
+
+        RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+            dist,
+            property_id="gainhelm",
+            canonical_base=GAINHELM_CANONICAL_BASE,
+        )
+    except Exception:
+        pass
 
     in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
     if os.environ.get("PSEO_IN_REFLECT") != "1":
@@ -3140,6 +3342,7 @@ def compile_gainhelm_estate_impl(
         leaf_dir = tools_dir / slug
         leaf_dir.mkdir(parents=True, exist_ok=True)
         rendered_void = _apply_overlay_if_present(res["html"], slug, root)
+        rendered_void = _inject_gainhelm_void_provenance(rendered_void, slug)
         (leaf_dir / "index.html").write_text(rendered_void, encoding="utf-8")
         void_manifest = dict(res["manifest"])
         void_manifest.setdefault("slug", slug)

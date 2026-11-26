@@ -164,3 +164,82 @@ def test_search_intent_doctrine_high_effort_integration(valid_high_effort_candid
     }
     with pytest.raises(ValueError, match="missing or empty primary statutory authority"):
         qualify_search_intent(q_data_invalid, require_high_effort=True)
+
+
+def test_evergreen_slug_ban_delete_modifier_spoke_gate_and_impression_split():
+    """
+    Verifies:
+      1. Slug validator bans year tokens (\\b20[1-3]\\d\\b) on new tool slugs.
+      2. Programmatic child spoke qualification enforces Delete-the-Modifier uniqueness.
+      3. evaluate_query_impression_split filters < 100 impr/28d noise and emits merge/anchor directives.
+    """
+    from pseofactory.qualification import (
+        assert_valid_new_tool_slug,
+        evaluate_query_impression_split,
+        qualify_programmatic_child_spokes,
+        qualify_search_intent,
+        validate_new_tool_slug,
+    )
+
+    assert validate_new_tool_slug("irs-tax-brackets")["valid"] is True
+    assert validate_new_tool_slug("irs-2027-tax-brackets")["valid"] is False
+    assert validate_new_tool_slug("capital-gains-2021-calculator")["valid"] is False
+    with pytest.raises(ValueError, match="Year-stamped tool slug"):
+        assert_valid_new_tool_slug("irs-interest-calculator-2027")
+
+    year_verdict = qualify_search_intent(
+        {
+            "query": "distinct unserved statutory calculator",
+            "slug": "distinct-unserved-calculator-2027",
+            "impressions": 200,
+            "position": 8.0,
+            "formula": "round(a * b * c, 2)",
+            "inputs": {"a": 1, "b": 2, "c": 3},
+        }
+    )
+    assert year_verdict["action"] == "REJECT_YEAR_SLUG"
+    assert year_verdict["status"] == "PRUNE"
+
+    dup_spoke = qualify_programmatic_child_spokes(
+        [
+            {
+                "slug": "tax-california",
+                "modifier": "California",
+                "html": "<p>Compute federal income tax liability under permanent 10% to 37% brackets in California.</p>",
+                "formula": "round(income * 0.22, 2)",
+                "inputs": {"income": 100000},
+            },
+            {
+                "slug": "tax-texas",
+                "modifier": "Texas",
+                "html": "<p>Compute federal income tax liability under permanent 10% to 37% brackets in Texas.</p>",
+                "formula": "round(income * 0.22, 2)",
+                "inputs": {"income": 100000},
+            },
+        ]
+    )
+    assert dup_spoke["approved"] is False
+    assert dup_spoke["status"] == "REJECT_NEAR_DUPLICATE_SPOKE"
+
+    low_noise = evaluate_query_impression_split(
+        [
+            {"url": "/tools/a/", "impressions": 45, "position": 7.0},
+            {"url": "/tools/b/", "impressions": 40, "position": 9.0},
+        ],
+        query="section 179 bonus depreciation",
+    )
+    assert low_noise["is_true_cannibalization_split"] is False
+    assert low_noise["classification"] == "BELOW_MIN_IMPRESSIONS_NOISE"
+
+    true_split = evaluate_query_impression_split(
+        [
+            {"url": "/tools/a/", "impressions": 120, "position": 6.0},
+            {"url": "/tools/b/", "impressions": 80, "position": 8.0},
+        ],
+        query="section 179 bonus depreciation",
+    )
+    assert true_split["is_true_cannibalization_split"] is True
+    assert true_split["winner_url"] == "/tools/a/"
+    assert true_split["loser_urls"] == ["/tools/b/"]
+    assert true_split["merge_directives"][0]["http_redirect"] == 301
+    assert true_split["internal_anchor_rewrite_directives"][0]["to_target_url"] == "/tools/a/"
