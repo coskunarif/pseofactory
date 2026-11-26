@@ -5720,20 +5720,21 @@ class TruthReconciliationEngine:
             if catalog_json.is_file():
                 try:
                     cat_data = _json_lib.loads(catalog_json.read_text(encoding="utf-8"))
-                    tools_list = cat_data.get("tools") if isinstance(cat_data, dict) else (cat_data if isinstance(cat_data, list) else [])
                     cat_changed = False
-                    for t_item in tools_list:
-                        if isinstance(t_item, dict) and "refinanc" in t_item.get("slug", ""):
-                            t_desc = t_item.get("description", "")
-                            if "permanently forfeits" not in t_desc:
-                                t_item["description"] = f"{t_desc} Warning: {disclaimer_str}".strip()
-                                cat_changed = True
-                            t_qa = t_item.get("quick_answer", "")
-                            if "permanently forfeits" not in t_qa:
-                                t_item["quick_answer"] = f"{t_qa} Warning: {disclaimer_str}".strip()
-                                cat_changed = True
+                    if isinstance(cat_data, dict):
+                        cur_disc = str(cat_data.get("disclosure") or "")
+                        if "permanently forfeits" not in cur_disc.lower():
+                            cat_data["disclosure"] = disclaimer_str
+                            cat_changed = True
+                        tools_list = cat_data.get("tools") if isinstance(cat_data.get("tools"), list) else []
+                        for t_item in tools_list:
+                            if isinstance(t_item, dict):
+                                for forbidden_k in ("quick_answer", "inputs", "formula", "published_output", "query_syntax"):
+                                    if forbidden_k in t_item:
+                                        t_item.pop(forbidden_k, None)
+                                        cat_changed = True
                     if cat_changed:
-                        catalog_json.write_text(_json_lib.dumps(cat_data, indent=2), encoding="utf-8")
+                        catalog_json.write_text(_json_lib.dumps(cat_data, indent=2) + "\n", encoding="utf-8")
                         repaired_paths.append(str(catalog_json))
                 except Exception:
                     pass
