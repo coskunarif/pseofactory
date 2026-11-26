@@ -20371,7 +20371,7 @@ def reflect_and_recompile_all_assets(
         except Exception:
             callout_mismatch_count = 0
 
-        force_compiled_build = bool(force and getattr(adapter, "property_id", None) in ("gainhelm", "lienbond"))
+        force_compiled_build = bool(force)
         pre_retro_ran = False
         pre_retrofitted_count = 0
         if (

@@ -791,10 +791,18 @@ async function main() {
     const createdSess = stripeCreates[stripeCreates.length - 1];
     tierRep.unit_amount = createdSess.unit_amount;
     tierRep.session_id = createdSess.id;
+    tierRep.livemode = chkRes.json.livemode;
+    tierRep.price_cents = chkRes.json.price_cents;
     tierRep.success_url = createdSess.success_url || chkRes.json.success_url || "";
     tierRep.cancel_url = createdSess.cancel_url || chkRes.json.cancel_url || "";
     tierRep.lead_id = chkRes.json.lead_id || createdSess.client_reference_id || "";
 
+    if (chkRes.json.livemode !== true) {
+      issues.push(`[${tierName}] checkout livemode !== true (got ${chkRes.json.livemode})`);
+    }
+    if (Number(chkRes.json.price_cents) !== Number(spec.price_cents)) {
+      issues.push(`[${tierName}] checkout price_cents ${chkRes.json.price_cents} != expected ${spec.price_cents}`);
+    }
     if (createdSess.unit_amount !== spec.price_cents) {
       issues.push(`[${tierName}] Stripe unit_amount ${createdSess.unit_amount} != expected ${spec.price_cents}`);
     }
