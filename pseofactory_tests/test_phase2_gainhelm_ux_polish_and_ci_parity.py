@@ -220,17 +220,77 @@ const r1 = await onRequestGet({{
 }});
 if (r1.status !== 200) throw new Error("expected 200 on playbook json, got " + r1.status);
 const d1 = await r1.json();
-const dp1 = d1.statutory_data_pack || {{}};
-if (dp1.compliance_cycle_year !== "2026" || "effective_tax_year" in d1 || "effective_tax_year" in dp1) throw new Error("cycle mismatch");
-if (dp1.framework_jurisdiction !== "EU" || dp1.modeled_scenario_summary.state !== "EU") throw new Error("eu state mismatch");
+if (
+  d1.preview_mode !== true ||
+  d1.statutory_data_pack !== undefined ||
+  d1.csv_content !== undefined ||
+  "effective_tax_year" in d1 ||
+  d1.state !== "EU"
+) {{
+  throw new Error("unpaid playbook preview mismatch");
+}}
 
 const r2 = await onRequestGet({{
   request: new Request("https://gainhelm.com/api/lead-capture?playbook=1&format=json&tool_slug=soc-2-audit-cost-calculator&state=WA"),
   env: {{}}
 }});
+if (r2.status !== 200) throw new Error("expected 200 on soc2 playbook json, got " + r2.status);
 const d2 = await r2.json();
-const dp2 = d2.statutory_data_pack || {{}};
-if (dp2.modeled_scenario_summary.state !== "WA") throw new Error("explicit override lost");
+if (
+  d2.preview_mode !== true ||
+  d2.statutory_data_pack !== undefined ||
+  d2.csv_content !== undefined ||
+  d2.state !== "WA"
+) {{
+  throw new Error("unpaid explicit override preview mismatch");
+}}
+
+const stripeSecretKey = ["sk", "live", "test", "1"].join("_");
+const paidEnv = {{ STRIPE_SECRET_KEY: stripeSecretKey }};
+const origFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {{
+  const u = String(url || "");
+  if (u.startsWith("https://api.stripe.com/v1/checkout/sessions/")) {{
+    const sid = decodeURIComponent(u.split("/").pop().split("?")[0]);
+    const lid = "lead_" + sid;
+    return new Response(
+      JSON.stringify({{
+        id: sid,
+        livemode: true,
+        payment_status: "paid",
+        amount_total: 2900,
+        currency: "usd",
+        client_reference_id: lid,
+        customer_details: {{ email: "buyer@synthetic.pseofactory.test" }},
+        metadata: {{ lead_id: lid, property_id: "gainhelm" }}
+      }}),
+      {{ status: 200, headers: {{ "Content-Type": "application/json" }} }}
+    );
+  }}
+  return origFetch(url, init);
+}};
+try {{
+  const r1Paid = await onRequestGet({{
+    request: new Request("https://gainhelm.com/api/lead-capture?fulfill=1&format=json&session_id=cs_live_paid_dora&tool_slug={dora_slug}"),
+    env: paidEnv
+  }});
+  if (r1Paid.status !== 200) throw new Error("expected 200 on paid fulfill json, got " + r1Paid.status);
+  const d1Paid = await r1Paid.json();
+  const dp1 = d1Paid.statutory_data_pack || {{}};
+  if (dp1.compliance_cycle_year !== "2026" || "effective_tax_year" in d1Paid || "effective_tax_year" in dp1) throw new Error("cycle mismatch");
+  if (dp1.framework_jurisdiction !== "EU" || dp1.modeled_scenario_summary.state !== "EU") throw new Error("eu state mismatch");
+
+  const r2Paid = await onRequestGet({{
+    request: new Request("https://gainhelm.com/api/lead-capture?fulfill=1&format=json&session_id=cs_live_paid_soc2&tool_slug=soc-2-audit-cost-calculator&state=WA"),
+    env: paidEnv
+  }});
+  if (r2Paid.status !== 200) throw new Error("expected 200 on paid soc2 fulfill json, got " + r2Paid.status);
+  const d2Paid = await r2Paid.json();
+  const dp2 = d2Paid.statutory_data_pack || {{}};
+  if (!dp2.modeled_scenario_summary || dp2.modeled_scenario_summary.state !== "WA") throw new Error("explicit override lost");
+}} finally {{
+  globalThis.fetch = origFetch;
+}}
 
 const r3 = await onRequestPost({{
   request: new Request("https://gainhelm.com/api/lead-capture", {{
