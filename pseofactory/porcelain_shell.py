@@ -5552,6 +5552,7 @@ def _enforce_calculator_leaf_slot_order(
             for p in (
                 "\n".join(calc_parts).strip(),
                 unlock_block,
+                compliance_html,
                 partner_block,
                 after_calc.strip(),
             )
@@ -5571,18 +5572,17 @@ def _enforce_calculator_leaf_slot_order(
                 res_parts.append(r_raw.strip())
             calc_combined = "\n".join([form_html] + res_parts).strip()
             ordered_body = "\n".join(
-                p for p in (calc_combined, unlock_block, partner_block, after_form.strip()) if p
+                p for p in (calc_combined, unlock_block, compliance_html, partner_block, after_form.strip()) if p
             )
         else:
             ordered_body = "\n".join(
-                p for p in (body_rest.strip(), unlock_block, partner_block) if p
+                p for p in (body_rest.strip(), unlock_block, compliance_html, partner_block) if p
             )
 
     return "\n".join(
         [
             f"      {breadcrumb_html.strip()}",
             hero_section_html,
-            compliance_html,
             ordered_body,
         ]
     )
