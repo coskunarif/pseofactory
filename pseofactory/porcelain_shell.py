@@ -5994,7 +5994,7 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
 
 
 def _is_official_primary_source_url_porcelain(url: str) -> bool:
-    """Returns True when URL points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org host."""
+    """Returns True when URL points to an official .gov, .mil, state .us legislature, eur-lex.europa.eu, or pcisecuritystandards.org host."""
     import urllib.parse
 
     raw = str(url or "").strip()
@@ -6009,21 +6009,466 @@ def _is_official_primary_source_url_porcelain(url: str) -> bool:
     return (
         host.endswith(".gov")
         or host.endswith(".mil")
+        or host == "leg.state.fl.us"
+        or bool(re.search(r"(?:^|\.)state\.[a-z]{2}\.us$", host))
         or host == "eur-lex.europa.eu"
         or host.endswith(".eur-lex.europa.eu")
         or host == "pcisecuritystandards.org"
         or host.endswith(".pcisecuritystandards.org")
+        or host == "fred.stlouisfed.org"
+        or host.endswith(".fred.stlouisfed.org")
     )
 
 
-def _build_porcelain_statutory_sources_html(
-    profile: Dict[str, Any],
-    rel_path: str,
-    inner_main: str,
-) -> str:
-    """Builds SSR Statutory Sources & Formula Verification + Statutory Changelog cards from TruthPack."""
-    prop = str(profile.get("property_id") or "").strip().lower()
-    slug = re.sub(r"(?:^|/)index\.html$", "", str(rel_path or "").strip().lstrip("/")).split("/")[-1].lower()
+def _extract_exact_statute_codes(text: str) -> Set[str]:
+    """Extracts normalized exact statutory / regulatory codes from an explicit citation string."""
+    raw = str(text or "").strip()
+    if not raw:
+        return set()
+    codes: Set[str] = set()
+    for m in re.finditer(
+        r"\b(\d+)\s+U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Secs?\.?|§)?\s*(\d+[A-Za-z0-9-]*(?:\([A-Za-z0-9]+\))*)",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        title_num = m.group(1)
+        sec_full = m.group(2).upper()
+        sec_base = re.split(r"[\(\-]", sec_full, maxsplit=1)[0]
+        if len(sec_base) >= 2:
+            codes.add(f"{title_num} USC {sec_base}")
+        codes.add(f"{title_num} USC {sec_full}")
+    for m in re.finditer(
+        r"\bIRC\s+(?:Sections?|Secs?\.?|§)?\s*(\d+[A-Za-z0-9-]*(?:\([A-Za-z0-9]+\))*)",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        sec_full = m.group(1).upper()
+        sec_base = re.split(r"[\(\-]", sec_full, maxsplit=1)[0]
+        if len(sec_base) >= 2:
+            codes.add(f"26 USC {sec_base}")
+        codes.add(f"26 USC {sec_full}")
+    for m in re.finditer(
+        r"\b(\d+)\s+C\.?\s*F\.?\s*R\.?\s*(?:Parts?|Sections?|Secs?\.?)?\s*(\d+(?:\.\d+)?)",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        cfr_title, cfr_sec = m.group(1), m.group(2).upper()
+        codes.add(f"{cfr_title} CFR {cfr_sec}")
+        if "." in cfr_sec:
+            codes.add(f"{cfr_title} CFR {cfr_sec.split('.', 1)[0]}")
+    for m in re.finditer(r"\b(\d+)\s+F\.?\s*R\.?\s*(\d+)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"{m.group(1)} FR {m.group(2)}")
+    for m in re.finditer(r"\bFAR\s+(\d+\.\d+(?:-\d+)?)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"FAR {m.group(1).upper()}")
+    for m in re.finditer(r"\bDFARS\s+(\d+\.\d+-\d+)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"DFARS {m.group(1).upper()}")
+    for m in re.finditer(
+        r"\bP\.?\s*L\.?\s*(\d+-\d+)\s+(?:Sections?|Secs?\.?)\s*(\d+[A-Za-z0-9]*)\b",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        codes.add(f"PL {m.group(1).upper()} SECTION {m.group(2).upper()}")
+    for m in re.finditer(
+        r"\bRev\.?\s*Proc\.?\s*(\d{4}-\d+)(?:\s+(?:Sections?|Secs?\.?)\s*(\d+(?:\.\d+)?))?",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        if m.group(2):
+            codes.add(f"REV PROC {m.group(1).upper()} SECTION {m.group(2).upper()}")
+        else:
+            codes.add(f"REV PROC {m.group(1).upper()}")
+    for m in re.finditer(r"\bNIST\s+SP\s+(800-\d+)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"NIST SP {m.group(1).upper()}")
+    for m in re.finditer(r"\bISO(?:/IEC)?\s+(\d+(?:-\d+)?)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"ISO {m.group(1).upper()}")
+    for m in re.finditer(r"\bPCI\s+DSS\b", raw, flags=re.IGNORECASE):
+        codes.add("PCI DSS")
+    for m in re.finditer(r"\bSSAE\s+18\b|\bSOC\s*2\b", raw, flags=re.IGNORECASE):
+        codes.add("AICPA SSAE 18")
+    for m in re.finditer(r"\bRegulation\s*\(EU\)\s*(\d{4}/\d+)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"REGULATION EU {m.group(1)}")
+    for m in re.finditer(r"\bCal\.\s*Rev\.\s*&\s*Tax\.\s*Code\s+Sections?\s+(\d+)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"CA RTC {m.group(1)}")
+    for m in re.finditer(r"\bMich\.\s*Comp\.\s*Laws\s+Section\s+(\d+(?:\.\d+)?)\b", raw, flags=re.IGNORECASE):
+        codes.add(f"MCL {m.group(1)}")
+    return codes
+
+
+def _extract_explicit_statutory_authority_from_html(html_text: str) -> str:
+    """Extracts explicit statutory_authority / citation strings from manifest JSON or data-statutory attributes."""
+    raw = str(html_text or "")
+    parts: List[str] = []
+    m_man = re.search(
+        r'<script\b[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*calculation-manifest[^"\']*["\'])[^>]*>([\s\S]*?)</script>',
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if m_man:
+        try:
+            man_obj = json.loads(m_man.group(1).strip())
+            if isinstance(man_obj, dict) and man_obj.get("statutory_authority"):
+                parts.append(str(man_obj["statutory_authority"]).strip())
+        except Exception:
+            pass
+    for attr_m in re.finditer(r'\bdata-statutory(?:-source)?\s*=\s*(["\'])(.*?)\1', raw, flags=re.IGNORECASE):
+        val = html_lib.unescape(attr_m.group(2)).strip()
+        if val:
+            parts.append(val)
+    return " | ".join(parts)
+
+
+_ARCHETYPE_OFFICIAL_PRIMARY_SOURCES: Tuple[Tuple[Tuple[str, ...], Tuple[Tuple[str, str, str, int, str], ...]], ...] = (
+    # GainHelm cyber compliance archetypes (ordered most-specific first)
+    (
+        ("dora-", "dora_"),
+        (
+            ("https://eur-lex.europa.eu/eli/reg/2022/2554/oj", "Regulation (EU) 2022/2554 (EU Digital Operational Resilience Act - DORA)", "EUR-Lex (Official Journal of the European Union)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("eu-ai-act",),
+        (
+            ("https://eur-lex.europa.eu/eli/reg/2024/1689/oj", "Regulation (EU) 2024/1689 (EU Artificial Intelligence Act)", "EUR-Lex (Official Journal of the European Union)", 2026, "2026-11-24"),
+            ("https://www.nist.gov/itl/ai-risk-management-framework", "NIST AI Risk Management Framework (AI RMF 1.0, 15 U.S.C. 278h-1)", "National Institute of Standards and Technology", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes152051.htm", "BLS OEWS Data Scientists (SOC 15-2051) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("sec-cybersecurity", "8k-item-105", "8-k"),
+        (
+            ("https://www.sec.gov/rules-regulations/2023/07/s7-09-22", "SEC Final Rule 33-11216 (Form 8-K Item 1.05 & Reg S-K Item 106)", "U.S. Securities and Exchange Commission", 2026, "2026-11-24"),
+            ("https://www.ecfr.gov/current/title-17/chapter-II/part-229/section-229.106", "17 CFR 229.106 Cybersecurity Risk Management Disclosures", "U.S. Government Publishing Office (eCFR)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("nist-800-171", "sprs-score"),
+        (
+            ("https://csrc.nist.gov/publications/detail/sp/800-171/rev-3/final", "NIST SP 800-171 Rev 3 & Rev 2 Protecting CUI", "National Institute of Standards and Technology (CSRC)", 2026, "2026-11-24"),
+            ("https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf", "DoD NIST SP 800-171 Assessment Methodology v1.2.1", "U.S. Department of Defense", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("cmmc",),
+        (
+            ("https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170", "32 CFR Part 170 (DoD CMMC 2.0 Final Program Rule)", "U.S. Government Publishing Office (eCFR)", 2026, "2026-11-24"),
+            ("https://www.acq.osd.mil/asda/dpc/cp/cyber/docs/safeguarding/NIST-SP-800-171-Assessment-Methodology-Version-1.2.1-6.24.2020.pdf", "DoD NIST SP 800-171 Assessment Methodology v1.2.1", "U.S. Department of Defense", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("pci-dss",),
+        (
+            ("https://www.pcisecuritystandards.org/document_library/", "PCI DSS v4.0.1 Security Standard & QSA ROC Document Library", "PCI Security Standards Council", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("fedramp",),
+        (
+            ("https://www.fedramp.gov/", "FedRAMP Program Rev 5 Baselines & 3PAO Authorization Rules", "U.S. General Services Administration (FedRAMP)", 2026, "2026-11-24"),
+            ("https://csrc.nist.gov/pubs/sp/800/53/r5/upd1/final", "NIST SP 800-53 Rev 5 Security & Privacy Controls", "National Institute of Standards and Technology (CSRC)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("soc-2", "soc2"),
+        (
+            ("https://csrc.nist.gov/projects/risk-management", "NIST Cybersecurity Risk Management & Trust Control Alignment", "National Institute of Standards and Technology (CSRC)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("hipaa",),
+        (
+            ("https://www.hhs.gov/hipaa/for-professionals/security/index.html", "HHS HIPAA Security Rule & HITECH Enforcement Guidance", "U.S. Department of Health and Human Services", 2026, "2026-11-24"),
+            ("https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160", "45 CFR Part 160 HIPAA Administrative Simplification Penalties", "U.S. Government Publishing Office (eCFR)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("iso-27001", "hitrust"),
+        (
+            ("https://csrc.nist.gov/projects/risk-management", "NIST Cybersecurity Risk Management & Control Framework Alignment", "National Institute of Standards and Technology (CSRC)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("penetration-testing", "pentest"),
+        (
+            ("https://csrc.nist.gov/pubs/sp/800/115/final", "NIST SP 800-115 Technical Guide to Information Security Testing", "National Institute of Standards and Technology (CSRC)", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("cyber-liability", "cyber-insurance"),
+        (
+            ("https://www.sec.gov/rules-regulations/2023/07/s7-09-22", "SEC Cybersecurity Risk Management & Material Incident Disclosure", "U.S. Securities and Exchange Commission", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    # LienBond construction / surety / ERISA archetypes
+    (
+        ("erisa-fidelity", "erisa"),
+        (
+            ("https://www.dol.gov/agencies/ebsa/about-ebsa/our-activities/resource-center/faqs/fidelity-bonding", "29 U.S.C. Section 1112 (ERISA Section 412 Fidelity Bonding)", "U.S. Department of Labor (EBSA)", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title29-section1112", "29 U.S.C. Section 1112 (ERISA Bonding Requirements)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("california-texas-florida-preliminary-notice", "preliminary-notice"),
+        (
+            ("https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=8200.", "California Civil Code Section 8200 (Preliminary 20-Day Notice)", "California Legislative Information", 2026, "2026-11-24"),
+            ("https://statutes.capitol.texas.gov/Docs/PR/htm/PR.53.htm", "Texas Property Code Chapter 53 (Derivative Notice Rules)", "Texas Legislature Statutes", 2026, "2026-11-24"),
+            ("https://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&URL=0700-0799/0713/0713.html", "Florida Statutes Section 713.06 (Notice to Owner)", "Florida Legislature", 2026, "2026-11-24"),
+            ("https://www.sba.gov/", "U.S. Small Business Administration Contractor Compliance Guide", "U.S. Small Business Administration", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("florida-lien-deadline", "lien-release"),
+        (
+            ("https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=8132.", "California Civil Code Sections 8132-8138 (Statutory Lien Waiver Forms)", "California Legislative Information", 2026, "2026-11-24"),
+            ("https://statutes.capitol.texas.gov/Docs/PR/htm/PR.53.htm", "Texas Property Code Section 53.284 (Statutory Waiver & Release)", "Texas Legislature Statutes", 2026, "2026-11-24"),
+            ("https://www.leg.state.fl.us/statutes/index.cfm?App_mode=Display_Statute&URL=0700-0799/0713/Sections/0713.20.html", "Florida Statutes Chapter 713 (Construction Liens & Waivers)", "Florida Legislature", 2026, "2026-11-24"),
+            ("https://www.sba.gov/", "U.S. Small Business Administration Contractor Compliance Guide", "U.S. Small Business Administration", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("texas-chapter-53", "retainage"),
+        (
+            ("https://statutes.capitol.texas.gov/Docs/PR/htm/PR.53.htm", "Texas Property Code Chapter 53 (Statutory Retainage & Fund-Trapping)", "Texas Legislature Statutes", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title31-section3903", "31 U.S.C. Section 3903 (Prompt Payment Act Interest Penalty)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("davis-bacon",),
+        (
+            ("https://www.dol.gov/agencies/whd/government-contracts/construction", "40 U.S.C. 3141 / 29 CFR 5.5 (Davis-Bacon Prevailing Wage & WH-347)", "U.S. Department of Labor (WHD)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("workers-comp", "workers-compensation", "experience-modification-rate", "emr-"),
+        (
+            ("https://www.dol.gov/agencies/owcp", "U.S. Department of Labor Workers' Compensation Programs (OWCP)", "U.S. Department of Labor", 2026, "2026-11-24"),
+            ("https://www.bls.gov/ecec/", "BLS Employer Costs for Employee Compensation (ECEC)", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("contractor-license-bond",),
+        (
+            ("https://www.cslb.ca.gov/Contractors/Applicants/Contractors_License_Bond/", "CA Contractors State License Board (B&P Code Section 7071.6 Bond)", "California CSLB", 2026, "2026-11-24"),
+            ("https://www.sba.gov/", "U.S. Small Business Administration Contractor Licensing & Bonding", "U.S. Small Business Administration", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("overhead-and-profit",),
+        (
+            ("https://www.sba.gov/business-guide/manage-your-business/manage-your-finances", "U.S. Small Business Administration Construction Financial Management", "U.S. Small Business Administration", 2026, "2026-11-24"),
+            ("https://www.bls.gov/oes/current/oes471011.htm", "BLS OEWS Construction Supervisors & Trade Cost Benchmarks", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("miller-act", "subcontractor-default-insurance"),
+        (
+            ("https://www.acquisition.gov/far/28.102-1", "40 U.S.C. 3131 / FAR 28.102-1 / 90 FR 41872 (Miller Act Bonds)", "U.S. General Services Administration (FAR)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("bid-bond", "surety-bond"),
+        (
+            ("https://www.acquisition.gov/far/28.101", "FAR 28.101-2 (Federal Bid Guarantee / Bid Bond Rules)", "U.S. General Services Administration (FAR)", 2026, "2026-11-24"),
+            ("https://www.acquisition.gov/far/28.102-1", "40 U.S.C. 3131 / FAR 28.102-1 (Miller Act Surety Bonds)", "U.S. General Services Administration (FAR)", 2026, "2026-11-24"),
+        ),
+    ),
+    # ProfitHelm tax & corporate finance archetypes
+    (
+        ("section-1031", "1031-exchange", "1031"),
+        (
+            ("https://www.irs.gov/forms-pubs/about-form-8824", "26 U.S.C. 1031 & IRS Form 8824 (Like-Kind Exchanges)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1031", "26 U.S.C. Section 1031 (Like-Kind Exchange Nonrecognition)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("saas-runway",),
+        (
+            ("https://fred.stlouisfed.org/", "FRED Economic Benchmark & Treasury Rate Series", "Federal Reserve Bank of St. Louis", 2026, "2026-11-24"),
+            ("https://www.bls.gov/", "BLS Employer Compensation & Operating Cost Benchmarks", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
+            ("https://www.irs.gov/businesses/small-businesses-self-employed", "IRS Corporate Liquidity & Small Business Accounting Guidance", "Internal Revenue Service", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("invoice-factoring",),
+        (
+            ("https://www.ecfr.gov/current/title-12/chapter-X/part-1026", "12 CFR Part 1026 (Regulation Z APR & Commercial Credit Benchmarks)", "U.S. Government Publishing Office (eCFR)", 2026, "2026-11-24"),
+            ("https://www.sba.gov/", "U.S. Small Business Administration Working Capital & Credit Guidance", "U.S. Small Business Administration", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("section-301",),
+        (
+            ("https://ustr.gov/issue-areas/enforcement/section-301-investigations", "19 U.S.C. Section 2411 (Trade Act Section 301 Investigations)", "Office of the United States Trade Representative", 2026, "2026-11-24"),
+            ("https://www.ecfr.gov/current/title-19/chapter-I/part-24", "19 CFR Part 24 (U.S. Customs Entry & Processing Fees)", "U.S. Government Publishing Office (eCFR)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("section-280g", "280g"),
+        (
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section280G", "26 U.S.C. Section 280G (Golden Parachute Payments)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section4999", "26 U.S.C. Section 4999 (Excess Parachute Excise Tax)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("corporate-amt", "camt"),
+        (
+            ("https://www.irs.gov/businesses/corporations", "26 U.S.C. Sections 55 & 56A (Corporate Alternative Minimum Tax - CAMT)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section55", "26 U.S.C. Section 55 (Alternative Minimum Tax Imposed)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("treasury-yield",),
+        (
+            ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates", "U.S. Treasury Daily Par Yield Curve & Interest Rate Statistics", "U.S. Department of the Treasury", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title31-section3124", "31 U.S.C. Section 3124 (Federal Debt State Tax Exemption)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("irs-interest",),
+        (
+            ("https://www.irs.gov/payments/quarterly-interest-rates", "26 U.S.C. Section 6621 & IRS Quarterly Underpayment/Overpayment Rates", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section6621", "26 U.S.C. Section 6621 (Determination of Rate of Interest)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("tax-brackets",),
+        (
+            ("https://www.irs.gov/pub/irs-drop/rp-25-32.pdf", "IRS Rev. Proc. 2025-32 Section 4.01 (2026 Tax Brackets & Standard Deduction)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://www.irs.gov/pub/irs-drop/rp-26-35.pdf", "IRS Rev. Proc. 2026-35 / IR-2026-133 (2027 Tax Brackets & Standard Deduction)", "Internal Revenue Service", 2027, "2026-11-24"),
+        ),
+    ),
+    (
+        ("crypto-tax", "crypto-staking", "1099-da", "form-8949"),
+        (
+            ("https://www.irs.gov/forms-pubs/about-form-1099-da", "26 U.S.C. Section 6045 & IRS Form 1099-DA Digital Asset Reporting", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://www.irs.gov/pub/irs-drop/rp-25-32.pdf", "26 U.S.C. 1(h) / IRS Rev. Proc. 2025-32 Capital Gains Schedule", "Internal Revenue Service", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("tcja-sunset",),
+        (
+            ("https://www.irs.gov/pub/irs-drop/rp-25-32.pdf", "26 U.S.C. 1(h) / IRS Rev. Proc. 2025-32 (LTCG & Standard Deduction)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://www.irs.gov/pub/irs-drop/rp-26-35.pdf", "IRS Rev. Proc. 2026-35 / IR-2026-133 (2027 Statutory Schedule)", "Internal Revenue Service", 2027, "2026-11-24"),
+            ("https://www.congress.gov/bill/119th-congress/house-bill/1", "P.L. 119-21 Section 70101 (Permanent Rate & Deduction Extension)", "U.S. Congress", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("capital-gains",),
+        (
+            ("https://www.irs.gov/pub/irs-drop/rp-25-32.pdf", "26 U.S.C. 1(h) / IRS Rev. Proc. 2025-32 Section 4.01 (LTCG Brackets)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1411", "26 U.S.C. Section 1411 (3.8% Net Investment Income Tax)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("section-179", "equipment-lease"),
+        (
+            ("https://www.congress.gov/bill/119th-congress/house-bill/1", "P.L. 119-21 Section 70306 & 70301 (26 U.S.C. 179 & 168(k) Bonus Depreciation)", "U.S. Congress", 2026, "2026-11-24"),
+            ("https://www.irs.gov/pub/irs-drop/rp-25-32.pdf", "IRS Rev. Proc. 2025-32 Section 4.24 (Section 179 Inflation Limits)", "Internal Revenue Service", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("qsbs", "1202"),
+        (
+            ("https://www.congress.gov/bill/119th-congress/house-bill/1", "P.L. 119-21 Section 70431 (amending 26 U.S.C. 1202 QSBS Exclusion)", "U.S. Congress", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section1202", "26 U.S.C. Section 1202 (Qualified Small Business Stock)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("r-and-d", "r-d-", "section-174"),
+        (
+            ("https://www.irs.gov/forms-pubs/about-form-6765", "26 U.S.C. Section 41 & IRS Form 6765 (R&D Tax Credit)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section174", "26 U.S.C. Section 174 (Research and Experimental Expenditures)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("s-corp",),
+        (
+            ("https://www.ssa.gov/news/press/factsheets/colafacts2026.pdf", "SSA 2026 Social Security Contribution and Benefit Base", "Social Security Administration", 2026, "2026-11-24"),
+            ("https://www.irs.gov/businesses/small-businesses-self-employed/s-corporation-compensation-and-medical-insurance-issues", "26 U.S.C. Sections 1366, 3121 & Rev. Rul. 74-44 (S-Corp Compensation)", "Internal Revenue Service", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("section-199a", "199a", "qbi"),
+        (
+            ("https://www.congress.gov/bill/119th-congress/house-bill/1", "P.L. 119-21 Section 70105 / 26 U.S.C. 199A (QBI Deduction)", "U.S. Congress", 2026, "2026-11-24"),
+            ("https://www.irs.gov/newsroom/qualified-business-income-deduction", "IRS Qualified Business Income Deduction (26 U.S.C. 199A)", "Internal Revenue Service", 2026, "2026-11-24"),
+        ),
+    ),
+    # Prexvo student loan archetypes
+    (
+        ("pslf",),
+        (
+            ("https://studentaid.gov/manage-loans/forgiveness-cancellation/public-service", "34 CFR 685.219 (Public Service Loan Forgiveness)", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+            ("https://www.federalregister.gov/d/2026-00690", "91 FR 1797 (2026 HHS Poverty Guidelines)", "U.S. Department of Health and Human Services", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("save-plan",),
+        (
+            ("https://www.federalregister.gov/d/2023-13112", "34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan Rule - subject to federal litigation)", "U.S. Department of Education", 2026, "2026-11-24"),
+            ("https://studentaid.gov/idr/", "P.L. 119-21 Section 82001 (Repayment Assistance Plan)", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+            ("https://www.federalregister.gov/d/2026-00690", "91 FR 1797 (2026 HHS Poverty Guidelines)", "U.S. Department of Health and Human Services", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("health-professions", "hpsl", "nhsc"),
+        (
+            ("https://bhw.hrsa.gov/funding/apply-loan-repayment", "Public Health Service Act Section 338B (42 U.S.C. 254l-1 NHSC LRP)", "Health Resources and Services Administration (HRSA)", 2026, "2026-11-24"),
+            ("https://studentaid.gov/idr/", "34 CFR Part 685 (Federal Student Loan Repayment Plans)", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("tax-bomb", "insolvency"),
+        (
+            ("https://www.irs.gov/forms-pubs/about-form-982", "26 U.S.C. Section 108(a)(1)(B) & IRS Form 982 (Insolvency Exclusion)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://studentaid.gov/idr/", "P.L. 119-21 Section 82001 & 34 CFR Part 685 Repayment Rules", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("refinance",),
+        (
+            ("https://www.consumerfinance.gov/paying-for-college/", "CFPB Student Loan Refinancing & Federal Benefit Disclosures", "Consumer Financial Protection Bureau", 2026, "2026-11-24"),
+            ("https://studentaid.gov/idr/", "P.L. 119-21 Section 82001 & 34 CFR Part 685 Federal Repayment Plans", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+        ),
+    ),
+    (
+        ("rap-", "-rap", "ibr", "icr", "paye", "parent-plus", "grad-plus", "discretionary-income", "married-filing-separately", "student-loan", "repayment-estimator", "tiered-standard"),
+        (
+            ("https://studentaid.gov/idr/", "P.L. 119-21 Section 82001 & 34 CFR Part 685 (Income-Driven & RAP Repayment)", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
+            ("https://www.federalregister.gov/d/2026-00690", "91 FR 1797 (2026 HHS Poverty Guidelines)", "U.S. Department of Health and Human Services", 2026, "2026-11-24"),
+        ),
+    ),
+)
+
+
+def resolve_statutory_sources_for_calculator(
+    property_id: str,
+    slug: str,
+    statutory_authority: str = "",
+) -> Tuple[List[Tuple[str, str, str, int, str]], str]:
+    """
+    Deterministically resolves official primary-source statutory links for a calculator.
+    Never performs loose single-token matching against prose. Matches ONLY via:
+      (a) explicit slug archetype / TruthPack applies_to_slugs entry, OR
+      (b) literal exact statute number/code containment in explicit statutory_authority.
+    """
+    prop = str(property_id or "").strip().lower()
+    slug_l = str(slug or "").strip().lower()
+    stat_raw = str(statutory_authority or "").strip()
+
+    pack_entries: List[Any] = []
+    statute_eff_date = ""
+    allowlist: List[Dict[str, Any]] = []
     try:
         from pseofactory.truth_pack import load_truth_pack
         from pseofactory.truth_gate import (
@@ -6036,45 +6481,18 @@ def _build_porcelain_statutory_sources_html(
         statute_eff_date = str(getattr(tp, "statute_effective_date", "") or "").strip()
         pack_entries = list((getattr(tp, "entries", {}) or {}).values())
         tp_dict = tp.to_dict() if hasattr(tp, "to_dict") else {}
-        allowlist = _normalize_citations_allowlist(tp_dict) if isinstance(tp_dict, dict) else []
+        if isinstance(tp_dict, dict):
+            allowlist = _normalize_citations_allowlist(tp_dict)
     except Exception:
-        return ""
+        pack_entries = []
 
-    if not pack_entries:
-        return ""
-
-    h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", inner_main or "", flags=re.IGNORECASE)
-    topic_label = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip() if h1_m else slug.replace("-", " ").title()
-    _generic_match_stops = frozenset({
-        "cost", "costs", "compliance", "calculator", "calculators", "risk", "rate", "rates",
-        "tax", "taxes", "penalty", "penalties", "audit", "audits", "score", "scores",
-        "benchmark", "benchmarks", "enterprise", "market", "series", "dataset", "model",
-        "fee", "fees", "type", "usd", "2024", "2025", "2026", "2027", "section", "part",
-        "title", "act", "code", "rule", "rules", "federal", "state", "firm", "range",
-        "gainhelm", "prexvo", "profithelm", "lienbond", "and", "the", "for", "with",
-        "annual", "total", "estimate", "estimator", "planner", "comparison", "tool",
-        "third", "party", "ict", "assessment", "regulatory", "impact", "analysis",
-        "security", "cyber", "cybersecurity", "framework", "standard", "standards",
-        "governance", "program", "readiness", "scoping", "controls", "control",
-    })
-    slug_tokens = {
-        w for w in re.findall(r"[a-z0-9]+", slug)
-        if len(w) >= 3 and w not in _generic_match_stops
-    }
-    plain_main = re.sub(r"<[^>]+>", " ", (inner_main or "")[:2500]).lower()
-    text_tokens = {
-        w for w in re.findall(r"[a-z0-9]+", plain_main)
-        if len(w) >= 3 and w not in _generic_match_stops
-    }
-
-    scored: List[Tuple[int, Any]] = []
-    for entry in pack_entries:
+    def _entry_allowed(entry: Any) -> bool:
         forb = [str(s or "").strip().lower() for s in (getattr(entry, "forbidden_on_slugs", None) or [])]
-        if slug and any(f == slug or f in slug for f in forb if f):
-            continue
+        if slug_l and any(f == slug_l or f in slug_l for f in forb if f):
+            return False
         url = str(getattr(entry, "primary_source_url", "") or "").strip()
         if not url.startswith(("http://", "https://")):
-            continue
+            return False
         cit_raw = str(getattr(entry, "citation", "") or "").strip()
         pub_raw = str(getattr(entry, "publisher", "") or "").strip()
         if allowlist and cit_raw:
@@ -6083,10 +6501,9 @@ def _build_porcelain_statutory_sources_html(
                 not any(_citation_matches_allow_item(c_tok, al_item)[0] for al_item in allowlist)
                 for c_tok, _pos in extracted_cits
             ):
-                continue
-            if slug:
+                return False
+            if slug_l:
                 cit_pub_probe = f"{cit_raw} ({pub_raw})"
-                slug_blocked = False
                 for al_item in allowlist:
                     forb_pats = al_item.get("forbidden_slug_patterns") or []
                     if not forb_pats:
@@ -6094,92 +6511,123 @@ def _build_porcelain_statutory_sources_html(
                     if _citation_matches_allow_item(cit_pub_probe, al_item)[0] or any(
                         _citation_matches_allow_item(c_tok, al_item)[0] for c_tok, _pos in extracted_cits
                     ):
-                        if any(re.search(str(fp), slug, re.IGNORECASE) for fp in forb_pats):
-                            slug_blocked = True
-                            break
-                if slug_blocked:
-                    continue
+                        if any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in forb_pats):
+                            return False
                 for c_tok, _pos in extracted_cits:
                     matched_al = [
                         al_item for al_item in allowlist if _citation_matches_allow_item(c_tok, al_item)[0]
                     ]
                     if matched_al and not any(
-                        not any(re.search(str(fp), slug, re.IGNORECASE) for fp in (mi.get("forbidden_slug_patterns") or []))
+                        not any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in (mi.get("forbidden_slug_patterns") or []))
                         and (
                             not (mi.get("allowed_slug_patterns") or [])
-                            or any(re.search(str(ap), slug, re.IGNORECASE) for ap in (mi.get("allowed_slug_patterns") or []))
+                            or any(re.search(str(ap), slug_l, re.IGNORECASE) for ap in (mi.get("allowed_slug_patterns") or []))
                         )
                         for mi in matched_al
                     ):
-                        slug_blocked = True
-                        break
-                if slug_blocked:
-                    continue
-        applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
-        cit_l = cit_raw.lower()
-        key_l = str(getattr(entry, "key", "") or "").lower()
-        cit_tokens = {
-            w for w in re.findall(r"[a-z0-9]+", f"{cit_l} {key_l}")
-            if len(w) >= 3 and w not in _generic_match_stops
-        }
-        score = 0
-        applies_hit = False
-        if applies and slug:
-            if any(a == slug or a in slug or slug in a for a in applies):
-                score += 100
-                applies_hit = True
-            else:
-                continue
-        text_hits = len(text_tokens & cit_tokens)
-        slug_hits = len(slug_tokens & cit_tokens)
-        if not applies_hit and slug_hits == 0 and text_hits == 0:
-            continue
-        score += text_hits * 6
-        score += slug_hits * 10
-        if _is_official_primary_source_url_porcelain(url):
-            score += 20
-        if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
-            score += 10
-        scored.append((score, entry))
+                        return False
+        return True
 
-    scored.sort(key=lambda item: (-item[0], str(getattr(item[1], "key", ""))))
     selected: List[Tuple[str, str, str, int, str]] = []
     seen_urls: Set[str] = set()
-    for _sc, entry in scored:
-        url = str(getattr(entry, "primary_source_url", "") or "").strip()
-        if url in seen_urls or not _is_official_primary_source_url_porcelain(url):
-            continue
+
+    def _add_source(url: str, cit: str, pub: str, ey: int, va: str) -> None:
+        if not url or url in seen_urls or not _is_official_primary_source_url_porcelain(url):
+            return
         seen_urls.add(url)
-        selected.append(
-            (
-                url,
-                str(getattr(entry, "citation", "") or "Primary Statute").strip(),
-                str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip(),
-                int(getattr(entry, "effective_year", 2026) or 2026),
-                str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
-            )
+        selected.append((url, cit, pub, ey, va))
+
+    # (a1) TruthPack explicit applies_to_slugs entries for this exact slug
+    for entry in pack_entries:
+        applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
+        if not applies or not slug_l:
+            continue
+        if not any(a == slug_l or a in slug_l or slug_l in a for a in applies):
+            continue
+        if not _entry_allowed(entry):
+            continue
+        _add_source(
+            str(getattr(entry, "primary_source_url", "") or "").strip(),
+            str(getattr(entry, "citation", "") or "Primary Statute").strip(),
+            str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip(),
+            int(getattr(entry, "effective_year", 2026) or 2026),
+            str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
         )
-        if len(selected) >= 2:
-            break
-    for _sc, entry in scored:
         if len(selected) >= 4:
             break
-        url = str(getattr(entry, "primary_source_url", "") or "").strip()
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        selected.append(
-            (
-                url,
-                str(getattr(entry, "citation", "") or "Primary Source").strip(),
-                str(getattr(entry, "publisher", "") or "Authoritative Standards Body").strip(),
-                int(getattr(entry, "effective_year", 2026) or 2026),
-                str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
-            )
-        )
 
+    # (a2) Explicit slug archetype official primary sources
+    matched_archetype = False
+    if slug_l:
+        for patterns, arch_sources in _ARCHETYPE_OFFICIAL_PRIMARY_SOURCES:
+            if any(pat in slug_l for pat in patterns):
+                matched_archetype = True
+                for src_tuple in arch_sources:
+                    if len(selected) >= 4:
+                        break
+                    _add_source(*src_tuple)
+                break
+
+    # (b) Fallback for non-archetype / future calculators: exact statute code containment in explicit statutory_authority
+    if not matched_archetype and stat_raw and len(selected) < 4:
+        auth_codes = _extract_exact_statute_codes(stat_raw)
+        if auth_codes:
+            scored_exact: List[Tuple[int, Any]] = []
+            for entry in pack_entries:
+                applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
+                if applies and slug_l and not any(a == slug_l or a in slug_l or slug_l in a for a in applies):
+                    continue
+                if not _entry_allowed(entry):
+                    continue
+                cit_raw = str(getattr(entry, "citation", "") or "").strip()
+                cit_codes = _extract_exact_statute_codes(cit_raw)
+                overlap = auth_codes & cit_codes
+                if not overlap:
+                    continue
+                score = len(overlap) * 20
+                if _is_official_primary_source_url_porcelain(str(getattr(entry, "primary_source_url", "") or "").strip()):
+                    score += 20
+                if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
+                    score += 10
+                scored_exact.append((score, entry))
+            scored_exact.sort(key=lambda item: (-item[0], str(getattr(item[1], "key", ""))))
+            for _sc, entry in scored_exact:
+                if len(selected) >= 4:
+                    break
+                _add_source(
+                    str(getattr(entry, "primary_source_url", "") or "").strip(),
+                    str(getattr(entry, "citation", "") or "Primary Statute").strip(),
+                    str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip(),
+                    int(getattr(entry, "effective_year", 2026) or 2026),
+                    str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
+                )
+
+    return selected, statute_eff_date
+
+
+def _build_porcelain_statutory_sources_html(
+    profile: Dict[str, Any],
+    rel_path: str,
+    inner_main: str,
+    statutory_authority: str = "",
+) -> str:
+    """Builds SSR Statutory Sources & Formula Verification + Statutory Changelog cards from TruthPack."""
+    prop = str(profile.get("property_id") or "").strip().lower()
+    slug = re.sub(r"(?:^|/)index\.html$", "", str(rel_path or "").strip().lstrip("/")).split("/")[-1].lower()
+    explicit_auth = str(statutory_authority or "").strip()
+    if not explicit_auth:
+        explicit_auth = _extract_explicit_statutory_authority_from_html(inner_main)
+
+    selected, statute_eff_date = resolve_statutory_sources_for_calculator(
+        property_id=prop,
+        slug=slug,
+        statutory_authority=explicit_auth,
+    )
     if not selected:
         return ""
+
+    h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", inner_main or "", flags=re.IGNORECASE)
+    topic_label = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip() if h1_m else slug.replace("-", " ").title()
 
     items_html = "\n".join(
         f'        <li><a href="{html_lib.escape(u, quote=True)}" rel="noopener" target="_blank" class="touch-target">{html_lib.escape(cit)} ({html_lib.escape(pub)})</a></li>'
@@ -6367,7 +6815,13 @@ def normalize_html_to_porcelain_shell(
         inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile, body_attrs=body_attrs)
         inner_main = _convert_preset_anchors_to_hash_buttons(inner_main)
         if 'class="statutory-sources' not in inner_main and "class='statutory-sources" not in inner_main:
-            stat_block = _build_porcelain_statutory_sources_html(profile, rel_path, inner_main)
+            explicit_stat_auth = _extract_explicit_statutory_authority_from_html(body_no_style)
+            stat_block = _build_porcelain_statutory_sources_html(
+                profile,
+                rel_path,
+                inner_main,
+                statutory_authority=explicit_stat_auth,
+            )
             if stat_block:
                 faq_pos = inner_main.find('class="faq-section')
                 if faq_pos != -1:

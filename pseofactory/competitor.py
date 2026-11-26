@@ -8672,7 +8672,7 @@ def filter_rankable_tool_keywords(
         tp_raw = row.get("traffic_potential")
         traffic_potential = int(float(tp_raw)) if tp_raw is not None else vol
         traffic = int(float(row.get("traffic", 0) or 0))
-        kd = float(row.get("kd", 25.0) or 25.0)
+        kd = float(row["kd"]) if row.get("kd") is not None else 25.0
         tool_top10 = int(float(row.get("tool_results_in_top10", 3) or 0))
         avg_dr = float(row.get("avg_top10_dr", 50.0) or 50.0)
         dom_fmt = str(row.get("serp_dominant_format") or "interactive_tool").strip().lower()

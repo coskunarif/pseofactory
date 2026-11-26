@@ -374,9 +374,12 @@ def test_live_profithelm_spoke_collapse_redirects_and_truthgate(tmp_path: Path) 
     assert all_rules.get("/tools/irs-interest-calculator-2027/") == "/tools/irs-interest-calculator/"
     assert all_rules.get("/tools/capital-gains-tax-rate-2021-calculator/") == "/tools/capital-gains-calculator/"
     assert all_rules.get("/tools/1031-exchange-capital-gains-calculator/") == "/tools/section-1031-calculator/"
-    assert all_rules.get("/tools/irs-2027-tax-brackets/california/") == "/tools/irs-tax-brackets/"
-    assert all_rules.get("/tools/section-1031-calculator/california/") == "/tools/section-1031-calculator/"
-    assert all_rules.get("/tools/section-179-calculator/cadillac-escalade-esv/") == "/tools/section-179-calculator/"
+    assert all_rules.get("/tools/irs-2027-tax-brackets/*") == "/tools/irs-tax-brackets/"
+    assert all_rules.get("/tools/section-1031-calculator/*") == "/tools/section-1031-calculator/"
+    assert all_rules.get("/tools/section-179-calculator/*") == "/tools/section-179-calculator/"
+    # Verify 0 two-hop chains in _redirects
+    for src, dst in all_rules.items():
+        assert dst not in all_rules, f"2-hop chain in _redirects: {src} -> {dst}"
 
     # 4. Verify edgeGone in functions/_middleware.js handles the 4 off-vertical / cross-tenant pages with 410
     mw_txt = (tmp_path / "functions" / "_middleware.js").read_text(encoding="utf-8")

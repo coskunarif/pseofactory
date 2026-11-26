@@ -87,6 +87,33 @@ def test_stage_2_http_transport_redirects_and_404s(tmp_path):
     rec_rule = engine_dist.inspect_url("https://profithelm.com/legacy-calc/")
     assert rec_rule.status == PreflightStatus.BLOCKED_REDIRECT
 
+    # Wildcard /* rule must only match child subpaths, never the canonical parent route itself
+    (dist_dir / "_redirects").write_text(
+        "/legacy-calc /tools/calc/ 301\n"
+        "/tools/section-1031-calculator/* /tools/section-1031-calculator/ 301\n",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "section-1031-calculator").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "section-1031-calculator" / "index.html").write_text(
+        "<!doctype html><html lang='en'><head>"
+        "<link rel='canonical' href='https://profithelm.com/tools/section-1031-calculator/' />"
+        "</head><body><h1>1031 Exchange Calculator</h1>"
+        "<aside class='quick-answer'>" + ("Section 1031 like-kind exchange calculation details. " * 30) + "</aside>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+    engine_wc = IndexingPreflightEngine(domain="profithelm.com", dist_dir=dist_dir)
+    assert engine_wc._match_redirect("/tools/section-1031-calculator/") is None
+    assert engine_wc._match_redirect("/tools/section-1031-calculator-v2/") is None
+    assert engine_wc._match_redirect("/tools/section-1031-calculator/california/") == (
+        "/tools/section-1031-calculator/",
+        301,
+    )
+    rec_parent = engine_wc.inspect_url("https://profithelm.com/tools/section-1031-calculator/")
+    assert rec_parent.status == PreflightStatus.PASS
+    rec_child = engine_wc.inspect_url("https://profithelm.com/tools/section-1031-calculator/california/")
+    assert rec_child.status == PreflightStatus.BLOCKED_REDIRECT
+
     # Missing file -> 404
     rec_missing = engine_dist.inspect_url("https://profithelm.com/tools/missing/")
     assert rec_missing.status == PreflightStatus.BLOCKED_404

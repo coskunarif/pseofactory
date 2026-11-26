@@ -11904,6 +11904,23 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 injected_sections.append(faq_section_markup)
 
         if schema_entities:
+            canon_m_ov = re.search(
+                r'<link\b[^>]*rel=["\']canonical["\'][^>]*href=["\']([^"\']+)["\']',
+                html,
+                re.IGNORECASE,
+            ) or re.search(
+                r'<link\b[^>]*href=["\']([^"\']+)["\'][^>]*rel=["\']canonical["\']',
+                html,
+                re.IGNORECASE,
+            )
+            canon_u_ov = (canon_m_ov.group(1) if canon_m_ov else str(overlay_data.get("target_url") or "")).split("#")[0].rstrip("/").lower()
+            is_calc_leaf_ov = (
+                ("/tools/" in canon_u_ov and not canon_u_ov.endswith("/tools"))
+                or 'id="calculation-manifest"' in html
+                or 'class="calculator-form' in html
+                or '"WebApplication"' in html
+                or '"SoftwareApplication"' in html
+            )
             faq_ld_json = {
                 "@context": "https://schema.org",
                 "@type": "FAQPage",
@@ -11938,7 +11955,7 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                         faq_modified = False
                         if faq_node:
                             faq_modified = _merge_overlay_faq_schema_entities(faq_node, schema_entities)
-                        else:
+                        elif not is_calc_leaf_ov:
                             faq_copy = dict(faq_ld_json)
                             faq_copy.pop("@context", None)
                             webpage_node = next((n for n in existing_data["@graph"] if n.get("@type") == "WebPage"), None)
@@ -11957,12 +11974,13 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                             new_script = f'<script type="application/ld+json">\n{json.dumps(existing_data, indent=2)}\n</script>'
                             html = html[: match.start()] + new_script + html[match.end() :]
                 except Exception:
-                    json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
-                    if "</head>" in html:
-                        html = html.replace("</head>", f"{json_ld_script}\n</head>", 1)
-                    else:
-                        injected_sections.append(json_ld_script)
-            else:
+                    if not is_calc_leaf_ov:
+                        json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
+                        if "</head>" in html:
+                            html = html.replace("</head>", f"{json_ld_script}\n</head>", 1)
+                        else:
+                            injected_sections.append(json_ld_script)
+            elif not is_calc_leaf_ov:
                 json_ld_script = f'<script type="application/ld+json">\n{json.dumps(faq_ld_json, indent=2)}\n</script>'
                 if "</head>" in html:
                     html = html.replace("</head>", f"{json_ld_script}\n</head>", 1)

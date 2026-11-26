@@ -228,6 +228,7 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
         "</head><body>"
         '<h1 id="calc-section">SOC 2 Type II Audit Cost &amp; Readiness Calculator</h1>'
         '<a href="/">Home</a>'
+        '<a href="https://www.bls.gov/oes/current/oes151212.htm" rel="noopener" target="_blank">BLS OEWS SOC 15-1212</a>'
         '<a href="/r/vanta_security" rel="noopener sponsored nofollow" target="_blank">Vanta</a>'
         '<form id="gh-soc2-form" class="calculator-form">'
         '<input type="number" id="calc-input-cpa_fee" name="cpa_fee" value="37000">'

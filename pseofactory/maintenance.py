@@ -8452,18 +8452,15 @@ def _normalize_page_structure_and_geo_parity(
                 updated = synced_ld
                 changed = True
 
-    if slug == "tools-directory" or ('"WebApplication"' in updated and '"priceCurrency"' not in updated):
+    if '"WebApplication"' in updated and '"priceCurrency"' not in updated:
         def _inject_tools_directory_webapp_ld(match: re.Match) -> str:
             open_t, raw_j, close_t = match.group(1), match.group(2), match.group(3)
             try:
                 data = json.loads(raw_j.strip())
                 if isinstance(data, dict) and "@graph" in data and isinstance(data["@graph"], list):
-                    base_u = (canonical_url or "https://profithelm.com/tools/").split("#")[0]
                     modified_graph = False
-                    has_webapp = False
                     for node in data["@graph"]:
                         if isinstance(node, dict) and node.get("@type") in ("WebApplication", "SoftwareApplication"):
-                            has_webapp = True
                             if "offers" not in node:
                                 node["offers"] = {
                                     "@type": "Offer",
@@ -8471,23 +8468,6 @@ def _normalize_page_structure_and_geo_parity(
                                     "priceCurrency": "USD",
                                 }
                                 modified_graph = True
-                    if not has_webapp and slug == "tools-directory" and "FAQPage" not in updated:
-                        data["@graph"].append(
-                            {
-                                "@type": "WebApplication",
-                                "@id": f"{base_u}#webapplication",
-                                "name": f"{topic_label}",
-                                "url": base_u,
-                                "applicationCategory": "FinanceApplication",
-                                "operatingSystem": "All",
-                                "offers": {
-                                    "@type": "Offer",
-                                    "price": "0",
-                                    "priceCurrency": "USD",
-                                },
-                            }
-                        )
-                        modified_graph = True
                     if modified_graph:
                         return f"{open_t}\n{json.dumps(data, indent=2)}\n  {close_t}"
             except Exception:
@@ -11525,8 +11505,6 @@ class RetroReflectionEngine:
                     and "/tools/student-loan-forgiveness/" not in cluster_body
                 )
             )
-            or (spoke_state and f"/{spoke_state}/" not in cluster_body)
-            or (spoke_vehicle_m and cluster_body.count("/tools/section-179-calculator/") < 6)
         ):
             missing.append("three_tier_topic_cluster_nav")
 
@@ -12847,6 +12825,31 @@ class RetroReflectionEngine:
                 f'    </section>'
             )
             repaired.append("multi_dataset_join")
+
+        if (
+            not is_non_tool_or_governance_route(slug)
+            and 'class="statutory-sources' not in updated
+            and "class='statutory-sources" not in updated
+        ):
+            from pseofactory.truth_gate import _is_official_primary_source_href
+
+            has_official_src = any(
+                _is_official_primary_source_href(href_m.group(1))
+                for href_m in re.finditer(r'<a\b[^>]*\bhref=["\']([^"\']+)["\']', updated, re.IGNORECASE)
+            )
+            if not has_official_src:
+                from pseofactory.compiler import _build_statutory_sources_and_changelog_html
+
+                stat_src_html = _build_statutory_sources_and_changelog_html(
+                    property_id=property_id,
+                    slug=slug,
+                    statutory_authority=stat_auth,
+                    topic_label=topic_label,
+                )
+                if stat_src_html:
+                    injected_parts.append(stat_src_html)
+                    if "statutory_truth_reconciliation" not in repaired:
+                        repaired.append("statutory_truth_reconciliation")
 
         if "deep_link_scenario_presets" in missing:
             presets = [

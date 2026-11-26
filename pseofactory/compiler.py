@@ -1729,7 +1729,7 @@ def _resolve_iso_dates_with_tz(
 
 
 def _is_official_primary_source_url(url: str) -> bool:
-    """Returns True when URL points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org host."""
+    """Returns True when URL points to an official .gov, .mil, state .us legislature, eur-lex.europa.eu, or pcisecuritystandards.org host."""
     import urllib.parse
 
     raw = str(url or "").strip()
@@ -1744,10 +1744,14 @@ def _is_official_primary_source_url(url: str) -> bool:
     return (
         host.endswith(".gov")
         or host.endswith(".mil")
+        or host == "leg.state.fl.us"
+        or bool(re.search(r"(?:^|\.)state\.[a-z]{2}\.us$", host))
         or host == "eur-lex.europa.eu"
         or host.endswith(".eur-lex.europa.eu")
         or host == "pcisecuritystandards.org"
         or host.endswith(".pcisecuritystandards.org")
+        or host == "fred.stlouisfed.org"
+        or host.endswith(".fred.stlouisfed.org")
     )
 
 
@@ -1759,227 +1763,20 @@ def _build_statutory_sources_and_changelog_html(
 ) -> str:
     """
     Renders mandatory SSR 'Statutory Sources & Formula Verification' block with live outbound
-    TruthPack primary_source_url links and a concise 2-4 bullet 'Statutory Changelog' from
-    TruthPack effective_year / verified_at / statute_effective_date.
+    official primary-source links and a concise 'Statutory Changelog' using strict deterministic
+    slug-archetype / exact-statute matching (zero loose prose token leakage).
     Zero em-dashes. Zero en-dashes.
     """
     import html as html_lib
+    from pseofactory.porcelain_shell import resolve_statutory_sources_for_calculator
 
     pid = str(property_id or "").strip().lower()
     slug_l = str(slug or "").strip().lower()
-    stat_l = str(statutory_authority or "").strip().lower()
-    _generic_match_stops = frozenset({
-        "cost", "costs", "compliance", "calculator", "calculators", "risk", "rate", "rates",
-        "tax", "taxes", "penalty", "penalties", "audit", "audits", "score", "scores",
-        "benchmark", "benchmarks", "enterprise", "market", "series", "dataset", "model",
-        "fee", "fees", "type", "usd", "2024", "2025", "2026", "2027", "section", "part",
-        "title", "act", "code", "rule", "rules", "federal", "state", "firm", "range",
-        "gainhelm", "prexvo", "profithelm", "lienbond", "and", "the", "for", "with",
-        "annual", "total", "estimate", "estimator", "planner", "comparison", "tool",
-        "third", "party", "ict",
-    })
-    stat_tokens = {
-        w for w in re.findall(r"[a-z0-9]+", stat_l)
-        if len(w) >= 3 and w not in _generic_match_stops
-    }
-    slug_tokens = {
-        w for w in re.findall(r"[a-z0-9]+", slug_l)
-        if len(w) >= 3 and w not in _generic_match_stops
-    }
-
-    pack_entries: List[Any] = []
-    statute_eff_date = ""
-    allowlist: List[Dict[str, Any]] = []
-    try:
-        from pseofactory.truth_pack import load_truth_pack
-        from pseofactory.truth_gate import (
-            _citation_matches_allow_item,
-            _extract_citations,
-            _normalize_citations_allowlist,
-        )
-
-        tp = load_truth_pack(pid, allow_expired=True)
-        statute_eff_date = str(getattr(tp, "statute_effective_date", "") or "").strip()
-        pack_entries = list((getattr(tp, "entries", {}) or {}).values())
-        tp_dict = tp.to_dict() if hasattr(tp, "to_dict") else {}
-        if isinstance(tp_dict, dict):
-            allowlist = _normalize_citations_allowlist(tp_dict)
-    except Exception:
-        pack_entries = []
-
-    scored: List[Tuple[int, Any]] = []
-    for entry in pack_entries:
-        forb = [str(s or "").strip().lower() for s in (getattr(entry, "forbidden_on_slugs", None) or [])]
-        if slug_l and any(f == slug_l or f in slug_l for f in forb if f):
-            continue
-        url = str(getattr(entry, "primary_source_url", "") or "").strip()
-        if not url.startswith(("http://", "https://")):
-            continue
-        cit_raw = str(getattr(entry, "citation", "") or "").strip()
-        pub_raw = str(getattr(entry, "publisher", "") or "").strip()
-        if allowlist and cit_raw:
-            extracted_cits = _extract_citations(cit_raw)
-            if extracted_cits and any(
-                not any(_citation_matches_allow_item(c_tok, al_item)[0] for al_item in allowlist)
-                for c_tok, _pos in extracted_cits
-            ):
-                continue
-            if slug_l:
-                cit_pub_probe = f"{cit_raw} ({pub_raw})"
-                slug_blocked = False
-                for al_item in allowlist:
-                    forb_pats = al_item.get("forbidden_slug_patterns") or []
-                    if not forb_pats:
-                        continue
-                    if _citation_matches_allow_item(cit_pub_probe, al_item)[0] or any(
-                        _citation_matches_allow_item(c_tok, al_item)[0] for c_tok, _pos in extracted_cits
-                    ):
-                        if any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in forb_pats):
-                            slug_blocked = True
-                            break
-                if slug_blocked:
-                    continue
-                for c_tok, _pos in extracted_cits:
-                    matched_al = [
-                        al_item for al_item in allowlist if _citation_matches_allow_item(c_tok, al_item)[0]
-                    ]
-                    if matched_al and not any(
-                        not any(re.search(str(fp), slug_l, re.IGNORECASE) for fp in (mi.get("forbidden_slug_patterns") or []))
-                        and (
-                            not (mi.get("allowed_slug_patterns") or [])
-                            or any(re.search(str(ap), slug_l, re.IGNORECASE) for ap in (mi.get("allowed_slug_patterns") or []))
-                        )
-                        for mi in matched_al
-                    ):
-                        slug_blocked = True
-                        break
-                if slug_blocked:
-                    continue
-        applies = [str(s or "").strip().lower() for s in (getattr(entry, "applies_to_slugs", None) or []) if str(s or "").strip()]
-        cit_l = cit_raw.lower()
-        key_l = str(getattr(entry, "key", "") or "").lower()
-        cit_tokens = set(re.findall(r"[a-z0-9]+", f"{cit_l} {key_l}"))
-        score = 0
-        applies_hit = False
-        if applies and slug_l:
-            if any(a == slug_l or a in slug_l or slug_l in a for a in applies):
-                score += 100
-                applies_hit = True
-            else:
-                continue
-        stat_hits = len(stat_tokens & cit_tokens)
-        slug_hits = len(slug_tokens & cit_tokens)
-        if not applies_hit and stat_hits == 0 and slug_hits == 0:
-            continue
-        score += stat_hits * 12
-        score += slug_hits * 8
-        if _is_official_primary_source_url(url):
-            score += 20
-        if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
-            score += 10
-        eff_year_val = int(getattr(entry, "effective_year", 2026) or 2026)
-        if eff_year_val >= 2026:
-            score += 15
-        scored.append((score, entry))
-
-    scored.sort(
-        key=lambda item: (
-            -item[0],
-            -int(getattr(item[1], "effective_year", 2026) or 2026),
-            str(getattr(item[1], "key", "")),
-        )
+    selected_links, statute_eff_date = resolve_statutory_sources_for_calculator(
+        property_id=pid,
+        slug=slug_l,
+        statutory_authority=str(statutory_authority or "").strip(),
     )
-
-    selected_links: List[Tuple[str, str, str, int, str]] = []
-    seen_urls: Set[str] = set()
-    # Guarantee at least one official primary-source URL appears if available
-    for _sc, entry in scored:
-        url = str(getattr(entry, "primary_source_url", "") or "").strip()
-        if url in seen_urls or not _is_official_primary_source_url(url):
-            continue
-        seen_urls.add(url)
-        cit = str(getattr(entry, "citation", "") or statutory_authority or "Primary Statute").strip()
-        pub = str(getattr(entry, "publisher", "") or "Official Regulatory Authority").strip()
-        eff_y = int(getattr(entry, "effective_year", 2026) or 2026)
-        ver_at = str(getattr(entry, "verified_at", "") or "2026-11-24").strip()
-        selected_links.append((url, cit, pub, eff_y, ver_at))
-        if len(selected_links) >= 2:
-            break
-    for _sc, entry in scored:
-        if len(selected_links) >= 4:
-            break
-        url = str(getattr(entry, "primary_source_url", "") or "").strip()
-        if url in seen_urls:
-            continue
-        seen_urls.add(url)
-        cit = str(getattr(entry, "citation", "") or statutory_authority or "Primary Source").strip()
-        pub = str(getattr(entry, "publisher", "") or "Authoritative Standards Body").strip()
-        eff_y = int(getattr(entry, "effective_year", 2026) or 2026)
-        ver_at = str(getattr(entry, "verified_at", "") or "2026-11-24").strip()
-        selected_links.append((url, cit, pub, eff_y, ver_at))
-
-    if not any(_is_official_primary_source_url(u) for u, _c, _p, _ey, _va in selected_links):
-        if any(tok in slug_l for tok in ("workers-comp", "workers-compensation", "emr", "class-code")):
-            selected_links.append(
-                (
-                    "https://www.dol.gov/agencies/owcp",
-                    "U.S. Department of Labor Workers' Compensation Programs (OWCP)",
-                    "U.S. Department of Labor",
-                    2026,
-                    "2026-11-24",
-                )
-            )
-            if len(selected_links) < 4:
-                selected_links.append(
-                    (
-                        "https://www.bls.gov/ecec/",
-                        "BLS Employer Costs for Employee Compensation (ECEC)",
-                        "U.S. Bureau of Labor Statistics",
-                        2026,
-                        "2026-11-24",
-                    )
-                )
-        elif "surety" in slug_l or "surety" in stat_l or "9304" in stat_l:
-            selected_links.append(
-                (
-                    "https://www.fiscal.treasury.gov/surety-bonds/",
-                    "31 U.S.C. Section 9304 & Treasury Circular 570 (Surety Bonds)",
-                    "U.S. Department of the Treasury",
-                    2026,
-                    "2026-11-24",
-                )
-            )
-        elif "section-301" in slug_l or "2411" in stat_l or "19 cfr" in stat_l:
-            selected_links.append(
-                (
-                    "https://ustr.gov/issue-areas/enforcement/section-301-investigations/tariff-actions",
-                    "19 U.S.C. Section 2411 (Trade Act Section 301 Tariff Actions)",
-                    "Office of the United States Trade Representative",
-                    2026,
-                    "2026-11-24",
-                )
-            )
-        elif "invoice-factoring" in slug_l or "1026" in stat_l or "section 163" in stat_l:
-            selected_links.append(
-                (
-                    "https://www.ecfr.gov/current/title-12/chapter-X/part-1026",
-                    "12 CFR Part 1026 & IRC Section 163(j) Business Credit Standards",
-                    "U.S. Government Publishing Office (eCFR)",
-                    2026,
-                    "2026-11-24",
-                )
-            )
-        elif "r-and-d" in slug_l or "section 174" in stat_l or "section 41" in stat_l:
-            selected_links.append(
-                (
-                    "https://www.irs.gov/forms-pubs/about-form-6765",
-                    "IRC Section 41 & IRS Form 6765 Research Credit Instructions",
-                    "Internal Revenue Service",
-                    2026,
-                    "2026-11-24",
-                )
-            )
-
     if not selected_links:
         return ""
 

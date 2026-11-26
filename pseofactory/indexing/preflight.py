@@ -355,8 +355,8 @@ class IndexingPreflightEngine:
             if from_norm == norm_path:
                 return (to_p, code)
             if from_p.endswith("/*"):
-                prefix = from_p[:-2]
-                if norm_path.startswith(prefix):
+                prefix = from_p[:-1]
+                if norm_path.startswith(prefix) and norm_path.rstrip("/") != to_p.rstrip("/"):
                     remainder = norm_path[len(prefix):]
                     target = to_p.replace(":splat", remainder.lstrip("/"))
                     return (target, code)

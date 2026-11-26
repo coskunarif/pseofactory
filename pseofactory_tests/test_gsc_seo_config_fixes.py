@@ -1078,7 +1078,13 @@ def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across
     for hp in sorted(gh_dist.rglob("*.html")):
         txt = hp.read_text(encoding="utf-8")
         assert "LocalBusiness" not in txt, f"LocalBusiness leaked in {hp.name}"
-        assert '"Organization"' in txt, f"Organization missing in {hp.name}"
+        if hp.relative_to(gh_dist).as_posix() in ("index.html", "about/index.html"):
+            assert '"Organization"' in txt, f"Organization missing in {hp.name}"
+        elif hp.name == "404.html":
+            assert '"Organization"' not in txt
+            assert '"WebPage"' in txt
+        else:
+            assert "https://gainhelm.com/#organization" in txt, f"#organization reference missing in {hp.name}"
     gh_tools_html = (gh_dist / "tools" / "index.html").read_text(encoding="utf-8")
     assert '"CollectionPage"' in gh_tools_html and '"ItemList"' in gh_tools_html
 
@@ -1087,7 +1093,7 @@ def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across
     compiler.compile_lienbond_estate(lb_repo, run_retrofit=True)
     lb_tools_html = (lb_repo / "dist" / "tools" / "index.html").read_text(encoding="utf-8")
     assert "LocalBusiness" not in lb_tools_html
-    assert '"Organization"' in lb_tools_html
+    assert "https://lienbond.com/#organization" in lb_tools_html
     m_lb_ld = re.search(
         r'<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
         lb_tools_html,
@@ -1197,7 +1203,12 @@ def test_schema_standardization_no_localbusiness_and_tools_collectionpage_across
             )
             assert "LocalBusiness" not in p1, f"LocalBusiness survived on {prop_id}/{rel_p}"
             assert "#localbusiness" not in p1.lower(), f"#localbusiness survived on {prop_id}/{rel_p}"
-            assert '"Organization"' in p1, f"Organization missing on {prop_id}/{rel_p}"
+            if rel_p == "index.html":
+                assert '"Organization"' in p1, f"Organization missing on {prop_id}/{rel_p}"
+            else:
+                assert f"{canon_base}/#organization" in p1 or '"Organization"' in p1, (
+                    f"Organization reference missing on {prop_id}/{rel_p}"
+                )
             if rel_p == "tools/index.html":
                 assert '"CollectionPage"' in p1 and '"ItemList"' in p1, (
                     f"CollectionPage/ItemList missing on {prop_id}/{rel_p}"

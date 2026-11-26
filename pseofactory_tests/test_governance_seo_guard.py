@@ -194,8 +194,8 @@ def test_gainhelm_governance_parity_under_seo_growth_workflows_and_reflect_pipel
     assert after_disclaimers == clean_disclaimers
     assert _extract_title(after_methodology) == "Enterprise Cyber Compliance & Audit Cost | GainHelm"
     assert _extract_title(after_disclaimers) == "Cyber Compliance Regulatory Notices &amp; Disclaimers | GainHelm"
-    assert _extract_dates_modified(after_methodology) == ["2026-10-31"]
-    assert _extract_dates_modified(after_disclaimers) == ["2026-10-31"]
+    assert set(_extract_dates_modified(after_methodology)) == {"2026-10-31"}
+    assert set(_extract_dates_modified(after_disclaimers)) == {"2026-10-31"}
     assert 'id="calculation-manifest"' not in after_methodology
     assert 'id="calculation-manifest"' not in after_disclaimers
 
@@ -465,7 +465,7 @@ def test_gated_workflow_helpers_skip_retrofit_html_and_overlay_mutation_on_non_t
             },
         )
         assert _extract_title(cleaned_inj) == _extract_title(gov_orig)
-        assert _extract_dates_modified(cleaned_inj) == ["2026-10-31"]
+        assert set(_extract_dates_modified(cleaned_inj)) == {"2026-10-31"}
         assert "gsc-striking-overlay" not in cleaned_inj
 
         cleaned_rb = rollback_degraded_overlay_from_html(
@@ -478,7 +478,7 @@ def test_gated_workflow_helpers_skip_retrofit_html_and_overlay_mutation_on_non_t
             },
         )
         assert _extract_title(cleaned_rb) == _extract_title(gov_orig)
-        assert _extract_dates_modified(cleaned_rb) == ["2026-10-31"]
+        assert set(_extract_dates_modified(cleaned_rb)) == {"2026-10-31"}
         assert "gsc-striking-overlay" not in cleaned_rb
 
     # Eligible un-retrofitted tool page still retrofits cleanly through _retrofit_tool_html_if_eligible

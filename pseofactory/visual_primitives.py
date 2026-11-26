@@ -7330,12 +7330,43 @@ def _sync_three_step_funnel_on_calculator_pages(updated: str) -> Tuple[str, List
     except ValueError:
         baseline_amt = None
 
-    stat_m = re.search(
-        r'data-statutory-authority=["\']([^"\']+)["\']|((?:IRC\s+(?:Section|§)\s*[0-9A-Za-z\(\)]+|34\s+CFR\s+Part\s+\d+|40\s+U\.S\.C\.\s+\d+))',
+    stat_auth = ""
+    manifest_m = re.search(
+        r'<script\b[^>]*(?:id=["\']calculation-manifest["\']|class=["\'][^"\']*\bcalculation-manifest\b[^"\']*["\'])[^>]*>([\s\S]*?)</script>',
         updated,
         re.IGNORECASE,
     )
-    stat_auth = _vp_html.unescape(((stat_m.group(1) or stat_m.group(2)) if stat_m else "").strip())
+    if manifest_m:
+        try:
+            manifest_obj = json.loads((manifest_m.group(1) or "").strip())
+            if isinstance(manifest_obj, dict):
+                stat_auth = str(
+                    manifest_obj.get("statutory_authority")
+                    or manifest_obj.get("statutory_provenance")
+                    or manifest_obj.get("authority")
+                    or ""
+                ).strip()
+        except Exception:
+            stat_auth = ""
+    if not stat_auth:
+        visible_for_stat = re.sub(
+            r"<(script|style|nav|footer)\b[^>]*>[\s\S]*?</\1>",
+            " ",
+            updated,
+            flags=re.IGNORECASE,
+        )
+        visible_for_stat = re.sub(
+            r'<section\b[^>]*\bthree-tier-cluster-section\b[^>]*>[\s\S]*?</section>',
+            " ",
+            visible_for_stat,
+            flags=re.IGNORECASE,
+        )
+        stat_m = re.search(
+            r'data-statutory-authority=["\']([^"\']+)["\']|((?:IRC\s+(?:Section|§)\s*[0-9A-Za-z\(\)]+|34\s+CFR\s+Part\s+\d+|40\s+U\.S\.C\.\s+\d+))',
+            visible_for_stat,
+            re.IGNORECASE,
+        )
+        stat_auth = _vp_html.unescape(((stat_m.group(1) or stat_m.group(2)) if stat_m else "").strip())
 
     if 'id="btn-preview-workpaper"' not in updated and "id='btn-preview-workpaper'" not in updated:
         step1_html = build_step1_preview_controls_html(

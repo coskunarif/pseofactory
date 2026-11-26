@@ -300,11 +300,11 @@ def test_gainhelm_calculator_syncs_url_state_on_input_and_preset() -> None:
         synced_url = page.url
         page.goto(synced_url, wait_until="load")
         assert page.locator("#calc-input-headcount").input_value() == "150"
-        # Preset click also updates URL
+        # Preset click also updates URL hash state (never query string)
         preset = page.locator(".calc-switcher-btn").nth(1)
         if preset.count() > 0:
             preset.click()
-            assert "?" in page.url and "headcount=" in page.url
+            assert "?" not in page.url and "#" in page.url and "headcount=" in page.url
         browser.close()
 
 
@@ -614,9 +614,9 @@ def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
             hc.dispatchEvent(new Event("input", {bubbles: true}));
             const elapsedMs = Date.now() - startTs;
             const immediateCalls = callTs.length;
-            const immediateUrl = window.location.search;
+            const immediateUrl = window.location.hash;
             // Fire popstate while trailing debounce is queued; stale queued write must be canceled
-            orig(null, "", window.location.pathname + "?headcount=999");
+            orig(null, "", window.location.pathname + "#headcount=999");
             window.dispatchEvent(new PopStateEvent("popstate"));
             return new Promise(resolve => setTimeout(() => {
                 resolve({
@@ -625,7 +625,7 @@ def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
                     immediateCalls,
                     totalCalls: callTs.length,
                     immediateUrl,
-                    finalUrl: window.location.search,
+                    finalUrl: window.location.hash,
                 });
             }, 220));
         }""")
@@ -643,7 +643,7 @@ def test_gainhelm_url_sync_throttles_burst_and_cancels_on_popstate() -> None:
     assert res["totalCalls"] == res["immediateCalls"], (
         f"Expected popstate to cancel trailing replaceState, got {res['totalCalls']} vs {res['immediateCalls']}"
     )
-    assert res["finalUrl"] == "?headcount=999", f"Stale queued replaceState overwrote popstate URL: {res['finalUrl']}"
+    assert res["finalUrl"] == "#headcount=999", f"Stale queued replaceState overwrote popstate URL: {res['finalUrl']}"
 
 
 

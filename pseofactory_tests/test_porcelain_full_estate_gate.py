@@ -885,8 +885,19 @@ def test_pseofactory_cli_pipeline_audit_does_not_silently_cap_to_8(
                 "status": self.status,
             }
 
+    from pseofactory.truth_gate import TruthGateReport, UnifiedTruthGate
+
     monkeypatch.setattr(pseo_cli, "audit_property_assets", lambda **kw: _PassReport())
     monkeypatch.setattr(pseo_cli, "_run_seo_fix_checklist_gate", lambda prop_id, as_json: True)
+    monkeypatch.setattr(
+        UnifiedTruthGate,
+        "audit_estate",
+        lambda self, *a, **kw: TruthGateReport(
+            property_id="profithelm",
+            violations=[],
+            files_audited=["index.html"],
+        ),
+    )
 
     args = argparse.Namespace(
         property="profithelm",

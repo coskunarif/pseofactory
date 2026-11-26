@@ -771,5 +771,32 @@ console.log('HASH_AND_PRESET_OK');
     assert "HASH_AND_PRESET_OK" in proc.stdout
 
 
+def test_workpaper_statutory_authority_ignores_scripts_and_cross_links():
+    """
+    Verifies normalize_html_visual_primitives reads #calculation-manifest statutory_authority first
+    and ignores <script>, <style>, <nav>, and cluster cross-links so IRC Section 179 does not leak
+    onto unrelated tools.
+    """
+    html_doc = """<!DOCTYPE html><html lang="en" data-theme="porcelain"><head><title>SaaS Runway Calculator</title>
+    <link rel="canonical" href="https://profithelm.com/tools/saas-runway-calculator/">
+    <script>var related = "IRC Section 179 heavy SUV";</script>
+    <style>/* IRC Section 179 */</style>
+    </head><body><main class="container">
+    <h1>SaaS Runway Calculator</h1>
+    <div class="calc-grid">
+      <div class="result-box"><div class="output-value">$240,000</div></div>
+    </div>
+    <section class="three-tier-cluster-section card pseo-card">
+      <a href="/tools/section-179-calculator/">IRC Section 179 Equipment Calculator</a>
+    </section>
+    <script type="application/json" id="calculation-manifest" class="calculation-manifest">
+    {"manifest_id":"saas-runway-manifest","slug":"saas-runway-calculator","model_name":"SaaS Runway Model","statutory_authority":"ASC 606 Revenue Recognition and GAAP Cash Burn","economic_dataset":"BVP Cloud Index","formula":"cash / burn","inputs":{"cash":240000,"burn":20000},"published_output":12.0}
+    </script>
+    </main></body></html>"""
+    healed, _ = normalize_html_visual_primitives(html_doc, is_tenant_porcelain=True)
+    assert "IRC Section 179" not in healed.split("id=\"workpaper-unlock-card\"")[1].split("</section>")[0]
+    assert "ASC 606 Revenue Recognition and GAAP Cash Burn" in healed
+
+
 
 

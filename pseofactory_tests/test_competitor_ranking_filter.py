@@ -118,3 +118,41 @@ def test_filter_rankable_tool_keywords_strict_gates_and_traffic_potential_sort()
         "fallback volume calculator",
         "section 1031 boot calculator",
     ]
+
+
+def test_filter_rankable_tool_keywords_preserves_kd_zero() -> None:
+    """Explicit kd=0 must remain 0.0 and never be coerced to default 25.0."""
+    rows = [
+        {
+            "keyword": "zero kd tax calculator",
+            "position": 3,
+            "volume": 5000,
+            "traffic_potential": 6000,
+            "kd": 0,
+            "lowest_dr": 10.0,
+            "input_count": 4,
+            "tool_results_in_top10": 5,
+        },
+        {
+            "keyword": "missing kd tax calculator",
+            "position": 3,
+            "volume": 5000,
+            "traffic_potential": 6000,
+            # kd omitted -> defaults to 25.0, which exceeds kd_ceiling = 15.0
+            "lowest_dr": 10.0,
+            "input_count": 4,
+            "tool_results_in_top10": 5,
+        },
+    ]
+    res = filter_rankable_tool_keywords(
+        rows,
+        tenant_id="profithelm",
+        tenant_dr=10.0,
+        max_kd_delta=5.0,
+    )
+    assert res["kd_ceiling"] == 15.0
+    assert res["surviving_count"] == 1
+    assert res["surviving_keywords"][0]["keyword"] == "zero kd tax calculator"
+    assert res["surviving_keywords"][0]["kd"] == 0.0
+    assert res["dropped_count"] == 1
+    assert res["dropped_keywords"][0]["keyword"] == "missing kd tax calculator"

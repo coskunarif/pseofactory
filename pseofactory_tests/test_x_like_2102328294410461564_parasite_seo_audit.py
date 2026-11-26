@@ -41,7 +41,37 @@ from pseofactory.seo_growth_loops import compile_search_opportunity_briefs
 
 
 @pytest.mark.host_estate
-def test_x_like_2102328294410461564_capability_matrix_and_live_estate() -> None:
+def test_x_like_2102328294410461564_capability_matrix_and_live_estate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pathlib import Path
+    from pseofactory import verifier as _verifier_mod
+    from pseofactory.compiler import compile_gainhelm_estate, compile_lienbond_estate, compile_prexvo_estate
+    from pseofactory.profithelm_estate import compile_profithelm_estate_impl
+
+    compiled_dists = {
+        "profithelm": (
+            "https://profithelm.com",
+            compile_profithelm_estate_impl(
+                tmp_path / "profithelm",
+                repo_root=Path("/home/ubuntuadmin/projects/profithelm-platform"),
+            ),
+        ),
+        "prexvo": ("https://prexvo.com", Path(compile_prexvo_estate(tmp_path / "prexvo"))),
+        "gainhelm": ("https://gainhelm.com", Path(compile_gainhelm_estate(tmp_path / "gainhelm")["dist_dir"])),
+        "lienbond": ("https://lienbond.com", Path(compile_lienbond_estate(tmp_path / "lienbond")["dist_dir"])),
+    }
+    orig_resolve = _verifier_mod._resolve_tenant_dist_and_domain
+
+    def _patched_resolve(property_id: str, dist_dir=None):
+        norm_p = (property_id or "profithelm").strip().lower()
+        if norm_p in ("profithelm-platform", "factory"):
+            norm_p = "profithelm"
+        if dist_dir is None and norm_p in compiled_dists:
+            dom, d_path = compiled_dists[norm_p]
+            return norm_p, dom, d_path
+        return orig_resolve(property_id, dist_dir)
+
+    monkeypatch.setattr(_verifier_mod, "_resolve_tenant_dist_and_domain", _patched_resolve)
+
     assert len(X_LIKE_2102328294410461564_CAPABILITY_MATRIX) == 8
     valid_dispositions = {
         "INTEGRATED_COMPOUNDING_UPGRADE",

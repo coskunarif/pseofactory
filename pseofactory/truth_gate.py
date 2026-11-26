@@ -3399,7 +3399,7 @@ def _extract_offer_prices(node: Any, prices: List[Tuple[float, str]]) -> None:
 
 
 def _is_official_primary_source_href(href: str) -> bool:
-    """Returns True when href points to an official .gov, .mil, eur-lex.europa.eu, or pcisecuritystandards.org URL."""
+    """Returns True when href points to an official .gov, .mil, state .us legislature, eur-lex.europa.eu, or pcisecuritystandards.org URL."""
     raw = str(href or "").strip()
     if not raw.startswith(("http://", "https://")):
         return False
@@ -3411,9 +3411,13 @@ def _is_official_primary_source_href(href: str) -> bool:
         return False
     if host.endswith(".gov") or host.endswith(".mil"):
         return True
+    if host == "leg.state.fl.us" or re.search(r"(?:^|\.)state\.[a-z]{2}\.us$", host):
+        return True
     if host == "eur-lex.europa.eu" or host.endswith(".eur-lex.europa.eu"):
         return True
     if host == "pcisecuritystandards.org" or host.endswith(".pcisecuritystandards.org"):
+        return True
+    if host == "fred.stlouisfed.org" or host.endswith(".fred.stlouisfed.org"):
         return True
     return False
 

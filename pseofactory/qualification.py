@@ -2879,112 +2879,112 @@ def group_related_queries_by_intent(
 
 CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
     "ca-tax-brackets": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2025": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2026": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2026-married-jointly": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2026-single": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-married": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2026-head-of-household": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-married-filing-jointly": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "california-income-tax-brackets-2026": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "california-tax-brackets-2026": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "california-tax-brackets-2027": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "ca-tax-brackets-2027-married-jointly": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "2027-california-tax-brackets": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "2027-california-income-tax-brackets": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "california-2027-tax-brackets": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "2027-california-tax-rates": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "california-state-tax-brackets": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/california/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "sc-income-tax-rate-2027": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/south-carolina/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "s-c-income-tax-rate-2027": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/south-carolina/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "2027-tax-tables": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "irs-2027-tax-bracket-projections": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "1031-exchange-rules-arizona": {
         "canonical_slug": "section-1031-calculator",
-        "redirect_target": "/tools/section-1031-calculator/arizona/",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "1031-exchange-ohio": {
         "canonical_slug": "section-1031-calculator",
-        "redirect_target": "/tools/section-1031-calculator/ohio/",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "ohio-1031": {
         "canonical_slug": "section-1031-calculator",
-        "redirect_target": "/tools/section-1031-calculator/ohio/",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "1031-exchange-in-massachusetts": {
         "canonical_slug": "section-1031-calculator",
-        "redirect_target": "/tools/section-1031-calculator/massachusetts/",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "section-1031-exchange-deferral": {
         "canonical_slug": "section-1031-calculator",
         "redirect_target": "/tools/section-1031-calculator/",
     },
     "irs-2027-tax-rates": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "irs-capital-gains-statutory-tax": {
         "canonical_slug": "tcja-sunset-capital-gains",
@@ -3027,8 +3027,8 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
         "redirect_target": "/tools/section-179-calculator/",
     },
     "irs-2027-tax-brackets-scenario-comparison-model": {
-        "canonical_slug": "irs-2027-tax-brackets",
-        "redirect_target": "/tools/irs-2027-tax-brackets/",
+        "canonical_slug": "irs-tax-brackets",
+        "redirect_target": "/tools/irs-tax-brackets/",
     },
     "crypto-tax-calculator-scenario-comparison-model": {
         "canonical_slug": "crypto-tax-calculator",
@@ -3052,7 +3052,7 @@ CANNIBALIZING_CLONE_CONSOLIDATION_MAP: Dict[str, Dict[str, str]] = {
     },
     "1031-like-kind-exchange-st-louis-mo": {
         "canonical_slug": "section-1031-calculator",
-        "redirect_target": "/tools/section-1031-calculator/missouri/",
+        "redirect_target": "/tools/section-1031-calculator/",
     },
     "section-174-r-d-amortization-calculator": {
         "canonical_slug": "r-and-d-tax-credit-section-174-amortization-calculator",

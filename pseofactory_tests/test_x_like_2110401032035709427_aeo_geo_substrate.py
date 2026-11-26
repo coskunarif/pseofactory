@@ -81,7 +81,7 @@ def test_jsonld_aeo_geo_graph_normalization_across_three_tenants() -> None:
     assert changed is True
     assert '"inLanguage": "en-US"' in norm_tool
     assert '"dateModified": "2026-10-31"' in norm_tool
-    assert '"SpeakableSpecification"' in norm_tool
+    assert '"SpeakableSpecification"' not in norm_tool
     assert '"isRelatedTo"' in norm_tool
     assert '"https://schema.org/InStock"' in norm_tool
     assert _needs_page_structure_geo_normalization(norm_tool) is False
@@ -137,6 +137,7 @@ def test_gainhelm_partner_roster_and_inline_slot_normalization(tmp_path: Path) -
         '<h1>SOC 2 Audit Cost Calculator</h1>'
         '<aside class="quick-answer"><p>Under AICPA SSAE 18, a 75-employee enterprise incurs $78,100.40 in Year-1 SOC 2 Type II costs.</p></aside>'
         '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<section class="statutory-sources card"><a href="https://www.bls.gov/oes/current/oes151212.htm" rel="noopener" target="_blank">BLS OEWS SOC 15-1212</a></section>'
         '<section id="calculator-workspace-anchor" class="interactive-calculator-container">'
         '<div class="calc-grid">'
         '<div class="calc-inputs-column"><form id="gainhelm-compliance-form">'
@@ -236,6 +237,7 @@ def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) ->
         '<h1>SOC 2 Audit Cost & GRC Automation Calculator</h1>'
         '<aside class="quick-answer"><p>Under AICPA SSAE 18 (AT-C Section 205), a 75-employee enterprise incurs $78,100.40 in total first-year SOC 2 Type II certification costs.</p></aside>'
         '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<section class="statutory-sources card"><a href="https://www.bls.gov/oes/current/oes151212.htm" rel="noopener" target="_blank">BLS OEWS SOC 15-1212</a></section>'
         '<section id="calculator-workspace-anchor" class="interactive-calculator-container">'
         '<div class="calc-grid">'
         '<div class="calc-inputs-column"><form id="gainhelm-compliance-form">'
@@ -283,6 +285,7 @@ def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) ->
         '<h1>CMMC 2.0 Compliance Cost Calculator</h1>'
         '<aside class="quick-answer"><p>Under 32 CFR Part 170, a 75-employee defense contractor incurs $132,000.00 in CMMC 2.0 Level 2 C3PAO certification costs across 110 controls.</p></aside>'
         '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<section class="statutory-sources card"><a href="https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170" rel="noopener" target="_blank">32 CFR Part 170 (eCFR)</a></section>'
         '<script type="application/json" id="calculation-manifest" class="calculation-manifest">'
         f'{{"manifest_id":"{peer_slug}-manifest","slug":"{peer_slug}","model_name":"CMMC 2.0 Model","statutory_authority":"32 CFR Part 170","economic_dataset":"DoD CMMC 2.0 RIA","formula":"c3pao_fee + enclave_cost","inputs":{{"c3pao_fee":52000,"enclave_cost":80000}},"published_output":132000.0}}'
         '</script>'
@@ -360,6 +363,7 @@ def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_bou
         '</aside>'
         '<p>Get automated scenario PDF worksheets and statutory expiration updates directly to your inbox.</p>'
         '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<section class="statutory-sources card"><a href="https://www.bls.gov/oes/current/oes151212.htm" rel="noopener" target="_blank">BLS OEWS SOC 15-1212</a></section>'
         '<section id="calculator-workspace-anchor" class="interactive-calculator-container">'
         '<div class="calc-grid"><div class="calc-results-column" aria-live="polite">'
         '<h3 class="calc-column-title">Deterministic Statutory &amp; Audit Outputs</h3>'

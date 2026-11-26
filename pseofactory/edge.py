@@ -9,7 +9,7 @@ import json
 import shutil
 from pathlib import Path
 import re
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple, Union
 import urllib.parse
 from dataclasses import dataclass, field
 
@@ -445,14 +445,48 @@ def parse_edge_redirects_rules(
     return parsed
 
 
+def _resolve_redirect_target_chain(
+    start_target: str,
+    exact_map: Dict[str, str],
+    prefix_pairs: Sequence[Tuple[str, str]],
+    max_hops: int = 16,
+) -> str:
+    """Flattens multi-hop redirect chains (A -> B -> C becomes A -> C) with cycle protection."""
+    cur = str(start_target or "").strip()
+    if not cur.startswith("/"):
+        return cur
+    visited: Set[str] = set()
+    for _ in range(max_hops):
+        norm = cur.rstrip("/") if cur != "/" else "/"
+        if norm in visited or cur in visited:
+            break
+        visited.add(cur)
+        visited.add(norm)
+        nxt = exact_map.get(cur) or exact_map.get(norm) or (exact_map.get(norm + "/") if norm != "/" else None)
+        if not nxt:
+            for pk, pv in prefix_pairs:
+                if cur == pv or (norm != "/" and (norm + "/") == pv):
+                    continue
+                if cur.startswith(pk) or (norm != "/" and (norm + "/").startswith(pk)):
+                    nxt = pv
+                    break
+        if not nxt or nxt == cur:
+            break
+        cur = nxt
+    return cur
+
+
 def compact_edge_redirects_to_cloudflare_cap(
     content: str,
     max_active_rules: int = EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES,
     existing_governance_routes: Optional[Set[str]] = None,
+    gone_paths: Optional[Iterable[str]] = None,
 ) -> str:
     """
     Compacts an existing dist/_redirects file so active non-comment rule lines never exceed
-    max_active_rules (<= 95, safely under Cloudflare Pages' hard 100-rule limit).
+    max_active_rules (<= 95, safely under Cloudflare Pages' hard 100-rule limit),
+    deterministically flattens multi-hop redirect chains, and drops rules whose final
+    target is in gone_paths.
     Prioritizes:
       0. Governance routes (/methodology, /about, /privacy, /disclaimers, /terms, etc.)
       1. Wildcard/splat rules and /vs/ordermetrics* rules
@@ -483,6 +517,41 @@ def compact_edge_redirects_to_cloudflare_cap(
     if not order:
         return content
 
+    exact_map: Dict[str, str] = {}
+    raw_prefix_pairs: List[Tuple[str, str]] = []
+    for src, (dst, code) in deduped.items():
+        if code not in ("301", "302", "307", "308"):
+            continue
+        if src.endswith("/*") and "*" not in src[:-2] and ":" not in src and src != "/*":
+            raw_prefix_pairs.append((src[:-1], dst))
+        elif "*" not in src and ":" not in src:
+            exact_map[src] = dst
+    prefix_pairs = sorted(raw_prefix_pairs, key=lambda item: -len(item[0]))
+
+    gone_norm_set: Set[str] = set()
+    for gp in (gone_paths or ()):
+        if isinstance(gp, str) and gp.strip().startswith("/"):
+            gp_s = gp.strip()
+            gone_norm_set.add(gp_s)
+            gone_norm_set.add(gp_s.rstrip("/") if gp_s != "/" else "/")
+
+    flattened_order: List[str] = []
+    for src in order:
+        dst, code = deduped[src]
+        if code in ("301", "302", "307", "308"):
+            final_dst = _resolve_redirect_target_chain(dst, exact_map, prefix_pairs)
+            is_wild = "*" in src or ":" in src
+            if not is_wild and src.rstrip("/") == final_dst.rstrip("/"):
+                continue
+            final_norm = final_dst.rstrip("/") if final_dst != "/" else "/"
+            if final_dst in gone_norm_set or final_norm in gone_norm_set:
+                continue
+            deduped[src] = (final_dst, code)
+        flattened_order.append(src)
+
+    if not flattened_order:
+        return ""
+
     def _redirect_priority(src_path: str) -> int:
         if src_path in _GOVERNANCE_REDIRECT_SOURCES:
             return 0
@@ -493,7 +562,7 @@ def compact_edge_redirects_to_cloudflare_cap(
         return 3
 
     sorted_sources = [
-        s for _, s in sorted(enumerate(order), key=lambda item: (_redirect_priority(item[1]), item[0]))
+        s for _, s in sorted(enumerate(flattened_order), key=lambda item: (_redirect_priority(item[1]), item[0]))
     ]
     out_lines: List[str] = []
     active_count = 0
@@ -901,7 +970,52 @@ def _sync_middleware_redirect_table(
             entry_order.append(k)
         merged_entries[k] = v
 
-    rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order]
+    # Flatten all multi-hop redirect chains (A -> B -> C becomes A -> C) across exact & prefix maps
+    prefix_pairs = [(pk, merged_prefixes[pk]) for pk in sorted_prefixes]
+    for pk in list(sorted_prefixes):
+        resolved_pv = _resolve_redirect_target_chain(merged_prefixes[pk], merged_entries, prefix_pairs)
+        merged_prefixes[pk] = resolved_pv
+    prefix_pairs = [(pk, merged_prefixes[pk]) for pk in sorted_prefixes]
+    for k in list(entry_order):
+        if k not in merged_entries:
+            continue
+        resolved_v = _resolve_redirect_target_chain(merged_entries[k], merged_entries, prefix_pairs)
+        if k.rstrip("/") == resolved_v.rstrip("/"):
+            merged_entries.pop(k, None)
+            continue
+        merged_entries[k] = resolved_v
+
+    # Absorb any redirect whose final target is in edgeGone directly into edgeGone (zero redirects into 410)
+    gone_norm_set: Set[str] = {gp.rstrip("/") if gp != "/" else "/" for gp in merged_gone_set}
+    for k in list(entry_order):
+        v = merged_entries.get(k)
+        if not v:
+            continue
+        v_norm = v.rstrip("/") if v != "/" else "/"
+        if (
+            v in merged_gone_set
+            or v_norm in gone_norm_set
+            or (v_norm != "/" and (v_norm + "/") in merged_gone_set)
+            or v_norm == "/ai-benchmarks"
+            or v_norm.startswith("/ai-benchmarks/")
+        ):
+            merged_entries.pop(k, None)
+            base_k = k.rstrip("/")
+            if base_k and not _is_live_dist_route(base_k):
+                for variant in (base_k, base_k + "/"):
+                    if variant not in merged_gone_set:
+                        merged_gone_set.add(variant)
+                        merged_gone.append(variant)
+    for pk in list(sorted_prefixes):
+        pv = merged_prefixes.get(pk)
+        if not pv:
+            continue
+        pv_norm = pv.rstrip("/") if pv != "/" else "/"
+        if pv in merged_gone_set or pv_norm in gone_norm_set or (pv_norm != "/" and (pv_norm + "/") in merged_gone_set):
+            merged_prefixes.pop(pk, None)
+            sorted_prefixes.remove(pk)
+
+    rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order if k in merged_entries]
     inner_body = ("\n".join(rendered_lines) + "\n") if rendered_lines else ""
     new_obj_block = obj_open + inner_body + obj_close
 
@@ -974,7 +1088,7 @@ def _sync_middleware_redirect_table(
             [
                 "    ];",
                 "    for (const [prefix, target] of legacyPrefixTargets) {",
-                "      if (pathname.startsWith(prefix)) {",
+                '      if (pathname.startsWith(prefix) && pathname !== target && (pathname + "/") !== target) {',
                 "        _matchedRedirectTarget = target;",
                 "        break;",
                 "      }",
@@ -18730,7 +18844,17 @@ def sync_tenant_edge_redirect_function(
             try:
                 orig_redirects = redirects_file.read_text(encoding="utf-8")
                 with_gone = ensure_gone_rules_in_redirects(orig_redirects)
-                compacted_redirects = compact_edge_redirects_to_cloudflare_cap(with_gone)
+                known_gone_for_redirects = _collect_tenant_middleware_gone_paths(repo=repo, dist_dir=dist_dir)
+                mw_probe_file = repo / "functions" / "_middleware.js"
+                if mw_probe_file.is_file():
+                    mw_probe_txt = mw_probe_file.read_text(encoding="utf-8", errors="ignore")
+                    for gm in re.finditer(r"const edgeGone = new Set\(\[([\s\S]*?)\]\);", mw_probe_txt):
+                        for sm in re.finditer(r'"((?:[^"\\]|\\.)*)"', gm.group(1)):
+                            known_gone_for_redirects.append(sm.group(1))
+                compacted_redirects = compact_edge_redirects_to_cloudflare_cap(
+                    with_gone,
+                    gone_paths=known_gone_for_redirects,
+                )
                 if compacted_redirects != orig_redirects:
                     redirects_file.write_text(compacted_redirects, encoding="utf-8")
                     dist_needs_update = True
@@ -18836,8 +18960,8 @@ def sync_tenant_edge_redirect_function(
                     '    "/tools/prediction-market-arbitrage-kelly-calculator/": "/tools/prediction-market-odds/",',
                     '    "/tools/query-two-buildable": "/tools/",',
                     '    "/tools/query-two-buildable/": "/tools/",',
-                    '    "/tools/irs-2027-tax-rates": "/tools/irs-2027-tax-brackets/",',
-                    '    "/tools/irs-2027-tax-rates/": "/tools/irs-2027-tax-brackets/",',
+                    '    "/tools/irs-2027-tax-rates": "/tools/irs-tax-brackets/",',
+                    '    "/tools/irs-2027-tax-rates/": "/tools/irs-tax-brackets/",',
                     '    "/tools/section-1031-exchange-deferral": "/tools/section-1031-calculator/",',
                     '    "/tools/section-1031-exchange-deferral/": "/tools/section-1031-calculator/",',
                     '    "/tools/prediction-market-odds-scenario-comparison-model": "/tools/prediction-market-odds/",',

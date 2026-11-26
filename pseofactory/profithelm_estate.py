@@ -1472,7 +1472,7 @@ def get_software_application_schema(
     return {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
-        "@id": f"{url}#software",
+        "@id": f"{url}#softwareapplication",
         "name": str(tool_meta.get("title") or SITE_NAME),
         "description": str(tool_meta.get("description") or SITE_DESCRIPTION),
         "url": url,
@@ -1636,11 +1636,18 @@ def _enforce_profithelm_jsonld_graph(
             clean_item["knowsAbout"] = list(ORGANIZATION_KNOWS_ABOUT)
         if "WebPage" in t_list and not is_home:
             clean_item.pop("isPartOf", None)
+            if isinstance(clean_item.get("about"), dict):
+                ab_id = str(clean_item["about"].get("@id") or "")
+                if ab_id.endswith("#software"):
+                    clean_item["about"]["@id"] = ab_id[:-len("#software")] + "#softwareapplication"
         if "SoftwareApplication" in t_list or "WebApplication" in t_list:
             if seen_app:
                 continue
             seen_app = True
             clean_item["@type"] = "WebApplication"
+            app_id = str(clean_item.get("@id") or "")
+            if app_id.endswith("#software"):
+                clean_item["@id"] = app_id[:-len("#software")] + "#softwareapplication"
         new_graph.append(clean_item)
     return new_graph
 
@@ -1934,12 +1941,26 @@ def _render_tool_shell(
     header_html = render_header(active_slug)
     footer_html = render_footer(tools_list=tools_list)
     manifest_script = ""
+    rendered_main = main_html
     if manifest is not None:
         manifest_script = (
             f'\n<script type="application/json" id="calculation-manifest">'
             f'{json.dumps(manifest, ensure_ascii=False)}'
             f"</script>"
         )
+        raw_stat_auth = str(manifest.get("statutory_authority") or "").strip()
+        if raw_stat_auth and "data-statutory-authority=" not in rendered_main:
+            escaped_stat = html_lib.escape(raw_stat_auth, quote=True)
+            if re.search(r"<(?:section|div)\b", rendered_main, re.IGNORECASE):
+                rendered_main = re.sub(
+                    r"(<(?:section|div)\b)",
+                    rf'\1 data-statutory-authority="{escaped_stat}"',
+                    rendered_main,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            else:
+                rendered_main = f'<div data-statutory-authority="{escaped_stat}">{rendered_main}</div>'
     raw = (
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
@@ -1947,7 +1968,7 @@ def _render_tool_shell(
         "<body>\n"
         f"{header_html}\n"
         '<main class="page-main">\n'
-        f"{main_html}\n"
+        f"{rendered_main}\n"
         "</main>\n"
         f"{footer_html}"
         f"{manifest_script}\n"
@@ -3449,15 +3470,12 @@ def _is_retired_or_year_stamped_slug(slug: str) -> bool:
 def _build_profithelm_redirects_content(repo_root: Optional[Path] = None) -> str:
     """
     Builds clean 1-hop 301 redirect rules for all collapsed 127 spokes, renamed year slugs,
-    and duplicate calculators, compacted cleanly to <= 95 active _redirects lines with
-    overflow annotations for Cloudflare middleware (zero 410 rules in _redirects).
+    and duplicate calculators using 3 wildcard spoke rules, compacted cleanly under the
+    <= 95 active _redirects rule cap (zero 410 rules in _redirects).
     """
     from pseofactory.edge import compact_edge_redirects_to_cloudflare_cap
 
-    states, vehicles, _ = _load_matrix_presets_data(repo_root)
-    state_slugs = [str(s["slug"]).strip().lower() for s in states if s.get("slug")] or list(_DEFAULT_51_STATE_SLUGS)
-    vehicle_slugs = [str(v["slug"]).strip().lower() for v in vehicles if v.get("slug")] or list(_DEFAULT_25_VEHICLE_SLUGS)
-
+    _ = repo_root
     rules: List[str] = [
         "/brackets /tools/irs-tax-brackets/ 301",
         "/179 /tools/section-179-calculator/ 301",
@@ -3468,6 +3486,8 @@ def _build_profithelm_redirects_content(repo_root: Optional[Path] = None) -> str
         "/tools/irs-2027-tax-brackets /tools/irs-tax-brackets/ 301",
         "/tools/irs-2027-tax-brackets/ /tools/irs-tax-brackets/ 301",
         "/tools/irs-2027-tax-brackets/* /tools/irs-tax-brackets/ 301",
+        "/tools/section-1031-calculator/* /tools/section-1031-calculator/ 301",
+        "/tools/section-179-calculator/* /tools/section-179-calculator/ 301",
         "/tools/irs-interest-calculator-2027 /tools/irs-interest-calculator/ 301",
         "/tools/irs-interest-calculator-2027/ /tools/irs-interest-calculator/ 301",
         "/tools/capital-gains-tax-rate-2021-calculator /tools/capital-gains-calculator/ 301",
@@ -3475,15 +3495,6 @@ def _build_profithelm_redirects_content(repo_root: Optional[Path] = None) -> str
         "/tools/1031-exchange-capital-gains-calculator /tools/section-1031-calculator/ 301",
         "/tools/1031-exchange-capital-gains-calculator/ /tools/section-1031-calculator/ 301",
     ]
-    for st in state_slugs:
-        rules.append(f"/tools/irs-2027-tax-brackets/{st} /tools/irs-tax-brackets/ 301")
-        rules.append(f"/tools/irs-2027-tax-brackets/{st}/ /tools/irs-tax-brackets/ 301")
-    for st in state_slugs:
-        rules.append(f"/tools/section-1031-calculator/{st} /tools/section-1031-calculator/ 301")
-        rules.append(f"/tools/section-1031-calculator/{st}/ /tools/section-1031-calculator/ 301")
-    for vh in vehicle_slugs:
-        rules.append(f"/tools/section-179-calculator/{vh} /tools/section-179-calculator/ 301")
-        rules.append(f"/tools/section-179-calculator/{vh}/ /tools/section-179-calculator/ 301")
 
     return compact_edge_redirects_to_cloudflare_cap("\n".join(rules) + "\n")
 
@@ -3898,15 +3909,8 @@ def _clean_unlisted_citations(text: str, slug: str = "") -> str:
             flags=re.IGNORECASE,
         )
         out = re.sub(r"\bSection\s*70431\b", "QSBS statutory provision", out, flags=re.IGNORECASE)
-    if s_low and not any(tok in s_low for tok in ("179", "suv", "vehicle", "depreciation", "bonus", "equipment", "capex")):
-        out = re.sub(
-            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*)?(?:IRC\s+)?(?:Sections?|Sec\.?|§)\s*179\b",
-            "applicable federal financial benchmark",
-            out,
-            flags=re.IGNORECASE,
-        )
     out = re.sub(
-        r"\b26\s*U\.?\s*S\.?\s*C\.?(?!\s*(?:Sections?|Sec\.?|§)?\s*\d)(?![A-Za-z])",
+        r"\b26\s*U\.?\s*S\.?\s*C\.?(?!\.?\s*(?:Sections?|Sec\.?|§)?\s*\d)(?![A-Za-z])",
         "Internal Revenue Code",
         out,
         flags=re.IGNORECASE,
@@ -5136,6 +5140,20 @@ def _merge_retro_with_authoritative_html(
                 flags=re.IGNORECASE,
             )
             out = out[: retro_h1_m.start()] + f"<h1>{clean_h1_inner}</h1>" + out[retro_h1_m.end() :]
+        if isinstance(merged_mf, dict) and merged_mf.get("statutory_authority"):
+            esc_stat_auth = html_lib.escape(str(merged_mf["statutory_authority"]).strip())
+            out = re.sub(
+                r'(<strong>Statutory Basis:</strong>\s*)[^<]*(</div>)',
+                lambda _m: f"{_m.group(1)}{esc_stat_auth}{_m.group(2)}",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(
+                r'(preserving your active calculator inputs and outputs under\s+)[^<]*(\.</p>)',
+                lambda _m: f"{_m.group(1)}{esc_stat_auth}{_m.group(2)}",
+                out,
+                flags=re.IGNORECASE,
+            )
 
     return out, merged_mf
 
@@ -5221,6 +5239,31 @@ def _post_process_estate_invariants(
                 if rel_hp.startswith(("signal/", "static/signal/", "syndication/")):
                     continue
                 raw_hp = html_file.read_text(encoding="utf-8", errors="ignore")
+                if "data-statutory-authority=" not in raw_hp and rel_hp.startswith("tools/"):
+                    man_m = re.search(
+                        r'<script\b[^>]*id=["\']calculation-manifest["\'][^>]*>([\s\S]*?)</script>',
+                        raw_hp,
+                        flags=re.IGNORECASE,
+                    )
+                    resolved_auth = ""
+                    if man_m:
+                        try:
+                            resolved_auth = str((json.loads(man_m.group(1).strip()) or {}).get("statutory_authority") or "").strip()
+                        except Exception:
+                            resolved_auth = ""
+                    if not resolved_auth:
+                        dss_m = re.search(r'data-statutory-source=["\']([^"\']+)["\']', raw_hp, flags=re.IGNORECASE)
+                        if dss_m:
+                            resolved_auth = html_lib.unescape(dss_m.group(1)).strip()
+                    if resolved_auth:
+                        esc_auth = html_lib.escape(resolved_auth, quote=True)
+                        raw_hp = re.sub(
+                            r"(<main\b)",
+                            rf'\1 data-statutory-authority="{esc_auth}"',
+                            raw_hp,
+                            count=1,
+                            flags=re.IGNORECASE,
+                        )
                 norm_hp, _ = normalize_html_visual_primitives(
                     raw_hp,
                     is_tenant_porcelain=True,

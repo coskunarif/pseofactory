@@ -395,7 +395,7 @@ def test_drift_qualification_signature_and_tenant_topical_reconciliation(tmp_pat
     assert "IRC Section 1202" not in json.dumps(b2b_tool["proprietary_calculation_table"])
 
     redirects = json.loads((tmp_path / "content" / "redirects.json").read_text(encoding="utf-8"))
-    assert redirects["/tools/ca-tax-brackets-2026/"] == "/tools/irs-2027-tax-brackets/california/"
+    assert redirects["/tools/ca-tax-brackets-2026/"] == "/tools/irs-tax-brackets/"
     assert redirects["/shopify-profit-tracker"] == "/tools/"
     assert redirects["/tools/landed-cost-calculator/"] == "/tools/section-301-tariff-landed-cost-calculator/"
 
@@ -1284,7 +1284,7 @@ def test_seo_checklist_engine_gates_listicle_rejection_unique_meta_and_two_line_
         for s, _ in items
     }
     assert "pslf-buyback-months-reconsideration-student-loan-calculator" in tier_slugs
-    assert "student-loan-forgiveness-2026" in tier_slugs
+    assert "student-loan-forgiveness" in tier_slugs
     assert "student-loan-forgiveness-tax-bomb-insolvency-calculator" in tier_slugs
 
 

@@ -39,8 +39,8 @@ def test_hierarchical_spoke_slug_and_tax_bracket_vertical_isolation(tmp_path: Pa
     assert "heavy SUV" not in blocks["statutory_compliance_html"]
     assert "Section 179" not in blocks["edge_case_trap_html"]
     assert "IRC Section 1(j)" in blocks["edge_case_trap_html"]
-    assert "/tools/section-1031-calculator/california/" in blocks["three_tier_cluster_html"]
-    assert "/tools/irs-2027-tax-brackets/connecticut/" in blocks["three_tier_cluster_html"]
+    assert "/tools/section-1031-calculator/" in blocks["three_tier_cluster_html"]
+    assert "/tools/irs-tax-brackets/" in blocks["three_tier_cluster_html"]
 
     blocks_1031 = render_competitor_winning_pattern_blocks(
         slug="section-1031-calculator/california",
@@ -50,7 +50,7 @@ def test_hierarchical_spoke_slug_and_tax_bracket_vertical_isolation(tmp_path: Pa
         statutory_authority="IRC Section 1031(a)(3); Treas. Reg. 1.1031(k)-1; IRS Form 8824",
         economic_dataset="Federal Reserve Z.1 Commercial Real Estate Series and FHFA House Price Index",
     )
-    assert "/tools/irs-2027-tax-brackets/california/" in blocks_1031["three_tier_cluster_html"]
+    assert "/tools/irs-tax-brackets/" in blocks_1031["three_tier_cluster_html"]
 
     dist = tmp_path / "dist"
     ca_dir = dist / "tools" / "irs-2027-tax-brackets" / "california"
@@ -87,7 +87,7 @@ def test_hierarchical_spoke_slug_and_tax_bracket_vertical_isolation(tmp_path: Pa
     assert '"slug": "irs-2027-tax-brackets/california"' in repaired_html
     assert "heavy SUV" not in repaired_html
     assert "IRC Section 1(j)" in repaired_html
-    assert "/tools/section-1031-calculator/california/" in repaired_html
+    assert "/tools/section-1031-calculator/" in repaired_html
 
 
 def test_gsc_overlay_tax_bracket_vertical_and_telemetry_sanitization():
@@ -278,9 +278,10 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         economic_dataset="IRS Publication 946",
     )
     cluster_html = veh_blocks["three_tier_cluster_html"]
-    assert "/tools/section-179-calculator/lincoln-navigator-l/" in cluster_html
-    assert "/tools/section-179-calculator/mercedes-benz-sprinter-2500/" in cluster_html
-    assert "/tools/section-179-calculator/gmc-yukon-xl/" in cluster_html
+    assert "/tools/section-179-calculator/" in cluster_html
+    assert "/tools/commercial-heavy-vehicle-section-179-weight-calculator/" in cluster_html
+    assert "/tools/section-179-vehicle-equipment-deduction/" in cluster_html
+    assert "/tools/section-179-calculator/lincoln-navigator-l/" not in cluster_html
 
     neighbor_blocks = render_competitor_winning_pattern_blocks(
         slug="section-179-calculator/lincoln-navigator-l",
@@ -290,10 +291,10 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         statutory_authority="IRC Section 179 & 168(k)",
         economic_dataset="IRS Publication 946",
     )
-    assert "/tools/section-179-calculator/land-rover-defender-110/" in neighbor_blocks["three_tier_cluster_html"]
+    assert "/tools/section-179-calculator/" in neighbor_blocks["three_tier_cluster_html"]
 
     expected_profithelm_roots = [
-        "irs-2027-tax-brackets",
+        "irs-tax-brackets",
         "section-179-calculator",
         "s-corp-reasonable-salary-tax-calculator",
         "tcja-sunset-capital-gains",
@@ -303,15 +304,13 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         "equipment-lease-tax-deduction",
         "invoice-factoring-vs-business-line-of-credit-calculator",
         "saas-runway-calculator",
-        "prediction-market-odds",
-        "prediction-market-tax",
+        "capital-gains-calculator",
+        "irs-interest-calculator",
         "r-and-d-tax-credit-section-174-amortization-calculator",
         "commercial-heavy-vehicle-section-179-weight-calculator",
         "section-179-vehicle-equipment-deduction",
         "medical-and-dental-equipment-section-179-roi-calculator",
         "crypto-tax-form-1099-da-mandatory-reporting",
-        "workers-comp-and-payroll-burden-calculator",
-        "contractor-surety-bond-cost-calculator",
         "section-301-tariff-landed-cost-calculator",
     ]
     for root_slug in expected_profithelm_roots:

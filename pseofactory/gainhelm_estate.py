@@ -1794,6 +1794,35 @@ def _render_base_html(
 
 
 _CORE_TOOL_CONTENT_SPECS: Dict[str, Dict[str, Any]] = {
+    "soc-2-audit-cost-calculator": {
+        "faqs": (
+            {"question": "How is a SOC 2 Type II audit budget calculated under AICPA SSAE 18?", "answer": "Under AICPA SSAE 18 (AT-C Section 205) and TSP Section 100, a 75-employee SaaS company selecting 3 Trust Services Criteria models licensed CPA attestation fees, GRC automation licensing, penetration testing, and BLS SOC 15-1212 engineering remediation labor totaling $78,100.40 in Year 1."},
+            {"question": "What separates SOC 2 Type I from SOC 2 Type II readiness scope?", "answer": "SOC 2 Type I attests to control design suitability as of a single point-in-time date, whereas Type II audits continuous control operating effectiveness across a 3-to-12-month observation window."},
+        ),
+        "howto": (
+            ("Select Trust Services Criteria (CC1-CC9 + Optional)", "Start with Security Common Criteria (CC1 through CC9) and add Availability, Confidentiality, Processing Integrity, or Privacy only when required by enterprise buyer contracts."),
+            ("Size In-Scope Production Cloud & Workforce", "Define production AWS/GCP/Azure VPCs, identity providers, and engineering headcount subject to CPA sampling."),
+            ("Budget CPA Attestation & Penetration Testing", "Include peer-reviewed AICPA CPA firm fieldwork, annual penetration testing, and GRC evidence automation."),
+            ("Track Continuous Type II Evidence Windows", "Maintain automated pull-request, access-review, and change-management logs across the 3-to-12-month Type II observation period."),
+        ),
+        "scenarios_lead": "GainHelm models AICPA SSAE 18 (AT-C Section 205) SOC 2 Type I and Type II attestation budgets across Trust Services Criteria selections and organizational headcount tiers.",
+        "steps": (
+            "Scope in-scope Trust Services Criteria (Security CC1-CC9 plus optional Availability, Confidentiality, Processing Integrity, or Privacy).",
+            "Apply peer-reviewed licensed CPA firm attestation fees under AICPA SSAE 18 (AT-C Section 205) and TSP Section 100.",
+            "Calculate internal security engineering remediation hours multiplied by loaded BLS SOC 15-1212 hourly rates.",
+            "Compare Type I point-in-time readiness against 3-to-12-month Type II observation and bridge-letter cycles.",
+        ),
+        "table_rows": (
+            ("SOC 2 Type I Report", "AICPA SSAE 18 (AT-C 205)", "Control Design at Point-in-Time", "Licensed CPA Firm", "Point-in-Time Readiness"),
+            ("SOC 2 Type II Report", "AICPA SSAE 18 &amp; TSP 100", "Design + Operating Effectiveness (CC1-CC9)", "Licensed CPA Firm", "Annual (3-12 Mo Window)"),
+            ("SOC 2 + Bridge Letter", "AICPA Trust Services Criteria", "Extended Observation Continuity", "Independent CPA Attestor", "Up to 90-Day Gap Coverage"),
+        ),
+        "provenance": (
+            ("Dataset 1:", "https://csrc.nist.gov/projects/risk-management", "NIST Cybersecurity Risk Management &amp; Trust Control Mapping"),
+            ("Dataset 2:", "https://www.aicpa-cima.com/", "AICPA SSAE 18 (AT-C Section 205) &amp; Trust Services Criteria Standards"),
+            ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ),
+    },
     "cmmc-2-0-compliance-cost-calculator": {
         "faqs": (
             {"question": "How is a CMMC 2.0 Level 2 C3PAO total budget calculated under 32 CFR Part 170?", "answer": "Under 32 CFR Part 170 and DFARS 252.204-7021, a 75-employee defense supplier models a $48,500.00 Cyber-AB C3PAO assessment fee, $26,400.00 CUI enclave licensing, $46,234.60 remediation labor, and $13,400.00 RPO advisory ($134,534.60 total program cost)."},
@@ -2423,9 +2452,8 @@ def _build_core_tool_html(
     )
 
     default_prov = (
-        ("Dataset 1:", "https://www.ecfr.gov/current/title-32/subtitle-A/chapter-I/subchapter-G/part-170", "DoD CMMC 2.0 Program Rule (32 CFR Part 170) &amp; NIST SP 800-171 Rev 2"),
-        ("Dataset 2:", "https://www.ecfr.gov/current/title-45/subtitle-A/subchapter-C/part-160", "HHS HIPAA Administrative Simplification &amp; Civil Penalties (45 CFR Part 160)"),
-        ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+        ("Dataset 1:", "https://csrc.nist.gov/projects/risk-management", "NIST Cybersecurity Risk Management &amp; Trust Control Mapping"),
+        ("Dataset 2:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
     )
     prov_html = "\n        ".join(
         f'<li><strong>{p[0]}</strong> <a href="{p[1]}" target="_blank" rel="noopener noreferrer">{p[2]}</a></li>'
@@ -2567,6 +2595,9 @@ def _build_methodology_html(css_text: str) -> str:
     title = "Enterprise Cyber Compliance & Audit Cost Methodology | GainHelm"
     meta_desc = "Authoritative mathematical methodology, statutory citations, auditor-day tables, and BLS security engineering wage rules for GainHelm cyber compliance models."
     body = """
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/" class="touch-target">Home</a> / <span>Methodology</span>
+    </nav>
     <article class="article-content">
       <section class="hero-section">
         <h1 class="hero-title">Enterprise Cyber Compliance &amp; Audit Cost Calculation Methodology</h1>
@@ -2615,6 +2646,13 @@ def _build_methodology_html(css_text: str) -> str:
             "datePublished": "2026-01-15",
             "dateModified": "2026-10-31",
         },
+        {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{GAINHELM_CANONICAL_BASE}/"},
+                {"@type": "ListItem", "position": 2, "name": "Methodology", "item": canonical_url},
+            ],
+        },
     ]
     return _render_base_html(title, meta_desc, canonical_url, body, jsonld_schemas=schemas, css_text=css_text)
 
@@ -2627,6 +2665,9 @@ def _build_disclaimers_html(css_text: str) -> str:
     aff_disc = html.escape(GAINHELM_DISCLOSURES["ftc_disclosure"])
     no_adv = html.escape(GAINHELM_DISCLOSURES["independent_publisher_disclaimer"])
     body = f"""
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/" class="touch-target">Home</a> / <span>Disclaimers</span>
+    </nav>
     <article class="article-content">
       <section class="hero-section">
         <h1 class="hero-title">Cyber Compliance Regulatory Notices &amp; Disclaimers</h1>
@@ -2675,6 +2716,13 @@ def _build_disclaimers_html(css_text: str) -> str:
             "description": meta_desc,
             "datePublished": "2026-01-15",
             "dateModified": "2026-10-31",
+        },
+        {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{GAINHELM_CANONICAL_BASE}/"},
+                {"@type": "ListItem", "position": 2, "name": "Disclaimers", "item": canonical_url},
+            ],
         },
     ]
     return _render_base_html(title, meta_desc, canonical_url, body, jsonld_schemas=schemas, css_text=css_text)
@@ -2838,7 +2886,7 @@ _DEPLOYED_VOID_PROVENANCE_SPECS: Dict[str, Tuple[Tuple[str, str, str], ...]] = {
         ("Dataset 3:", "https://www.bls.gov/oes/current/oes152051.htm", "BLS OEWS Data Scientists (SOC 15-2051) Wage Series"),
     ),
     "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator": (
-        ("Dataset 1:", "https://www.sec.gov/rules-regulations/2023/07/cybersecurity-risk-management-strategy-governance-incident-disclosure", "SEC Final Rule 33-11216 (Form 8-K Item 1.05 &amp; Reg S-K Item 106)"),
+        ("Dataset 1:", "https://www.sec.gov/rules-regulations/2023/07/s7-09-22", "SEC Final Rule 33-11216 (Form 8-K Item 1.05 &amp; Reg S-K Item 106)"),
         ("Dataset 2:", "https://www.ecfr.gov/current/title-17/chapter-II/part-229/section-229.106", "17 CFR 229.106 Cybersecurity Risk Management Disclosures"),
         ("Dataset 3:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
     ),
@@ -2930,19 +2978,27 @@ def _sanitize_gainhelm_jsonld_and_dom(
             return m.group(0)
 
         new_graph: List[Dict[str, Any]] = []
+        changed_ld = False
         for node in graph:
             if not isinstance(node, dict):
                 continue
             raw_t = node.get("@type")
             types = [raw_t] if isinstance(raw_t, str) else ([str(x) for x in raw_t] if isinstance(raw_t, list) else [])
-            if any(t in ("HowTo", "FAQPage", "Dataset", "TechArticle", "SpeakableSpecification") for t in types):
+            banned_types = ("HowTo", "FAQPage", "Dataset", "TechArticle", "SpeakableSpecification") if is_tool_leaf else ("HowTo", "FAQPage", "Dataset", "SpeakableSpecification")
+            if any(t in banned_types for t in types):
+                changed_ld = True
                 continue
             if "WebSite" in types and not is_home:
+                changed_ld = True
                 continue
             if "BreadcrumbList" in types and is_home:
+                changed_ld = True
                 continue
 
-            node = _clean_node_props(node)
+            cleaned_node = _clean_node_props(node)
+            if cleaned_node != node:
+                changed_ld = True
+            node = cleaned_node
             if "Organization" in types:
                 same_as = node.get("sameAs")
                 if isinstance(same_as, str):
@@ -2958,27 +3014,33 @@ def _sanitize_gainhelm_jsonld_and_dom(
                         moved_qids.append(u)
                     else:
                         kept_same_as.append(u)
-                if kept_same_as:
-                    node["sameAs"] = kept_same_as
-                else:
-                    node.pop("sameAs", None)
-                existing_knows = node.get("knowsAbout")
-                knows_list: List[Any] = list(existing_knows) if isinstance(existing_knows, list) else ([existing_knows] if existing_knows else [])
-                existing_knows_str = json.dumps(knows_list)
-                for qurl in moved_qids:
-                    if qurl not in existing_knows_str:
-                        knows_list.append({"@type": "Thing", "name": "Information Security", "sameAs": qurl})
-                if knows_list:
-                    node["knowsAbout"] = knows_list
+                if moved_qids:
+                    changed_ld = True
+                    if kept_same_as:
+                        node["sameAs"] = kept_same_as
+                    else:
+                        node.pop("sameAs", None)
+                    existing_knows = node.get("knowsAbout")
+                    knows_list: List[Any] = list(existing_knows) if isinstance(existing_knows, list) else ([existing_knows] if existing_knows else [])
+                    existing_knows_str = json.dumps(knows_list)
+                    for qurl in moved_qids:
+                        if qurl not in existing_knows_str:
+                            knows_list.append({"@type": "Thing", "name": "Information Security", "sameAs": qurl})
+                    if knows_list:
+                        node["knowsAbout"] = knows_list
 
             if any(t in ("SoftwareApplication", "WebApplication") for t in types):
                 new_types = ["WebApplication" if t == "SoftwareApplication" else t for t in types]
-                node["@type"] = new_types[0] if len(new_types) == 1 else new_types
+                if new_types != types:
+                    node["@type"] = new_types[0] if len(new_types) == 1 else new_types
+                    changed_ld = True
 
             new_graph.append(node)
 
+        if not changed_ld:
+            return m.group(0)
         payload["@graph"] = new_graph
-        return f"{m.group(1)}\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n{m.group(3)}"
+        return f"{m.group(1)}{json.dumps(payload, ensure_ascii=False)}{m.group(3)}"
 
     updated = ld_re.sub(_rewrite_ld, html_text)
     if re.search(r'<a\b[^>]*\bscenario-preset-link\b', updated, re.IGNORECASE):
