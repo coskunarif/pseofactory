@@ -15227,12 +15227,14 @@ function extractScenarioAmount(body, scenarioInputs, blueprintState) {
 }
 
 function buildEdgePersonalizedWorkpaperBundle(record, spec, mode = "paid_toolkit", sessionId = "") {
-  const toolSlug = String((record && record.tool_slug) || "section-1031-calculator");
+  const effSku = String((spec && spec.offerSku) || (record && record.offer_sku) || "").trim().toLowerCase();
+  const toolSlug = String((record && record.tool_slug) || defaultSlugForProfitHelmSku(effSku));
   const effSpec = spec || resolveVerticalAndThreshold(toolSlug, "", (record && record.offer_sku) || "");
   const canonOffer = getCanonicalEdgeOffer(effSpec.offerSku);
+  const effRecord = (record && !record.tool_slug) ? { ...record, tool_slug: toolSlug } : record;
   return buildCanonicalWorkpaperDeliverable({
     propertyId: "profithelm",
-    record,
+    record: effRecord,
     offer: canonOffer,
     mode,
     sessionId,
@@ -15713,7 +15715,7 @@ async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, statePar
     baseRecord = {
       lead_id: leadId || "lead_profithelm_direct",
       property_id: "profithelm",
-      tool_slug: toolSlug || "section-1031-calculator",
+      tool_slug: toolSlug || "",
       calculated_amount: Number.isFinite(parsedAmt) && parsedAmt > 0 ? parsedAmt : 250000,
       state: resolvedState,
       email: emailParam || "",

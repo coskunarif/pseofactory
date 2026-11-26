@@ -1209,7 +1209,28 @@ def test_redteam_bug_1_1_and_1_2_all_four_tenants_anti_bounce_and_canonical_send
     assert out["outboundAfterBlocked"] == 0
     assert out["leakedCustomerEmails"] == []
     assert out["nonCanonicalMerchants"] == []
-    assert out["zohoSenders"] == ["arif.coskun@profithelm.com"]
+    from email.utils import parseaddr
+
+    assert out["zohoSenders"]
+    forbidden_sender_tokens = (
+        "arif@profithelm.com",
+        "editorial@lienbond.com",
+        "noreply@gainhelm.com",
+        "billing@prexvo.com",
+        "@gainhelm.com",
+        "@lienbond.com",
+        "@prexvo.com",
+    )
+    for zoho_sender in out["zohoSenders"]:
+        assert zoho_sender == "arif.coskun@profithelm.com" or zoho_sender.endswith(
+            " <arif.coskun@profithelm.com>"
+        ), f"Unexpected Zoho sender format: {zoho_sender!r}"
+        _, parsed_addr = parseaddr(zoho_sender)
+        assert parsed_addr == "arif.coskun@profithelm.com", f"Parsed Zoho sender mismatch: {zoho_sender!r}"
+        low_sender = zoho_sender.lower()
+        assert not any(tok in low_sender for tok in forbidden_sender_tokens), (
+            f"Foreign/unprovisioned sender leaked in Zoho fromAddress: {zoho_sender!r}"
+        )
     assert out["zeptoSenders"] == ["arif.coskun@profithelm.com"]
     assert out["zohoCount"] >= 4
     assert out["zeptoCount"] >= 3

@@ -52,6 +52,26 @@ def _strip_esm_exports(js_src: str) -> str:
     stripped = re.sub(r"\bexport\s*\{[\s\S]*?\};?", "", stripped)
     return stripped
 FORBIDDEN_NON_AUDIT_TOKENS = ("soc 2", "soc2", "cmmc", "c3pao", "aicpa", "hipaa")
+STRICT_ISOLATED_GAINHELM_FRAMEWORKS = (
+    "dora",
+    "eu_ai_act",
+    "sec_8k",
+    "gdpr",
+    "ccpa",
+    "nis2",
+)
+
+
+def _deliverable_sku_for_framework(fw_key: str, canonical_sku: str) -> str:
+    """Strict-isolated GainHelm frameworks emit framework-specific deliverable SKUs without leaking 'hipaa'."""
+    if fw_key in STRICT_ISOLATED_GAINHELM_FRAMEWORKS and canonical_sku in (
+        "gh_hipaa_iso27001_governance_kit",
+        "gh_soc2_cmmc_audit_workpapers",
+    ):
+        return f"gh_{fw_key}_governance_kit"
+    return canonical_sku
+
+
 SKU_IDS = (
     "gh_hipaa_iso27001_governance_kit",
     "gh_soc2_cmmc_audit_workpapers",
@@ -1426,11 +1446,16 @@ def test_phase2_edge_generic_slugs_propagate_vertical_across_all_15_frameworks(
             "primary_partner_key": prof["primary_partner_key"],
             "partner_rep_desk": prof["partner_rep_desk"],
             "offer_sku": prof["offer_sku"],
+            "deliverable_offer_sku": _deliverable_sku_for_framework(fw_k, prof["offer_sku"]),
             "offer_price_usd": int(round(float(prof["offer_price_usd"]))),
             "default_sku_slug": prof["default_sku_slug"],
             "vanta_url": prof["vanta_url"],
             "statutory_authority": prof["statutory_authority"],
-            "regulator_name": prof["regulator_name"],
+            "regulator_name": (
+                "AICPA Auditing Standards Board (Trust Services Criteria)"
+                if fw_k == "soc2"
+                else prof["regulator_name"]
+            ),
             "forbidden": list(_PHASE2_FW_CASES[fw_k]["forbidden"]),
         }
         for fw_k, prof in GAINHELM_FRAMEWORK_PROFILES.items()
@@ -1569,13 +1594,18 @@ async function run() {{
       const getRes = await onRequestGet({{ request: new Request(getUrl.toString()), env }});
       if (getRes.status !== 200) throw new Error(`GET fulfill=1 status ${{getRes.status}} for ${{fwKey}}:${{gSlug}}`);
       const dp = await getRes.json();
-      if (((gSlug && gSlug !== "general" && gSlug !== "index") && dp.tool_slug !== gSlug) || dp.vertical !== spec.vertical || dp.offer_sku !== spec.offer_sku) {{
+      if (((gSlug && gSlug !== "general" && gSlug !== "index") && dp.tool_slug !== gSlug) || dp.vertical !== spec.vertical || dp.offer_sku !== spec.deliverable_offer_sku) {{
         throw new Error(`GET fulfill datapack mismatch (${{fwKey}}:${{gSlug}}): ${{JSON.stringify(dp)}}`);
       }}
       if (dp.statutory_authority !== spec.statutory_authority || dp.regulator_name !== spec.regulator_name) {{
         throw new Error(`GET fulfill authority mismatch (${{fwKey}}:${{gSlug}}): ${{dp.statutory_authority}} | ${{dp.regulator_name}}`);
       }}
-      const dpLow = JSON.stringify(dp).replace(/gh_(?:soc2_cmmc_audit_workpapers|hipaa_iso27001_governance_kit|instant_compliance_worksheet_19)/g, "").toLowerCase();
+      const dpJsonLower = JSON.stringify(dp).toLowerCase();
+      const isStrictIsolatedFw = spec.deliverable_offer_sku !== spec.offer_sku;
+      if (isStrictIsolatedFw && dpJsonLower.includes("hipaa")) {{
+        throw new Error(`GET fulfill strict-isolated datapack leaked 'hipaa' on ${{fwKey}}:${{gSlug}}`);
+      }}
+      const dpLow = dpJsonLower.replace(/gh_(?:soc2_cmmc_audit_workpapers|hipaa_iso27001_governance_kit|instant_compliance_worksheet_19)/g, "");
       for (const bad of spec.forbidden) {{
         if (dpLow.includes(bad)) {{
           throw new Error(`GET fulfill datapack leak '${{bad}}' on ${{fwKey}}:${{gSlug}}`);
@@ -1796,7 +1826,12 @@ def test_phase2_python_tracker_generic_slugs_propagate_vertical(tmp_path: Path) 
                     "lead_id": pb["lead_id"],
                     "exp_vert": exp_vert,
                     "exp_sku": exp_sku,
-                    "exp_reg": str(prof["regulator_name"]),
+                    "exp_deliverable_sku": _deliverable_sku_for_framework(fw_k, exp_sku),
+                    "exp_reg": (
+                        "AICPA Auditing Standards Board (Trust Services Criteria)"
+                        if fw_k == "soc2"
+                        else str(prof["regulator_name"])
+                    ),
                     "exp_tool_prefix": exp_tool_prefix,
                     "checkout_ep": offer["live_checkout_endpoint"],
                     "playbook_ep": em["playbook_endpoint"],
@@ -1898,8 +1933,11 @@ const cases = {json.dumps(edge_roundtrip_cases)};
     }});
     if (pbRes.status !== 200) throw new Error(`Edge playbook HTTP ${{pbRes.status}} for ${{c.fw}}:${{c.g_slug}}`);
     const pbDp = await pbRes.json();
-    if (pbDp.offer_sku !== c.exp_sku || pbDp.regulator_name !== c.exp_reg || pbDp.vertical !== c.exp_vert) {{
+    if (pbDp.offer_sku !== c.exp_deliverable_sku || pbDp.regulator_name !== c.exp_reg || pbDp.vertical !== c.exp_vert) {{
       throw new Error(`Edge playbook mismatch (${{c.fw}}:${{c.g_slug}}): ${{JSON.stringify(pbDp)}}`);
+    }}
+    if (c.exp_deliverable_sku !== c.exp_sku && String(pbDp.offer_sku || "").toLowerCase().includes("hipaa")) {{
+      throw new Error(`Edge playbook strict-isolated SKU leaked hipaa (${{c.fw}}:${{c.g_slug}}): ${{pbDp.offer_sku}}`);
     }}
 
     const ffLid = c.lead_id.replace(/^lead_/, "lead_") ;
@@ -1911,8 +1949,11 @@ const cases = {json.dumps(edge_roundtrip_cases)};
     }});
     if (ffRes.status !== 200) throw new Error(`Edge fulfill HTTP ${{ffRes.status}} for ${{c.fw}}:${{c.g_slug}}`);
     const ffDp = await ffRes.json();
-    if (ffDp.offer_sku !== c.exp_sku || ffDp.regulator_name !== c.exp_reg) {{
+    if (ffDp.offer_sku !== c.exp_deliverable_sku || ffDp.regulator_name !== c.exp_reg) {{
       throw new Error(`Edge fulfill mismatch (${{c.fw}}:${{c.g_slug}}): ${{JSON.stringify(ffDp)}}`);
+    }}
+    if (c.exp_deliverable_sku !== c.exp_sku && JSON.stringify(ffDp).toLowerCase().includes("hipaa")) {{
+      throw new Error(`Edge fulfill strict-isolated datapack leaked hipaa (${{c.fw}}:${{c.g_slug}})`);
     }}
 
     const emChkRes = await ctx.onRequestGet({{
@@ -2616,7 +2657,7 @@ globalThis.fetch = async (url, opts) => {
     { name: 'bare_root', body: { email: 'a@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true }, expectedSku: 'gh_soc2_cmmc_audit_workpapers', expectedCents: '2900', expectedPath: '/' },
     { name: 'bare_19', body: { email: 'b@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true, sku: 'gh_instant_compliance_worksheet_19' }, expectedSku: 'gh_instant_compliance_worksheet_19', expectedCents: '1500', expectedPath: '/tools/soc-2-audit-cost-calculator/' },
     { name: 'hipaa_49', body: { email: 'c@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true, tool_slug: 'hipaa-breach-fine-calculator' }, expectedSku: 'gh_hipaa_iso27001_governance_kit', expectedCents: '2900', expectedPath: '/tools/hipaa-breach-fine-calculator/' },
-    { name: 'dora_hub', body: { email: 'd@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true, tool_slug: 'dora-hub' }, expectedSku: 'gh_hipaa_iso27001_governance_kit', expectedCents: '2900', expectedPath: '/' },
+    { name: 'dora_hub', body: { email: 'd@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true, tool_slug: 'dora-hub' }, expectedSku: 'gh_hipaa_iso27001_governance_kit', expectedEmailSku: 'gh_dora_governance_kit', expectedCents: '2900', expectedPath: '/' },
     { name: 'cmmc_79', body: { email: 'e@realco.com', state: 'DE', calculated_amount: 65000, partner_sharing_consent: true, tool_slug: 'cmmc-compliance-cost-calculator' }, expectedSku: 'gh_soc2_cmmc_audit_workpapers', expectedCents: '2900', expectedPath: '/tools/cmmc-compliance-cost-calculator/' },
   ];
   for (const c of cases) {
@@ -2669,7 +2710,7 @@ globalThis.fetch = async (url, opts) => {
     if (c.name === 'bare_root' && (qs.get('vertical') || qs.get('sku'))) {
       throw new Error('bare_root email link leaked vertical/sku: ' + hrefMatch[1]);
     }
-    if ((c.name === 'bare_19' || c.name === 'hipaa_49' || c.name === 'dora_hub') && qs.get('sku') !== c.expectedSku) {
+    if ((c.name === 'bare_19' || c.name === 'hipaa_49' || c.name === 'dora_hub') && qs.get('sku') !== (c.expectedEmailSku || c.expectedSku)) {
       throw new Error(c.name + ' no-stripe email lost sku: ' + hrefMatch[1]);
     }
   }
@@ -3021,6 +3062,19 @@ def test_phase2_sku_and_vertical_propagation_across_email_datapack_and_edge_sync
                 assert py_extra["offer_price_usd"] == 29.0
                 assert "FIPS 140-3" in " ".join(py_extra["deliverables"])
 
+        exp_edge_title = py_extra["offer_title"]
+        exp_edge_authority = py_extra["statutory_authority"]
+        exp_edge_deliverables = list(py_extra["deliverables"])
+        exp_deliverable_sku = py_extra["offer_sku"]
+        if case_name.startswith("gh_fw_"):
+            exp_deliverable_sku = _deliverable_sku_for_framework(case_name[len("gh_fw_") :], py_extra["offer_sku"])
+        elif case_name == "gh_dora_79_override":
+            dora_prof = gh_profiles["dora"]
+            exp_deliverable_sku = "gh_dora_governance_kit"
+            exp_edge_title = dora_prof["offer_title"]
+            exp_edge_authority = dora_prof["statutory_authority"]
+            exp_edge_deliverables = list(dora_prof["deliverables"])
+
         extra_offer_parity_cases.append(
             {
                 "name": case_name,
@@ -3035,9 +3089,13 @@ def test_phase2_sku_and_vertical_propagation_across_email_datapack_and_edge_sync
                 "exp_price": float(py_extra["offer_price_usd"]),
                 "exp_cents": str(int(round(float(py_extra["offer_price_usd"]) * 100))),
                 "exp_path": urlparse(py_extra["success_url"]).path,
-                "exp_title": py_extra["offer_title"],
-                "exp_authority": py_extra["statutory_authority"],
-                "exp_deliverables": list(py_extra["deliverables"]),
+                "exp_title": exp_edge_title,
+                "exp_authority": exp_edge_authority,
+                "exp_deliverables": exp_edge_deliverables,
+                "exp_deliverable_sku": exp_deliverable_sku,
+                "exp_deliverable_title": exp_edge_title,
+                "exp_deliverable_authority": exp_edge_authority,
+                "exp_deliverable_deliverables": exp_edge_deliverables,
                 "forbidden_prices": forbidden_prices,
                 "forbidden_tokens": forbidden_tokens,
             }
@@ -3419,11 +3477,11 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
       extraCase.name + " json",
       jsonPayload.html_report,
       jsonPayload,
-      extraCase.exp_sku,
+      extraCase.exp_deliverable_sku,
       extraCase.exp_price,
-      extraCase.exp_title,
-      extraCase.exp_authority,
-      extraCase.exp_deliverables,
+      extraCase.exp_deliverable_title,
+      extraCase.exp_deliverable_authority,
+      extraCase.exp_deliverable_deliverables,
       extraCase.forbidden_prices,
       extraCase.forbidden_tokens,
       true,
@@ -3433,11 +3491,11 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
       extraCase.name + " format=html",
       htmlPayload,
       null,
-      extraCase.exp_sku,
+      extraCase.exp_deliverable_sku,
       extraCase.exp_price,
-      extraCase.exp_title,
-      extraCase.exp_authority,
-      extraCase.exp_deliverables,
+      extraCase.exp_deliverable_title,
+      extraCase.exp_deliverable_authority,
+      extraCase.exp_deliverable_deliverables,
       extraCase.forbidden_prices,
       extraCase.forbidden_tokens,
       true,
@@ -3539,11 +3597,11 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
       extraCase.name + " lead_id playbook json",
       lidPbJson.html_report,
       lidPbJson,
-      extraCase.exp_sku,
+      extraCase.exp_deliverable_sku,
       extraCase.exp_price,
-      extraCase.exp_title,
-      extraCase.exp_authority,
-      extraCase.exp_deliverables,
+      extraCase.exp_deliverable_title,
+      extraCase.exp_deliverable_authority,
+      extraCase.exp_deliverable_deliverables,
       extraCase.forbidden_prices,
       extraCase.forbidden_tokens,
       true,
@@ -3553,11 +3611,11 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
       extraCase.name + " lead_id playbook format=html",
       lidPbHtml,
       null,
-      extraCase.exp_sku,
+      extraCase.exp_deliverable_sku,
       extraCase.exp_price,
-      extraCase.exp_title,
-      extraCase.exp_authority,
-      extraCase.exp_deliverables,
+      extraCase.exp_deliverable_title,
+      extraCase.exp_deliverable_authority,
+      extraCase.exp_deliverable_deliverables,
       extraCase.forbidden_prices,
       extraCase.forbidden_tokens,
       true,
@@ -3599,11 +3657,11 @@ function assertOfferHtmlAndDeliverables(label, htmlText, payload, expSku, expPri
       extraCase.name + " lead_id fulfill json",
       lidFfJson.html_report,
       lidFfJson,
-      extraCase.exp_sku,
+      extraCase.exp_deliverable_sku,
       extraCase.exp_price,
-      extraCase.exp_title,
-      extraCase.exp_authority,
-      extraCase.exp_deliverables,
+      extraCase.exp_deliverable_title,
+      extraCase.exp_deliverable_authority,
+      extraCase.exp_deliverable_deliverables,
       extraCase.forbidden_prices,
       extraCase.forbidden_tokens,
       false
