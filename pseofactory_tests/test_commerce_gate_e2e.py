@@ -264,22 +264,45 @@ export async function onRequestGet({{ request, env }}) {{
     }}
     const paidSku = (sess.metadata && sess.metadata.offer_sku) || skuParam;
     const paidOffer = resolveOffer(paidSku) || CFG.tiers.full;
+    const paidSlug = (sess.metadata && sess.metadata.tool_slug) || toolSlug;
+    const paidLeadId = sess.client_reference_id || (sess.metadata && sess.metadata.lead_id) || "lead_mock";
     const fmt = (u.searchParams.get("format") || "json").toLowerCase();
     if (paidOffer.tier_kind === "quick" && fmt === "datapack") {{
       return jsonResp({{ ok: false, status: "payment_required", settled: false }}, 402);
     }}
+    const reconSchedule = [
+      {{
+        line_code: "REC-01",
+        line_item: `Primary modeled adjustment for ${{paidSlug}}`,
+        authority: "Statutory Baseline",
+        baseline_value: "$10,000.00",
+        optimized_value: "$8,500.00",
+        delta_impact: "-$1,500.00",
+      }},
+    ];
     if (fmt === "csv") {{
-      return new Response("Section,Line\\nOK,1\\n", {{ status: 200, headers: {{ "Content-Type": "text/csv" }} }});
+      const escCell = (v) => '"' + String(v === undefined || v === null ? "" : v).replace(/"/g, '""') + '"';
+      const rows = [
+        ["Section", "Line Code", "Line Item", "Authority / Detail", "Baseline Value", "Optimized / Modeled Value", "Delta / Notes"],
+        ["META", "META-TOOL", "Tool Slug", "Canonical Route", paidSlug, paidSlug, "Verified"],
+        ["META", "META-STATE", "Jurisdiction", "State Code", "CA", "CA", "Applicable"],
+        ["META", "META-SKU", "Offer SKU", "Pricing Tier", paidOffer.sku, paidOffer.sku, paidOffer.tier_kind],
+        ["META", "META-LEAD", "Lead Reference", "Session Lead ID", paidLeadId, paidLeadId, "Settled"],
+        ["META", "META-YEAR", "Tax / Statutory Year", "Compliance Cycle", "2026", "2026", "Current"],
+        ["RECONCILIATION", reconSchedule[0].line_code, reconSchedule[0].line_item, reconSchedule[0].authority, reconSchedule[0].baseline_value, reconSchedule[0].optimized_value, reconSchedule[0].delta_impact],
+      ];
+      const csvBody = rows.map((r) => r.map(escCell).join(",")).join("\\n") + "\\n";
+      return new Response(csvBody, {{ status: 200, headers: {{ "Content-Type": "text/csv" }} }});
     }}
     if (fmt === "html") {{
       const firmName = (sess.metadata && sess.metadata.firm_name) || "";
       return new Response(
-        `<html><body><h1>${{paidOffer.tier_kind}}</h1><p>${{firmName}}</p><p>session_id=${{sid}}</p></body></html>`,
+        `<html><body><h1>${{paidOffer.tier_kind}} (${{paidSlug}})</h1><p>${{firmName}}</p><p>session_id=${{sid}}</p></body></html>`,
         {{ status: 200, headers: {{ "Content-Type": "text/html" }} }}
       );
     }}
     if (fmt === "datapack") {{
-      return jsonResp({{ pack_id: `dp_${{sid}}`, tier_kind: paidOffer.tier_kind }}, 200);
+      return jsonResp({{ pack_id: `dp_${{sid}}`, tier_kind: paidOffer.tier_kind, tool_slug: paidSlug, reconciliation_schedule: reconSchedule }}, 200);
     }}
     const dpUrl = (paidOffer.tier_kind === "quick" && !CFG.quick_leak_datapack)
       ? null
@@ -587,6 +610,194 @@ def test_compiled_edge_commerce_replay_all_legacy_and_fifth_site(tmp_path: Path)
             (api_dir / "lead-fulfillment.js").write_text(fulfill_js, encoding="utf-8")
         replay = verify_local_edge_commerce_replay(repo, prop_id, dist_dir=dist)
         assert replay["status"] == "PASS", f"{prop_id} compiled edge replay failed: {replay['issues']}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node binary required for asset content quality gate")
+def test_paid_asset_content_quality_gate_passes_across_all_four_tenants(tmp_path: Path) -> None:
+    from pseofactory import edge
+    from pseofactory.commerce_gate import (
+        _LEGACY_REPRESENTATIVE_TOOL_CATEGORIES,
+        verify_local_edge_commerce_replay,
+    )
+
+    tenants = [
+        ("profithelm", "profithelm.com", "business", 15, 29),
+        ("prexvo", "prexvo.com", "consumer", 9, 19),
+        ("gainhelm", "gainhelm.com", "business", 15, 29),
+        ("lienbond", "lienbond.com", "business", 15, 29),
+    ]
+
+    for prop_id, domain, aud_tier, q_p, f_p in tenants:
+        expected_slugs = list(_LEGACY_REPRESENTATIVE_TOOL_CATEGORIES[prop_id])
+        assert len(expected_slugs) == 4
+        repo = tmp_path / f"acq_{prop_id}"
+        dist = repo / "dist"
+        _build_compliant_dist(dist, prop_id, expected_slugs[0], q_p, f_p)
+        for extra_slug in expected_slugs[1:]:
+            (dist / "tools" / extra_slug).mkdir(parents=True, exist_ok=True)
+            (dist / "tools" / extra_slug / "index.html").write_text(
+                f"<!DOCTYPE html><html lang='en'><head><title>{extra_slug}</title></head>"
+                f"<body><main><h1>{extra_slug}</h1></main></body></html>",
+                encoding="utf-8",
+            )
+        (repo / ".pseofactory.json").write_text(
+            json.dumps(
+                {
+                    "property_id": prop_id,
+                    "domain": domain,
+                    "canonical_base": f"https://{domain}",
+                    "audience_tier": aud_tier,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (repo / "functions" / "api").mkdir(parents=True, exist_ok=True)
+        if hasattr(edge, "sync_tenant_edge_functions"):
+            edge.sync_tenant_edge_functions(repo, property_id=prop_id)
+        else:
+            api_dir = repo / "functions" / "api"
+            lc_js = edge.generate_edge_lead_capture_function(prop_id, audience_tier=aud_tier, repo_root=repo)
+            wh_js = edge.generate_edge_stripe_webhook_function(prop_id)
+            checkout_js = (
+                'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n'
+                "function withFlag(ctx) { const u = new URL(ctx.request.url); if (!u.searchParams.has('checkout')) u.searchParams.set('checkout', '1'); return { ...ctx, request: new Request(u.toString(), ctx.request) }; }\n"
+                "export async function onRequestGet(ctx) { return lcGet(withFlag(ctx)); }\n"
+                "export async function onRequestPost(ctx) { return lcPost(withFlag(ctx)); }\n"
+                "export async function onRequestOptions(ctx) { return lcOpt(ctx); }\n"
+            )
+            fulfill_js = (
+                'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n'
+                "function withFlag(ctx) { const u = new URL(ctx.request.url); if (!u.searchParams.has('fulfill')) u.searchParams.set('fulfill', '1'); return { ...ctx, request: new Request(u.toString(), ctx.request) }; }\n"
+                "export async function onRequestGet(ctx) { return lcGet(withFlag(ctx)); }\n"
+                "export async function onRequestPost(ctx) { return lcPost(withFlag(ctx)); }\n"
+                "export async function onRequestOptions(ctx) { return lcOpt(ctx); }\n"
+            )
+            (api_dir / "lead-capture.js").write_text(lc_js, encoding="utf-8")
+            (api_dir / "stripe-webhook.js").write_text(wh_js, encoding="utf-8")
+            (api_dir / "checkout.js").write_text(checkout_js, encoding="utf-8")
+            (api_dir / "lead-fulfillment.js").write_text(fulfill_js, encoding="utf-8")
+
+        replay = verify_local_edge_commerce_replay(repo, prop_id, dist_dir=dist)
+        assert replay["passed"] is True, f"{prop_id} replay failed: {replay['issues']}"
+        acq = replay.get("asset_content_quality") or {}
+        assert acq.get("passed") is True, f"{prop_id} asset_content_quality failed: {acq}"
+        assert acq.get("tools_audited_count") == 4
+        assert set(acq.get("audited_tools") or []) == set(expected_slugs)
+        assert acq.get("differentiation_passed") is True
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node binary required for asset content quality negative gate")
+def test_paid_asset_content_quality_gate_fails_closed_on_wrong_domain_or_malformed_csv(tmp_path: Path) -> None:
+    from pseofactory.commerce_gate import resolve_tenant_commerce_matrix, verify_local_edge_commerce_replay
+
+    # Case 1: Wrong-domain contamination ("DoD CIO" emitted on SOC 2 for gainhelm)
+    gh_repo = tmp_path / "bad_soc2_domain"
+    gh_dist = gh_repo / "dist"
+    _build_compliant_dist(gh_dist, "gainhelm", "soc-2-audit-cost-calculator", 15, 29)
+    (gh_repo / ".pseofactory.json").write_text(
+        json.dumps({"property_id": "gainhelm", "domain": "gainhelm.com", "canonical_base": "https://gainhelm.com"}),
+        encoding="utf-8",
+    )
+    gh_matrix = resolve_tenant_commerce_matrix("gainhelm", repo_root=gh_repo, dist_dir=gh_dist)
+    _write_compliant_mock_edge_workers(
+        gh_repo, "gainhelm", "gainhelm.com", "soc-2-audit-cost-calculator", gh_matrix["tiers"]
+    )
+    (gh_repo / "functions" / "api" / "lead-fulfillment.js").write_text(
+        'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n'
+        "export async function onRequestGet(ctx) {\n"
+        "  const u = new URL(ctx.request.url);\n"
+        '  u.searchParams.set("fulfill", "1");\n'
+        "  const resp = await lcGet({ ...ctx, request: new Request(u.toString(), ctx.request) });\n"
+        '  const slug = (u.searchParams.get("tool_slug") || "").toLowerCase();\n'
+        '  const fmt = (u.searchParams.get("format") || "json").toLowerCase();\n'
+        '  if (resp.status === 200 && slug === "soc-2-audit-cost-calculator" && fmt === "html") {\n'
+        "    const body = await resp.text();\n"
+        '    return new Response(body + "<p>Regulator: DoD CIO</p>", { status: 200, headers: { "Content-Type": "text/html" } });\n'
+        "  }\n"
+        "  return resp;\n"
+        "}\n"
+        "export async function onRequestPost(ctx) { return lcPost(ctx); }\n"
+        "export async function onRequestOptions(ctx) { return lcOpt(ctx); }\n",
+        encoding="utf-8",
+    )
+    gh_rep = verify_local_edge_commerce_replay(gh_repo, "gainhelm", dist_dir=gh_dist)
+    assert gh_rep["passed"] is False
+    assert gh_rep["asset_content_quality"]["passed"] is False
+    assert any("DoD CIO" in msg and "soc-2-audit-cost-calculator" in msg for msg in gh_rep["issues"]), gh_rep["issues"]
+
+    # Case 2: Ragged CSV missing META-TOOL
+    csv_repo = tmp_path / "bad_ragged_csv"
+    csv_dist = csv_repo / "dist"
+    _build_compliant_dist(csv_dist, "profithelm", "section-179-calculator", 15, 29)
+    (csv_repo / ".pseofactory.json").write_text(
+        json.dumps({"property_id": "profithelm", "domain": "profithelm.com", "canonical_base": "https://profithelm.com"}),
+        encoding="utf-8",
+    )
+    ph_matrix = resolve_tenant_commerce_matrix("profithelm", repo_root=csv_repo, dist_dir=csv_dist)
+    _write_compliant_mock_edge_workers(
+        csv_repo, "profithelm", "profithelm.com", "section-179-calculator", ph_matrix["tiers"]
+    )
+    (csv_repo / "functions" / "api" / "lead-fulfillment.js").write_text(
+        'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n'
+        "export async function onRequestGet(ctx) {\n"
+        "  const u = new URL(ctx.request.url);\n"
+        '  u.searchParams.set("fulfill", "1");\n'
+        "  const resp = await lcGet({ ...ctx, request: new Request(u.toString(), ctx.request) });\n"
+        '  const fmt = (u.searchParams.get("format") || "json").toLowerCase();\n'
+        '  if (resp.status === 200 && fmt === "csv") {\n'
+        '    return new Response("Section,Code,Item,Auth,Base,Opt,Notes\\nMETA,META-STATE,CA,US,1,2,3\\nRAGGED,ONLY,3COLS\\n", { status: 200, headers: { "Content-Type": "text/csv" } });\n'
+        "  }\n"
+        "  return resp;\n"
+        "}\n"
+        "export async function onRequestPost(ctx) { return lcPost(ctx); }\n"
+        "export async function onRequestOptions(ctx) { return lcOpt(ctx); }\n",
+        encoding="utf-8",
+    )
+    csv_rep = verify_local_edge_commerce_replay(csv_repo, "profithelm", dist_dir=csv_dist)
+    assert csv_rep["passed"] is False
+    assert csv_rep["asset_content_quality"]["passed"] is False
+    assert any("Ragged CSV" in msg for msg in csv_rep["issues"]), csv_rep["issues"]
+    assert any("META-TOOL" in msg for msg in csv_rep["issues"]), csv_rep["issues"]
+
+    # Case 3: Broken token slop (undefined + U+2014) & identical reconciliation_schedule across categories
+    slop_repo = tmp_path / "bad_slop_and_generic"
+    slop_dist = slop_repo / "dist"
+    _build_compliant_dist(slop_dist, "profithelm", "section-179-calculator", 15, 29)
+    (slop_repo / ".pseofactory.json").write_text(
+        json.dumps({"property_id": "profithelm", "domain": "profithelm.com", "canonical_base": "https://profithelm.com"}),
+        encoding="utf-8",
+    )
+    _write_compliant_mock_edge_workers(
+        slop_repo, "profithelm", "profithelm.com", "section-179-calculator", ph_matrix["tiers"]
+    )
+    (slop_repo / "functions" / "api" / "lead-fulfillment.js").write_text(
+        'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n'
+        "export async function onRequestGet(ctx) {\n"
+        "  const u = new URL(ctx.request.url);\n"
+        '  u.searchParams.set("fulfill", "1");\n'
+        "  const resp = await lcGet({ ...ctx, request: new Request(u.toString(), ctx.request) });\n"
+        '  const fmt = (u.searchParams.get("format") || "json").toLowerCase();\n'
+        '  if (resp.status === 200 && fmt === "html") {\n'
+        "    const body = await resp.text();\n"
+        '    return new Response(body + "<p>Val: undefined " + String.fromCharCode(0x2014) + "</p>", { status: 200, headers: { "Content-Type": "text/html" } });\n'
+        "  }\n"
+        '  if (resp.status === 200 && fmt === "datapack") {\n'
+        "    const dp = await resp.json();\n"
+        '    dp.reconciliation_schedule = [{ line_code: "GEN-1", line_item: "Generic Identical Label" }];\n'
+        '    return new Response(JSON.stringify(dp), { status: 200, headers: { "Content-Type": "application/json" } });\n'
+        "  }\n"
+        "  return resp;\n"
+        "}\n"
+        "export async function onRequestPost(ctx) { return lcPost(ctx); }\n"
+        "export async function onRequestOptions(ctx) { return lcOpt(ctx); }\n",
+        encoding="utf-8",
+    )
+    slop_rep = verify_local_edge_commerce_replay(slop_repo, "profithelm", dist_dir=slop_dist)
+    assert slop_rep["passed"] is False
+    assert slop_rep["asset_content_quality"]["passed"] is False
+    assert any("undefined" in msg for msg in slop_rep["issues"]), slop_rep["issues"]
+    assert any("U+2014" in msg for msg in slop_rep["issues"]), slop_rep["issues"]
+    assert any("Tool-Category Differentiation failed" in msg for msg in slop_rep["issues"]), slop_rep["issues"]
 
 
 # ---------------------------------------------------------------------------

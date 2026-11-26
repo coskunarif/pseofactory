@@ -1901,6 +1901,7 @@ def _render_gainhelm_framework_routing_js(include_deliverables: bool = False) ->
         '  if (s.includes("pci-dss") || s.includes("pci-") || s.includes("qsa")) return "pci_dss";\n'
         '  if (s.includes("hitrust")) return "hitrust";\n'
         '  if (s.includes("fedramp") || s.includes("stateramp") || s.includes("txramp")) return "fedramp";\n'
+        '  if (s.includes("soc-2") || s.includes("soc2") || s.includes("trust-services")) return "soc2";\n'
         '  if (s.includes("penetration-test") || s.includes("pentest") || s.includes("penetration")) return "pentest";\n'
         '  if (s.includes("cyber-liability") || s.includes("cyber-insurance") || s.includes("breach-exposure")) return "cyber_insurance";\n'
         '  if (s.includes("cmmc") || s.includes("sprs") || s.includes("800-171") || s.includes("federal-defense-grc")) return "cmmc";\n'
@@ -2318,6 +2319,9 @@ def _resolve_edge_pricing_catalog(
         for k, v in _pricing.SKU_ALIASES.items()
         if str(k).startswith(sku_prefix) or str(v).startswith(sku_prefix)
     }
+    if prop_clean == "gainhelm":
+        for _fw in ("dora", "eu_ai_act", "sec_8k", "gdpr", "ccpa", "nis2"):
+            tenant_aliases.setdefault(f"gh_{_fw}_governance_kit", "gh_hipaa_iso27001_governance_kit")
     return {
         "property_id": prop_clean,
         "quick_offer": quick_offer,
@@ -6039,7 +6043,11 @@ def _render_edge_pricing_and_workpaper_engine_js(
     catalog_json = pricing_bundle["catalog_json"]
     sku_prefix_stem = pricing_bundle["sku_prefix_stem"]
     exec_prefix = sku_prefix_stem.upper()
-    aliases_json = json.dumps(pricing_bundle["aliases"], sort_keys=True)
+    aliases_map = dict(pricing_bundle.get("aliases") or {})
+    if prop_clean == "gainhelm":
+        for _fw in ("dora", "eu_ai_act", "sec_8k", "gdpr", "ccpa", "nis2"):
+            aliases_map.setdefault(f"gh_{_fw}_governance_kit", "gh_hipaa_iso27001_governance_kit")
+    aliases_json = json.dumps(aliases_map, sort_keys=True)
     quick_sku = str(quick_offer["sku"])
     partner_sku = str(partner_offer["sku"])
     brand_name = meta["brand_name"] or TENANT_BRAND_NAMES.get(
@@ -6061,133 +6069,494 @@ def _render_edge_pricing_and_workpaper_engine_js(
 
     if prop_clean == "prexvo":
         tenant_compute_js = """
-    let curRatePct = extractEdgeNumericParam(inputs, outputs, ["current_rate", "cur_rate", "federal_rate", "rate"], 6.8, 1, 18);
-    let refiRatePct = extractEdgeNumericParam(inputs, outputs, ["refi_rate", "new_rate", "target_rate", "private_rate"], Math.max(3.5, curRatePct - 1.9), 1, 18);
-    if (refiRatePct >= curRatePct) refiRatePct = Math.max(2.5, curRatePct - 1.5);
-    const termYears = Math.round(extractEdgeNumericParam(inputs, outputs, ["term", "year"], 10, 2, 30));
-    const nMonths = termYears * 12;
-    const calcAmort = (prin, aprPct, months) => {
-      const r = (aprPct / 100) / 12;
-      if (r <= 0) return { pmt: prin / months, totalInt: 0 };
-      const pmt = prin * (r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
-      return { pmt, totalInt: Math.max(0, pmt * months - prin) };
-    };
-    const baseRes = calcAmort(baseAmount, curRatePct, nMonths);
-    const refiRes = calcAmort(baseAmount, refiRatePct, nMonths);
-    const monthlyDelta = Math.max(0, baseRes.pmt - refiRes.pmt);
-    const lifetimeSavings = Math.max(0, baseRes.totalInt - refiRes.totalInt);
+    const isParentPlus = /parent-plus|double-consolidation/.test(slugLower);
+    const isGradPlus = !isParentPlus && /grad-plus|borrowing-cap|aggregate-limit/.test(slugLower);
+    const isRapIdr = !isParentPlus && !isGradPlus && /rap|ibr|icr|paye|discretionary|repayment-estimator|forgiveness|tiered-standard/.test(slugLower);
 
-    kpis = [
-      { label: "Modeled Loan Principal", value: fmtUsd(baseAmount) },
-      { label: "Monthly Payment Delta", value: `${fmtUsd(baseRes.pmt)} -> ${fmtUsd(refiRes.pmt)}` },
-      { label: "Lifetime Interest Saved", value: fmtUsd(lifetimeSavings) },
-      { label: "Amortization Horizon", value: `${termYears} Years (${nMonths} Months)` },
-    ];
-    reconciliationSchedule = [
-      { line_code: "PX-100", line_item: "Modeled Principal Loan Balance", authority: "Promissory Note Principal", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `${termYears}-Yr Term (${nMonths} mo)` },
-      { line_code: "PX-200", line_item: `Monthly Payment (${fmtPct(curRatePct)} vs ${fmtPct(refiRatePct)} APR)`, authority: "Truth in Lending Act (12 CFR Part 1026)", baseline_value: `${fmtUsd(baseRes.pmt)}/mo`, optimized_value: `${fmtUsd(refiRes.pmt)}/mo`, delta_impact: `-${fmtUsd(monthlyDelta)}/mo Relief` },
-      { line_code: "PX-300", line_item: "Total Cumulative Interest Over Full Term", authority: "20 U.S.C. 1087e & 12 CFR 1026.47", baseline_value: fmtUsd(baseRes.totalInt), optimized_value: fmtUsd(refiRes.totalInt), delta_impact: `-${fmtUsd(lifetimeSavings)} Saved` },
-      { line_code: "PX-400", line_item: "Federal IDR / PSLF Forfeiture Hurdle", authority: "34 CFR 685.209 & 34 CFR 685.219", baseline_value: "Federal Protections Active", optimized_value: "Permanently Waived on Refi", delta_impact: "Verify Zero PSLF / IDR Subsidy Loss" },
-    ];
-    const spreads = [-1.0, -0.5, 0.0, 0.5, 1.0];
-    sensitivityMatrix = spreads.map((bpsDelta) => {
-      const testApr = Math.max(2.0, Math.round((refiRatePct + bpsDelta) * 100) / 100);
-      const testRes = calcAmort(baseAmount, testApr, nMonths);
-      const sav = baseRes.totalInt - testRes.totalInt;
-      const lbl = bpsDelta === 0 ? `Modeled Refi Rate (${fmtPct(testApr)})` : `${bpsDelta > 0 ? "+" : ""}${Math.round(bpsDelta * 100)} bps Refi Rate (${fmtPct(testApr)})`;
-      return {
+    if (isParentPlus) {
+      if (!isQuickTier && !isPartnerSlot) {
+        effectiveOfferTitle = "Prexvo Parent PLUS Repayment & Consolidation Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact Parent PLUS balance and AGI inputs (HTML/PDF)",
+          "Dynamic 5-scenario ICR vs Standard 10-year and Extended 25-year sensitivity matrix (HTML/CSV)",
+          "6-step NSLDS disbursement cohort, Direct Consolidation & recertification calendar (HTML/CSV)",
+          "Complete structured JSON data pack with OBBBA July 1, 2026 cohort & FPL metadata (JSON)",
+          "Unredacted Direct Consolidation cutoff, ICR election & statutory discharge checklist clauses (HTML/PDF)",
+        ];
+      } else if (isQuickTier) {
+        effectiveOfferTitle = "Prexvo Quick Parent PLUS Repayment Worksheet";
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "34 CFR Part 685, Higher Education Act & OBBBA (P.L. 119-21) Parent PLUS Cohort Rules";
+      }
+      const plusRatePct = extractEdgeNumericParam(inputs, outputs, ["plus_rate", "current_rate", "rate", "apr"], 8.94, 2, 16);
+      const agiInput = extractEdgeNumericParam(inputs, outputs, ["agi", "income", "household_income"], 95000, 15000, 1000000);
+      const famSize = Math.round(extractEdgeNumericParam(inputs, outputs, ["family", "household", "dependents"], 2, 1, 10));
+      const fpl2026 = 15960 + Math.max(0, famSize - 1) * 5680;
+      const stdRateM = (plusRatePct / 100) / 12;
+      const stdPmt = Math.round((baseAmount * (stdRateM * Math.pow(1 + stdRateM, 120)) / (Math.pow(1 + stdRateM, 120) - 1)) * 100) / 100;
+      const icrDisc = Math.max(0, agiInput - fpl2026);
+      const icrPmt = Math.round((icrDisc * 0.20 / 12) * 100) / 100;
+      const icrRelief = Math.max(0, Math.round((stdPmt - icrPmt) * 100) / 100);
+      const capIntAmt = Math.round(baseAmount * 0.05 * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Parent PLUS Balance", value: fmtUsd(baseAmount) },
+        { label: "Standard 10-Yr vs ICR Monthly", value: `${fmtUsd(stdPmt)} vs ${fmtUsd(icrPmt)}` },
+        { label: "OBBBA Cohort Cutoff", value: "July 1, 2026" },
+        { label: "Est. Monthly Cash-Flow Delta", value: `${fmtUsd(icrRelief)}/mo` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "PX-100", line_item: "Parent PLUS Balance & OBBBA Statutory Cohort Rule", authority: "20 U.S.C. 1078-2 & P.L. 119-21 Parent PLUS Provisions", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: "Legacy Pre-Cutoff vs $20k/$65k Cap" },
+        { line_code: "PX-200", line_item: `ICR vs Standard 10-Year Repayment Exposure (${fmtPct(plusRatePct)})`, authority: "34 CFR 685.209(b) & 34 CFR 685.208", baseline_value: `${fmtUsd(stdPmt)}/mo Std`, optimized_value: `${fmtUsd(icrPmt)}/mo ICR`, delta_impact: `-${fmtUsd(icrRelief)}/mo Delta` },
+        { line_code: "PX-300", line_item: "Direct Consolidation Cutoff & Interest Capitalization Impact", authority: "20 U.S.C. 1078-3 & 34 CFR 685.220", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount + capIntAmt), delta_impact: `+${fmtUsd(capIntAmt)} Est. Cap. Risk` },
+        { line_code: "PX-400", line_item: "OBBBA Parent PLUS Annual ($20,000) & Lifetime ($65,000) Cap", authority: "P.L. 119-21 Title IV Parent PLUS Caps", baseline_value: "$20,000/yr Cap", optimized_value: "$65,000 Lifetime/Student", delta_impact: baseAmount > 65000 ? "Verify Legacy Disbursement Exemption" : "Within Statutory Cap" },
+      ];
+      const plusScenarios = [
+        ["Pre-Cutoff Direct Consolidation into ICR (Modeled AGI)", 1.00, icrPmt],
+        ["Standard 10-Year Level Repayment", 1.00, stdPmt],
+        ["Extended 25-Year Fixed Repayment", 1.00, Math.round((baseAmount * (stdRateM * Math.pow(1 + stdRateM, 300)) / (Math.pow(1 + stdRateM, 300) - 1)) * 100) / 100],
+        ["Capitalized Unpaid Interest (+5% Principal)", 1.05, Math.round((baseAmount * 1.05 * (stdRateM * Math.pow(1 + stdRateM, 120)) / (Math.pow(1 + stdRateM, 120) - 1)) * 100) / 100],
+        ["Post-Cutoff Ineligible Cohort (Standard / Tiered Only)", 1.00, stdPmt],
+      ];
+      sensitivityMatrix = plusScenarios.map(([lbl, balMult, pmtVal]) => ({
         scenario_label: lbl,
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: `${fmtPct(testApr)} (${fmtUsd(testRes.pmt)}/mo)`,
-        estimated_net_benefit: `${sav >= 0 ? "+" : ""}${fmtUsd(sav)} Lifetime vs Baseline`,
-      };
-    });
-    let balRefi = baseAmount;
-    let balBase = baseAmount;
-    let cumIntSaved = 0;
-    const rRefiM = (refiRatePct / 100) / 12;
-    const rBaseM = (curRatePct / 100) / 12;
-    for (let m = 1; m <= nMonths; m++) {
-      const begR = balRefi;
-      const intR = balRefi * rRefiM;
-      const prinR = Math.min(balRefi, refiRes.pmt - intR);
-      balRefi = Math.max(0, balRefi - prinR);
-      const intB = balBase * rBaseM;
-      const prinB = Math.min(balBase, baseRes.pmt - intB);
-      balBase = Math.max(0, balBase - prinB);
-      cumIntSaved += (intB - intR);
-      if (m <= 12) {
+        modeled_principal: fmtUsd(baseAmount * balMult),
+        effective_rate: `${fmtPct(plusRatePct)} Fixed (${fmtUsd(pmtVal)}/mo)`,
+        estimated_net_benefit: `${stdPmt - pmtVal >= 0 ? "+" : ""}${fmtUsd((stdPmt - pmtVal) * 12)}/yr vs Standard`,
+      }));
+      const plusMilestones = [
+        ["Step 1: NSLDS Loan Audit", fmtUsd(baseAmount), "Verify Disbursement Dates", "Pre-July 1, 2026 Cohort", "Pull StudentAid.gov loan aid summary"],
+        ["Step 2: Consolidation Cutoff Check", "Before Statutory Deadline", "Direct Consolidation", "34 CFR 685.220", "Confirm disbursement timing before consolidation lock"],
+        ["Step 3: Unpaid Interest Audit", fmtUsd(capIntAmt), "Capitalization Check", fmtPct(plusRatePct), "Pay accrued interest prior to consolidation if advantageous"],
+        ["Step 4: IDR / ICR Election", `${fmtUsd(icrPmt)}/mo`, `AGI: ${fmtUsd(agiInput)}`, `FPL: ${fmtUsd(fpl2026)}`, "Submit IRS Direct Data Exchange income consent"],
+        ["Step 5: Annual Recertification", "Every 12 Months", "Income Update", "34 CFR 685.209", "Prevent Standard-plan payment spike on missed renewal"],
+        ["Step 6: Discharge & Payoff Review", fmtUsd(baseAmount), "25-Yr / TPD Protections", "Title IV Statutory", "Preserve federal Parent PLUS death/TPD discharge"],
+      ];
+      periodSchedule = plusMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `${fmtUsd(icrRelief)}/mo Relief`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "ed_direct_plus_rate", metric_label: "Title IV Direct PLUS Fixed Interest Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 8.05, "2025": 9.08, "2026": 8.94, "2028": 8.40, "2030": 8.15 } },
+        { series_id: "obbba_parent_plus_lifetime_cap", metric_label: "OBBBA Parent PLUS Lifetime Borrowing Cap per Student", statutory_citation: "P.L. 119-21 Title IV Amendments", unit: "USD", points: { "2024": 0, "2025": 0, "2026": 65000, "2028": 65000, "2030": 65000 } },
+        { series_id: "hhs_fpl_single", metric_label: "HHS 48-State Single Federal Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15960, "2028": 16600, "2030": 17600 } },
+      ];
+      methodologyNotes = [
+        `Parent PLUS repayment modeled on ${fmtUsd(baseAmount)} at ${fmtPct(plusRatePct)} APR comparing Standard 10-year (${fmtUsd(stdPmt)}/mo) against ICR (${fmtUsd(icrPmt)}/mo using AGI ${fmtUsd(agiInput)} and 2026 FPL ${fmtUsd(fpl2026)}).`,
+        "Under OBBBA (P.L. 119-21), Parent PLUS borrowers must satisfy statutory consolidation and disbursement-cohort deadlines to retain income-contingent eligibility.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PX-EXEC-101",
+          instrument_title: "Direct Consolidation Cohort Cutoff & NSLDS Verification Checklist",
+          controlling_statute: "20 U.S.C. 1078-3, 34 CFR 685.220 & P.L. 119-21",
+          filing_deadline_rule: "Confirm Prior to Statutory Cohort Cutoff",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `DIRECT CONSOLIDATION AUDIT (${stateCode}): Verify disbursement dates for all Parent PLUS promissory notes totaling ${fmtUsd(baseAmount)} in StudentAid.gov NSLDS before submitting consolidation.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-102",
+          instrument_title: "ICR vs Standard Repayment Election & Interest Capitalization Audit",
+          controlling_statute: "34 CFR 685.209(b) & 34 CFR 685.208",
+          filing_deadline_rule: "Complete at Consolidation / Within 10-Day Servicer Notice",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `ICR ELECTION CHECKLIST: Modeled ICR payment is ${fmtUsd(icrPmt)}/mo vs ${fmtUsd(stdPmt)}/mo Standard (${fmtUsd(icrRelief)}/mo cash-flow difference). Audit accrued unpaid interest (${fmtUsd(capIntAmt)}) prior to consolidation capitalization.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-103",
+          instrument_title: "Parent PLUS Statutory Discharge & Annual Recertification Protocol",
+          controlling_statute: "20 U.S.C. 1087(a) & 34 CFR 685.212",
+          filing_deadline_rule: "Maintain Annual Income Recertification",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "DISCHARGE & RENEWAL PROTOCOL: Parent PLUS loans carry statutory discharge upon borrower or student death/TPD under 34 CFR 685.212; verify whether third-party private conversion would forfeit those protections."
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isGradPlus) {
+      if (!isQuickTier && !isPartnerSlot) {
+        effectiveOfferTitle = "Prexvo OBBBA Graduate & Professional Borrowing Cap Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact COA and program-length inputs (HTML/PDF)",
+          "Dynamic 5-scenario federal cap vs unfunded Cost-of-Attendance gap sensitivity table (HTML/CSV)",
+          "6-year academic aid cap utilization and post-graduation transition schedule (HTML/CSV)",
+          "Complete structured JSON data pack with OBBBA $20,500/$50,000 annual & lifetime caps (JSON)",
+          "Unredacted financial aid package audit & legacy Grad PLUS cohort checklist clauses (HTML/PDF)",
+        ];
+      } else if (isQuickTier) {
+        effectiveOfferTitle = "Prexvo Quick Graduate Borrowing Cap Worksheet";
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "Higher Education Act Title IV & OBBBA (P.L. 119-21) Graduate/Professional Loan Caps";
+      }
+      const isProf = /prof|med|law|md|jd|dds|dvm|pharm/.test(slugLower);
+      const annualCap = isProf ? 50000 : 20500;
+      const lifetimeCap = isProf ? 200000 : 100000;
+      const programYears = Math.round(extractEdgeNumericParam(inputs, outputs, ["year", "term", "program_length"], isProf ? 4 : 2, 1, 6));
+      const coaTotal = Math.max(baseAmount, annualCap * 1.35);
+      const annualGap = Math.max(0, Math.round((coaTotal - annualCap) * 100) / 100);
+      const totalGap = Math.max(0, Math.round((coaTotal * programYears - Math.min(lifetimeCap, annualCap * programYears)) * 100) / 100);
+      const fedGradRate = extractEdgeNumericParam(inputs, outputs, ["rate", "apr", "fed_rate"], 7.80, 2, 16);
+
+      kpis = [
+        { label: "Modeled Annual COA / Need", value: fmtUsd(coaTotal) },
+        { label: `OBBBA Annual Cap (${isProf ? "Prof" : "Grad"})`, value: fmtUsd(annualCap) },
+        { label: "OBBBA Lifetime Cap", value: fmtUsd(lifetimeCap) },
+        { label: "Annual Unfunded COA Gap", value: fmtUsd(annualGap) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "PX-100", line_item: "OBBBA Statutory Graduate / Professional Annual Cap ($20,500 Grad / $50,000 Prof)", authority: "P.L. 119-21 Title IV Borrowing Limits & 20 U.S.C. 1087e", baseline_value: fmtUsd(coaTotal), optimized_value: fmtUsd(annualCap), delta_impact: `${fmtUsd(annualGap)}/yr Unfunded Gap` },
+        { line_code: "PX-200", line_item: "OBBBA Statutory Lifetime Borrowing Cap ($100,000 Grad / $200,000 Prof)", authority: "P.L. 119-21 Aggregate Direct Loan Limit", baseline_value: fmtUsd(coaTotal * programYears), optimized_value: fmtUsd(lifetimeCap), delta_impact: `${fmtUsd(totalGap)} Multi-Yr Cap Delta` },
+        { line_code: "PX-300", line_item: "Unfunded Cost-of-Attendance (COA) Gap Analysis", authority: "20 U.S.C. 1087ll Cost of Attendance Standards", baseline_value: `${fmtUsd(coaTotal)} Total COA`, optimized_value: `${fmtUsd(annualCap)} Federal Aid`, delta_impact: `${fmtUsd(annualGap)} Gap to Fund` },
+        { line_code: "PX-400", line_item: "Private Supplement vs Federal Aid & Legacy Grandfathering Check", authority: "34 CFR 685.203 & 12 CFR 1026.48 Private Education Loans", baseline_value: `${fmtPct(fedGradRate)} Direct Grad`, optimized_value: "Legacy Exception vs Private Gap", delta_impact: "Compare Origination Fee & Protections" },
+      ];
+      const capScenarios = [
+        ["Federal Direct Unsubsidized Only (Within Cap)", annualCap, fedGradRate],
+        ["Graduate ($20,500/yr Fed Cap) + Private Gap", 20500, fedGradRate],
+        ["Professional ($50,000/yr Fed Cap) + Private Gap", 50000, fedGradRate],
+        ["Legacy Pre-Cutoff Enrolled Grad PLUS Cohort", coaTotal, 8.94],
+        ["Institutional Grant / Assistantship COA Offset (-25%)", Math.max(0, coaTotal * 0.75 - annualCap), fedGradRate],
+      ];
+      sensitivityMatrix = capScenarios.map(([lbl, fedAmt, rPct]) => {
+        const privGap = Math.max(0, Math.round((coaTotal - fedAmt) * 100) / 100);
+        return {
+          scenario_label: lbl,
+          modeled_principal: `${fmtUsd(fedAmt)} Fed`,
+          effective_rate: `${fmtPct(rPct)} Federal Benchmark`,
+          estimated_net_benefit: `${fmtUsd(privGap)} Private Gap Required`,
+        };
+      });
+      for (let yr = 1; yr <= 6; yr++) {
+        const activeYr = Math.min(yr, programYears);
+        const cumFed = Math.min(lifetimeCap, annualCap * activeYr);
+        const cumCoa = coaTotal * activeYr;
+        const cumGap = Math.max(0, cumCoa - cumFed);
         periodSchedule.push({
-          period: `Month ${m}`,
-          metric_a: fmtUsd(begR),
-          metric_b: fmtUsd(prinR),
-          metric_c: fmtUsd(intR),
-          metric_d: fmtUsd(balRefi),
-          note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
-        });
-      } else if (m % 12 === 0 || m === nMonths) {
-        const yrNum = Math.ceil(m / 12);
-        periodSchedule.push({
-          period: `Year ${yrNum} End (Mo ${m})`,
-          metric_a: fmtUsd(refiRes.pmt * 12) + "/yr",
-          metric_b: fmtUsd(baseAmount - balRefi) + " Cum. Prin",
-          metric_c: fmtUsd(intR) + " Mo Int",
-          metric_d: fmtUsd(balRefi),
-          note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
+          period: yr <= programYears ? `Academic Year ${yr}` : `Post-Grad Year ${yr - programYears}`,
+          metric_a: fmtUsd(cumCoa),
+          metric_b: fmtUsd(cumFed),
+          metric_c: fmtUsd(cumGap),
+          metric_d: `${Math.round((cumFed / lifetimeCap) * 100)}% Cap Used`,
+          note: yr <= programYears ? "FAFSA, Award Letter & Cap Tracking" : "Grace Period / Repayment Transition",
         });
       }
+      statutoryTrendTimeseries = [
+        { series_id: "obbba_grad_annual_cap", metric_label: "OBBBA Graduate Annual Direct Unsubsidized Cap", statutory_citation: "P.L. 119-21 Title IV Amendments", unit: "USD", points: { "2024": 20500, "2025": 20500, "2026": 20500, "2028": 20500, "2030": 20500 } },
+        { series_id: "obbba_prof_annual_cap", metric_label: "OBBBA Professional Degree Annual Direct Loan Cap", statutory_citation: "P.L. 119-21 Title IV Amendments", unit: "USD", points: { "2024": 40500, "2025": 40500, "2026": 50000, "2028": 50000, "2030": 50000 } },
+        { series_id: "ed_direct_grad_rate", metric_label: "Title IV Direct Graduate Unsubsidized Fixed Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 8.08, "2025": 7.94, "2026": 7.80, "2028": 7.35, "2030": 7.10 } },
+      ];
+      methodologyNotes = [
+        `Modeled under OBBBA (P.L. 119-21) graduate/professional borrowing caps: $20,500/yr ($100,000 lifetime) for general graduate programs and $50,000/yr ($200,000 lifetime) for qualifying professional programs.`,
+        `Annual COA of ${fmtUsd(coaTotal)} leaves an unfunded gap of ${fmtUsd(annualGap)}/yr beyond the ${fmtUsd(annualCap)} annual federal cap over ${programYears} years.`,
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PX-EXEC-101",
+          instrument_title: "Financial Aid Package & OBBBA Borrowing Cap Gap Audit",
+          controlling_statute: "P.L. 119-21 & 20 U.S.C. 1087ll",
+          filing_deadline_rule: "Review Upon Financial Aid Award Letter Receipt",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `AID PACKAGE AUDIT (${stateCode}): Exhaust the ${fmtUsd(annualCap)}/yr federal Direct Unsubsidized allocation (${fmtUsd(lifetimeCap)} lifetime ceiling) before accepting any private COA gap loan (${fmtUsd(annualGap)}/yr gap).`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-102",
+          instrument_title: "Legacy Grad PLUS Cohort Grandfathering Verification",
+          controlling_statute: "P.L. 119-21 Transition Rules & 34 CFR 685.203",
+          filing_deadline_rule: "Verify Continuous Enrollment Prior to Cutoff",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "LEGACY COHORT CHECK: Confirm with your university financial aid office whether prior Direct Grad PLUS borrowing in the same program preserves legacy Grad PLUS transition eligibility through program completion."
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-103",
+          instrument_title: "Private Gap Supplement Regulation Z (12 CFR 1026.48) Comparison Checklist",
+          controlling_statute: "12 CFR 1026.47 & 12 CFR 1026.48",
+          filing_deadline_rule: "30-Day Approval Lock / 3-Day Rescission Window",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PRIVATE GAP CHECKLIST: For the ${fmtUsd(annualGap)}/yr unfunded gap, compare institutional tuition payment plans, fellowships, and multiple Regulation Z Approval Disclosures before signing a private supplement note.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isRapIdr) {
+      if (!isQuickTier && !isPartnerSlot) {
+        effectiveOfferTitle = "Prexvo OBBBA RAP & Income-Driven Repayment Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact loan balance, AGI & household inputs (HTML/PDF)",
+          "Dynamic 5-tier AGI stress-test comparing OBBBA RAP vs IBR monthly payments (HTML/CSV)",
+          "6-milestone IRS Direct Data Exchange, $50/mo RAP principal match & recertification schedule (HTML/CSV)",
+          "Complete structured JSON data pack with 2026 HHS FPL & RAP subsidy/match metadata (JSON)",
+          "Unredacted StudentAid.gov IDR/RAP enrollment & tax filing status (MFS vs MFJ) checklist clauses (HTML/PDF)",
+        ];
+      } else if (isQuickTier) {
+        effectiveOfferTitle = "Prexvo Quick RAP & Income-Driven Repayment Worksheet";
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "OBBBA (P.L. 119-21) Repayment Assistance Plan (RAP), 34 CFR 685.209 & 2026 HHS FPL";
+      }
+      const agiInput = extractEdgeNumericParam(inputs, outputs, ["agi", "income", "salary"], 72000, 10000, 1000000);
+      const famSize = Math.round(extractEdgeNumericParam(inputs, outputs, ["family", "household", "dependents"], 1, 1, 10));
+      const fpl2026 = 15960 + Math.max(0, famSize - 1) * 5680;
+      const calcRapMonthly = (agiVal) => {
+        if (agiVal <= 10000) return 10;
+        const pct = Math.min(0.10, Math.max(0.01, Math.floor((agiVal - 10000) / 10000) * 0.01 + 0.01));
+        return Math.max(10, Math.round((agiVal * pct / 12) * 100) / 100);
+      };
+      const rapMonthly = calcRapMonthly(agiInput);
+      const ibrMonthly = Math.max(0, Math.round((Math.max(0, agiInput - 1.5 * fpl2026) * 0.10 / 12) * 100) / 100);
+      const loanRatePct = extractEdgeNumericParam(inputs, outputs, ["rate", "apr"], 6.39, 2, 14);
+      const monthlyIntAccrual = Math.round((baseAmount * (loanRatePct / 100) / 12) * 100) / 100;
+      const rapIntSubsidy = Math.max(0, Math.round((monthlyIntAccrual - rapMonthly) * 100) / 100);
+      const rapPrincipalMatch = Math.min(50, Math.round(rapMonthly * 100) / 100);
+      const std10RateM = (loanRatePct / 100) / 12;
+      const std10Monthly = Math.round((baseAmount * (std10RateM * Math.pow(1 + std10RateM, 120)) / (Math.pow(1 + std10RateM, 120) - 1)) * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Loan Balance", value: fmtUsd(baseAmount) },
+        { label: "RAP Monthly Payment", value: `${fmtUsd(rapMonthly)}/mo` },
+        { label: "IBR Monthly Payment", value: `${fmtUsd(ibrMonthly)}/mo` },
+        { label: "RAP Subsidy + Match", value: `${fmtUsd(rapIntSubsidy + rapPrincipalMatch)}/mo` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "PX-100", line_item: `OBBBA Repayment Assistance Plan (RAP 1%-10% AGI on ${fmtUsd(agiInput)})`, authority: "P.L. 119-21 RAP Statutory Sliding Scale", baseline_value: `${fmtUsd(std10Monthly)}/mo Std`, optimized_value: `${fmtUsd(rapMonthly)}/mo RAP`, delta_impact: `-${fmtUsd(Math.max(0, std10Monthly - rapMonthly))}/mo Relief` },
+        { line_code: "PX-200", line_item: "RAP Unpaid Interest Subsidy & $50/mo Principal Match", authority: "P.L. 119-21 Section 455(e) RAP Principal & Interest Rule", baseline_value: `${fmtUsd(monthlyIntAccrual)}/mo Int`, optimized_value: `${fmtUsd(rapIntSubsidy)}/mo Int + ${fmtUsd(rapPrincipalMatch)}/mo Match`, delta_impact: "Zero Negative Amortization" },
+        { line_code: "PX-300", line_item: `IBR Discretionary Income (150% of 2026 HHS FPL ${fmtUsd(fpl2026)})`, authority: "34 CFR 685.221 & 42 U.S.C. 9902(2)", baseline_value: `${fmtUsd(Math.max(0, agiInput - 1.5 * fpl2026))} Disc. Inc.`, optimized_value: `${fmtUsd(ibrMonthly)}/mo (10% Cap)`, delta_impact: rapMonthly <= ibrMonthly ? "RAP Lower Monthly Outlay" : "IBR Lower Monthly Outlay" },
+        { line_code: "PX-400", line_item: "Standard 10-Year / Tiered Standard Payment Benchmark", authority: "34 CFR 685.208 & P.L. 119-21 Tiered Standard", baseline_value: `${fmtUsd(std10Monthly)}/mo`, optimized_value: `${fmtUsd(Math.min(rapMonthly, ibrMonthly))}/mo Best IDR`, delta_impact: `${fmtUsd(Math.max(0, std10Monthly - Math.min(rapMonthly, ibrMonthly)) * 12)}/yr Cash-Flow` },
+      ];
+      const agiMults = [0.80, 0.90, 1.00, 1.10, 1.25];
+      sensitivityMatrix = agiMults.map((m) => {
+        const testAgi = Math.round(agiInput * m);
+        const rPmt = calcRapMonthly(testAgi);
+        const iPmt = Math.max(0, Math.round((Math.max(0, testAgi - 1.5 * fpl2026) * 0.10 / 12) * 100) / 100);
+        const lbl = m === 1.0 ? `Modeled Baseline AGI (${fmtUsd(testAgi)})` : `${m < 1 ? "-" : "+"}${Math.round(Math.abs(m - 1) * 100)}% AGI Stress-Test (${fmtUsd(testAgi)})`;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(testAgi),
+          effective_rate: `RAP ${fmtUsd(rPmt)}/mo | IBR ${fmtUsd(iPmt)}/mo`,
+          estimated_net_benefit: `${fmtUsd(Math.max(0, std10Monthly - Math.min(rPmt, iPmt)))}/mo vs Std`,
+        };
+      });
+      const recertMilestones = [
+        ["Enrollment: IRS Data Exchange", fmtUsd(agiInput), fmtUsd(fpl2026), `${famSize} Person(s)`, "Authorize automatic tax-transcript income pull"],
+        ["Year 1: Monthly RAP & Match Audit", `${fmtUsd(rapMonthly * 12)}/yr`, `${fmtUsd(rapPrincipalMatch * 12)}/yr Prin Match`, `${fmtUsd(rapIntSubsidy * 12)}/yr Int Sub`, "Verify $50/mo principal reduction posting"],
+        ["Year 2: Annual Recertification", fmtUsd(agiInput), "34 CFR 685.209", "Zero Interest Spike", "Submit recertification 35 days before anniversary"],
+        ["Year 5: Mid-Term Trajectory Audit", fmtUsd(rapMonthly * 60), fmtUsd(rapPrincipalMatch * 60), fmtUsd(rapIntSubsidy * 60), "Compare cumulative out-of-pocket vs Standard"],
+        ["Year 10: Standard Payoff Benchmark", fmtUsd(std10Monthly * 120), fmtUsd(rapMonthly * 120), "Balance Check", "Evaluate remaining balance vs taxable forgiveness rules"],
+        ["Final Statutory Horizon", "25-30 Yr Cap", "Form 1099-C Review", stateCode + " Tax Check", "Track qualifying monthly payment count in StudentAid.gov"],
+      ];
+      periodSchedule = recertMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `${fmtUsd(rapMonthly)}/mo RAP`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "hhs_fpl_single", metric_label: "HHS 48-State Single Federal Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15960, "2028": 16600, "2030": 17600 } },
+        { series_id: "rap_principal_match_monthly", metric_label: "OBBBA RAP Monthly Principal Match Credit Cap", statutory_citation: "P.L. 119-21 Repayment Assistance Plan", unit: "USD", points: { "2024": 0, "2025": 0, "2026": 50, "2028": 50, "2030": 50 } },
+        { series_id: "ibr_discretionary_cap_pct", metric_label: "IBR Discretionary Income Payment Percentage", statutory_citation: "34 CFR 685.221", unit: "PCT", points: { "2024": 10.0, "2025": 10.0, "2026": 10.0, "2028": 10.0, "2030": 10.0 } },
+      ];
+      methodologyNotes = [
+        `Modeled RAP payment (${fmtUsd(rapMonthly)}/mo) uses the OBBBA 1%-10% AGI sliding scale on ${fmtUsd(agiInput)} AGI with ${fmtUsd(rapIntSubsidy)}/mo unpaid interest subsidy and up to $50/mo principal match.`,
+        `Modeled IBR payment (${fmtUsd(ibrMonthly)}/mo) applies 10% of discretionary income above 150% of the 2026 HHS Federal Poverty Guideline (${fmtUsd(fpl2026)} for household size ${famSize}).`,
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PX-EXEC-101",
+          instrument_title: "StudentAid.gov IDR / RAP Enrollment & IRS Direct Data Exchange Checklist",
+          controlling_statute: "P.L. 119-21 & 34 CFR 685.209 / 685.221",
+          filing_deadline_rule: "Recertify Annually 35 Days Prior to Plan Anniversary",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `IDR / RAP ENROLLMENT (${stateCode}): Authorize IRS Direct Data Exchange consent on StudentAid.gov using modeled AGI ${fmtUsd(agiInput)} (family size ${famSize}) to lock ${fmtUsd(Math.min(rapMonthly, ibrMonthly))}/mo payment.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-102",
+          instrument_title: "RAP $50/mo Principal Match & Unpaid Interest Subsidy Verification",
+          controlling_statute: "P.L. 119-21 Section 455(e)",
+          filing_deadline_rule: "Audit Monthly Servicer Billing Statement",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `RAP BENEFIT AUDIT: Verify on each monthly statement that unpaid interest (${fmtUsd(rapIntSubsidy)}/mo) is subsidized and the up-to-$50/mo principal match (${fmtUsd(rapPrincipalMatch)}/mo) reduces principal on ${fmtUsd(baseAmount)}.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-103",
+          instrument_title: "Tax Filing Status (MFS vs MFJ) & Qualifying Payment Count Protocol",
+          controlling_statute: "34 CFR 685.209(e) & IRC Section 6013",
+          filing_deadline_rule: "Evaluate Prior to Apr 15 Federal Tax Filing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "TAX FILING CHECKLIST: Compare Married Filing Separately vs Jointly tax delta against IDR/RAP payment reduction before filing Form 1040, and archive monthly qualifying payment counters."
+            : lockedChecklistNotice,
+        },
+      ];
+    } else {
+      let curRatePct = extractEdgeNumericParam(inputs, outputs, ["current_rate", "cur_rate", "federal_rate", "rate"], 6.8, 1, 18);
+      let refiRatePct = extractEdgeNumericParam(inputs, outputs, ["refi_rate", "new_rate", "target_rate", "private_rate"], Math.max(3.5, curRatePct - 1.9), 1, 18);
+      if (refiRatePct >= curRatePct) refiRatePct = Math.max(2.5, curRatePct - 1.5);
+      const termYears = Math.round(extractEdgeNumericParam(inputs, outputs, ["term", "year"], 10, 2, 30));
+      const nMonths = termYears * 12;
+      const calcAmort = (prin, aprPct, months) => {
+        const r = (aprPct / 100) / 12;
+        if (r <= 0) return { pmt: prin / months, totalInt: 0 };
+        const pmt = prin * (r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
+        return { pmt, totalInt: Math.max(0, pmt * months - prin) };
+      };
+      const baseRes = calcAmort(baseAmount, curRatePct, nMonths);
+      const refiRes = calcAmort(baseAmount, refiRatePct, nMonths);
+      const monthlyDelta = Math.max(0, baseRes.pmt - refiRes.pmt);
+      const lifetimeSavings = Math.max(0, baseRes.totalInt - refiRes.totalInt);
+
+      kpis = [
+        { label: "Modeled Loan Principal", value: fmtUsd(baseAmount) },
+        { label: "Monthly Payment Delta", value: `${fmtUsd(baseRes.pmt)} -> ${fmtUsd(refiRes.pmt)}` },
+        { label: "Lifetime Interest Saved", value: fmtUsd(lifetimeSavings) },
+        { label: "Amortization Horizon", value: `${termYears} Years (${nMonths} Months)` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "PX-100", line_item: "Modeled Principal Loan Balance", authority: "Promissory Note Principal", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `${termYears}-Yr Term (${nMonths} mo)` },
+        { line_code: "PX-200", line_item: `Monthly Payment (${fmtPct(curRatePct)} vs ${fmtPct(refiRatePct)} APR)`, authority: "Truth in Lending Act (12 CFR Part 1026)", baseline_value: `${fmtUsd(baseRes.pmt)}/mo`, optimized_value: `${fmtUsd(refiRes.pmt)}/mo`, delta_impact: `-${fmtUsd(monthlyDelta)}/mo Relief` },
+        { line_code: "PX-300", line_item: "Total Cumulative Interest Over Full Term", authority: "20 U.S.C. 1087e & 12 CFR 1026.47", baseline_value: fmtUsd(baseRes.totalInt), optimized_value: fmtUsd(refiRes.totalInt), delta_impact: `-${fmtUsd(lifetimeSavings)} Saved` },
+        { line_code: "PX-400", line_item: "Federal IDR / PSLF Forfeiture Hurdle", authority: "34 CFR 685.209 & 34 CFR 685.219", baseline_value: "Federal Protections Active", optimized_value: "Permanently Waived on Refi", delta_impact: "Verify Zero PSLF / IDR Subsidy Loss" },
+      ];
+      const spreads = [-1.0, -0.5, 0.0, 0.5, 1.0];
+      sensitivityMatrix = spreads.map((bpsDelta) => {
+        const testApr = Math.max(2.0, Math.round((refiRatePct + bpsDelta) * 100) / 100);
+        const testRes = calcAmort(baseAmount, testApr, nMonths);
+        const sav = baseRes.totalInt - testRes.totalInt;
+        const lbl = bpsDelta === 0 ? `Modeled Refi Rate (${fmtPct(testApr)})` : `${bpsDelta > 0 ? "+" : ""}${Math.round(bpsDelta * 100)} bps Refi Rate (${fmtPct(testApr)})`;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(baseAmount),
+          effective_rate: `${fmtPct(testApr)} (${fmtUsd(testRes.pmt)}/mo)`,
+          estimated_net_benefit: `${sav >= 0 ? "+" : ""}${fmtUsd(sav)} Lifetime vs Baseline`,
+        };
+      });
+      let balRefi = baseAmount;
+      let balBase = baseAmount;
+      let cumIntSaved = 0;
+      const rRefiM = (refiRatePct / 100) / 12;
+      const rBaseM = (curRatePct / 100) / 12;
+      for (let m = 1; m <= nMonths; m++) {
+        const begR = balRefi;
+        const intR = balRefi * rRefiM;
+        const prinR = Math.min(balRefi, refiRes.pmt - intR);
+        balRefi = Math.max(0, balRefi - prinR);
+        const intB = balBase * rBaseM;
+        const prinB = Math.min(balBase, baseRes.pmt - intB);
+        balBase = Math.max(0, balBase - prinB);
+        cumIntSaved += (intB - intR);
+        if (m <= 12) {
+          periodSchedule.push({
+            period: `Month ${m}`,
+            metric_a: fmtUsd(begR),
+            metric_b: fmtUsd(prinR),
+            metric_c: fmtUsd(intR),
+            metric_d: fmtUsd(balRefi),
+            note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
+          });
+        } else if (m % 12 === 0 || m === nMonths) {
+          const yrNum = Math.ceil(m / 12);
+          periodSchedule.push({
+            period: `Year ${yrNum} End (Mo ${m})`,
+            metric_a: fmtUsd(refiRes.pmt * 12) + "/yr",
+            metric_b: fmtUsd(baseAmount - balRefi) + " Cum. Prin",
+            metric_c: fmtUsd(intR) + " Mo Int",
+            metric_d: fmtUsd(balRefi),
+            note: `Cum. Interest Saved: ${fmtUsd(cumIntSaved)}`,
+          });
+        }
+      }
+      statutoryTrendTimeseries = [
+        { series_id: "ed_direct_undergrad_rate", metric_label: "Title IV Direct Undergraduate Fixed Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2028": 5.95, "2030": 5.8 } },
+        { series_id: "hhs_fpl_single_base", metric_label: "HHS 48-State Single Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15960, "2028": 16600, "2030": 17600 } },
+        { series_id: "fred_dgs10_yield", metric_label: "10-Year U.S. Treasury Benchmark Yield", statutory_citation: "31 U.S.C. 3102 / FRED DGS10", unit: "PCT", points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2028": 3.95, "2030": 3.8 } },
+      ];
+      methodologyNotes = [
+        `Monthly amortization computed using exact level-payment formula M = P * r / (1 - (1 + r)^-n) with P = ${fmtUsd(baseAmount)}, baseline APR = ${fmtPct(curRatePct)}, refi APR = ${fmtPct(refiRatePct)}, n = ${nMonths} months.`,
+        "Refinancing federal Direct Loans into private credit permanently waives Title IV federal protections (IDR/RAP, PSLF, federal forbearance, and statutory discharge under 34 CFR Part 685).",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PX-EXEC-101",
+          instrument_title: "34 CFR 685.209 / 685.219 Federal Protection Forfeiture Audit",
+          controlling_statute: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
+          filing_deadline_rule: "Review Prior to 3-Business-Day TILA Rescission Cutoff",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `FORFEITURE AUDIT (${stateCode}): Refinancing ${fmtUsd(baseAmount)} from ${fmtPct(curRatePct)} to ${fmtPct(refiRatePct)} over ${termYears} years reduces monthly payment by ${fmtUsd(monthlyDelta)} and saves ${fmtUsd(lifetimeSavings)} in lifetime interest. Confirm zero active PSLF qualifying payments (34 CFR 685.219) or RAP/IBR interest subsidies before signing.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-102",
+          instrument_title: "Regulation Z (12 CFR 1026.48) Rate-Match & 3-Day Rescission Calendar",
+          controlling_statute: "12 CFR 1026.47 & 12 CFR 1026.48",
+          filing_deadline_rule: "30-Day Approval Lock / 3-Business-Day Right to Cancel",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `REGULATION Z CHECKLIST: (1) Request competing Approval Disclosures within 30 days under 12 CFR 1026.48(c); (2) Submit lowest competing APR (${fmtPct(refiRatePct)}) for written rate-match credit; (3) Preserve 3-business-day non-disbursement cancellation right under 12 CFR 1026.48(d).`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PX-EXEC-103",
+          instrument_title: "Cosigner Release & Death/Disability Discharge Verification Rider",
+          controlling_statute: "15 U.S.C. 1650 & EGRRCPA Section 601",
+          filing_deadline_rule: "Verify in Promissory Note Prior to Closing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PROMISSORY NOTE CHECKLIST: Confirm explicit written contractual inclusion of (a) death and total permanent disability discharge parity and (b) cosigner release eligibility after 12 to 24 consecutive on-time payments of ${fmtUsd(refiRes.pmt)}/mo.`
+            : lockedChecklistNotice,
+        },
+      ];
     }
-    statutoryTrendTimeseries = [
-      { series_id: "ed_direct_undergrad_rate", metric_label: "Title IV Direct Undergraduate Fixed Rate", statutory_citation: "20 U.S.C. 1087e(b)", unit: "PCT", points: { "2024": 5.5, "2025": 6.53, "2026": 6.39, "2028": 5.95, "2030": 5.8 } },
-      { series_id: "hhs_fpl_single_base", metric_label: "HHS 48-State Single Poverty Guideline", statutory_citation: "42 U.S.C. 9902(2)", unit: "USD", points: { "2024": 15060, "2025": 15650, "2026": 15960, "2028": 16600, "2030": 17600 } },
-      { series_id: "fred_dgs10_yield", metric_label: "10-Year U.S. Treasury Benchmark Yield", statutory_citation: "31 U.S.C. 3102 / FRED DGS10", unit: "PCT", points: { "2024": 4.21, "2025": 4.48, "2026": 4.34, "2028": 3.95, "2030": 3.8 } },
-    ];
-    methodologyNotes = [
-      `Monthly amortization computed using exact level-payment formula M = P * r / (1 - (1 + r)^-n) with P = ${fmtUsd(baseAmount)}, baseline APR = ${fmtPct(curRatePct)}, refi APR = ${fmtPct(refiRatePct)}, n = ${nMonths} months.`,
-      "Refinancing federal Direct Loans into private credit permanently waives Title IV federal protections (IDR/RAP, PSLF, federal forbearance, and statutory discharge under 34 CFR Part 685).",
-    ];
-    statutoryExecutionArtifacts = [
-      {
-        instrument_id: "PX-EXEC-101",
-        instrument_title: "34 CFR 685.209 / 685.219 Federal Protection Forfeiture Audit",
-        controlling_statute: "20 U.S.C. 1087e & 34 CFR 685.209 / 685.219",
-        filing_deadline_rule: "Review Prior to 3-Business-Day TILA Rescission Cutoff",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `FORFEITURE AUDIT (${stateCode}): Refinancing ${fmtUsd(baseAmount)} from ${fmtPct(curRatePct)} to ${fmtPct(refiRatePct)} over ${termYears} years reduces monthly payment by ${fmtUsd(monthlyDelta)} and saves ${fmtUsd(lifetimeSavings)} in lifetime interest. Confirm zero active PSLF qualifying payments (34 CFR 685.219) or RAP/IBR interest subsidies before signing.`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "PX-EXEC-102",
-        instrument_title: "Regulation Z (12 CFR 1026.48) Rate-Match & 3-Day Rescission Calendar",
-        controlling_statute: "12 CFR 1026.47 & 12 CFR 1026.48",
-        filing_deadline_rule: "30-Day Approval Lock / 3-Business-Day Right to Cancel",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `REGULATION Z CHECKLIST: (1) Request competing Approval Disclosures within 30 days under 12 CFR 1026.48(c); (2) Submit lowest competing APR (${fmtPct(refiRatePct)}) for written rate-match credit; (3) Preserve 3-business-day non-disbursement cancellation right under 12 CFR 1026.48(d).`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "PX-EXEC-103",
-        instrument_title: "Cosigner Release & Death/Disability Discharge Verification Rider",
-        controlling_statute: "15 U.S.C. 1650 & EGRRCPA Section 601",
-        filing_deadline_rule: "Verify in Promissory Note Prior to Closing",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `PROMISSORY NOTE CHECKLIST: Confirm explicit written contractual inclusion of (a) death and total permanent disability discharge parity and (b) cosigner release eligibility after 12 to 24 consecutive on-time payments of ${fmtUsd(refiRes.pmt)}/mo.`
-          : lockedChecklistNotice,
-      },
-    ];
 """
     elif prop_clean == "profithelm":
         tenant_compute_js = """
     const skuNorm = normalizeEdgeSku((offer && (offer.sku || offer.offerSku)) || "");
-    const is1031 = skuNorm === "ph_1031_boot_replacement_workpapers" || toolSlug.includes("1031") || toolSlug.includes("exchange");
-    const isCapex = !is1031 && (skuNorm === "ph_commercial_capital_audit_toolkit" || toolSlug.includes("179") || toolSlug.includes("equipment") || toolSlug.includes("macrs") || toolSlug.includes("factoring") || toolSlug.includes("tariff"));
+    const is1031Slug = /1031|like-kind|exchange|8824|3840|boot|dst/.test(slugLower);
+    const isCapexSlug = !is1031Slug && /179|bonus|equipment|macrs|tariff|factoring|lease|depreciation|vehicle|gvwr|line-of-credit|working-capital|landed-cost/.test(slugLower);
+    const isCryptoSlug = !is1031Slug && !isCapexSlug && /crypto|capital-gain|niit|wash-sale|harvest|stock|short-term|long-term|1099-da|prediction-market|kalshi|polymarket/.test(slugLower);
+    const isScorpSlug = !is1031Slug && !isCapexSlug && !isCryptoSlug && /s-corp|scorp|reasonable-salary|self-employment|1099|payroll|fica/.test(slugLower);
+    const isQsbsSlug = !is1031Slug && !isCapexSlug && !isCryptoSlug && !isScorpSlug && /qsbs|1202/.test(slugLower);
+    const isBracketTaxSlug = !is1031Slug && !isCapexSlug && !isCryptoSlug && !isScorpSlug && !isQsbsSlug && /bracket|1040|199a|qbi|standard-deduction|effective-tax|marginal-tax|federal-income|amt|estimated-tax/.test(slugLower);
+    const canFallbackToSku = !is1031Slug && !isCapexSlug && !isCryptoSlug && !isScorpSlug && !isQsbsSlug && !isBracketTaxSlug;
+    const is1031 = is1031Slug || (canFallbackToSku && skuNorm === "ph_1031_boot_replacement_workpapers");
+    const isCapex = !is1031 && (isCapexSlug || (canFallbackToSku && skuNorm === "ph_commercial_capital_audit_toolkit"));
+    const isCryptoCapGains = !is1031 && !isCapex && isCryptoSlug;
+    const isSCorpSe = !is1031 && !isCapex && !isCryptoCapGains && isScorpSlug;
+    const isQsbs = !is1031 && !isCapex && !isCryptoCapGains && !isSCorpSe && isQsbsSlug;
     const margRatePct = extractEdgeNumericParam(inputs, outputs, ["tax_rate", "marginal", "bracket", "rate"], 32, 10, 50);
     const margRate = margRatePct / 100;
 
     if (is1031) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_1031_boot_replacement_workpapers";
+      }
+      if (!isQuickTier && !isPartnerSlot && rawOfferSku !== "ph_1031_boot_replacement_workpapers") {
+        const canon1031 = getCanonicalEdgeOffer("ph_1031_boot_replacement_workpapers");
+        if (canon1031) {
+          effectiveOfferTitle = canon1031.title || effectiveOfferTitle;
+          effectiveStatutoryAuthority = canon1031.statutory_authority || effectiveStatutoryAuthority;
+          if (Array.isArray(canon1031.deliverables) && canon1031.deliverables.length) {
+            effectiveDeliverables = [...canon1031.deliverables];
+          }
+        }
+      }
       const basisInput = extractEdgeNumericParam(inputs, outputs, ["basis", "adjusted_basis", "cost_basis"], 0, 1, baseAmount * 2);
       const replInput = extractEdgeNumericParam(inputs, outputs, ["replacement", "new_property", "target_price"], baseAmount, 1, baseAmount * 5);
       const deprInput = extractEdgeNumericParam(inputs, outputs, ["depreciation", "accumulated_depr", "recapture"], 0, 0, baseAmount);
@@ -6233,11 +6602,63 @@ def _render_edge_pricing_and_workpaper_engine_js(
         { period: "Day 180 (Hard Cutoff)", metric_a: fmtUsd(replInput), metric_b: "Final Deed Closing", metric_c: "No Extensions Permitted", metric_d: fmtUsd(Math.max(0, deferredTaxTotal - recognizedBootTax)), note: "Close replacement acquisition before Day 180 or tax due date" },
         { period: "Tax Return Filing", metric_a: "IRS Form 8824", metric_b: "Carryover Basis Schedule", metric_c: stateCode + " Conformity Check", metric_d: fmtUsd(Math.max(0, replInput - realizedGain)), note: "Attach Form 8824 (and CA FTB Form 3840 if applicable)" },
       ];
+      statutoryTrendTimeseries = [
+        { series_id: "irc_1031_id_window_days", metric_label: "IRC Section 1031(a)(3)(A) Written Identification Window", statutory_citation: "26 U.S.C. 1031(a)(3)(A)", unit: "DAYS", points: { "2024": 45, "2025": 45, "2026": 45, "2028": 45, "2030": 45 } },
+        { series_id: "irc_1031_exchange_window_days", metric_label: "IRC Section 1031(a)(3)(B) Exchange Closing Window", statutory_citation: "26 U.S.C. 1031(a)(3)(B)", unit: "DAYS", points: { "2024": 180, "2025": 180, "2026": 180, "2028": 180, "2030": 180 } },
+        { series_id: "irc_1250_recapture_rate", metric_label: "Unrecaptured Section 1250 Depreciation Statutory Rate", statutory_citation: "26 U.S.C. 1(h)(1)(E)", unit: "PCT", points: { "2024": 25.0, "2025": 25.0, "2026": 25.0, "2028": 25.0, "2030": 25.0 } },
+        { series_id: "irc_1411_niit_rate", metric_label: "Net Investment Income Tax (NIIT) Statutory Rate", statutory_citation: "26 U.S.C. 1411", unit: "PCT", points: { "2024": 3.8, "2025": 3.8, "2026": 3.8, "2028": 3.8, "2030": 3.8 } },
+      ];
       methodologyNotes = [
         "IRC Section 1031 defers federal capital gains (20% LTCG + 3.8% NIIT) and Section 1250 depreciation recapture (25%) when replacement property value and debt equal or exceed relinquished net sale proceeds.",
         "Statutory 45-day identification and 180-day closing clocks under Treas. Reg. 1.1031(k)-1 run concurrently from closing date with no standard extension.",
       ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "Qualified Intermediary (QI) Exchange Agreement & Non-Receipt Audit",
+          controlling_statute: "IRC Section 1031(a) & Treas. Reg. 1.1031(k)-1(g)(4)",
+          filing_deadline_rule: "Execute Prior to Relinquished Property Deed Closing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `QI ASSIGNMENT (${stateCode}): Assign relinquished sale contract (${fmtUsd(baseAmount)}) to an independent Qualified Intermediary prior to closing so zero constructive receipt occurs under Treas. Reg. 1.1031(k)-1.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "45-Day Identification & 180-Day Replacement Closing Checklist",
+          controlling_statute: "IRC Section 1031(a)(3) & Form 8824",
+          filing_deadline_rule: "Day 45 Midnight Identification / Day 180 Closing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `EXCHANGE CALENDAR (${stateCode}): (1) Deliver signed written 3-Property / 200% Rule identification to QI by Day 45; (2) Reinvest >= ${fmtUsd(baseAmount)} and replace equal-or-greater debt to avoid boot; (3) Reconcile Form 8824 carryover basis (${fmtUsd(adjustedBasis)}).`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "State Clawback & Form 8824 Audit Retention Protocol",
+          controlling_statute: "IRC Section 6662 & State Clawback Statutes (e.g., CA FTB Form 3840)",
+          filing_deadline_rule: "Retain Through Replacement Property Disposition + 4-6 Years",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `AUDIT RETENTION (${stateCode}): Retain closing statements (ALTA/HUD-1), QI wire confirmations, written Day-45 ID letter, and Form 8824 workpapers; file state clawback tracking forms where required.`
+            : lockedChecklistNotice,
+        },
+      ];
     } else if (isCapex) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_commercial_capital_audit_toolkit";
+        effectiveOfferTitle = "ProfitHelm Section 179 & OBBBA Bonus Depreciation Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact CapEx inputs and outputs (HTML/PDF)",
+          "Dynamic 6-year 200% DB MACRS vs Section 179 and 100% Section 168(k) recovery schedule (HTML/CSV)",
+          "Dynamic 5-point equipment basis and business-use sensitivity table computed from your inputs (HTML/CSV)",
+          "Complete structured JSON data pack with Form 4562 schedules and OBBBA P.L. 119-21 metadata (JSON)",
+          "Unredacted Form 4562 election, placed-in-service cutoff, and state conformity checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "IRC Section 179, Section 168(k) (OBBBA P.L. 119-21) & IRS Form 4562";
+      }
       const busUsePct = extractEdgeNumericParam(inputs, outputs, ["business_use", "bus_use", "use_pct"], 100, 50, 100);
       const qualBasis = Math.round(baseAmount * (busUsePct / 100) * 100) / 100;
       const cap2026 = 2560000;
@@ -6294,11 +6715,402 @@ def _render_edge_pricing_and_workpaper_engine_js(
           note: idx === 0 ? "Sec 179 + 100% Bonus (P.L. 119-21)" : "Remaining MACRS 200% DB Recovery",
         };
       });
+      statutoryTrendTimeseries = [
+        { series_id: "irs_sec179_cap", metric_label: "IRC Section 179 Maximum Deduction Cap", statutory_citation: "26 U.S.C. 179(b)(1) / P.L. 119-21 Sec. 70306", unit: "USD", points: { "2024": 1220000, "2025": 2500000, "2026": 2560000, "2028": 2680000, "2030": 2810000 } },
+        { series_id: "irs_sec168k_bonus", metric_label: "IRC Section 168(k) First-Year Bonus Depreciation", statutory_citation: "26 U.S.C. 168(k) / P.L. 119-21 Sec. 70301", unit: "PCT", points: { "2024": 60.0, "2025": 40.0, "2026": 100.0, "2028": 100.0, "2030": 100.0 } },
+        { series_id: "irs_sec179_phaseout", metric_label: "IRC Section 179 Phase-Out Threshold", statutory_citation: "26 U.S.C. 179(b)(2) / Rev. Proc. 2025-32", unit: "USD", points: { "2024": 3050000, "2025": 4000000, "2026": 4090000, "2028": 4280000, "2030": 4490000 } },
+        { series_id: "macrs_5yr_first_year", metric_label: "5-Year MACRS 200% DB Half-Year Year-1 Rate", statutory_citation: "IRS Pub. 946 Table A-1", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
+      ];
       methodologyNotes = [
         "2026 IRC Section 179 statutory expense cap is $2,560,000 with dollar-for-dollar phase-out beginning at $4,090,000; 2026 IRC Section 168(k) bonus depreciation rate is 100% under P.L. 119-21 Section 70301.",
         "Standard 5-Year 200% Declining Balance Half-Year MACRS schedule (IRS Pub. 946 Table A-1): 20.00%, 32.00%, 19.20%, 11.52%, 11.52%, 5.76%.",
       ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "Form 4562 Section 179 & Bonus Election Substantiation",
+          controlling_statute: "IRC Section 179, Section 168(k) & P.L. 119-21",
+          filing_deadline_rule: "Attach Form 4562 to Timely Filed Return (Including Extensions)",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `FORM 4562 SUBSTANTIATION (${stateCode}): Modeled qualifying basis of ${fmtUsd(qualBasis)} (${busUsePct}% business use) supports ${fmtUsd(sec179)} Sec. 179 + ${fmtUsd(bonus100)} bonus writeoff and ${fmtUsd(yr1Shield)} Year-1 tax shield.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "Placed-in-Service Cutoff & Heavy-Vehicle / Equipment Log Checklist",
+          controlling_statute: "IRC Section 179(c), Section 280F & Treas. Reg. 1.167(a)-11",
+          filing_deadline_rule: "Placed in Service On or Before December 31",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PLACED-IN-SERVICE CHECKLIST: (1) Retain vendor invoice, financing note, and delivery/operational commissioning log dated <= Dec 31; (2) Confirm >50% qualified business use (${busUsePct}%) for listed property; (3) Reconcile Form 4562 Part I and Part II against fixed-asset subledger.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "State Bonus-Depreciation Decoupling & Recapture Retention Memo",
+          controlling_statute: "IRC Section 179(d)(10) & State Fixed-Asset Conformity",
+          filing_deadline_rule: "Retain Through Asset Recovery Period + 3-6 Years",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `STATE CONFORMITY (${stateCode}): Track state-specific Section 179 ceilings and Section 168(k) bonus add-backs separately on your state depreciation schedule.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isCryptoCapGains) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_statutory_tax_audit_workpapers";
+        effectiveOfferTitle = "ProfitHelm Crypto & Capital Gains Tax Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact capital gains inputs and outputs (HTML/PDF)",
+          "Dynamic 5-scenario tax-lot relief sensitivity matrix (FIFO, LIFO, HIFO, SpecID & Short-Term) (HTML/CSV)",
+          "6-milestone Form 8949, Schedule D, Form 8960 NIIT & Form 1099-DA reconciliation calendar (HTML/CSV)",
+          "Complete structured JSON data pack with lot-basis schedules and IRC Section 1(h) / 1411 metadata (JSON)",
+          "Unredacted Form 8949 substantiation, wash-sale & tax-loss harvesting execution checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "IRC Sections 1(h), 1001, 1221, 1411 (NIIT), IRS Form 8949, Schedule D & Form 1099-DA";
+      }
+      const costBasisInput = extractEdgeNumericParam(inputs, outputs, ["basis", "cost_basis", "purchase"], 0, 0, baseAmount * 5);
+      const holdingDays = Math.round(extractEdgeNumericParam(inputs, outputs, ["holding", "days", "term_days"], 400, 1, 3650));
+      const agiOther = extractEdgeNumericParam(inputs, outputs, ["agi", "income", "salary"], 180000, 0, 5000000);
+      const modeledBasis = costBasisInput > 0 ? Math.min(costBasisInput, baseAmount * 0.95) : Math.round(baseAmount * 0.45);
+      const netGain = Math.max(0, Math.round((baseAmount - modeledBasis) * 100) / 100);
+      const stRatePct = Math.min(37, Math.max(12, margRatePct));
+      const ltcgRatePct = (agiOther + netGain) > 533400 ? 20 : ((agiOther + netGain) > 49450 ? 15 : 0);
+      const niitApplies = (agiOther + netGain) > 200000;
+      const niitTax = niitApplies ? Math.round(netGain * 0.038 * 100) / 100 : 0;
+      const stTax = Math.round((netGain * (stRatePct / 100) + niitTax) * 100) / 100;
+      const ltTax = Math.round((netGain * (ltcgRatePct / 100) + niitTax) * 100) / 100;
+      const ltSavings = Math.max(0, Math.round((stTax - ltTax) * 100) / 100);
+      const hifoGain = Math.round(netGain * 0.78 * 100) / 100;
+      const hifoTax = Math.round((hifoGain * ((holdingDays > 365 ? ltcgRatePct : stRatePct) / 100) + (niitApplies ? hifoGain * 0.038 : 0)) * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Proceeds / Asset Value", value: fmtUsd(baseAmount) },
+        { label: "Modeled Capital Gain", value: fmtUsd(netGain) },
+        { label: `LTCG (${fmtPct(ltcgRatePct)}) vs ST (${fmtPct(stRatePct)})`, value: `${fmtUsd(ltTax)} vs ${fmtUsd(stTax)}` },
+        { label: "IRC Sec. 1411 NIIT (3.8%)", value: fmtUsd(niitTax) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "8949-P1", line_item: "Form 8949 & Schedule D Proceeds / Cost-Basis Gain", authority: "IRC Section 1001, Section 1012 & Form 8949 / Schedule D", baseline_value: `${fmtUsd(baseAmount)} Proceeds`, optimized_value: `${fmtUsd(netGain)} Gain (${fmtUsd(modeledBasis)} Basis)`, delta_impact: costBasisInput > 0 ? "Buyer-Supplied Basis" : "45% Default Basis Overrideable" },
+        { line_code: "1H-LTCG", line_item: `Short-Term Ordinary (${fmtPct(stRatePct)}) vs Long-Term Capital Gains (0%/15%/20%)`, authority: "IRC Section 1(h) & Section 1222 (>1 Year Holding)", baseline_value: `${fmtUsd(stTax)} ST Tax`, optimized_value: `${fmtUsd(ltTax)} LT Tax`, delta_impact: `-${fmtUsd(ltSavings)} LTCG Differential` },
+        { line_code: "8960-NIIT", line_item: "IRC Section 1411 Net Investment Income Tax (3.8% NIIT)", authority: "IRC Section 1411 & IRS Form 8960 ($200k/$250k MAGI)", baseline_value: niitApplies ? "3.8% Surtax Triggered" : "Below MAGI Threshold", optimized_value: fmtUsd(niitTax), delta_impact: niitApplies ? "Include on Form 8960" : "$0.00 NIIT" },
+        { line_code: "1099-DA", line_item: "Cost-Basis Lot Selection (FIFO vs HIFO vs SpecID) & Form 1099-DA", authority: "Treas. Reg. 1.1012-1(h), Rev. Proc. 2024-28 & Form 1099-DA", baseline_value: `${fmtUsd(ltTax)} FIFO Est.`, optimized_value: `${fmtUsd(hifoTax)} HIFO/SpecID Est.`, delta_impact: `-${fmtUsd(Math.max(0, ltTax - hifoTax))} Lot Optimization` },
+      ];
+      const lotScenarios = [
+        ["FIFO Default Lot Relief (First-In, First-Out)", 1.00, holdingDays > 365 ? ltcgRatePct : stRatePct],
+        ["LIFO Lot Relief (Last-In, First-Out)", 0.88, stRatePct],
+        ["HIFO Tax-Lot Selection (Highest-In, First-Out)", 0.78, holdingDays > 365 ? ltcgRatePct : stRatePct],
+        ["SpecID Long-Term Lots (>365 Days + Highest Basis)", 0.74, ltcgRatePct],
+        ["Short-Term Realization (<365 Days Ordinary Bracket)", 1.00, stRatePct],
+      ];
+      sensitivityMatrix = lotScenarios.map(([lbl, gainMult, rPct]) => {
+        const gAmt = Math.round(netGain * gainMult * 100) / 100;
+        const tAmt = Math.round((gAmt * (rPct / 100) + (niitApplies ? gAmt * 0.038 : 0)) * 100) / 100;
+        return {
+          scenario_label: lbl,
+          modeled_principal: `${fmtUsd(gAmt)} Gain`,
+          effective_rate: `${fmtPct(rPct)}${niitApplies ? " + 3.8% NIIT" : ""}`,
+          estimated_net_benefit: `${fmtUsd(tAmt)} Est. Tax`,
+        };
+      });
+      const capMilestones = [
+        ["Q1 (Apr 15): Lot Ledger & 1099-DA Sync", fmtUsd(baseAmount), fmtUsd(modeledBasis), "Wallet-by-Wallet", "Lock Rev. Proc. 2024-28 wallet-by-wallet basis records"],
+        ["Q2 (Jun 15): Mid-Year Gain & NIIT Check", fmtUsd(netGain * 0.5), fmtUsd(niitTax * 0.5), "Form 8960 Check", "Evaluate MAGI vs $200k/$250k NIIT threshold"],
+        ["Q3 (Sep 15): Holding-Period (>365d) Audit", `${holdingDays} Days`, fmtPct(ltcgRatePct), fmtUsd(ltSavings), "Defer short-term lots nearing 366-day mark"],
+        ["Q4 (Dec 31): SpecID & Loss-Harvest Cutoff", fmtUsd(hifoGain), fmtUsd(hifoTax), "IRC Sec. 1211", "Harvest unrealized losses before midnight Dec 31"],
+        ["Jan 31: Form 1099-DA / 1099-B Reconcile", fmtUsd(baseAmount), fmtUsd(modeledBasis), "Broker Basis Check", "Cross-check broker 1099-DA gross proceeds vs Form 8949"],
+        ["Apr 15: Form 8949 & Schedule D Filing", fmtUsd(netGain), fmtUsd(ltTax), "Form 8949 / Sch D", "Attach Form 8949 (Part I ST / Part II LT) & Form 8960"],
+      ];
+      periodSchedule = capMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `${fmtUsd(ltTax)} Est. Tax`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "irc_1h_ltcg_top_rate", metric_label: "Top Federal Long-Term Capital Gains Rate", statutory_citation: "26 U.S.C. 1(h)(1)(D)", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
+        { series_id: "irc_1411_niit_rate", metric_label: "Net Investment Income Tax (NIIT) Rate", statutory_citation: "26 U.S.C. 1411", unit: "PCT", points: { "2024": 3.8, "2025": 3.8, "2026": 3.8, "2028": 3.8, "2030": 3.8 } },
+        { series_id: "irs_capital_loss_cap", metric_label: "Annual Ordinary Income Capital Loss Deduction Cap", statutory_citation: "26 U.S.C. 1211(b)(1)", unit: "USD", points: { "2024": 3000, "2025": 3000, "2026": 3000, "2028": 3000, "2030": 3000 } },
+        { series_id: "irs_1099_da_reporting", metric_label: "Digital Asset Broker Form 1099-DA Reporting Coverage", statutory_citation: "26 U.S.C. 6045 / Treas. Reg. 1.6045-1", unit: "PCT", points: { "2024": 0.0, "2025": 100.0, "2026": 100.0, "2028": 100.0, "2030": 100.0 } },
+      ];
+      methodologyNotes = [
+        `Capital gains modeled on ${fmtUsd(baseAmount)} gross proceeds minus ${fmtUsd(modeledBasis)} adjusted basis (${fmtUsd(netGain)} net gain), comparing ${fmtPct(stRatePct)} short-term ordinary rates against ${fmtPct(ltcgRatePct)} LTCG under IRC Section 1(h) plus 3.8% NIIT (IRC Section 1411).`,
+        "Specific Identification (SpecID) and HIFO lot relief require contemporaneous wallet-by-wallet records per Treas. Reg. 1.1012-1(h) and Rev. Proc. 2024-28 for Form 8949 and Schedule D substantiation.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "Form 8949 & Schedule D Lot-Basis Substantiation Record",
+          controlling_statute: "IRC Section 1001, Section 1012 & Form 8949 / Schedule D",
+          filing_deadline_rule: "Contemporaneous Lot Selection Prior to Disposition",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `FORM 8949 SUBSTANTIATION (${stateCode}): Modeled disposition of ${fmtUsd(baseAmount)} with ${fmtUsd(modeledBasis)} basis yields ${fmtUsd(netGain)} capital gain. Archive acquisition timestamps, TX hashes, and SpecID/HIFO instructions prior to trade execution.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "Form 8960 NIIT & Year-End Tax-Loss Harvesting Checklist",
+          controlling_statute: "IRC Section 1411, Section 1211(b) & Section 1091",
+          filing_deadline_rule: "Execute Harvest Trades On or Before December 31",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `NIIT & HARVEST CHECKLIST: (1) Reconcile Form 8960 net investment income (${fmtUsd(niitTax)} NIIT modeled); (2) Verify 30-day wash-sale window (IRC Sec. 1091) on equity/ETF positions; (3) Apply up to $3,000 net capital loss offset against ordinary income.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "Form 1099-DA Wallet-by-Wallet Accounting & Retention Protocol",
+          controlling_statute: "IRC Section 6045, Treas. Reg. 1.6045-1 & Rev. Proc. 2024-28",
+          filing_deadline_rule: "Retain 3 to 6 Years Post-Filing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `1099-DA RETENTION (${stateCode}): Reconcile exchange Form 1099-DA / 1099-B statements against Form 8949 adjustment codes (Code B / Code T) and retain wallet CSV exports for the statutory audit window.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isSCorpSe) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_statutory_tax_audit_workpapers";
+        effectiveOfferTitle = "ProfitHelm S-Corp Reasonable Salary & Self-Employment Tax Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact S-Corp salary and profit inputs (HTML/PDF)",
+          "Dynamic 5-tier W-2 salary vs K-1 distribution FICA/SE tax sensitivity matrix (HTML/CSV)",
+          "6-milestone Form 2553, quarterly Form 941 payroll, W-2 & Form 1120-S compliance calendar (HTML/CSV)",
+          "Complete structured JSON data pack with payroll splits, OASDI wage-base caps & Form 1120-S metadata (JSON)",
+          "Unredacted Rev. Rul. 74-44 reasonable compensation & state PTET execution checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "IRC Sections 1366, 1401, 3121, IRS Form 1120-S, Form 2553 & Schedule SE";
+      }
+      const ssaCap = 184500;
+      const w2RatioPct = extractEdgeNumericParam(inputs, outputs, ["salary_pct", "w2_pct", "reasonable_pct"], 45, 25, 80);
+      const w2Salary = Math.min(baseAmount, Math.round(baseAmount * (w2RatioPct / 100) * 100) / 100);
+      const k1Dist = Math.max(0, Math.round((baseAmount - w2Salary) * 100) / 100);
+      const solePropSeTax = Math.round((Math.min(baseAmount * 0.9235, ssaCap) * 0.124 + baseAmount * 0.9235 * 0.029) * 100) / 100;
+      const scorpFicaTax = Math.round((Math.min(w2Salary, ssaCap) * 0.124 + w2Salary * 0.029) * 100) / 100;
+      const ficaSavings = Math.max(0, Math.round((solePropSeTax - scorpFicaTax) * 100) / 100);
+      const qbiBase = Math.max(0, Math.round(k1Dist * 0.20 * 100) / 100);
+
+      kpis = [
+        { label: "Modeled Net Business Income", value: fmtUsd(baseAmount) },
+        { label: `W-2 Reasonable Salary (${w2RatioPct}%)`, value: fmtUsd(w2Salary) },
+        { label: "K-1 Pass-Through Distribution", value: fmtUsd(k1Dist) },
+        { label: "Annual FICA / SE Tax Savings", value: fmtUsd(ficaSavings) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "1120S-W2", line_item: `Form 1120-S & Schedule SE Split (${w2RatioPct}% W-2 vs K-1 Distribution)`, authority: "IRC Section 1366, Rev. Rul. 74-44 & Form 1120-S", baseline_value: `${fmtUsd(baseAmount)} Sole Prop SE`, optimized_value: `${fmtUsd(w2Salary)} W-2 / ${fmtUsd(k1Dist)} K-1`, delta_impact: "Reasonable Comp Substantiated" },
+        { line_code: "SE-FICA", line_item: "15.3% FICA / SE Tax Exposure up to $184,500 SSA Wage Base", authority: "IRC Section 1401, Section 3101/3111 & 2026 SSA Cap", baseline_value: fmtUsd(solePropSeTax), optimized_value: fmtUsd(scorpFicaTax), delta_impact: `-${fmtUsd(ficaSavings)} FICA Savings` },
+        { line_code: "199A-INT", line_item: "Employer Payroll Tax & Section 199A QBI Interaction", authority: "IRC Section 199A(b)(2) W-2 Wage Limit & Form 8995-A", baseline_value: `${fmtUsd(baseAmount * 0.20)} QBI Base`, optimized_value: `${fmtUsd(qbiBase)} K-1 QBI (20%)`, delta_impact: `W-2 Payroll: ${fmtUsd(w2Salary)}` },
+        { line_code: "941-QTR", line_item: "Quarterly Form 941 Payroll Deposit & Form 1120-S Cadence", authority: "IRC Section 3402 & Form 941 / W-2", baseline_value: `${fmtUsd(solePropSeTax / 4)}/qtr SE`, optimized_value: `${fmtUsd(scorpFicaTax / 4)}/qtr FICA`, delta_impact: "Requires Timely Payroll Runs" },
+      ];
+      const splitPcts = [35, 45, 55, 65, 100];
+      sensitivityMatrix = splitPcts.map((pct) => {
+        const sal = Math.round(baseAmount * (pct / 100));
+        const fica = Math.round((Math.min(sal, ssaCap) * 0.124 + sal * 0.029) * 100) / 100;
+        const sav = Math.round((solePropSeTax - fica) * 100) / 100;
+        const lbl = pct === 100 ? "100% Schedule C / Sole Prop Baseline" : `${pct}% W-2 Salary / ${100 - pct}% K-1 Split`;
+        return {
+          scenario_label: lbl,
+          modeled_principal: `${fmtUsd(sal)} W-2`,
+          effective_rate: `${fmtUsd(fica)} FICA/SE Tax`,
+          estimated_net_benefit: `${sav >= 0 ? "+" : ""}${fmtUsd(sav)} vs Sole Prop`,
+        };
+      });
+      const scorpMilestones = [
+        ["Mar 15: Form 2553 / 1120-S Cutoff", fmtUsd(w2Salary), "Rev. Rul. 74-44", "S-Corp Election", "File Form 2553 within 2 mo 15 days of tax year start"],
+        ["Q1 (Apr 30): Form 941 Payroll Filing", fmtUsd(w2Salary / 4), fmtUsd(scorpFicaTax / 4), "Form 941 Q1", "Remit federal payroll tax & state unemployment"],
+        ["Q2 (Jul 31): Form 941 Payroll Filing", fmtUsd(w2Salary / 4), fmtUsd(scorpFicaTax / 4), "Form 941 Q2", "Review mid-year K-1 profit vs W-2 ratio"],
+        ["Q3 (Oct 31): Form 941 Payroll Filing", fmtUsd(w2Salary / 4), fmtUsd(scorpFicaTax / 4), "Form 941 Q3", "Adjust Q4 officer payroll if net profit surged"],
+        ["Jan 31: Form 941 Q4 & W-2 / W-3", fmtUsd(w2Salary), fmtUsd(scorpFicaTax), "SSA W-2 Filing", "Issue Form W-2 to officer-shareholder by Jan 31"],
+        ["Mar 15: Form 1120-S & Schedule K-1", fmtUsd(k1Dist), fmtUsd(qbiBase), "Form 1120-S", "Issue Schedule K-1 prior to personal Form 1040"],
+      ];
+      periodSchedule = scorpMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `${fmtUsd(ficaSavings)} Saved`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "ssa_fica_wage_base", metric_label: "Social Security OASDI Maximum Taxable Wage Base", statutory_citation: "26 U.S.C. 3121 / SSA", unit: "USD", points: { "2024": 168600, "2025": 176100, "2026": 184500, "2028": 196500, "2030": 209300 } },
+        { series_id: "irs_sec199a_qbi", metric_label: "IRC Section 199A QBI Deduction Rate (OBBBA Permanent)", statutory_citation: "26 U.S.C. 199A / P.L. 119-21", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
+        { series_id: "irs_se_tax_rate", metric_label: "Combined OASDI + Medicare Self-Employment / FICA Rate", statutory_citation: "26 U.S.C. 1401 & 3101", unit: "PCT", points: { "2024": 15.3, "2025": 15.3, "2026": 15.3, "2028": 15.3, "2030": 15.3 } },
+        { series_id: "irs_additional_medicare_threshold", metric_label: "Additional 0.9% Medicare Surtax Single Threshold", statutory_citation: "26 U.S.C. 3101(b)(2)", unit: "USD", points: { "2024": 200000, "2025": 200000, "2026": 200000, "2028": 200000, "2030": 200000 } },
+      ];
+      methodologyNotes = [
+        `Modeled S-Corp split allocates ${fmtUsd(w2Salary)} (${w2RatioPct}%) to Form W-2 officer compensation subject to 15.3% FICA up to the $184,500 2026 OASDI wage base, and ${fmtUsd(k1Dist)} to Schedule K-1 distribution exempt from SE tax.`,
+        "Reasonable compensation must reflect market replacement wage benchmarks (BLS OEWS / RCReports) under Rev. Rul. 74-44 and IRC Section 1366.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "Form 2553 S-Corp Election & Reasonable Compensation Benchmark Memo",
+          controlling_statute: "IRC Section 1362, Rev. Rul. 74-44 & Form 2553",
+          filing_deadline_rule: "File Form 2553 Within 75 Days of Tax Year Start (or Rev. Proc. 2013-30 Late Relief)",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `REASONABLE COMP RECORD (${stateCode}): Document BLS wage comparables supporting ${fmtUsd(w2Salary)} officer W-2 salary on ${fmtUsd(baseAmount)} business profit, saving ${fmtUsd(ficaSavings)} vs Schedule SE.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "Form 941 Quarterly Payroll & Form 1120-S / Schedule K-1 Checklist",
+          controlling_statute: "IRC Section 3402, Section 6037 & Form 1120-S",
+          filing_deadline_rule: "Form 941 Quarterly / Form 1120-S Due March 15",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PAYROLL & 1120-S CHECKLIST: (1) Execute regular payroll runs totaling ${fmtUsd(w2Salary)} before Dec 31; (2) File Forms 941, 940, and W-2/W-3; (3) Reconcile shareholder basis and Section 199A W-2 wages on Form 1120-S.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "State S-Corp Franchise / PTET & Audit Retention Protocol",
+          controlling_statute: "IRC Section 6662 & State Pass-Through Entity Tax (PTET) Rules",
+          filing_deadline_rule: "Observe State PTET Election Deadlines & Retain 3-6 Years",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `STATE PTET & RETENTION (${stateCode}): Verify state-level S-Corp recognition (e.g., CA 1.5% franchise tax, NYC non-recognition) and elective PTET SALT workaround deadlines.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isQsbs) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_statutory_tax_audit_workpapers";
+        effectiveOfferTitle = "ProfitHelm IRC Section 1202 QSBS Exclusion Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact QSBS exit and basis inputs (HTML/PDF)",
+          "Dynamic 5-tier Section 1202 holding-period exclusion & Section 1045 rollover sensitivity matrix (HTML/CSV)",
+          "6-milestone original-issuance, 80% active business & Form 8949 Code Q compliance calendar (HTML/CSV)",
+          "Complete structured JSON data pack with $15M OBBBA / 10x basis cap & state conformity metadata (JSON)",
+          "Unredacted C-Corp gross-assets attestation & anti-redemption audit checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "IRC Section 1202 (OBBBA P.L. 119-21), Schedule D & C-Corp Gross Assets Rules";
+      }
+      const adjBasisInput = extractEdgeNumericParam(inputs, outputs, ["basis", "adjusted_basis", "investment"], 0, 1, baseAmount);
+      const holdingYrs = extractEdgeNumericParam(inputs, outputs, ["holding", "year", "term"], 5, 0.5, 25);
+      const stockBasis = adjBasisInput > 0 ? adjBasisInput : Math.round(baseAmount * 0.05);
+      const realizedExitGain = Math.max(0, Math.round((baseAmount - stockBasis) * 100) / 100);
+      const capObbba = 15000000;
+      const tenXBasis = stockBasis * 10;
+      const statutoryCap = Math.max(capObbba, tenXBasis);
+      const exclPct = holdingYrs >= 5 ? 1.00 : (holdingYrs >= 4 ? 0.75 : (holdingYrs >= 3 ? 0.50 : 0.00));
+      const eligibleGain = Math.min(realizedExitGain, statutoryCap);
+      const excludedGain = Math.round(eligibleGain * exclPct * 100) / 100;
+      const fedShield = Math.round(excludedGain * 0.238 * 100) / 100;
+      const nonConformStates = ["CA", "AL", "MS", "NJ", "PA", "HI", "PR"];
+      const stateConforms = !nonConformStates.includes(stateCode);
+
+      kpis = [
+        { label: "Modeled Exit Proceeds", value: fmtUsd(baseAmount) },
+        { label: "Sec. 1202 Exclusion Ceiling", value: fmtUsd(statutoryCap) },
+        { label: `Excluded Gain (${Math.round(exclPct * 100)}%)`, value: fmtUsd(excludedGain) },
+        { label: "Federal Tax Shield (23.8%)", value: fmtUsd(fedShield) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "1202-CAP", line_item: "IRC Section 1202 QSBS Exclusion Cap (Greater of $10M/$15M OBBBA or 10x Basis)", authority: "IRC Section 1202(b)(1) & P.L. 119-21 Sec. 70431", baseline_value: `${fmtUsd(realizedExitGain)} Gain`, optimized_value: `${fmtUsd(excludedGain)} Excluded`, delta_impact: `Cap: ${fmtUsd(statutoryCap)}` },
+        { line_code: "1202-GA", line_item: "Domestic C-Corp Aggregate Gross Assets Ceiling ($50M / $75M OBBBA)", authority: "IRC Section 1202(d)(1) Issuance Test", baseline_value: "Verified <= Ceiling", optimized_value: "Qualifying C-Corp", delta_impact: "Officer Attestation Required" },
+        { line_code: "1202-HOLD", line_item: `Holding Period Cliff (${holdingYrs} Yrs: 3-Yr 50% / 4-Yr 75% / 5-Yr 100%)`, authority: "IRC Section 1202(a) & P.L. 119-21 Tiered Holding", baseline_value: `${fmtUsd(realizedExitGain * 0.238)} Unshielded`, optimized_value: `${fmtUsd((realizedExitGain - excludedGain) * 0.238)} Net Fed Tax`, delta_impact: `+${fmtUsd(fedShield)} Federal Shield` },
+        { line_code: "1202-ST", line_item: `State Conformity Check (${stateCode})`, authority: "State Revenue Code Section 1202 Conformity", baseline_value: stateConforms ? `${stateCode} Conforming` : `${stateCode} Non-Conforming`, optimized_value: stateConforms ? "State Exclusion Applies" : "State Tax Due on Gain", delta_impact: stateConforms ? "Full Fed+State Alignment" : "Model State Cap Gains Separately" },
+      ];
+      const holdCases = [
+        ["Under 3 Years (0% Exclusion / Consider Sec. 1045 Rollover)", 0.00],
+        ["3-Year Holding Tier (50% OBBBA Post-Enactment Exclusion)", 0.50],
+        ["4-Year Holding Tier (75% OBBBA Post-Enactment Exclusion)", 0.75],
+        ["5+ Year Full Cliff (100% Exclusion up to Cap)", 1.00],
+        ["Section 1045 60-Day QSBS Rollover into Replacement QSBS", 1.00],
+      ];
+      sensitivityMatrix = holdCases.map(([lbl, frac]) => {
+        const ex = Math.round(eligibleGain * frac * 100) / 100;
+        const sh = Math.round(ex * 0.238 * 100) / 100;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(ex),
+          effective_rate: `${Math.round(frac * 100)}% Excluded`,
+          estimated_net_benefit: `+${fmtUsd(sh)} Federal Shield`,
+        };
+      });
+      const qsbsMilestones = [
+        ["Issuance Day 0: Original Issue Check", fmtUsd(stockBasis), "$50M/$75M Gross Assets", "IRC 1202(c)-(d)", "Obtain signed C-Corp gross-assets officer certificate"],
+        ["Year 1-2: 80% Active Business Test", fmtUsd(baseAmount * 0.4), "80% Asset Test", "IRC 1202(e)", "Confirm qualified trade/business (non-service)"],
+        ["Year 3: OBBBA 50% Exclusion Milestone", fmtUsd(eligibleGain * 0.50), fmtUsd(eligibleGain * 0.50 * 0.238), "P.L. 119-21", "Verify zero disqualifying redemptions (2-yr lookback)"],
+        ["Year 4: OBBBA 75% Exclusion Milestone", fmtUsd(eligibleGain * 0.75), fmtUsd(eligibleGain * 0.75 * 0.238), "P.L. 119-21", "Track 83(b) / option exercise start date"],
+        ["Year 5: 100% Exclusion Cliff", fmtUsd(eligibleGain), fmtUsd(eligibleGain * 0.238), "IRC 1202(a)(4)", "Full 100% exclusion unlocked up to $10M/$15M or 10x"],
+        ["Exit Filing: Form 8949 Code Q", fmtUsd(excludedGain), fmtUsd(fedShield), stateCode + " Check", "Report sale on Form 8949 Part II with Code Q"],
+      ];
+      periodSchedule = qsbsMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `+${fmtUsd(fedShield)} Shield`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "irc_1202_gain_exclusion_cap", metric_label: "IRC Section 1202 Per-Issuer Gain Exclusion Cap", statutory_citation: "26 U.S.C. 1202(b)(1) / P.L. 119-21 Sec. 70431", unit: "USD", points: { "2024": 10000000, "2025": 15000000, "2026": 15000000, "2028": 15600000, "2030": 16200000 } },
+        { series_id: "irc_1202_gross_assets_ceiling", metric_label: "C-Corp Aggregate Gross Assets Ceiling", statutory_citation: "26 U.S.C. 1202(d)(1) / P.L. 119-21", unit: "USD", points: { "2024": 50000000, "2025": 75000000, "2026": 75000000, "2028": 78000000, "2030": 81000000 } },
+        { series_id: "irc_1h_ltcg_plus_niit", metric_label: "Top Federal LTCG + 3.8% NIIT Rate Shielded", statutory_citation: "26 U.S.C. 1(h) & 1411", unit: "PCT", points: { "2024": 23.8, "2025": 23.8, "2026": 23.8, "2028": 23.8, "2030": 23.8 } },
+      ];
+      methodologyNotes = [
+        `Modeled IRC Section 1202 QSBS exclusion on ${fmtUsd(realizedExitGain)} realized gain (${fmtUsd(stockBasis)} adjusted basis) using the $15M OBBBA / $10M legacy / 10x basis ceiling (${fmtUsd(statutoryCap)}) at ${holdingYrs} years holding.`,
+        "Under IRC Section 1202(b) and P.L. 119-21, original issuance from a domestic C-Corporation, gross assets ceiling, 80% active business qualification, and anti-redemption windows must all be substantiated.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "C-Corp QSBS Original-Issuance & Gross Assets Attestation Checklist",
+          controlling_statute: "IRC Section 1202(c)-(d) & P.L. 119-21 Sec. 70431",
+          filing_deadline_rule: "Secure Officer Attestation at Issuance & Prior to Exit",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `QSBS ATTESTATION (${stateCode}): Obtain signed corporate secretary/CFO certificate confirming original issuance for money/property/services, C-Corp tax status, and aggregate gross assets <= $50M/$75M immediately after issuance.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "80% Active Business & Section 1202(c)(3) Anti-Redemption Audit",
+          controlling_statute: "IRC Section 1202(c)(3) & Section 1202(e)",
+          filing_deadline_rule: "Verify Across 4-Year / 2-Year Redemption Lookback Windows",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "ACTIVE BUSINESS & REDEMPTION CHECK: Confirm at least 80% of corporate assets were used in a qualified non-service trade or business and that no disqualifying stock redemptions occurred within statutory lookback windows."
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "Form 8949 Code Q Reporting & State Conformity Retention Memo",
+          controlling_statute: "Form 8949 Instructions (Code Q) & State Conformity Rules",
+          filing_deadline_rule: "Attach to Form 1040 Exit Year Return / Retain 6 Years",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `EXIT REPORTING (${stateCode}): Claim ${fmtUsd(excludedGain)} exclusion on Form 8949 Part II (Adjustment Code Q). Note: ${stateConforms ? stateCode + " generally conforms to federal Section 1202" : stateCode + " does NOT conform to federal Section 1202; budget state tax separately"}.`
+            : lockedChecklistNotice,
+        },
+      ];
     } else {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "ph_statutory_tax_audit_workpapers";
+        effectiveOfferTitle = "ProfitHelm Federal & State Income Tax Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact income and deduction inputs (HTML/PDF)",
+          "Dynamic 5-point income and marginal rate sensitivity schedule computed from your inputs (HTML/CSV)",
+          "4-quarter IRC Section 6654 estimated tax safe-harbor installment & annual Form 1040 schedule (HTML/CSV)",
+          "Complete structured JSON data pack with OBBBA 2026 standard deduction & QBI metadata (JSON)",
+          "Unredacted Form 1040 substantiation and quarterly Form 1040-ES execution checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "26 U.S.C. Section 1 (OBBBA P.L. 119-21), IRS Rev. Proc. 2025-32 & Form 1040 / 1040-ES";
+      }
       const stdDed = extractEdgeNumericParam(inputs, outputs, ["std_ded", "standard_deduction"], baseAmount >= 180000 ? 32200 : 16100, 0, 50000);
       const qbiEligible = Math.max(0, baseAmount - stdDed);
       const qbiDed = Math.round(qbiEligible * 0.20 * 100) / 100;
@@ -6363,54 +7175,59 @@ def _render_edge_pricing_and_workpaper_engine_js(
         metric_b: fmtUsd(fedOpt),
         metric_c: fmtUsd(fedOpt),
         metric_d: `+${fmtUsd(taxDelta)} Saved`,
-        note: "Form 1040 / Schedule K-1 / Form 8995 Filing",
+        note: "Form 1040 / Schedule 1 / Form 8995 Filing",
       });
+      statutoryTrendTimeseries = [
+        { series_id: "irs_std_deduction_single", metric_label: "2026 Standard Deduction (Single Filer)", statutory_citation: "26 U.S.C. 63 / Rev. Proc. 2025-32 & P.L. 119-21", unit: "USD", points: { "2024": 14600, "2025": 15750, "2026": 16100, "2028": 16900, "2030": 17750 } },
+        { series_id: "irs_std_deduction_mfj", metric_label: "2026 Standard Deduction (Married Filing Jointly)", statutory_citation: "26 U.S.C. 63 / Rev. Proc. 2025-32 & P.L. 119-21", unit: "USD", points: { "2024": 29200, "2025": 31500, "2026": 32200, "2028": 33800, "2030": 35500 } },
+        { series_id: "irs_sec199a_qbi", metric_label: "IRC Section 199A QBI Deduction Rate (OBBBA Permanent)", statutory_citation: "26 U.S.C. 199A / P.L. 119-21", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
+        { series_id: "ssa_fica_wage_base", metric_label: "Social Security OASDI Maximum Taxable Wage Base", statutory_citation: "26 U.S.C. 3121 / SSA", unit: "USD", points: { "2024": 168600, "2025": 176100, "2026": 184500, "2028": 196500, "2030": 209300 } },
+      ];
       methodologyNotes = [
-        "Computed under enacted OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32: permanent 10%-37% progressive brackets, $16,100 Single / $32,200 MFJ 2026 standard deduction, permanent 20% Section 199A QBI deduction, and $184,500 2026 OASDI wage base.",
+        "Computed under enacted OBBBA (P.L. 119-21) and IRS Rev. Proc. 2025-32: permanent 10%-37% progressive brackets, $16,100 Single / $32,200 MFJ 2026 standard deduction, and permanent 20% Section 199A QBI deduction.",
         "Quarterly safe-harbor estimates divide annual modeled liability into 4 equal installments under IRC Section 6654(d)(1)(B).",
       ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "PH-EXEC-101",
+          instrument_title: "Form 1040 Bracket & Section 199A Substantiation Summary",
+          controlling_statute: effectiveStatutoryAuthority,
+          filing_deadline_rule: "Attach to Form 1040 by April 15 (or Oct 15 Extension)",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `SUBSTANTIATION RECORD (${stateCode}): Modeled income basis of ${fmtUsd(baseAmount)} (${capitalBand}) for ${toolSlug} generates ${fmtUsd(fedOpt)} optimized federal tax after ${fmtUsd(stdDed)} standard deduction and ${fmtUsd(qbiDed)} QBI.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-102",
+          instrument_title: "IRC Section 6654 Safe-Harbor Quarterly Estimated Tax Checklist",
+          controlling_statute: "IRC Section 6654(d)(1)(B) & Form 1040-ES",
+          filing_deadline_rule: "Apr 15 / Jun 15 / Sep 15 / Jan 15 Installments",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `ESTIMATED TAX CHECKLIST (${stateCode}): Remit ${fmtUsd(fedOpt / 4)}/quarter (or 110% of prior-year tax if AGI > $150,000) via IRS Direct Pay / EFTPS to avoid Form 2210 underpayment penalties.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "PH-EXEC-103",
+          instrument_title: "State Conformity & Audit Retention Protocol",
+          controlling_statute: "IRC Section 6662 & State Revenue Code Conformity Rules",
+          filing_deadline_rule: "Retain 3 to 6 Years Post-Filing",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `AUDIT RETENTION (${stateCode}): Retain Form 1040, W-2/1099/K-1 transcripts, and Form 8995/8995-A workpapers for the federal 3-year and state 4-to-6-year assessment periods.`
+            : lockedChecklistNotice,
+        },
+      ];
     }
-    statutoryTrendTimeseries = [
-      { series_id: "irs_sec179_cap", metric_label: "IRC Section 179 Maximum Deduction Cap", statutory_citation: "26 U.S.C. 179(b)(1) / P.L. 119-21 Sec. 70306", unit: "USD", points: { "2024": 1220000, "2025": 2500000, "2026": 2560000, "2028": 2680000, "2030": 2810000 } },
-      { series_id: "irs_sec199a_qbi", metric_label: "IRC Section 199A QBI Deduction Rate (OBBBA Permanent)", statutory_citation: "26 U.S.C. 199A / P.L. 119-21", unit: "PCT", points: { "2024": 20.0, "2025": 20.0, "2026": 20.0, "2028": 20.0, "2030": 20.0 } },
-      { series_id: "ssa_fica_wage_base", metric_label: "Social Security OASDI Maximum Taxable Wage Base", statutory_citation: "26 U.S.C. 3121", unit: "USD", points: { "2024": 168600, "2025": 176100, "2026": 184500, "2028": 196500, "2030": 209300 } },
-      { series_id: "irs_sec168k_bonus", metric_label: "IRC Section 168(k) First-Year Bonus Depreciation", statutory_citation: "26 U.S.C. 168(k) / P.L. 119-21 Sec. 70301", unit: "PCT", points: { "2024": 60.0, "2025": 40.0, "2026": 100.0, "2028": 100.0, "2030": 100.0 } },
-    ];
-    statutoryExecutionArtifacts = [
-      {
-        instrument_id: "PH-EXEC-101",
-        instrument_title: "CPA Binder Election & Statutory Substantiation Summary",
-        controlling_statute: offer.statutory_authority,
-        filing_deadline_rule: "Attach Contemporaneously Prior to Statutory Filing / Closing Cutoff",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `SUBSTANTIATION RECORD (${stateCode}): Pursuant to ${offer.statutory_authority}, modeled transaction/income basis of ${fmtUsd(baseAmount)} (${capitalBand}) for ${toolSlug} is documented for CPA workpaper review under IRC Section 6662 substantial authority standards.`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "PH-EXEC-102",
-        instrument_title: "Statutory Election, Placed-in-Service & Safe-Harbor Filing Checklist",
-        controlling_statute: "Treas. Reg. 1.1031(k)-1, IRC Section 179(c) & Section 6654(d)",
-        filing_deadline_rule: "Before Constructive Receipt / Dec 31 Placed-in-Service / Quarterly Dates",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `EXECUTION CHECKLIST (${stateCode}): (1) Lock QI exchange agreement or placed-in-service asset log before statutory cutoff; (2) Reconcile Form 4562 / Form 8824 / Form 8995 line items against general ledger; (3) Schedule quarterly safe-harbor tax remittances to avoid IRC Section 6654 penalties.`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "PH-EXEC-103",
-        instrument_title: "State Conformity & Audit Retention Protocol",
-        controlling_statute: "IRC Section 6662 & State Revenue Code Conformity Rules",
-        filing_deadline_rule: "Retain 3 to 6 Years Post-Filing",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `AUDIT RETENTION (${stateCode}): Retain this calculation workpaper, underlying invoices/closing statements, and CPA sign-off for the applicable federal (3-year) and state (4-to-6-year) statutory assessment period.`
-          : lockedChecklistNotice,
-      },
-    ];
 """
     elif prop_clean == "gainhelm":
         tenant_compute_js = """
+    if (!isQuickTier && !isPartnerSlot && fwMeta && fwMeta.title && rawOfferSku === "gh_soc2_cmmc_audit_workpapers") {
+      effectiveOfferTitle = fwMeta.title;
+      if (fwMeta.statutoryAuthority) effectiveStatutoryAuthority = fwMeta.statutoryAuthority;
+      if (Array.isArray(fwMeta.deliverables) && fwMeta.deliverables.length) effectiveDeliverables = [...fwMeta.deliverables];
+    }
     const blsHourly = 121.67;
     const headcount = Math.round(extractEdgeNumericParam(inputs, outputs, ["headcount", "employee", "staff"], 75, 5, 10000));
     const estEngHours = Math.round(Math.max(80, Math.min(600, headcount * 2.4)));
@@ -6428,7 +7245,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       { label: "Eng. Hours Reclaimed (@$121.67)", value: `${estEngHours - optEngHours} hrs` },
     ];
     reconciliationSchedule = [
-      { line_code: "GH-100", line_item: fwLabel, authority: offer.statutory_authority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(netOptimized), delta_impact: `-${fmtUsd(autoSavings)} Automation Savings` },
+      { line_code: "GH-100", line_item: fwLabel, authority: effectiveStatutoryAuthority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(netOptimized), delta_impact: `-${fmtUsd(autoSavings)} Automation Savings` },
       { line_code: "GH-200", line_item: `Internal Security Engineering Labor (${headcount} Staff @ $121.67/hr BLS SOC 15-1212)`, authority: (fwMeta && fwMeta.l200Auth) || "BLS OEWS SOC 15-1212 & AICPA AT-C 205", baseline_value: `${estEngHours} hrs (${fmtUsd(estEngHours * blsHourly)})`, optimized_value: `${optEngHours} hrs (${fmtUsd(optEngHours * blsHourly)})`, delta_impact: `-${estEngHours - optEngHours} hrs Saved` },
       { line_code: "GH-300", line_item: (fwMeta && fwMeta.l300Title) || "Regulatory Enforcement & Contract Delay Exposure", authority: (fwMeta && fwMeta.l300Auth) || "32 CFR Part 170 / 45 CFR 160.404 / SEC Item 1.05", baseline_value: fmtUsd(baseAmount * 3.5), optimized_value: fmtUsd(baseAmount * 0.5), delta_impact: "Continuous Evidence Monitoring" },
       { line_code: "GH-400", line_item: (fwMeta && fwMeta.l400Title) || "Year-2 Cross-Framework Control Reuse Credit", authority: (fwMeta && fwMeta.l400Auth) || "ISO/IEC 27006-1:2024 & AICPA Common Criteria", baseline_value: fmtUsd(baseAmount * 0.78), optimized_value: fmtUsd(Math.max(9500, baseAmount * 0.78 - reuseCredit)), delta_impact: `-${fmtUsd(reuseCredit)} Overlap Credit` },
@@ -6472,7 +7289,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       {
         series_id: "fw_assessment_fee_idx",
         metric_label: (fwTrendList[0] && fwTrendList[0].metric_name) || "Accredited Compliance Assessment Fee Benchmark",
-        statutory_citation: (fwTrendList[0] && fwTrendList[0].authority_source) || offer.statutory_authority,
+        statutory_citation: (fwTrendList[0] && fwTrendList[0].authority_source) || effectiveStatutoryAuthority,
         unit: "USD",
         points: { "2024": Math.round(baseAmount * 0.84), "2025": Math.round(baseAmount * 0.92), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.09), "2030": Math.round(baseAmount * 1.18) },
       },
@@ -6486,7 +7303,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       {
         series_id: "fw_regulatory_exposure_idx",
         metric_label: (fwTrendList[2] && fwTrendList[2].metric_name) || "Regulatory Enforcement & Remediation Exposure Index",
-        statutory_citation: (fwTrendList[2] && fwTrendList[2].authority_source) || offer.statutory_authority,
+        statutory_citation: (fwTrendList[2] && fwTrendList[2].authority_source) || effectiveStatutoryAuthority,
         unit: "USD",
         points: { "2024": Math.round(baseAmount * 2.8), "2025": Math.round(baseAmount * 3.1), "2026": Math.round(baseAmount * 3.5), "2028": Math.round(baseAmount * 3.85), "2030": Math.round(baseAmount * 4.2) },
       },
@@ -6499,11 +7316,11 @@ def _render_edge_pricing_and_workpaper_engine_js(
       {
         instrument_id: "GH-EXEC-101",
         instrument_title: (fwMeta && fwMeta.exec101Title) || "CISO / CFO Audit Scope Boundary Declaration",
-        controlling_statute: offer.statutory_authority,
+        controlling_statute: effectiveStatutoryAuthority,
         filing_deadline_rule: "Day 30 Scope Lock",
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
-          ? `SCOPE DECLARATION (${stateCode}): Modeled compliance boundary for ${toolSlug} (${headcount} staff) establishes unautomated baseline of ${fmtUsd(baseAmount)} and GRC-optimized budget of ${fmtUsd(netOptimized)} under ${offer.statutory_authority}.`
+          ? `SCOPE DECLARATION (${stateCode}): Modeled compliance boundary for ${toolSlug} (${headcount} staff) establishes unautomated baseline of ${fmtUsd(baseAmount)} and GRC-optimized budget of ${fmtUsd(netOptimized)} under ${effectiveStatutoryAuthority}.`
           : lockedChecklistNotice,
       },
       {
@@ -6531,91 +7348,508 @@ def _render_edge_pricing_and_workpaper_engine_js(
     elif prop_clean == "lienbond":
         tenant_compute_js = """
     const stLien = stateSpec || { cite: `${stateCode} Statutory Mechanics Lien & Miller Act`, prelim: "20-45 Days", record: "90 Days", enforce: "90-365 Days" };
-    const emrVal = extractEdgeNumericParam(inputs, outputs, ["emr", "mod_rate", "experience"], 1.0, 0.5, 2.5);
-    const retainagePct = extractEdgeNumericParam(inputs, outputs, ["retainage"], 10, 0, 20);
-    const stdBondPrem = Math.round(baseAmount * 0.025 * 100) / 100;
-    const prefBondPrem = Math.round(baseAmount * 0.0115 * 100) / 100;
-    const premSavings = Math.max(250, Math.round((stdBondPrem - prefBondPrem) * 100) / 100);
-    const retainageHoldback = Math.round(baseAmount * (retainagePct / 100) * 100) / 100;
+    const isEmrWc = /emr|workers-comp|mod-rate|class-code/.test(slugLower);
+    const isDavisBacon = !isEmrWc && /davis-bacon|prevailing-wage|wh-347|certified-payroll/.test(slugLower);
+    const isLien = !isEmrWc && !isDavisBacon && /lien|preliminary-notice|retainage|chapter-53|fund-trapping|waiver/.test(slugLower);
+    const isOverheadSdi = !isEmrWc && !isDavisBacon && !isLien && /overhead|markup|margin|sdi|subcontractor-default/.test(slugLower);
 
-    kpis = [
-      { label: "Modeled Contract / Bond Sum", value: fmtUsd(baseAmount) },
-      { label: "Preferred vs Standard Bond Savings", value: fmtUsd(premSavings) },
-      { label: `Protected ${retainagePct}% Retainage`, value: fmtUsd(retainageHoldback) },
-      { label: `${stateCode} Lien Recording Window`, value: stLien.record },
-    ];
-    reconciliationSchedule = [
-      { line_code: "LB-100", line_item: `Modeled Contract / Bond Penal Sum (${stateCode})`, authority: offer.statutory_authority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `100% Penal / Lien Basis (${stateCode})` },
-      { line_code: "LB-200", line_item: `Surety Tier & NCCI EMR Variance (Modeled EMR: ${emrVal.toFixed(2)})`, authority: "SAA Sliding-Scale Tariff & NCCI Experience Rating Plan", baseline_value: `${fmtUsd(stdBondPrem)} (2.50% Std)`, optimized_value: `${fmtUsd(prefBondPrem)} (1.15% Pref)`, delta_impact: `-${fmtUsd(premSavings)} Savings` },
-      { line_code: "LB-300", line_item: `Statutory ${retainagePct}% Retainage & Mechanics Lien Protection (${stateCode})`, authority: stLien.cite, baseline_value: `${fmtUsd(retainageHoldback)} Unsecured`, optimized_value: `${fmtUsd(retainageHoldback)} Protected`, delta_impact: `Prelim: ${stLien.prelim}` },
-      { line_code: "LB-400", line_item: "Davis-Bacon Fringe Credit & NCCI Overtime Exclusion (1/3 OT)", authority: "29 CFR 5.5(a)(1) & NCCI Basic Manual Rule 2-C-2", baseline_value: fmtUsd(baseAmount * 0.082 * emrVal), optimized_value: fmtUsd(baseAmount * 0.054 * Math.min(emrVal, 1.0)), delta_impact: "Audit-Defensible Payroll Credit" },
-    ];
-    const lbTiers = [
-      ["Tier 1: Preferred Surety (740+ FICO / 0.75 EMR)", 0.0085, 0.75],
-      ["Tier 2: Strong Commercial (700-739 / 0.85 EMR)", 0.0115, 0.85],
-      ["Tier 3: Standard Market (670-699 / 1.00 EMR)", 0.0185, 1.00],
-      ["Tier 4: Sub-Standard (620-669 / 1.15 EMR)", 0.0250, 1.15],
-      ["Tier 5: SBA 13 CFR 115 Guarantee (1.35 EMR)", 0.0310, 1.35],
-    ];
-    sensitivityMatrix = lbTiers.map(([lbl, rate, tierEmr]) => {
-      const prem = Math.round(baseAmount * rate * 100) / 100;
-      const deltaVsStd = Math.round((stdBondPrem - prem) * 100) / 100;
-      return {
+    if (isEmrWc) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "lb_workers_comp_emr_audit_packet";
+        effectiveOfferTitle = "LienBond Workers Compensation EMR & Experience Rating Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact payroll and EMR inputs (HTML/PDF)",
+          "Dynamic 5-tier NCCI Experience Modification Factor (0.75x-1.25x) premium sensitivity table (HTML/CSV)",
+          "6-milestone NCCI Unit Statistical Card valuation and Rule 2-C-2 payroll audit calendar (HTML/CSV)",
+          "Complete structured JSON data pack with primary split-point ($18,500) and bureau metadata (JSON)",
+          "Unredacted NCCI loss-run audit, 1/3 overtime exclusion & subcontractor COI checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "NCCI Experience Rating Plan Manual, Primary Split Point & State WC Rating Bureaus";
+      }
+      const emrVal = extractEdgeNumericParam(inputs, outputs, ["emr", "mod_rate", "experience"], 1.15, 0.5, 2.5);
+      const classRate = extractEdgeNumericParam(inputs, outputs, ["class_rate", "rate_per_100", "manual_rate"], 5.95, 0.5, 45);
+      const otPayroll = Math.round(baseAmount * 0.12 * 100) / 100;
+      const otExclPayroll = Math.round((otPayroll / 3) * 100) / 100;
+      const manualPrem = Math.round((baseAmount / 100) * classRate * 100) / 100;
+      const modPrem = Math.round(manualPrem * emrVal * 100) / 100;
+      const targetEmr = Math.min(0.85, Math.max(0.75, emrVal - 0.25));
+      const optPrem = Math.round(((baseAmount - otExclPayroll) / 100) * classRate * targetEmr * 100) / 100;
+      const wcSavings = Math.max(0, Math.round((modPrem - optPrem) * 100) / 100);
+      const splitPoint = 18500;
+      const splitImpact = Math.round(splitPoint * 0.38 * Math.max(0.1, emrVal - 0.85) * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Annual Payroll Base", value: fmtUsd(baseAmount) },
+        { label: "Modeled NCCI EMR Factor", value: `${emrVal.toFixed(2)}x` },
+        { label: "Primary Loss Split-Point", value: fmtUsd(splitPoint) },
+        { label: "WC Premium Optimization Delta", value: `-${fmtUsd(wcSavings)}/yr` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "LB-100", line_item: `Modeled Annual Payroll Base (${stateCode} Class Rate ${fmtUsd(classRate)}/$100)`, authority: "NCCI Basic Manual & State Rating Bureau Payroll Rules", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount - otExclPayroll), delta_impact: `-${fmtUsd(otExclPayroll)} 1/3 OT Exclusion` },
+        { line_code: "LB-200", line_item: `NCCI Experience Modification Factor (EMR) Penalty / Credit (${emrVal.toFixed(2)}x vs ${targetEmr.toFixed(2)}x)`, authority: "NCCI Experience Rating Plan (ERP)", baseline_value: `${fmtUsd(modPrem)} (${emrVal.toFixed(2)}x EMR)`, optimized_value: `${fmtUsd(optPrem)} (${targetEmr.toFixed(2)}x Target)`, delta_impact: `-${fmtUsd(wcSavings)} Annual Premium` },
+        { line_code: "LB-300", line_item: `Primary Loss Split-Point Impact ($18,500 Cap per Claim)`, authority: "NCCI Primary / Excess Loss Split-Point Rule", baseline_value: `${fmtUsd(splitPoint)} Primary Cap`, optimized_value: `${fmtUsd(splitImpact)} Est. Claim Mod Weight`, delta_impact: "Severity Capped Above $18,500" },
+        { line_code: "LB-400", line_item: "Class-Code Rate Optimization & NCCI Overtime Exclusion (1/3 OT)", authority: "NCCI Basic Manual Rule 2-C-2 & Rule 2-G Interchange", baseline_value: `${fmtUsd(manualPrem)} Manual Base`, optimized_value: `${fmtUsd(Math.round(((baseAmount - otExclPayroll) / 100) * classRate * 100) / 100)} Segregated`, delta_impact: "Audit-Defensible Class Segregation" },
+      ];
+      const emrTiers = [0.75, 0.85, 1.00, 1.15, 1.25];
+      sensitivityMatrix = emrTiers.map((tierEmr) => {
+        const tierPrem = Math.round(((baseAmount - otExclPayroll) / 100) * classRate * tierEmr * 100) / 100;
+        const deltaVsUnit = Math.round((manualPrem - tierPrem) * 100) / 100;
+        return {
+          scenario_label: `${tierEmr.toFixed(2)}x NCCI EMR Tier (${tierEmr < 1 ? "Credit Mod" : (tierEmr === 1 ? "Unity Baseline" : "Debit Surcharge")})`,
+          modeled_principal: fmtUsd(baseAmount),
+          effective_rate: `${fmtUsd(classRate)}/$100 Class Rate (${fmtUsd(tierPrem)}/yr)`,
+          estimated_net_benefit: `${deltaVsUnit >= 0 ? "+" : ""}${fmtUsd(deltaVsUnit)} vs 1.00x Unity`,
+        };
+      });
+      const ncciMilestones = [
+        ["Milestone 1: Policy Effective & Class Code Lock", fmtUsd(baseAmount), `${fmtUsd(classRate)}/$100`, `${emrVal.toFixed(2)}x EMR`, "Confirm governing & interchange labor class codes"],
+        ["Milestone 2: 6-Month Loss Valuation", fmtUsd(splitPoint), "Open Reserve Audit", "Claim Severity Check", "Review open medical-only vs indemnity reserves"],
+        ["Milestone 3: 18-Month NCCI Unit Stat Filing", "1st Experience Period", "Unit Stat Card", "18-Mo Cutoff", "Carrier reports payroll & incurred losses to NCCI/Bureau"],
+        ["Milestone 4: 30-Month Loss Development", "2nd Experience Period", "Reserve Closure", "ERA Discount Check", "Close minor claims before 30-month valuation date"],
+        ["Milestone 5: 42-Month Final Mod Lock", "3rd Experience Period", "3-Yr Rolling Window", `${targetEmr.toFixed(2)}x Target`, "Drop oldest high-loss policy year from mod formula"],
+        ["Milestone 6: Annual Payroll Audit & 1/3 OT", fmtUsd(otExclPayroll), "Rule 2-C-2", fmtUsd(wcSavings), "Present segregated overtime & sub COI records to auditor"],
+      ];
+      periodSchedule = ncciMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `${fmtUsd(modPrem)}/yr`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "ncci_split_point", metric_label: "NCCI Experience Rating Primary Loss Split-Point Cap", statutory_citation: "NCCI Experience Rating Plan", unit: "USD", points: { "2024": 18500, "2025": 19000, "2026": 19500, "2028": 21000, "2030": 22500 } },
+        { series_id: "wc_class_rate_index", metric_label: "Contracting Workers' Comp Class-Code Manual Rate Index", statutory_citation: "NCCI / State Rating Bureau Loss Costs", unit: "USD/$100", points: { "2024": 6.45, "2025": 6.20, "2026": 5.95, "2028": 5.65, "2030": 5.40 } },
+        { series_id: "emr_claim_cap", metric_label: "NCCI Experience Rating Single-Claim D-Ratio / Cap Index", statutory_citation: "NCCI Experience Rating Plan Table", unit: "USD", points: { "2024": 250000, "2025": 262500, "2026": 275000, "2028": 295000, "2030": 315000 } },
+      ];
+      methodologyNotes = [
+        `Workers' compensation premium modeled on ${fmtUsd(baseAmount)} annual payroll at ${fmtUsd(classRate)}/$100 manual class rate and ${emrVal.toFixed(2)}x NCCI EMR (${fmtUsd(modPrem)}/yr), vs ${targetEmr.toFixed(2)}x optimized target (${fmtUsd(optPrem)}/yr).`,
+        "NCCI Experience Rating weights primary losses up to the $18,500-$19,500 split point far more heavily than excess losses; frequency control and Rule 2-C-2 1/3 overtime segregation directly reduce future mods.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "LB-EXEC-101",
+          instrument_title: "NCCI Loss-Run & Unit Statistical Card Audit Checklist",
+          controlling_statute: "NCCI Experience Rating Plan & State Rating Bureau Rules",
+          filing_deadline_rule: "Audit 60 Days Prior to Unit Stat Valuation Date",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `LOSS-RUN AUDIT (${stateCode}): Request 4-year NCCI Unit Statistical cards and verify claim coding (medical-only ERA 70% exclusion vs indemnity) and $18,500 primary split-point weighting for modeled EMR ${emrVal.toFixed(2)}x.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-102",
+          instrument_title: "NCCI Rule 2-C-2 Overtime Segregation & Payroll Audit Protocol",
+          controlling_statute: "NCCI Basic Manual Rule 2-C-2 & Rule 2-G",
+          filing_deadline_rule: "Maintain Weekly Segregated Payroll Ledger Prior to Audit",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PAYROLL AUDIT CHECKLIST (${stateCode}): Segregate the 1/3 overtime premium (${fmtUsd(otExclPayroll)} modeled) and approved interchange payroll splits in general ledger so the annual WC auditor excludes non-ratable wages.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-103",
+          instrument_title: "Subcontractor COI Verification & Bid Prequalification EMR Memo",
+          controlling_statute: "State Workers' Compensation Act & Owner Prequalification Rules",
+          filing_deadline_rule: "Verify Valid COIs Prior to Subcontractor Mobilization",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `SUBCONTRACTOR COI PROTOCOL (${stateCode}): Collect active statutory workers' compensation Certificates of Insurance from every subcontractor prior to site access to avoid uninsured-subcontractor payroll assessments at year-end audit.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isDavisBacon) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "lb_wh347_certified_payroll_packet";
+        effectiveOfferTitle = "LienBond Davis-Bacon Prevailing Wage & WH-347 Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact wage and fringe inputs (HTML/PDF)",
+          "Dynamic 5-point bona-fide fringe benefit plan FICA/WC savings sensitivity matrix (HTML/CSV)",
+          "6-milestone Form WH-347 weekly compliance, SF-1444 & 3-year payroll retention calendar (HTML/CSV)",
+          "Complete structured JSON data pack with CWHSSA overtime & 29 CFR Part 5 metadata (JSON)",
+          "Unredacted WH-347 Statement of Compliance & fringe annualization execution checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "40 U.S.C. Sections 3141-3148 (Davis-Bacon Act), 29 CFR Part 5 & DOL Form WH-347";
+      }
+      const baseWage = extractEdgeNumericParam(inputs, outputs, ["base_wage", "base_rate", "hourly"], 42.50, 12, 180);
+      const fringeRate = extractEdgeNumericParam(inputs, outputs, ["fringe", "benefit"], 16.80, 0, 90);
+      const totalWage = baseWage + fringeRate;
+      const fringeShare = totalWage > 0 ? fringeRate / totalWage : 0.28;
+      const basePayroll = Math.round(baseAmount * (1 - fringeShare) * 100) / 100;
+      const fringePayroll = Math.round(baseAmount * fringeShare * 100) / 100;
+      const ficaWcBurdenPct = 0.145;
+      const cashFringeBurden = Math.round(fringePayroll * ficaWcBurdenPct * 100) / 100;
+      const otSavings = Math.round(fringePayroll * 0.08 * 100) / 100;
+      const weeklyPayroll = Math.round((baseAmount / 52) * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Certified Payroll Base", value: fmtUsd(baseAmount) },
+        { label: "Base vs Fringe Hourly Split", value: `${fmtUsd(baseWage)} / ${fmtUsd(fringeRate)}` },
+        { label: "Bona-Fide Fringe Plan Savings", value: fmtUsd(cashFringeBurden) },
+        { label: "WH-347 Weekly Submission", value: `${fmtUsd(weeklyPayroll)}/wk` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "LB-100", line_item: `Base Wage vs Fringe Benefit Rate Split (${fmtUsd(baseWage)} Base + ${fmtUsd(fringeRate)} Fringe)`, authority: "40 U.S.C. 3141-3148 & 29 CFR 5.5(a)(1)", baseline_value: `${fmtUsd(basePayroll)} Base`, optimized_value: `${fmtUsd(fringePayroll)} Fringe`, delta_impact: `Total Wage: ${fmtUsd(totalWage)}/hr` },
+        { line_code: "LB-200", line_item: "Weekly Certified Payroll (Form WH-347) Liability", authority: "29 CFR 5.5(a)(3)(ii) Weekly Statement of Compliance", baseline_value: `${fmtUsd(weeklyPayroll)}/wk`, optimized_value: "7-Day Certified Filing", delta_impact: "52 Weekly Filings / Yr" },
+        { line_code: "LB-300", line_item: "Fringe Credit: Cash Payment vs Bona-Fide Fringe Plan Savings", authority: "29 CFR 5.23-5.32 Bona Fide Fringe Benefit Plans", baseline_value: `${fmtUsd(cashFringeBurden)} Payroll Tax/WC Drag`, optimized_value: "$0.00 Drag on Bona-Fide Trust", delta_impact: `+${fmtUsd(cashFringeBurden)} Employer Savings` },
+        { line_code: "LB-400", line_item: "CWHSSA Overtime Compliance (1.5x Base Rate Only)", authority: "40 U.S.C. 3701-3708 & 29 CFR 5.32(c)", baseline_value: `${fmtUsd(totalWage * 1.5)}/hr If Paid on Fringe`, optimized_value: `${fmtUsd(baseWage * 1.5 + fringeRate)}/hr Lawful OT`, delta_impact: `-${fmtUsd(otSavings)} Overtime Savings` },
+      ];
+      const fringeAllocs = [0, 0.25, 0.50, 0.75, 1.00];
+      sensitivityMatrix = fringeAllocs.map((alloc) => {
+        const sav = Math.round(cashFringeBurden * alloc * 100) / 100;
+        const lbl = alloc === 0 ? "0% Bona-Fide Plan (100% Fringe Paid as Cash)" : (alloc === 1.0 ? "100% Bona-Fide Fringe Benefit Trust Allocation" : `${Math.round(alloc * 100)}% Bona-Fide Plan / ${Math.round((1 - alloc) * 100)}% Cash`);
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(fringePayroll),
+          effective_rate: `${fmtPct(ficaWcBurdenPct * (1 - alloc) * 100)} Burden on Fringe`,
+          estimated_net_benefit: `+${fmtUsd(sav)} Annual FICA/WC Savings`,
+        };
+      });
+      const whMilestones = [
+        ["Week 1: Wage Determination & SF-1444", "SAM.gov WD Lock", fmtUsd(totalWage) + "/hr", "29 CFR 5.5(a)(1)(iii)", "File SF-1444 for any unlisted worker classifications"],
+        ["Week 2: Bona-Fide Plan Annualization", fmtUsd(fringePayroll), fmtUsd(cashFringeBurden), "29 CFR 5.28", "Document annualization formula for health/pension plans"],
+        ["Week 3: CWHSSA Overtime Verification", `${fmtUsd(baseWage * 1.5)}/hr OT`, fmtUsd(fringeRate) + " Fringe", "40 U.S.C. 3702", "Verify 1.5x applies to base wage excluding fringe"],
+        ["Week 4: Weekly WH-347 Submission", `${fmtUsd(weeklyPayroll)}/wk`, "7-Day Cutoff", "29 CFR 5.5(a)(3)", "Sign Statement of Compliance within 7 days of payday"],
+        ["Monthly: Subcontractor WH-347 Flowdown", "All Tier-2 Subs", "Flowdown Audit", "FAR 52.222-6", "Collect & review lower-tier WH-347s before progress pay"],
+        ["Closeout: 3-Year Payroll Retention", fmtUsd(baseAmount), "DOL WHD Audit Ready", "29 CFR 5.5(a)(3)(i)", "Retain timecards, fringe invoices & WH-347s for 3+ years"],
+      ];
+      periodSchedule = whMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: `+${fmtUsd(cashFringeBurden)} Saved`,
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "dol_davis_bacon_threshold", metric_label: "Davis-Bacon Act Prime Contract Coverage Threshold", statutory_citation: "40 U.S.C. 3142(a) & 29 CFR 5.5", unit: "USD", points: { "2024": 2000, "2025": 2000, "2026": 2000, "2028": 2000, "2030": 2000 } },
+        { series_id: "dol_prevailing_wage_index", metric_label: "Davis-Bacon Weighted Prevailing Hourly Wage + Fringe Benchmark", statutory_citation: "29 CFR Part 1 & SAM.gov Wage Determinations", unit: "USD/HR", points: { "2024": 54.80, "2025": 57.10, "2026": 59.30, "2028": 62.90, "2030": 66.50 } },
+        { series_id: "cwhssa_overtime_penalty_daily", metric_label: "CWHSSA Daily Liquidated Damages Rate per Affected Worker", statutory_citation: "40 U.S.C. 3702(c) & 29 CFR 5.8", unit: "USD/DAY", points: { "2024": 31, "2025": 32, "2026": 33, "2028": 35, "2030": 37 } },
+      ];
+      methodologyNotes = [
+        `Prevailing wage modeled on ${fmtUsd(baseAmount)} certified payroll split between ${fmtUsd(baseWage)}/hr base wage and ${fmtUsd(fringeRate)}/hr fringe benefit under 40 U.S.C. 3141-3148 and 29 CFR 5.5.`,
+        "Redirecting prevailing-wage fringe obligations from taxable cash wages into a qualifying bona-fide benefit plan saves employer FICA, FUTA/SUTA, and workers' compensation burden on the fringe component.",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "LB-EXEC-101",
+          instrument_title: "DOL Form WH-347 Weekly Statement of Compliance Checklist",
+          controlling_statute: "29 CFR 5.5(a)(3)(ii) & Copeland Anti-Kickback Act (40 U.S.C. 3145)",
+          filing_deadline_rule: "Within 7 Calendar Days After Payroll Payment Date",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `WH-347 FILING (${stateCode}): Submit signed Form WH-347 certifying ${fmtUsd(baseWage)}/hr base + ${fmtUsd(fringeRate)}/hr fringe payment for every covered craft classification on ${fmtUsd(weeklyPayroll)}/wk payroll.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-102",
+          instrument_title: "Bona-Fide Fringe Benefit Annualization & Trust Substantiation",
+          controlling_statute: "29 CFR 5.23-5.32 & DOL Field Operations Handbook Ch. 15",
+          filing_deadline_rule: "Calculate Annualized Hourly Credit Prior to First WH-347",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `FRINGE CREDIT AUDIT: Document irrevocable third-party trustee contributions (health, 401k, apprenticeship) divided by total annual hours worked (both public & private) to substantiate ${fmtUsd(cashFringeBurden)} employer savings.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-103",
+          instrument_title: "CWHSSA Overtime & SF-1444 Conformance Request Protocol",
+          controlling_statute: "40 U.S.C. 3701-3708 & 29 CFR 5.5(a)(1)(iii)",
+          filing_deadline_rule: "Submit SF-1444 Prior to Working Unlisted Classifications",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "OVERTIME & CONFORMANCE CHECK: Compute overtime >40 hrs/week at 1.5x basic hourly rate plus 1.0x fringe rate, and file Standard Form 1444 with the contracting officer for any unlisted trade classification."
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isLien) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "lb_mechanics_lien_waiver_packet";
+        effectiveOfferTitle = "LienBond Mechanics Lien, Preliminary Notice & Retainage Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact contract and retainage inputs (HTML/PDF)",
+          "Dynamic 5-scenario preliminary notice, fund-trapping & waiver exposure sensitivity table (HTML/CSV)",
+          "6-milestone state preliminary notice, lien perfection & foreclosure deadline calendar (HTML/CSV)",
+          "Complete structured JSON data pack with state-specific notice and recording statute metadata (JSON)",
+          "Unredacted conditional progress waiver, retainage carve-out & recording checklist clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "State Mechanics Lien Statutes (CA Civ. Code 8000+, TX Prop. Code Ch. 53, FL Stat. Ch. 713)";
+      }
+      const retainagePct = extractEdgeNumericParam(inputs, outputs, ["retainage"], 10, 0, 20);
+      const retainageHoldback = Math.round(baseAmount * (retainagePct / 100) * 100) / 100;
+      const waiverExposure = Math.round((baseAmount - retainageHoldback) * 100) / 100;
+
+      kpis = [
+        { label: "Modeled Claim / Contract Exposure", value: fmtUsd(baseAmount) },
+        { label: `Statutory ${retainagePct}% Retainage Holdback`, value: fmtUsd(retainageHoldback) },
+        { label: `${stateCode} Preliminary Notice Window`, value: stLien.prelim },
+        { label: `${stateCode} Lien Recording Cutoff`, value: stLien.record },
+      ];
+      reconciliationSchedule = [
+        { line_code: "LB-100", line_item: `Statutory Preliminary Notice Deadline & Amount at Risk (${stateCode})`, authority: stLien.cite, baseline_value: fmtUsd(baseAmount), optimized_value: `${fmtUsd(baseAmount)} Preserved`, delta_impact: `Prelim: ${stLien.prelim}` },
+        { line_code: "LB-200", line_item: `Statutory ${retainagePct}% Retainage Holdback & Fund-Trapping Notice Window`, authority: stLien.cite, baseline_value: `${fmtUsd(retainageHoldback)} Unsecured`, optimized_value: `${fmtUsd(retainageHoldback)} Trapped / Secured`, delta_impact: "Reserve in Conditional Waiver" },
+        { line_code: "LB-300", line_item: "Lien Perfection & Conditional vs Unconditional Release Waiver Exposure", authority: `${stateCode} Statutory Waiver Forms & ${stLien.cite}`, baseline_value: `${fmtUsd(waiverExposure)} Progress Risk`, optimized_value: "Conditional Until Bank Clearance", delta_impact: `Record Cutoff: ${stLien.record}` },
+        { line_code: "LB-400", line_item: `Foreclosure Enforcement Deadline & Bond-Around Substitution (${stateCode})`, authority: stLien.cite, baseline_value: stLien.enforce, optimized_value: "Priority Lien / Bond Claim", delta_impact: "File Suit Before Statutory Cutoff" },
+      ];
+      const lienTiers = [
+        ["Timely Day-20 Preliminary Notice + Conditional Waivers", 1.00, "100% Claim & Retainage Protected"],
+        ["Late Preliminary Notice (20-Day Lookback Haircut)", 0.70, "Lookback Window Trimmed"],
+        ["TX 15th-of-Month Fund-Trapping Notice Served", 0.90, "Owner Funds Trapped Upon Receipt"],
+        ["Unconditional Waiver Signed Before Check Cleared", 0.15, "Severe Lien Rights Extinguished"],
+        ["Perfected Claim of Lien + Timely Foreclosure Action", 1.00, "Full Statutory Priority Preserved"],
+      ];
+      sensitivityMatrix = lienTiers.map(([lbl, covFrac, effLbl]) => ({
         scenario_label: lbl,
-        modeled_principal: fmtUsd(baseAmount),
-        effective_rate: `${fmtPct(rate * 100)} Bond (${fmtUsd(prem)}) | ${tierEmr.toFixed(2)} EMR`,
-        estimated_net_benefit: `${deltaVsStd >= 0 ? "+" : ""}${fmtUsd(deltaVsStd)} vs Standard 2.50%`,
-      };
-    });
-    periodSchedule = [
-      { period: "Milestone 1: Preliminary Notice", metric_a: stLien.prelim, metric_b: fmtUsd(baseAmount), metric_c: stateCode, metric_d: "Mandatory Preservation", note: stLien.cite },
-      { period: "Milestone 2: Weekly WH-347 Payroll", metric_a: "7 Days Post-Payroll", metric_b: "29 CFR 5.5", metric_c: "Fringe Credit Log", metric_d: "1/3 OT WC Exclusion", note: "Submit signed Statement of Compliance" },
-      { period: "Milestone 3: Progress Waiver", metric_a: "Each Pay App", metric_b: "Conditional Only", metric_c: fmtUsd(retainageHoldback) + " Reserved", metric_d: "AIA G702/G703", note: "Never sign unconditional waiver before funds clear" },
-      { period: "Milestone 4: Miller Act 90-Day Notice", metric_a: "90 Days Last Work", metric_b: "40 U.S.C. 3133", metric_c: "Certified Mail", metric_d: fmtUsd(baseAmount), note: "Applies to 2nd-tier subs/suppliers on federal work" },
-      { period: "Milestone 5: Mechanics Lien Recording", metric_a: stLien.record, metric_b: "County Recorder", metric_c: stateCode, metric_d: fmtUsd(retainageHoldback), note: "Verify Notice of Completion shortening rules" },
-      { period: "Milestone 6: Foreclosure / Bond Suit", metric_a: stLien.enforce, metric_b: "Statutory Cutoff", metric_c: stateCode, metric_d: "100% Claim Principal", note: "File enforcement action before statutory expiration" },
-    ];
-    statutoryTrendTimeseries = [
-      { series_id: "saa_bond_rate", metric_label: "SAA Class B Surety Bond Rate per $1,000", statutory_citation: "SAA Manual & 40 U.S.C. 3131", unit: "USD/$1k", points: { "2024": 14.5, "2025": 14.2, "2026": 13.85, "2028": 13.4, "2030": 13.1 } },
-      { series_id: "ncci_split_point", metric_label: "NCCI Experience Rating Split-Point Cap", statutory_citation: "NCCI Experience Rating Plan", unit: "USD", points: { "2024": 18500, "2025": 19000, "2026": 19500, "2028": 21000, "2030": 22500 } },
-      { series_id: "sba_sbg_ceiling", metric_label: "SBA Surety Bond Guarantee Contract Ceiling", statutory_citation: "13 CFR 115.12(e)", unit: "USD", points: { "2024": 6500000, "2025": 9000000, "2026": 9000000, "2028": 10000000, "2030": 12000000 } },
-    ];
-    methodologyNotes = [
-      `State mechanics lien windows mapped to ${stateCode} (${stLien.cite}): Preliminary Notice ${stLien.prelim}; Recording ${stLien.record}; Enforcement ${stLien.enforce}.`,
-      "Surety premiums and NCCI EMR variances are deterministic contractor underwriting models and do not constitute legal advice or binding surety carrier quotes.",
-    ];
-    statutoryExecutionArtifacts = [
-      {
-        instrument_id: "LB-EXEC-101",
-        instrument_title: `${stateCode} Preliminary Notice & Conditional Progress Waiver Clause`,
-        controlling_statute: stLien.cite,
-        filing_deadline_rule: `Prelim: ${stLien.prelim} | Recording: ${stLien.record}`,
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `CONDITIONAL WAIVER (${stateCode} - ${stLien.cite}): Effective only upon actual bank clearance of payment for modeled claim ${fmtUsd(baseAmount)}. Statutory retainage of ${fmtUsd(retainageHoldback)} and unapproved change orders remain expressly reserved.`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "LB-EXEC-102",
-        instrument_title: "Miller Act (40 U.S.C. 3133) Payment Bond Notice & Underwriting Checklist",
-        controlling_statute: "40 U.S.C. 3131-3133, FAR 28.102 & 13 CFR Part 115",
-        filing_deadline_rule: `90-Day Notice / ${stLien.enforce} Enforcement Cutoff`,
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `PAYMENT BOND NOTICE (${stateCode}): Serve certified written notice of unpaid sum (${fmtUsd(baseAmount)}) within 90 days of last furnishing under 40 U.S.C. 3133(b)(2). Target preferred surety tier (${fmtUsd(prefBondPrem)}) vs standard tariff (${fmtUsd(stdBondPrem)}).`
-          : lockedChecklistNotice,
-      },
-      {
-        instrument_id: "LB-EXEC-103",
-        instrument_title: "DOL Form WH-347 Compliance & NCCI Overtime Exclusion Checklist",
-        controlling_statute: "29 CFR 5.5(a)(3)(ii) & NCCI Basic Manual Rule 2-C-2",
-        filing_deadline_rule: "Within 7 Calendar Days After Payroll Payment Date",
-        execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
-        statutory_clause_body: isFullPaid
-          ? `WH-347 & NCCI AUDIT (${stateCode}): Certify full prevailing wage and bona fide fringe disbursement under 29 CFR 5.5(a)(3)(ii). Segregate overtime premium pay (1/3 of 1.5x OT) before applying NCCI class rate and EMR (${emrVal.toFixed(2)}).`
-          : lockedChecklistNotice,
-      },
-    ];
+        modeled_principal: fmtUsd(Math.round(baseAmount * covFrac * 100) / 100),
+        effective_rate: effLbl,
+        estimated_net_benefit: `${fmtUsd(Math.round(retainageHoldback * covFrac * 100) / 100)} Retainage Secured`,
+      }));
+      periodSchedule = [
+        { period: "Day 1-20: Preliminary Notice", metric_a: stLien.prelim, metric_b: fmtUsd(baseAmount), metric_c: stateCode, metric_d: "Certified Mail / RRR", note: stLien.cite },
+        { period: "15th-of-Month: Fund-Trapping Notice", metric_a: "Monthly Cutoff", metric_b: fmtUsd(waiverExposure), metric_c: "Owner + GC Service", metric_d: "Chapter 53 / Stop Notice", note: "Serve monthly unpaid-balance notice where required" },
+        { period: "Each Pay App: Conditional Waiver", metric_a: "Progress Billing", metric_b: fmtUsd(retainageHoldback) + " Reserved", metric_c: "Conditional Only", metric_d: "Zero Bank Risk", note: "Never execute unconditional waiver prior to cleared funds" },
+        { period: "Substantial Completion Check", metric_a: "Notice of Completion", metric_b: fmtUsd(retainageHoldback), metric_c: "Track Shortened Clock", metric_d: "Monitor Recorder", note: "Notice of Completion can shorten recording deadline" },
+        { period: "Day 90 / Statutory Lien Perfection", metric_a: stLien.record, metric_b: fmtUsd(baseAmount), metric_c: "County Recorder", metric_d: "Verified Claim of Lien", note: "Record and serve copy on owner within statutory window" },
+        { period: "Enforcement / Foreclosure Cutoff", metric_a: stLien.enforce, metric_b: fmtUsd(baseAmount), metric_c: stateCode, metric_d: "100% Claim Principal", note: "File lien foreclosure or bond-claim suit before expiration" },
+      ];
+      statutoryTrendTimeseries = [
+        { series_id: "state_retainage_cap_pct", metric_label: "Statutory Private / Public Construction Retainage Cap Benchmark", statutory_citation: "State Prompt Pay & Retainage Statutes", unit: "PCT", points: { "2024": 10.0, "2025": 10.0, "2026": 5.0, "2028": 5.0, "2030": 5.0 } },
+        { series_id: "miller_act_threshold", metric_label: "Federal Miller Act Payment Bond Statutory Threshold", statutory_citation: "40 U.S.C. 3131 / FAR 28.102", unit: "USD", points: { "2024": 150000, "2025": 150000, "2026": 150000, "2028": 200000, "2030": 200000 } },
+        { series_id: "construction_lien_claim_index", metric_label: "Modeled Mechanics Lien & Retainage Exposure Index", statutory_citation: stLien.cite, unit: "USD", points: { "2024": Math.round(baseAmount * 0.90), "2025": Math.round(baseAmount * 0.95), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.07), "2030": Math.round(baseAmount * 1.14) } },
+      ];
+      methodologyNotes = [
+        `Mechanics lien deadlines mapped to ${stateCode} (${stLien.cite}): Preliminary Notice ${stLien.prelim}; Lien Recording ${stLien.record}; Enforcement ${stLien.enforce}.`,
+        `Modeled ${retainagePct}% statutory retainage holdback equals ${fmtUsd(retainageHoldback)} on ${fmtUsd(baseAmount)} contract exposure and must be expressly carved out of progress waivers.`,
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "LB-EXEC-101",
+          instrument_title: `${stateCode} Preliminary Notice & Fund-Trapping Service Checklist`,
+          controlling_statute: stLien.cite,
+          filing_deadline_rule: `Prelim: ${stLien.prelim}`,
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PRELIMINARY NOTICE (${stateCode}): Serve written preliminary notice on property owner, general contractor, and construction lender via certified mail RRR within ${stLien.prelim} to secure ${fmtUsd(baseAmount)} claim.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-102",
+          instrument_title: "Conditional vs Unconditional Progress Waiver & Retainage Carve-Out",
+          controlling_statute: stLien.cite,
+          filing_deadline_rule: "Attach to Every Pay Application (AIA G702/G703)",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `CONDITIONAL WAIVER CLAUSE (${stateCode}): Waiver effective ONLY upon bank clearance of progress draw; expressly reserves ${fmtUsd(retainageHoldback)} (${retainagePct}% retainage) and unbilled change orders.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-103",
+          instrument_title: "Lien Perfection Recording & Foreclosure Suit Calendar",
+          controlling_statute: stLien.cite,
+          filing_deadline_rule: `Recording: ${stLien.record} | Enforce: ${stLien.enforce}`,
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PERFECTION CALENDAR (${stateCode}): Record verified Claim of Lien within ${stLien.record} and initiate foreclosure enforcement action (or payment bond suit) prior to ${stLien.enforce}.`
+            : lockedChecklistNotice,
+        },
+      ];
+    } else if (isOverheadSdi) {
+      if (!isQuickTier && !isPartnerSlot) {
+        offerSku = "lb_surety_lien_wh347_packet";
+        effectiveOfferTitle = "LienBond Construction Overhead, Profit Margin & SDI Workpaper & Data Pack";
+        effectiveDeliverables = [
+          "Everything in the Quick Worksheet populated with your exact direct cost and markup inputs (HTML/PDF)",
+          "Dynamic 5-tier markup-to-margin and SDI loss-retention sensitivity matrix (HTML/CSV)",
+          "6-phase bid markup lock, ASC 606 WIP billing & job-cost reconciliation calendar (HTML/CSV)",
+          "Complete structured JSON data pack with Eichleay overhead & CFMA benchmark metadata (JSON)",
+          "Unredacted bid margin audit, SDI prequalification & change-order protocol clauses (HTML/PDF)",
+        ];
+      }
+      if (!isPartnerSlot) {
+        effectiveStatutoryAuthority = "FAR 31.205, AIA A201 General Conditions & Commercial Subcontractor Default Underwriting";
+      }
+      const markupPct = extractEdgeNumericParam(inputs, outputs, ["markup", "margin", "profit", "overhead"], 20, 2, 100);
+      const sdiRatePct = extractEdgeNumericParam(inputs, outputs, ["sdi", "default_rate", "retention"], 1.35, 0.25, 10);
+      const bidTotal = Math.round(baseAmount * (1 + markupPct / 100) * 100) / 100;
+      const grossProfit = Math.round((bidTotal - baseAmount) * 100) / 100;
+      const effMarginPct = bidTotal > 0 ? (grossProfit / bidTotal) * 100 : 0;
+      const sdiRetentionLayer = Math.round(baseAmount * (sdiRatePct / 100) * 100) / 100;
+      const netProfitAfterSdi = Math.max(0, Math.round((grossProfit - sdiRetentionLayer) * 100) / 100);
+
+      kpis = [
+        { label: "Modeled Direct Cost Base", value: fmtUsd(baseAmount) },
+        { label: `Bid Total (${fmtPct(markupPct)} Markup)`, value: fmtUsd(bidTotal) },
+        { label: "Effective Gross Margin %", value: fmtPct(effMarginPct) },
+        { label: "Net Margin After SDI Layer", value: fmtUsd(netProfitAfterSdi) },
+      ];
+      reconciliationSchedule = [
+        { line_code: "LB-100", line_item: `Direct Cost vs Markup-to-Margin Bridge (${fmtPct(markupPct)} Markup = ${fmtPct(effMarginPct)} Margin)`, authority: "CFMA Construction Financial Management Benchmarks", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(bidTotal), delta_impact: `+${fmtUsd(grossProfit)} Gross Profit` },
+        { line_code: "LB-200", line_item: `Gross Margin Erosion / SDI Loss-Retention Layer (${fmtPct(sdiRatePct)} Sub Default Reserve)`, authority: "Subcontractor Default Insurance (SDI) Self-Insured Retention & Co-Pay", baseline_value: fmtUsd(grossProfit), optimized_value: fmtUsd(netProfitAfterSdi), delta_impact: `-${fmtUsd(sdiRetentionLayer)} SDI Retention` },
+        { line_code: "LB-300", line_item: "Home-Office Overhead & Bid Buffer Sensitivity (Eichleay Allocation)", authority: "FAR 31.205 / Eichleay Unabsorbed Overhead Formula", baseline_value: fmtUsd(grossProfit * 0.45), optimized_value: fmtUsd(grossProfit * 0.55), delta_impact: "Protects Overhead Recovery on Delays" },
+        { line_code: "LB-400", line_item: "WIP Billing & Retainage Cash-Flow Margin Guardrail", authority: "ASC 606 Percentage-of-Completion & AIA G702", baseline_value: fmtUsd(bidTotal * 0.10), optimized_value: fmtUsd(netProfitAfterSdi), delta_impact: "Prevents Profit Fade at Closeout" },
+      ];
+      const markupSteps = [10, 15, 20, 25, 30];
+      sensitivityMatrix = markupSteps.map((mk) => {
+        const bVal = Math.round(baseAmount * (1 + mk / 100) * 100) / 100;
+        const gp = Math.round((bVal - baseAmount) * 100) / 100;
+        const gmPct = (gp / Math.max(1, bVal)) * 100;
+        return {
+          scenario_label: `${mk}% Cost Markup (${fmtPct(gmPct)} Gross Margin)`,
+          modeled_principal: fmtUsd(bVal),
+          effective_rate: `${fmtPct(gmPct)} Margin | ${fmtUsd(sdiRetentionLayer)} SDI`,
+          estimated_net_benefit: `${fmtUsd(Math.max(0, gp - sdiRetentionLayer))} Net Margin`,
+        };
+      });
+      const bidMilestones = [
+        ["Phase 1: Estimate & Markup Lock", fmtUsd(baseAmount), fmtUsd(bidTotal), fmtPct(effMarginPct), "Confirm markup-to-margin conversion before bid submission"],
+        ["Phase 2: Subcontractor Prequal & SDI", fmtUsd(sdiRetentionLayer), fmtPct(sdiRatePct), "Prequal Tier", "Bind SDI or subcontractor performance bonds on key trades"],
+        ["Phase 3: Mobilization & WIP Baseline", fmtUsd(grossProfit), "ASC 606 Schedule", "Zero Underbilling", "Establish schedule of values avoiding back-loaded margin"],
+        ["Phase 4: Change-Order Margin Guard", "+15% OH&P Fee", fmtUsd(grossProfit * 0.15), "Written CO Approval", "Apply full OH&P markup to self-performed & sub COs"],
+        ["Phase 5: Substantial Completion", fmtUsd(netProfitAfterSdi), "Closeout Audit", "Punchlist Cap", "Track closeout labor drag against contingency buffer"],
+        ["Phase 6: Final Job-Cost Reconciliation", fmtUsd(bidTotal), fmtUsd(netProfitAfterSdi), "CFMA Benchmark", "Audit final job margin vs bid-day target margin"],
+      ];
+      periodSchedule = bidMilestones.map(([p, ma, mb, mc, note]) => ({
+        period: p,
+        metric_a: ma,
+        metric_b: mb,
+        metric_c: mc,
+        metric_d: fmtUsd(netProfitAfterSdi),
+        note,
+      }));
+      statutoryTrendTimeseries = [
+        { series_id: "construction_overhead_margin_idx", metric_label: "Specialty Contractor Pre-Tax Net Margin Benchmark", statutory_citation: "CFMA Annual Financial Survey", unit: "PCT", points: { "2024": 5.8, "2025": 6.1, "2026": 6.4, "2028": 6.6, "2030": 6.8 } },
+        { series_id: "sdi_loss_retention_pct", metric_label: "SDI Program Cost & Loss-Retention Rate Index", statutory_citation: "Commercial SDI Underwriting Benchmarks", unit: "PCT", points: { "2024": 1.25, "2025": 1.30, "2026": 1.35, "2028": 1.40, "2030": 1.45 } },
+        { series_id: "material_cost_escalation_idx", metric_label: "Modeled Direct Cost Bid Escalation Benchmark", statutory_citation: "BLS PPI Construction Inputs", unit: "USD", points: { "2024": Math.round(baseAmount * 0.93), "2025": Math.round(baseAmount * 0.97), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.07), "2030": Math.round(baseAmount * 1.14) } },
+      ];
+      methodologyNotes = [
+        `Markup-to-margin bridge converts ${fmtPct(markupPct)} markup on ${fmtUsd(baseAmount)} direct cost into ${fmtUsd(bidTotal)} bid price (${fmtPct(effMarginPct)} gross margin = ${fmtUsd(grossProfit)}).`,
+        `Deducting a modeled ${fmtPct(sdiRatePct)} SDI self-insured loss-retention reserve (${fmtUsd(sdiRetentionLayer)}) yields ${fmtUsd(netProfitAfterSdi)} net pre-tax margin buffer.`,
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "LB-EXEC-101",
+          instrument_title: "Bid Markup-to-Margin & Overhead Allocation Audit",
+          controlling_statute: "CFMA WIP Accounting & FAR 31.205 / Eichleay Overhead Standards",
+          filing_deadline_rule: "Verify Prior to Final Bid Submission",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `BID MARGIN AUDIT (${stateCode}): Confirm ${fmtPct(markupPct)} cost markup yields ${fmtPct(effMarginPct)} gross margin on ${fmtUsd(bidTotal)} contract price and covers home-office G&A overhead.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-102",
+          instrument_title: "SDI Loss-Retention & Subcontractor Prequalification Checklist",
+          controlling_statute: "Commercial SDI Underwriting & Subcontract Default Clauses",
+          filing_deadline_rule: "Complete Financial Prequalification Prior to Subcontract Award",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `SDI CHECKLIST (${stateCode}): Benchmark ${fmtUsd(sdiRetentionLayer)} (${fmtPct(sdiRatePct)}) SDI retention against 100% performance/payment bond flowdown on critical-path subcontractors.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-103",
+          instrument_title: "Change-Order Margin Protection & WIP Fade Prevention Protocol",
+          controlling_statute: "ASC 606 Revenue Recognition & AIA A201 Change-Order Rules",
+          filing_deadline_rule: "Enforce Written Change-Order Pricing Monthly",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? "WIP & CO PROTOCOL: Require signed written change orders with full overhead and profit markup prior to extra work execution to protect net job margin."
+            : lockedChecklistNotice,
+        },
+      ];
+    } else {
+      const creditScore = Math.round(extractEdgeNumericParam(inputs, outputs, ["credit", "fico", "score"], 710, 500, 850));
+      const stdRate = 0.025;
+      const prefRate = creditScore >= 740 ? 0.0085 : (creditScore >= 700 ? 0.0115 : (creditScore >= 660 ? 0.0175 : 0.0250));
+      const stdBondPrem = Math.round(baseAmount * stdRate * 100) / 100;
+      const prefBondPrem = Math.round(baseAmount * prefRate * 100) / 100;
+      const premSavings = Math.max(150, Math.round((stdBondPrem - prefBondPrem) * 100) / 100);
+
+      kpis = [
+        { label: "Modeled Bond Penal Sum", value: fmtUsd(baseAmount) },
+        { label: "Preferred vs Standard Premium", value: `${fmtUsd(prefBondPrem)} vs ${fmtUsd(stdBondPrem)}` },
+        { label: "Annual Surety Rate Savings", value: fmtUsd(premSavings) },
+        { label: "Modeled Credit / Tier", value: `${creditScore} FICO (${fmtPct(prefRate * 100)})` },
+      ];
+      reconciliationSchedule = [
+        { line_code: "LB-100", line_item: `Modeled Surety Bond Penal Sum (${stateCode})`, authority: effectiveStatutoryAuthority, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `100% Penal Sum Basis (${stateCode})` },
+        { line_code: "LB-200", line_item: `Surety Rate Tier Variance (${fmtPct(stdRate * 100)} Std vs ${fmtPct(prefRate * 100)} Preferred)`, authority: "SAA Sliding-Scale Tariff & Carrier Underwriting Tiers", baseline_value: `${fmtUsd(stdBondPrem)} (2.50% Std)`, optimized_value: `${fmtUsd(prefBondPrem)} (${fmtPct(prefRate * 100)})`, delta_impact: `-${fmtUsd(premSavings)} Annual Savings` },
+        { line_code: "LB-300", line_item: "Miller Act & SBA Surety Bond Guarantee Ceiling Check", authority: "40 U.S.C. 3131-3133 & 13 CFR 115.12(e)", baseline_value: "$150,000 Miller Act Trigger", optimized_value: "$9,000,000 SBA SBG Cap", delta_impact: baseAmount >= 150000 ? "Federal Bond Mandatory" : "Below Federal Miller Threshold" },
+        { line_code: "LB-400", line_item: "General Indemnity Agreement (GIA) & Working Capital Ratio", authority: "Treasury Circular 570 & Surety Underwriting Standards", baseline_value: "10% Working Capital Target", optimized_value: fmtUsd(baseAmount * 0.10), delta_impact: "Substantiates Preferred Tier Rate" },
+      ];
+      const bondRates = [
+        ["Tier 1: Super-Preferred Surety (0.50% / 760+ FICO)", 0.0050],
+        ["Tier 2: Preferred Commercial (1.00% / 720+ FICO)", 0.0100],
+        ["Tier 3: Standard Market (1.50% / 680+ FICO)", 0.0150],
+        ["Tier 4: Sub-Standard Market (2.25% / 630+ FICO)", 0.0225],
+        ["Tier 5: SBA 13 CFR 115 / High-Risk (3.00%)", 0.0300],
+      ];
+      sensitivityMatrix = bondRates.map(([lbl, rVal]) => {
+        const prem = Math.round(baseAmount * rVal * 100) / 100;
+        const deltaVsMax = Math.round((baseAmount * 0.0300 - prem) * 100) / 100;
+        return {
+          scenario_label: lbl,
+          modeled_principal: fmtUsd(baseAmount),
+          effective_rate: `${fmtPct(rVal * 100)} (${fmtUsd(prem)}/yr)`,
+          estimated_net_benefit: `+${fmtUsd(deltaVsMax)} vs 3.00% Tier`,
+        };
+      });
+      periodSchedule = [
+        { period: "Milestone 1: Financials & GIA Review", metric_a: fmtUsd(baseAmount * 0.10), metric_b: "CPA Review / Balance Sheet", metric_c: `${creditScore} FICO`, metric_d: fmtUsd(prefBondPrem), note: "Verify 10% working capital & net worth capacity" },
+        { period: "Milestone 2: Bid Bond Issuance", metric_a: "5%-20% Bid Sum", metric_b: fmtUsd(baseAmount * 0.10), metric_c: "SF-24 / Private", metric_d: "Zero Bid Fee", note: "Confirm Treasury Circular 570 listed surety" },
+        { period: "Milestone 3: Performance & Payment Bonds", metric_a: "100% Penal Sum", metric_b: fmtUsd(baseAmount), metric_c: "SF-25 / SF-25A", metric_d: fmtUsd(prefBondPrem), note: "Bind at award under 40 U.S.C. 3131 / state Little Miller Act" },
+        { period: "Milestone 4: 90-Day Subcontractor Notice", metric_a: "90 Days Last Work", metric_b: "40 U.S.C. 3133", metric_c: "Certified Mail", metric_d: "Claim Defense", note: "Track lower-tier notices & lien waivers to protect indemnity" },
+        { period: "Milestone 5: Substantial Completion", metric_a: "Consent of Surety", metric_b: "AIA G707", metric_c: "Final Pay Release", metric_d: "Bond Exoneration", note: "Obtain owner release / closeout certificate" },
+        { period: "Milestone 6: 1-Year Enforcement Cutoff", metric_a: "1 Year Last Work", metric_b: "40 U.S.C. 3133(b)(4)", metric_c: stateCode, metric_d: "Indemnity Release", note: "Close surety bond file and verify zero open claims" },
+      ];
+      statutoryTrendTimeseries = [
+        { series_id: "saa_bond_rate", metric_label: "SAA Class B Surety Bond Rate per $1,000", statutory_citation: "SAA Manual & 40 U.S.C. 3131", unit: "USD/$1k", points: { "2024": 14.5, "2025": 14.2, "2026": 13.85, "2028": 13.4, "2030": 13.1 } },
+        { series_id: "miller_act_threshold", metric_label: "Federal Miller Act Performance & Payment Bond Threshold", statutory_citation: "40 U.S.C. 3131 / FAR 28.102", unit: "USD", points: { "2024": 150000, "2025": 150000, "2026": 150000, "2028": 200000, "2030": 200000 } },
+        { series_id: "sba_sbg_ceiling", metric_label: "SBA Surety Bond Guarantee Contract Ceiling", statutory_citation: "13 CFR 115.12(e)", unit: "USD", points: { "2024": 6500000, "2025": 9000000, "2026": 9000000, "2028": 10000000, "2030": 12000000 } },
+      ];
+      methodologyNotes = [
+        `Surety bond pricing modeled on ${fmtUsd(baseAmount)} penal sum in ${stateCode} across 0.50%-3.00% underwriting tiers (preferred modeled premium ${fmtUsd(prefBondPrem)} vs 2.50% standard ${fmtUsd(stdBondPrem)}).`,
+        "Federal contracts exceeding $150,000 require Miller Act performance and payment bonds (40 U.S.C. 3131); SBA Surety Bond Guarantees (13 CFR Part 115) cover contracts up to $9,000,000 ($14,000,000 federal).",
+      ];
+      statutoryExecutionArtifacts = [
+        {
+          instrument_id: "LB-EXEC-101",
+          instrument_title: "Treasury Circular 570 Surety & General Indemnity Agreement (GIA) Audit",
+          controlling_statute: "31 U.S.C. 9304-9308 & Treasury Circular 570",
+          filing_deadline_rule: "Verify Carrier Listing & Working Capital Prior to Bid",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `SURETY UNDERWRITING (${stateCode}): Confirm surety carrier is Treasury Circular 570 certified for ${fmtUsd(baseAmount)} penal sum and maintain >= ${fmtUsd(baseAmount * 0.10)} working capital to qualify for ${fmtPct(prefRate * 100)} pricing.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-102",
+          instrument_title: "Miller Act (40 U.S.C. 3133) Payment Bond Notice & Claim Checklist",
+          controlling_statute: "40 U.S.C. 3131-3133, FAR 28.102 & 13 CFR Part 115",
+          filing_deadline_rule: "90-Day Notice / 1-Year Suit Cutoff",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `PAYMENT BOND CHECKLIST (${stateCode}): Second-tier claimants must serve certified written notice within 90 days of last furnishing under 40 U.S.C. 3133(b)(2) and file any bond action within 1 year.`
+            : lockedChecklistNotice,
+        },
+        {
+          instrument_id: "LB-EXEC-103",
+          instrument_title: "Bond Closeout, Consent of Surety & Exoneration Protocol",
+          controlling_statute: "FAR 28.106 & Commercial Surety Indemnity Rules",
+          filing_deadline_rule: "Obtain Written Owner Release Upon Final Acceptance",
+          execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
+          statutory_clause_body: isFullPaid
+            ? `EXONERATION PROTOCOL (${stateCode}): Submit executed AIA G707 Consent of Surety to Final Payment and obtain written bond exoneration from obligee to release annual renewal exposure.`
+            : lockedChecklistNotice,
+        },
+      ];
+    }
 """
     else:
         tenant_compute_js = """
@@ -6634,8 +7868,8 @@ def _render_edge_pricing_and_workpaper_engine_js(
       { label: "Evaluation Horizon", value: `${horizonYears} Years` },
     ];
     reconciliationSchedule = [
-      { line_code: `${CANONICAL_EXEC_PREFIX}-100`, line_item: `Modeled Principal / Scope Basis (${stateCode})`, authority: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Calculation Reference`, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `Tool: ${toolSlug}` },
-      { line_code: `${CANONICAL_EXEC_PREFIX}-200`, line_item: `Annualized Baseline vs Optimized Run-Rate (${fmtPct(ratePct)})`, authority: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Statutory Methodology`, baseline_value: `${fmtUsd(annualBaseline)}/yr`, optimized_value: `${fmtUsd(annualOptimized)}/yr`, delta_impact: `-${fmtUsd(annualBaseline - annualOptimized)}/yr` },
+      { line_code: `${CANONICAL_EXEC_PREFIX}-100`, line_item: `Modeled Principal / Scope Basis (${stateCode})`, authority: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Calculation Reference`, baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(baseAmount), delta_impact: `Tool: ${toolSlug}` },
+      { line_code: `${CANONICAL_EXEC_PREFIX}-200`, line_item: `Annualized Baseline vs Optimized Run-Rate (${fmtPct(ratePct)})`, authority: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Statutory Methodology`, baseline_value: `${fmtUsd(annualBaseline)}/yr`, optimized_value: `${fmtUsd(annualOptimized)}/yr`, delta_impact: `-${fmtUsd(annualBaseline - annualOptimized)}/yr` },
       { line_code: `${CANONICAL_EXEC_PREFIX}-300`, line_item: `Cumulative ${horizonYears}-Year Modeled Impact`, authority: "Deterministic Compounding & Amortization Reference", baseline_value: fmtUsd(baseAmount), optimized_value: fmtUsd(netModeledTotal), delta_impact: `${fmtUsd(totalProjectedBenefit)} Net Delta` },
       { line_code: `${CANONICAL_EXEC_PREFIX}-400`, line_item: `Jurisdiction & Filing Readiness (${stateCode})`, authority: `${CANONICAL_BRAND_NAME} Compliance Verification Protocol`, baseline_value: "Unverified Estimate", optimized_value: "Substantiated Workpaper", delta_impact: `Band: ${capitalBand}` },
     ];
@@ -6667,9 +7901,9 @@ def _render_edge_pricing_and_workpaper_engine_js(
       });
     }
     statutoryTrendTimeseries = [
-      { series_id: `${propertyId}_baseline_idx`, metric_label: `${CANONICAL_BRAND_NAME} Modeled Baseline Benchmark`, statutory_citation: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(baseAmount * 0.92), "2025": Math.round(baseAmount * 0.96), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.06), "2030": Math.round(baseAmount * 1.12) } },
+      { series_id: `${propertyId}_baseline_idx`, metric_label: `${CANONICAL_BRAND_NAME} Modeled Baseline Benchmark`, statutory_citation: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(baseAmount * 0.92), "2025": Math.round(baseAmount * 0.96), "2026": Math.round(baseAmount), "2028": Math.round(baseAmount * 1.06), "2030": Math.round(baseAmount * 1.12) } },
       { series_id: `${propertyId}_rate_idx`, metric_label: "Effective Benchmark Rate / Factor", statutory_citation: "Deterministic Model Parameter", unit: "PCT", points: { "2024": Math.round(ratePct * 0.94 * 100) / 100, "2025": Math.round(ratePct * 0.97 * 100) / 100, "2026": Math.round(ratePct * 100) / 100, "2028": Math.round(ratePct * 0.95 * 100) / 100, "2030": Math.round(ratePct * 0.92 * 100) / 100 } },
-      { series_id: `${propertyId}_net_delta_idx`, metric_label: "Cumulative Projected Net Delta", statutory_citation: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(totalProjectedBenefit * 0.85), "2025": Math.round(totalProjectedBenefit * 0.92), "2026": Math.round(totalProjectedBenefit), "2028": Math.round(totalProjectedBenefit * 1.08), "2030": Math.round(totalProjectedBenefit * 1.16) } },
+      { series_id: `${propertyId}_net_delta_idx`, metric_label: "Cumulative Projected Net Delta", statutory_citation: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Reference`, unit: "USD", points: { "2024": Math.round(totalProjectedBenefit * 0.85), "2025": Math.round(totalProjectedBenefit * 0.92), "2026": Math.round(totalProjectedBenefit), "2028": Math.round(totalProjectedBenefit * 1.08), "2030": Math.round(totalProjectedBenefit * 1.16) } },
     ];
     methodologyNotes = [
       `Deterministic calculation for ${toolSlug} (${stateCode}) modeled from baseline ${fmtUsd(baseAmount)} at ${fmtPct(ratePct)} over ${horizonYears} years.`,
@@ -6679,7 +7913,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       {
         instrument_id: `${CANONICAL_EXEC_PREFIX}-EXEC-101`,
         instrument_title: `${CANONICAL_BRAND_NAME} Scenario Substantiation & Input Audit`,
-        controlling_statute: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Statutory Reference`,
+        controlling_statute: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Statutory Reference`,
         filing_deadline_rule: "Verify Prior to Filing / Transaction Execution",
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
@@ -6689,7 +7923,7 @@ def _render_edge_pricing_and_workpaper_engine_js(
       {
         instrument_id: `${CANONICAL_EXEC_PREFIX}-EXEC-102`,
         instrument_title: "Multi-Period Projection & Sensitivity Verification Checklist",
-        controlling_statute: offer.statutory_authority || `${CANONICAL_BRAND_NAME} Methodology`,
+        controlling_statute: effectiveStatutoryAuthority || `${CANONICAL_BRAND_NAME} Methodology`,
         filing_deadline_rule: "Review Prior to Commitment",
         execution_status: isFullPaid ? "UNREDACTED_READY_FOR_FILING" : "LOCKED_FULL_PACK_ONLY",
         statutory_clause_body: isFullPaid
@@ -7011,6 +8245,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   const isFullPaid = isPaidSession && tierKind === "full";
   const leadId = String((record && record.lead_id) || "lead_" + propertyId + "_session");
   const toolSlug = String((record && record.tool_slug) || (offer && offer.default_slug) || "general");
+  const slugLower = toolSlug.trim().toLowerCase();
   const stateCode = String((record && record.state) || (fwMeta && fwMeta.jurisdiction) || "{default_state}").toUpperCase();
   const email = String((record && record.email) || "{default_buyer_label}");
   const firmName = String((record && (record.firm_name || record.company_name)) || (record && record.metadata && record.metadata.firm_name) || "").trim();
@@ -7039,6 +8274,13 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   const fullTierPriceLabel = "$" + Number((fullTierOfferRef && fullTierOfferRef.price_usd) || {full_price_int});
   const lockedChecklistNotice = `Locked in Preview / Quick Worksheet. Upgrade to Full Workpaper & Data Pack (${{fullTierPriceLabel}}) to unlock unredacted execution checklists.`;
 
+  const rawOfferSku = String((offer && (offer.sku || offer.offerSku)) || CANONICAL_DEFAULT_FULL_SKU);
+  let offerSku = String((fwMeta && fwMeta.displayOfferSku) || rawOfferSku);
+  let effectiveOfferTitle = String((offer && (offer.title || offer.offerTitle)) || (CANONICAL_BRAND_NAME + " Workpaper"));
+  const offerPriceUsd = Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || {full_price_int});
+  let effectiveStatutoryAuthority = String((offer && (offer.statutory_authority || offer.statutoryAuthority)) || "");
+  let effectiveDeliverables = Array.isArray(offer && offer.deliverables) ? [...offer.deliverables] : [];
+
   let reconciliationSchedule = [];
   let sensitivityMatrix = [];
   let periodSchedule = [];
@@ -7048,12 +8290,6 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   let kpis = [];
 
 {tenant_compute_js}
-
-  const offerSku = String((offer && (offer.sku || offer.offerSku)) || CANONICAL_DEFAULT_FULL_SKU);
-  const offerTitle = String((offer && (offer.title || offer.offerTitle)) || (CANONICAL_BRAND_NAME + " Workpaper"));
-  const offerPriceUsd = Number((offer && (offer.price_usd !== undefined ? offer.price_usd : offer.offerPriceUsd)) || {full_price_int});
-  const offerAuth = String((offer && (offer.statutory_authority || offer.statutoryAuthority)) || "");
-  const offerDeliverables = Array.isArray(offer && offer.deliverables) ? offer.deliverables : [];
 
   const buildUrl = (flagName, extraParams = {{}}) => {{
     if (typeof actionUrlBuilder === "function") {{
@@ -7094,7 +8330,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     ? {{ ...rawFullOffer, title: fwMeta.title }}
     : rawFullOffer;
   const quickCheckoutUrl = buildUrl("checkout", {{ sku: quickOffer.sku, redirect: true }});
-  const fullCheckoutUrl = buildUrl("checkout", {{ sku: fullOffer.sku, redirect: true }});
+  const fullCheckoutUrl = buildUrl("checkout", {{ sku: (fwMeta && fwMeta.displayOfferSku) || fullOffer.sku, redirect: true }});
 
   const estFeeUsd = Math.round((offerPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((offerPriceUsd - estFeeUsd) * 100) / 100);
@@ -7108,7 +8344,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     tool_slug: toolSlug,
     lead_id: leadId,
     offer_sku: offerSku,
-    offer_title: offerTitle,
+    offer_title: effectiveOfferTitle,
     tier_kind: tierKind,
     gross_amount_usd: offerPriceUsd,
     estimated_processor_fee_usd: estFeeUsd,
@@ -7132,9 +8368,16 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     outputs,
   }};
 
+  const effectiveYear = String((record && (record.effective_year || record.effective_tax_year || record.compliance_cycle_year)) || "2026");
+  const csvOfferSku = String((fwMeta && fwMeta.csvOfferSku) || offerSku);
   let csvContent = null;
   if (isPaidSession && !isPartnerSlot) {{
     const csvLines = ["Section,Line Code,Line Item,Authority / Detail,Baseline Value,Optimized / Modeled Value,Delta / Notes"];
+    csvLines.push(["Metadata", "META-TOOL", "Tool Slug", propertyId, toolSlug, toolSlug, "Active Calculator Route"].map(csvEscapeCell).join(","));
+    csvLines.push(["Metadata", "META-STATE", "Jurisdiction / State", "Statutory Jurisdiction", stateCode, stateCode, "Captured"].map(csvEscapeCell).join(","));
+    csvLines.push(["Metadata", "META-SKU", "Offer SKU / Tier", effectiveOfferTitle, csvOfferSku, tierKind, `${{csvOfferSku}} / ${{tierKind}}`].map(csvEscapeCell).join(","));
+    csvLines.push(["Metadata", "META-LEAD", "Fulfillment Reference", "Lead / Session Reference", leadId, verifiedSessionId || leadId, isPaidSettled ? "Settled" : "Verified Session"].map(csvEscapeCell).join(","));
+    csvLines.push(["Metadata", "META-YEAR", "Statutory / Compliance Year", effectiveStatutoryAuthority || "Statutory Cycle", effectiveYear, effectiveYear, "Effective Benchmark Year"].map(csvEscapeCell).join(","));
     for (const [k, v] of Object.entries(inputs)) {{
       csvLines.push(["INPUT", `IN-${{k}}`, `Calculator Input: ${{k}}`, "Buyer Calculator State", String(v), String(v), "Captured"].map(csvEscapeCell).join(","));
     }}
@@ -7173,9 +8416,10 @@ function buildCanonicalWorkpaperDeliverable(params) {{
         {datapack_cycle_js}
         ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
         offer_sku: offerSku,
-        offer_title: offerTitle,
+        offer_title: effectiveOfferTitle,
         tier_kind: tierKind,
-        statutory_authority: offerAuth,
+        statutory_authority: effectiveStatutoryAuthority,
+        deliverables: effectiveDeliverables,
         buyer_inputs: inputs,
         buyer_outputs: outputs,
         modeled_scenario_summary: customParameterLedger,
@@ -7226,7 +8470,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
       `<tr><td>Placement Fee</td><td><strong>$${{esc(offerPriceUsd)}}</strong></td></tr>` +
       `<tr><td>Target Calculator Route</td><td><code>${{esc(toolSlug)}}</code></td></tr>` +
       `<tr><td>Settlement Status</td><td><strong>${{esc(settlementAttribution.settlement_status)}}</strong></td></tr>` +
-      `<tr><td>Included Deliverables</td><td><ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul></td></tr>` +
+      `<tr><td>Included Deliverables</td><td><ul>${{effectiveDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul></td></tr>` +
       `</tbody></table>`;
   }} else if (!isPaidSession) {{
     actionsHtml =
@@ -7252,7 +8496,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
       `<h2>1. Executive Reconciliation Schedule</h2>` +
       `<table><thead><tr><th>Code</th><th>Line Item &amp; Authority</th><th>Baseline</th><th>Optimized</th><th>Impact</th></tr></thead><tbody>${{reconRowsHtml}}</tbody></table>` +
       `<h2>2. Formula Methodology &amp; Compliance Notes</h2><ul>${{methodHtml}}</ul>` +
-      `<h2>3. Included Quick Worksheet Deliverables</h2><ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
+      `<h2>3. Included Quick Worksheet Deliverables</h2><ul>${{effectiveDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
       `<div class="banner"><strong>Need Multi-Period Schedules &amp; JSON Data Pack?</strong> Upgrade to the <a href="${{esc(fullCheckoutUrl)}}">${{esc(fullOffer.title)}} ($${{esc(fullOffer.price_usd)}})</a> for the 5-point sensitivity matrix, ${{periodSchedule.length}}-row dynamic schedule, full CSV, JSON Data Pack, and unredacted execution checklist.</div>`;
   }} else {{
     actionsHtml =
@@ -7284,7 +8528,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
       `<table><thead><tr><th>Metric &amp; Authority</th><th>2024</th><th>2025</th><th>2026</th><th>2028 Proj</th><th>2030 Proj</th></tr></thead><tbody>${{trendHtml}}</tbody></table>` +
       `<h2>5. Methodology, Deliverables &amp; Unredacted Execution Checklist</h2>` +
       `<ul>${{methodHtml}}</ul>` +
-      `<ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
+      `<ul>${{effectiveDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul>` +
       `<table><thead><tr><th>Clause ID</th><th>Checklist Item &amp; Cutoff</th><th>Execution Clause</th></tr></thead><tbody>${{execHtml}}</tbody></table>`;
   }}
 
@@ -7293,7 +8537,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${{esc(offerTitle)}} (${{esc(leadId)}})</title>
+<title>${{esc(effectiveOfferTitle)}} (${{esc(leadId)}})</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f8fafc; margin: 0; padding: 24px 16px; line-height: 1.55; }}
   .sheet {{ max-width: 960px; margin: 0 auto; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 12px; padding: 28px; box-shadow: 0 8px 20px rgba(15,23,42,0.05); }}
@@ -7321,9 +8565,9 @@ function buildCanonicalWorkpaperDeliverable(params) {{
 <body>
 <div class="sheet">
   <span class="badge">${{esc(badgeText)}}</span>
-  <h1>${{esc(offerTitle)}}</h1>
+  <h1>${{esc(effectiveOfferTitle)}}</h1>
   <div class="meta">
-    Reference: <strong>${{esc(leadId)}}</strong> | Prepared For: <strong>${{esc(firmName || email)}}</strong> | Tool: <code>${{esc(toolSlug)}}</code> | Jurisdiction: <strong>${{esc(stateCode)}}</strong> | Authority: <strong>${{esc(offerAuth)}}</strong>
+    Reference: <strong>${{esc(leadId)}}</strong> | Prepared For: <strong>${{esc(firmName || email)}}</strong> | Tool: <code>${{esc(toolSlug)}}</code> | Jurisdiction: <strong>${{esc(stateCode)}}</strong> | Authority: <strong>${{esc(effectiveStatutoryAuthority)}}</strong>
   </div>
   <div class="actions">${{actionsHtml}}</div>
   ${{bodySectionsHtml}}
@@ -7356,10 +8600,10 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     paid_unlock_required: !isPaidSession,
     tier_kind: tierKind,
     offer_sku: offerSku,
-    offer_title: offerTitle,
+    offer_title: effectiveOfferTitle,
     offer_price_usd: offerPriceUsd,
-    statutory_authority: offerAuth,
-    deliverables: offerDeliverables,
+    statutory_authority: effectiveStatutoryAuthority,
+    deliverables: effectiveDeliverables,
     calculated_amount: baseAmount,
     modeled_amount_usd: baseAmount,
     capital_band: capitalBand,
@@ -7653,6 +8897,8 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
       if (!accessToken) return false;
       const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
       const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+      const safeFromName = String(fromName || "").replace(/[<>"\\r\\n]/g, "").trim();
+      const zohoFromHeader = safeFromName ? `${{safeFromName}} <${{zohoFromEmail}}>` : zohoFromEmail;
       const zohoResp = await fetch(`https://mail.zoho.com/api/accounts/${{encodeURIComponent(zohoAccountId)}}/messages`, {{
         method: "POST",
         headers: {{
@@ -7661,7 +8907,7 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
           Accept: "application/json",
         }},
         body: JSON.stringify({{
-          fromAddress: zohoFromEmail,
+          fromAddress: zohoFromHeader,
           toAddress: targetEmail,
           subject,
           content: htmlBody,
@@ -8073,7 +9319,7 @@ function maskEdgeEmail(email) {
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@") || e.includes("*")) return true;
-  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  if (e === CANONICAL_OPERATOR_MAILBOX || e === "coskun.arf@gmail.com") return false;
   const at = e.lastIndexOf("@");
   const local = e.slice(0, at);
   const domain = e.slice(at + 1);
@@ -8690,6 +9936,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
         const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const safeFromName = String(fromName || "").replace(/[<>"\\r\\n]/g, "").trim();
+        const zohoFromHeader = safeFromName ? `${safeFromName} <${zohoFromEmail}>` : zohoFromEmail;
         const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
           ? zohoSyntheticSinkEmail
@@ -8702,7 +9950,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
             Accept: "application/json",
           },
           body: JSON.stringify({
-            fromAddress: zohoFromEmail,
+            fromAddress: zohoFromHeader,
             toAddress: deliveryRecipient,
             subject: emailSubject,
             content: htmlBody,
@@ -9911,6 +11159,36 @@ const GAINHELM_FRAMEWORK_BUNDLE_SPECS = {
     exec103Title: "DFARS 252.204-7012 / 7021 Contract Flowdown & SPRS Substantiation Memo",
     exec103Auth: "DoD CIO 32 CFR Part 170 Rulemaking",
   },
+  soc2: {
+    offerSku: "gh_soc2_cmmc_audit_workpapers",
+    title: "GainHelm SOC 2 Type II, CMMC 2.0 & NIST 800-171 Audit Scoping Workpaper Suite",
+    statutoryAuthority: "AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) & 32 CFR Part 170",
+    regulatorName: "AICPA Auditing Standards Board (Trust Services Criteria)",
+    vertical: "soc2_grc_automation",
+    primaryPartnerKey: "vanta_security",
+    partnerRepDesk: "Vanta Trust Management & SOC 2 Audit Desk",
+    footerComplianceDoc: "Retain this workpaper alongside AICPA SSAE 18 (AT-C Section 205), Trust Services Criteria (TSP Section 100) system description, and CPA examination records.",
+    l100Title: "Baseline AICPA SOC 2 Type I vs Type II CPA Examination & Readiness Scope",
+    l200Title: "Internal SOC 2 Control Engineering, Evidence & Trust Services Criteria Hours (At $121.67/hr)",
+    l200Auth: "AICPA SSAE 18 (AT-C Section 205) & Trust Services Criteria (TSP Section 100)",
+    l300Title: "Enterprise Deal Delay, Type II Observation Rework & Unautomated Audit Exposure",
+    l300Auth: "AICPA AT-C Section 205 & Enterprise Vendor Security Due Diligence",
+    l400Title: "Continuous GRC Monitoring & Year-2 Surveillance Control Reuse Credit",
+    l400Auth: "AICPA Common Criteria (CC1-CC9) & ISO/IEC 27006-1:2024",
+    s3Title: "Expanded Multi-Criteria SOC 2 Type II (Security + Availability + Confidentiality + Privacy)",
+    trends: [
+      { metric_name: "AICPA SOC 2 Type II CPA Firm Examination Fee Benchmark", authority_source: "AICPA SSAE 18 (AT-C 205) & CPA Peer Review Surveys" },
+      { metric_name: "InfoSec Analyst Loaded Hourly Wage (BLS OEWS 15-1212)", authority_source: "BLS OEWS 15-1212" },
+      { metric_name: "SOC 2 Penetration Test & Continuous GRC Automation Cost Index", authority_source: "AICPA Trust Services Criteria & PtaaS Market Benchmarks" },
+    ],
+    exec101Title: "AICPA SOC 2 Trust Services Criteria & Type I / Type II Boundary Declaration",
+    exec101Scope: "AICPA SSAE 18 (AT-C Section 205) & TSP Section 100",
+    exec102Title: "180-Day SOC 2 Type I Readiness, Penetration Test & Type II Observation Calendar",
+    exec102Auth: "AICPA AT-C Section 205 Observation Window & Penetration Testing Standards",
+    exec102Body: "Day 1-30: Lock Trust Services Criteria scope (Security + Availability/Confidentiality) & system description; Day 31-90: Remediate access/logging gaps, execute independent penetration test & complete Type I readiness; Day 91-180: Run continuous evidence collection across Type II observation window and close CPA sample requests",
+    exec103Title: "SOC 2 Type II Continuous Control Evidence & Bridge Letter Retention Memo",
+    exec103Auth: "AICPA SSAE 18 (AT-C Section 205) & TSP Section 100",
+  },
 };
 
 for (const [fwKey, fwSpec] of Object.entries(GAINHELM_FRAMEWORK_BUNDLE_SPECS)) {
@@ -9952,10 +11230,13 @@ function selectOfferForSlug(toolSlug, reqSku, vertical = "") {
   if (baseOffer.tier_kind === "partner_slot") {
     return baseOffer;
   }
+  const hasFrameworkContext = !isGenericGainHelmToolSlug(toolSlug) || isExplicitGainHelmVertical(vertical);
+  const isDefaultFullFallback = normReqSku === "gh_soc2_cmmc_audit_workpapers" && hasFrameworkContext;
   const hasExplicitMismatch =
     Boolean(normReqSku) &&
     spec &&
-    normReqSku !== spec.offerSku;
+    normReqSku !== spec.offerSku &&
+    !isDefaultFullFallback;
   if (!spec || hasExplicitMismatch) {
     return baseOffer;
   }
@@ -10068,8 +11349,13 @@ function resolveGainHelmRecordScopeFlags(record, toolSlugOverride = "") {
 function buildGainHelmActionUrl(modeName, record, offer, extras = {}) {
   const flags = resolveGainHelmRecordScopeFlags(record, extras.tool_slug || "");
   const leadId = String((record && record.lead_id) || "lead_gainhelm_direct");
-  const offerSku = String((offer && offer.sku) || (record && record.offer_sku) || "").trim().toLowerCase();
+  const rawOfferSku = String((offer && (offer.sku || offer.offerSku)) || (record && record.offer_sku) || "").trim().toLowerCase();
   const vertVal = String(extras.vertical !== undefined ? extras.vertical : ((record && record.vertical) || "")).trim().toLowerCase();
+  const fwKey = classifyGainHelmFramework(flags.slugVal, vertVal);
+  const isStrictIsolated = ["dora", "eu_ai_act", "sec_8k", "gdpr", "ccpa", "nis2"].includes(fwKey);
+  const offerSku = (isStrictIsolated && (rawOfferSku === "gh_hipaa_iso27001_governance_kit" || rawOfferSku === "gh_soc2_cmmc_audit_workpapers"))
+    ? `gh_${fwKey}_governance_kit`
+    : rawOfferSku;
   const qs = new URLSearchParams();
   qs.set(modeName, "1");
   qs.set("lead_id", leadId);
@@ -10137,6 +11423,9 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit", sess
   const fwVertical = (fwSpec && fwSpec.vertical) || GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
   const verifiedSid = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
   const effRecord = { ...(record || {}), tool_slug: toolSlug, state: stateCode, vertical: fwVertical };
+  const isStrictIsolated = ["dora", "eu_ai_act", "sec_8k", "gdpr", "ccpa", "nis2"].includes(fwKey);
+  const offerTierKind = String((offer && (offer.tier_kind || offer.tierKind)) || "full").toLowerCase();
+  const strictIsolatedSku = (isStrictIsolated && offerTierKind === "full") ? `gh_${fwKey}_governance_kit` : "";
   return buildCanonicalWorkpaperDeliverable({
     propertyId: "gainhelm",
     record: effRecord,
@@ -10145,10 +11434,13 @@ function buildGainHelmWorkpaperBundle(record, offer, mode = "paid_toolkit", sess
     sessionId: verifiedSid,
     fwMeta: {
       ...(fwSpec || {}),
-      regulatorName: (fwSpec && fwSpec.regulatorName) || "AICPA Auditing Standards Board, DoD CIO, and HHS OCR",
+      regulatorName: (fwSpec && fwSpec.regulatorName) || "AICPA Auditing Standards Board (Trust Services Criteria)",
       vertical: fwVertical,
       frameworkKey: fwKey,
       jurisdiction: fwJurisdiction,
+      displayOfferSku: strictIsolatedSku,
+      csvOfferSku: strictIsolatedSku,
+      ...(strictIsolatedSku ? { offerSku: strictIsolatedSku } : {}),
     },
     actionUrlBuilder: (flagName, extraParams = {}) => {
       const targetOffer = extraParams.sku ? getCanonicalEdgeOffer(extraParams.sku) : offer;
@@ -10289,7 +11581,7 @@ function maskEdgeEmail(email) {
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@") || e.includes("*")) return true;
-  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  if (e === CANONICAL_OPERATOR_MAILBOX || e === "coskun.arf@gmail.com") return false;
   const at = e.lastIndexOf("@");
   const local = e.slice(0, at);
   const domain = e.slice(at + 1);
@@ -10942,6 +12234,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
         const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const safeFromName = String(fromName || "").replace(/[<>"\\r\\n]/g, "").trim();
+        const zohoFromHeader = safeFromName ? `${safeFromName} <${zohoFromEmail}>` : zohoFromEmail;
         const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
           ? zohoSyntheticSinkEmail
@@ -10954,7 +12248,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
             Accept: "application/json",
           },
           body: JSON.stringify({
-            fromAddress: zohoFromEmail,
+            fromAddress: zohoFromHeader,
             toAddress: deliveryRecipient,
             subject: emailSubject,
             content: htmlBody,
@@ -11148,12 +12442,13 @@ export async function onRequestGet(context) {
       }
     }
     const bundle = buildGainHelmWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
+    const dlOfferSku = (bundle && bundle.offer_sku) || offer.sku;
     if (fmt === "csv") {
       return new Response(bundle.csv_content, {
         status: 200,
         headers: {
           "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": `attachment; filename="gainhelm_${offer.sku}_${leadId}.csv"`,
+          "Content-Disposition": `attachment; filename="gainhelm_${dlOfferSku}_${leadId}.csv"`,
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },
@@ -11164,7 +12459,7 @@ export async function onRequestGet(context) {
         status: 200,
         headers: {
           "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": `attachment; filename="gainhelm_${offer.sku}_datapack_${leadId}.json"`,
+          "Content-Disposition": `attachment; filename="gainhelm_${dlOfferSku}_datapack_${leadId}.json"`,
           ...(isSynth ? { "X-Edge-Synthetic-Test": "1" } : {}),
           ...CORS_HEADERS,
         },
@@ -12015,7 +13310,7 @@ function maskEdgeEmail(email) {
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@") || e.includes("*")) return true;
-  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  if (e === CANONICAL_OPERATOR_MAILBOX || e === "coskun.arf@gmail.com") return false;
   const at = e.lastIndexOf("@");
   const local = e.slice(0, at);
   const domain = e.slice(at + 1);
@@ -12788,6 +14083,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
         const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const safeFromName = String(fromName || "").replace(/[<>"\\r\\n]/g, "").trim();
+        const zohoFromHeader = safeFromName ? `${safeFromName} <${zohoFromEmail}>` : zohoFromEmail;
         const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
           ? zohoSyntheticSinkEmail
@@ -12800,7 +14097,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
             Accept: "application/json",
           },
           body: JSON.stringify({
-            fromAddress: zohoFromEmail,
+            fromAddress: zohoFromHeader,
             toAddress: deliveryRecipient,
             subject: emailSubject,
             content: htmlBody,
@@ -14064,7 +15361,7 @@ function maskEdgeEmail(email) {
 function isPlaceholderCheckoutEmail(email) {
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@") || e.includes("*")) return true;
-  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  if (e === CANONICAL_OPERATOR_MAILBOX || e === "coskun.arf@gmail.com") return false;
   const at = e.lastIndexOf("@");
   const local = e.slice(0, at);
   const domain = e.slice(at + 1);
@@ -14824,6 +16121,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       if (accessToken) {
         const zohoAccountId = env && env.ZOHO_MAIL_ACCOUNT_ID ? String(env.ZOHO_MAIL_ACCOUNT_ID).trim() : "676891000000008002";
         const zohoFromEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_FROM_EMAIL);
+        const safeFromName = String(fromName || "").replace(/[<>"\\r\\n]/g, "").trim();
+        const zohoFromHeader = safeFromName ? `${safeFromName} <${zohoFromEmail}>` : zohoFromEmail;
         const zohoSyntheticSinkEmail = normalizeCanonicalSenderEmail(env && env.ZOHO_SYNTHETIC_SINK_EMAIL);
         const deliveryRecipient = isSyntheticTestEmail(record.email)
           ? zohoSyntheticSinkEmail
@@ -14836,7 +16135,7 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
             Accept: "application/json",
           },
           body: JSON.stringify({
-            fromAddress: zohoFromEmail,
+            fromAddress: zohoFromHeader,
             toAddress: deliveryRecipient,
             subject: emailSubject,
             content: htmlBody,
@@ -15893,7 +17192,7 @@ function maskEdgeEmail(email) {{
 function isPlaceholderCheckoutEmail(email) {{
   const e = String(email || "").trim().toLowerCase();
   if (!e || !e.includes("@") || e.includes("*")) return true;
-  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  if (e === CANONICAL_OPERATOR_MAILBOX || e === "coskun.arf@gmail.com") return false;
   const at = e.lastIndexOf("@");
   const local = e.slice(0, at);
   const domain = e.slice(at + 1);

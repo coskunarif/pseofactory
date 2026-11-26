@@ -1028,14 +1028,14 @@ def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes
         f"Expected single post-workflow retrofit_estate after overlay HTML mutation on clean estate, got {event_log}"
     )
 
-    # Case 2: When pre-retro already ran (stale_count=1, porcelain_compiled=True), workflow HTML mutation on disk
+    # Case 2: When pre-retro already ran (stale_count=1, porcelain_compiled=True, force=False), workflow HTML mutation on disk
     # MUST still trigger a second post-workflow retrofit_estate even with mutated_donor_pages=[]
     event_log.clear()
     mutate_on_workflow["enabled"] = True
     monkeypatch.setattr(RetroReflectionEngine, "audit_estate", classmethod(lambda cls, *a, **k: {"stale_count": 1, "stale_pages": ["index.html"]}))
     reflect_and_recompile_all_assets(
         properties=["profithelm"],
-        force=True,
+        force=False,
         run_downstream=False,
         registry=reg,
         defer_live_indexing=True,
@@ -1051,7 +1051,7 @@ def test_stage3b_overlay_mutation_triggers_post_workflow_retrofit_and_normalizes
     mutate_on_workflow["enabled"] = False
     reflect_and_recompile_all_assets(
         properties=["profithelm"],
-        force=True,
+        force=False,
         run_downstream=False,
         registry=reg,
         defer_live_indexing=True,

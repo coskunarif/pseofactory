@@ -1418,7 +1418,7 @@ console.log(JSON.stringify({{ chkData, ffData }}));
         assert len(out["ffData"]["statutory_trend_timeseries"]) >= 3
         assert out["ffData"]["custom_parameter_ledger"]["calculated_amount"] == 410000
         assert out["ffData"]["custom_parameter_ledger"]["inputs"]["custom_amount"] == 410000
-        edge_expected_id = "irs_sec179_cap" if prop_id == "profithelm" else expected_series_id
+        edge_expected_id = "irc_1031_id_window_days" if (prop_id == "profithelm" and "1031" in slug) else expected_series_id
         assert any(s.get("series_id") == edge_expected_id for s in out["ffData"]["statutory_trend_timeseries"])
         assert "TREND-" in out["ffData"]["csv_content"]
 

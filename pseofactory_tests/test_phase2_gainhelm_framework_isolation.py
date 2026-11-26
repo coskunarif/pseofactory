@@ -415,7 +415,12 @@ async function run() {{
     const resDp = await onRequestGet({{ request: new Request("https://gainhelm.com/api/lead-capture?" + baseQs + "&format=datapack", hdrs), env: stripeEnv }});
     if (resDp.status !== 200) throw new Error("Bad datapack status " + resDp.status + " for " + slug);
     const wp = await resDp.json();
-    if (!wp || wp.offer_sku !== expectedSku) throw new Error("Bad SKU for " + slug + ": " + JSON.stringify(wp));
+    const expectedDpSku = slug.includes("dora") ? "gh_dora_governance_kit"
+      : slug.includes("eu-ai-act") ? "gh_eu_ai_act_governance_kit"
+      : slug.includes("8k-item-105") ? "gh_sec_8k_governance_kit"
+      : slug.includes("ccpa") ? "gh_ccpa_governance_kit"
+      : expectedSku;
+    if (!wp || wp.offer_sku !== expectedDpSku) throw new Error("Bad SKU for " + slug + ": expected " + expectedDpSku + ", got " + JSON.stringify(wp));
 
     // 2. HTML Report check (?format=html)
     const resHtml = await onRequestGet({{ request: new Request("https://gainhelm.com/api/lead-capture?" + baseQs + "&format=html", hdrs), env: stripeEnv }});

@@ -54,6 +54,47 @@ _RAW_402_URL_LITERAL_RE = re.compile(
 _CANONICAL_OPERATOR_MAILBOX = "arif.coskun@profithelm.com"
 _MONETIZATION_VAULT_PATH = Path(__file__).resolve().parent / "monetization_vault.json"
 
+_LEGACY_REPRESENTATIVE_TOOL_CATEGORIES: Dict[str, Tuple[str, ...]] = {
+    "profithelm": (
+        "section-179-calculator",
+        "1031-exchange-capital-gains-calculator",
+        "crypto-tax-calculator",
+        "s-corp-reasonable-salary-tax-calculator",
+    ),
+    "prexvo": (
+        "rap-payment-calculator",
+        "parent-plus-loan-payment-calculator",
+        "grad-plus-borrowing-cap-calculator",
+        "student-loan-refinance-break-even-calculator",
+    ),
+    "gainhelm": (
+        "soc-2-audit-cost-calculator",
+        "cmmc-2-0-compliance-cost-calculator",
+        "hipaa-violation-penalty-breach-cost-calculator",
+        "dora-ict-third-party-risk-compliance-cost-calculator",
+    ),
+    "lienbond": (
+        "miller-act-performance-and-payment-bond-premium-calculator",
+        "experience-modification-rate-emr-workers-comp-penalty-calculator",
+        "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",
+        "california-texas-florida-preliminary-notice-deadline-calculator",
+    ),
+}
+
+_CROSS_DOMAIN_CONTAMINATION_BLOCKLIST: Dict[str, Tuple[str, ...]] = {
+    "crypto-tax-calculator": ("Section 199A QBI", "Form 8995", "Section 1031", "Form 8824"),
+    "section-179-calculator": ("Section 1031", "Form 8824"),
+    "soc-2-audit-cost-calculator": ("DoD CIO", "HHS OCR"),
+    "dora-ict-third-party-risk-compliance-cost-calculator": ("hipaa",),
+    "experience-modification-rate-emr-workers-comp-penalty-calculator": (
+        "Bond Penal Sum",
+        "10% Retainage",
+        "Miller Act",
+    ),
+    "grad-plus-borrowing-cap-calculator": ("Refinance Break-Even", "TILA rescission"),
+    "parent-plus-loan-payment-calculator": ("Refinance Break-Even", "TILA rescission"),
+}
+
 
 @dataclass
 class CommerceGateReport:
@@ -139,14 +180,15 @@ def _validate_sku_for_tenant(
     return bool(norm and norm in cat)
 
 
-def _select_valid_tool_slug(
+def _discover_commercial_tool_slugs(
     property_id: str,
     dist_dir: Optional[Union[str, Path]],
     full_offer: Dict[str, Any],
-) -> str:
+) -> List[str]:
     from pseofactory.affiliates import is_restricted_public_service_slug
 
     prop = _normalize_property_id(property_id)
+    discovered: List[str] = []
     if dist_dir:
         tools_dir = Path(dist_dir) / "tools"
         if tools_dir.is_dir():
@@ -162,11 +204,33 @@ def _select_valid_tool_slug(
                     continue
                 if is_restricted_public_service_slug(slug):
                     continue
-                return slug
+                if slug not in discovered:
+                    discovered.append(slug)
+    if discovered:
+        return discovered
     default_slug = str(full_offer.get("default_slug") or "").strip().lower()
     if default_slug and default_slug != "general" and not is_restricted_public_service_slug(default_slug):
-        return default_slug
-    return "general-calculator"
+        return [default_slug]
+    return ["general-calculator"]
+
+
+def _select_valid_tool_slug(
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]],
+    full_offer: Dict[str, Any],
+) -> str:
+    return _discover_commercial_tool_slugs(property_id, dist_dir, full_offer)[0]
+
+
+def _resolve_audit_tool_slugs(
+    property_id: str,
+    dist_dir: Optional[Union[str, Path]],
+    full_offer: Dict[str, Any],
+) -> List[str]:
+    prop = _normalize_property_id(property_id)
+    if prop in _LEGACY_REPRESENTATIVE_TOOL_CATEGORIES:
+        return list(_LEGACY_REPRESENTATIVE_TOOL_CATEGORIES[prop])
+    return _discover_commercial_tool_slugs(prop, dist_dir, full_offer)[:4]
 
 
 def resolve_tenant_commerce_matrix(
@@ -211,6 +275,7 @@ def resolve_tenant_commerce_matrix(
     partner_offer = tier_overrides.get("partner_slot", partner_offer)
 
     valid_tool_slug = _select_valid_tool_slug(prop, eff_dist, full_offer)
+    audit_tool_slugs = _resolve_audit_tool_slugs(prop, eff_dist, full_offer)
 
     # Pick a canonical SKU owned by a different tenant for cross-tenant rejection tests.
     foreign_sku = ""
@@ -310,6 +375,8 @@ def resolve_tenant_commerce_matrix(
             },
         },
         "valid_tool_slug": valid_tool_slug,
+        "audit_tool_slugs": audit_tool_slugs,
+        "is_legacy_tenant": prop in _LEGACY_REPRESENTATIVE_TOOL_CATEGORIES,
         "foreign_sku": foreign_sku,
     }
 
@@ -530,6 +597,175 @@ function signStripeWebhook(secret, rawBody) {
   return `t=${ts},v1=${sig}`;
 }
 
+function parseRfc4180Csv(rawText) {
+  const text = String(rawText || "");
+  if (!text.trim()) {
+    return { ok: false, error: "empty_csv", rows: [] };
+  }
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+  let fieldStarted = false;
+  let justClosedQuote = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = i + 1 < text.length ? text[i + 1] : "";
+    if (inQuotes) {
+      if (ch === '"') {
+        if (next === '"') {
+          cell += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+          justClosedQuote = true;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+
+    if (justClosedQuote) {
+      if (ch === ",") {
+        row.push(cell);
+        cell = "";
+        fieldStarted = false;
+        justClosedQuote = false;
+        continue;
+      }
+      if (ch === "\\r" || ch === "\\n") {
+        if (ch === "\\r" && next === "\\n") i += 1;
+        row.push(cell);
+        rows.push(row);
+        row = [];
+        cell = "";
+        fieldStarted = false;
+        justClosedQuote = false;
+        continue;
+      }
+      return { ok: false, error: "unexpected_char_after_closing_quote", rows };
+    }
+
+    if (ch === '"') {
+      if (fieldStarted || cell.length > 0) {
+        return { ok: false, error: "unescaped_quote_in_unquoted_field", rows };
+      }
+      inQuotes = true;
+      fieldStarted = true;
+    } else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+      fieldStarted = false;
+    } else if (ch === "\\r" || ch === "\\n") {
+      if (ch === "\\r" && next === "\\n") i += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      fieldStarted = false;
+    } else {
+      cell += ch;
+      fieldStarted = true;
+    }
+  }
+
+  if (inQuotes) {
+    return { ok: false, error: "unclosed_quoted_field", rows };
+  }
+  if (fieldStarted || row.length > 0 || justClosedQuote) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return { ok: true, error: null, rows };
+}
+
+function validatePaidCsv(rawCsv, toolSlug, expectedCols) {
+  const errors = [];
+  const parsed = parseRfc4180Csv(rawCsv);
+  if (!parsed.ok) {
+    errors.push(`RFC-4180 parse error: ${parsed.error}`);
+    return { ok: false, errors, row_count: parsed.rows.length };
+  }
+  const rows = parsed.rows;
+  if (rows.length < 2) {
+    errors.push(`CSV must contain header plus data rows (got ${rows.length} row(s))`);
+    return { ok: false, errors, row_count: rows.length };
+  }
+  const header = rows[0];
+  if (header.length !== expectedCols) {
+    errors.push(`CSV header expected ${expectedCols} columns, got ${header.length}`);
+  }
+  if (header.some((h) => String(h || "").trim().length === 0)) {
+    errors.push("CSV header contains empty column name");
+  }
+  for (let idx = 1; idx < rows.length; idx += 1) {
+    if (rows[idx].length !== header.length) {
+      errors.push(`Ragged CSV row ${idx + 1}: expected ${header.length} columns, got ${rows[idx].length}`);
+      break;
+    }
+  }
+
+  const dataRows = rows.slice(1);
+  const requiredMeta = ["META-TOOL", "META-STATE", "META-SKU", "META-LEAD", "META-YEAR"];
+  for (const tag of requiredMeta) {
+    const tagRe = new RegExp(`\\\\b${tag}\\\\b`);
+    const matchRow = dataRows.find((r) => r.some((c) => tagRe.test(String(c || "").trim())));
+    if (!matchRow) {
+      errors.push(`CSV missing required metadata row '${tag}'`);
+      continue;
+    }
+    if (matchRow.filter((c) => String(c || "").trim().length > 0).length < 2) {
+      errors.push(`CSV metadata row '${tag}' has empty metadata value`);
+    }
+    if (tag === "META-TOOL") {
+      const slugLower = String(toolSlug || "").toLowerCase();
+      if (!matchRow.some((c) => String(c || "").toLowerCase().includes(slugLower))) {
+        errors.push(`CSV metadata row 'META-TOOL' missing tool_slug '${toolSlug}'`);
+      }
+    }
+  }
+
+  return { ok: errors.length === 0, errors, row_count: rows.length, column_count: header.length };
+}
+
+function findBrokenTokens(text, opts = {}) {
+  const val = String(text || "");
+  const hits = [];
+  const checks = [
+    [/\\bundefined\\b/, "undefined"],
+    [/\\bNaN\\b/, "NaN"],
+    [/\\[object Object\\]/, "[object Object]"],
+    [/\\u2014/, "U+2014"],
+    [/\\u2013/, "U+2013"],
+  ];
+  if (opts && opts.checkNull) {
+    checks.push([/\\bnull\\b/, "null"]);
+  }
+  for (const [re, label] of checks) {
+    if (re.test(val)) hits.push(label);
+  }
+  return hits;
+}
+
+function findContaminationViolations(toolSlug, text) {
+  const normSlug = String(toolSlug || "").trim().toLowerCase();
+  const blocklist =
+    (CFG.contamination_blocklist &&
+      (CFG.contamination_blocklist[normSlug] || CFG.contamination_blocklist[toolSlug])) ||
+    [];
+  if (blocklist.length === 0) return [];
+  const lower = String(text || "").toLowerCase();
+  const hits = [];
+  for (const phrase of blocklist) {
+    if (lower.includes(String(phrase).toLowerCase())) {
+      hits.push(phrase);
+    }
+  }
+  return hits;
+}
+
 async function main() {
   const issues = [];
   const details = {
@@ -538,6 +774,7 @@ async function main() {
     isolation_checks: {},
     prexvo_ymyl_checks: {},
     tier_replays: {},
+    asset_content_quality: {},
   };
 
   const leadCaptureMod = await import(pathToFileURL(CFG.files.lead_capture).href);
@@ -985,6 +1222,262 @@ async function main() {
     details.tier_replays[tierName] = tierRep;
   }
 
+  // 4. Automated Sellable Asset Content Quality Gate (paid full + quick across representative categories)
+  const assetAuditSlugs = Array.isArray(CFG.asset_audit_slugs) && CFG.asset_audit_slugs.length > 0
+    ? CFG.asset_audit_slugs
+    : [CFG.valid_tool_slug];
+  const expectedCsvCols = Number(CFG.expected_csv_columns || 7);
+  const assetIssues = [];
+  const perToolReports = {};
+  const scheduleSignatures = {};
+
+  for (const auditSlug of assetAuditSlugs) {
+    const toolReport = { tool_slug: auditSlug, tiers: {} };
+    for (const tierName of ["full", "quick", "default_sku"]) {
+      const isDefaultProbe = tierName === "default_sku";
+      const spec = isDefaultProbe ? null : CFG.tiers[tierName];
+      const tierAudit = { sku: spec ? spec.sku : "", passed: true, violations: [] };
+      const addViolation = (msg) => {
+        const fullMsg = `[${auditSlug}][${tierName}] ${msg}`;
+        tierAudit.passed = false;
+        tierAudit.violations.push(msg);
+        assetIssues.push(fullMsg);
+      };
+
+      const checkoutQuery = isDefaultProbe
+        ? `/api/checkout?format=json&tool_slug=${encodeURIComponent(auditSlug)}`
+        : `/api/checkout?format=json&sku=${encodeURIComponent(spec.sku)}&tool_slug=${encodeURIComponent(auditSlug)}`;
+      const chkRes = await readJsonSafe(await callLocal(checkoutQuery));
+      if (chkRes.status !== 200 || !chkRes.json || !chkRes.json.checkout_session_id) {
+        addViolation(`checkout failed: HTTP ${chkRes.status}`);
+        toolReport.tiers[tierName] = tierAudit;
+        continue;
+      }
+      const sess = stripeSessions.get(chkRes.json.checkout_session_id);
+      if (!sess) {
+        addViolation("missing mocked Stripe session after checkout");
+        toolReport.tiers[tierName] = tierAudit;
+        continue;
+      }
+      const resolvedSku = isDefaultProbe
+        ? String((chkRes.json.offer_sku || chkRes.json.sku || (sess.metadata && sess.metadata.offer_sku)) || "").trim()
+        : spec.sku;
+      const resolvedCents = isDefaultProbe
+        ? Number(chkRes.json.price_cents || sess.unit_amount || CFG.tiers.full.price_cents)
+        : spec.price_cents;
+      const resolvedTierKind = isDefaultProbe
+        ? String(chkRes.json.tier_kind || "full").toLowerCase()
+        : tierName;
+      tierAudit.sku = resolvedSku;
+      if (!resolvedSku) {
+        addViolation("checkout response missing resolved offer_sku");
+        toolReport.tiers[tierName] = tierAudit;
+        continue;
+      }
+      sess.payment_status = "paid";
+      sess.status = "complete";
+      sess.customer_details = { email: "buyer@example-client.com" };
+      const leadId =
+        chkRes.json.lead_id || sess.client_reference_id || (sess.metadata && sess.metadata.lead_id) || "";
+      const whBody = JSON.stringify({
+        id: `evt_asset_${CFG.property_id}_${tierName}_${auditSlug}`,
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: sess.id,
+            payment_status: "paid",
+            status: "complete",
+            amount_total: resolvedCents,
+            currency: "usd",
+            livemode: true,
+            client_reference_id: leadId,
+            customer_details: { email: "buyer@example-client.com" },
+            metadata: {
+              property_id: CFG.property_id,
+              lead_id: leadId,
+              tool_slug: auditSlug,
+              offer_sku: resolvedSku,
+            },
+          },
+        },
+      });
+      const whSig = signStripeWebhook(webhookSecret, whBody);
+      const whResp = await readJsonSafe(
+        await callLocal("/api/stripe-webhook", "POST", whBody, {
+          "Content-Type": "application/json",
+          "Stripe-Signature": whSig,
+        })
+      );
+      if (whResp.status !== 200 || !whResp.json || whResp.json.ok !== true) {
+        addViolation(`signed webhook failed: HTTP ${whResp.status}`);
+        toolReport.tiers[tierName] = tierAudit;
+        continue;
+      }
+
+      const ffBase = isDefaultProbe
+        ? `/api/lead-fulfillment?session_id=${encodeURIComponent(sess.id)}&tool_slug=${encodeURIComponent(auditSlug)}`
+        : `/api/lead-fulfillment?session_id=${encodeURIComponent(sess.id)}&sku=${encodeURIComponent(resolvedSku)}&tool_slug=${encodeURIComponent(auditSlug)}`;
+
+      // Check format=html
+      const htmlResp = await callLocal(`${ffBase}&format=html`);
+      const htmlText = await htmlResp.text();
+      tierAudit.html_status = htmlResp.status;
+      if (htmlResp.status !== 200 || !htmlText.trim()) {
+        addViolation(`paid format=html failed or empty (HTTP ${htmlResp.status})`);
+      } else {
+        const htmlTokens = findBrokenTokens(htmlText);
+        if (htmlTokens.length > 0) {
+          addViolation(`paid format=html contains broken token(s): ${htmlTokens.join(", ")}`);
+        }
+        const htmlContam = findContaminationViolations(auditSlug, htmlText);
+        if (htmlContam.length > 0) {
+          addViolation(`paid format=html cross-domain contamination: ${htmlContam.join(", ")}`);
+        }
+        const htmlLinks = extractEmailLinks(htmlText);
+        const downloadLinks = htmlLinks.filter(
+          (lnk) =>
+            lnk.includes("/api/lead-fulfillment") ||
+            (lnk.includes("/api/lead-capture") && lnk.includes("fulfill=1"))
+        );
+        tierAudit.download_links_checked = downloadLinks.length;
+        for (const dl of downloadLinks) {
+          const dlContam = findContaminationViolations(auditSlug, dl);
+          if (dlContam.length > 0) {
+            addViolation(`paid format=html download link cross-domain contamination (${dlContam.join(", ")}): ${dl}`);
+          }
+          const dlResp = await callLocal(dl);
+          if (dlResp.status !== 200) {
+            addViolation(`paid format=html download link returned HTTP ${dlResp.status}: ${dl}`);
+          }
+        }
+      }
+
+      // Check format=csv
+      const csvResp = await callLocal(`${ffBase}&format=csv`);
+      const csvText = await csvResp.text();
+      tierAudit.csv_status = csvResp.status;
+      if (csvResp.status !== 200 || !csvText.trim()) {
+        addViolation(`paid format=csv failed or empty (HTTP ${csvResp.status})`);
+      } else {
+        const csvTokens = findBrokenTokens(csvText, { checkNull: true });
+        if (csvTokens.length > 0) {
+          addViolation(`paid format=csv contains broken token(s): ${csvTokens.join(", ")}`);
+        }
+        const csvContam = findContaminationViolations(auditSlug, csvText);
+        if (csvContam.length > 0) {
+          addViolation(`paid format=csv cross-domain contamination: ${csvContam.join(", ")}`);
+        }
+        const csvCheck = validatePaidCsv(csvText, auditSlug, expectedCsvCols);
+        tierAudit.csv_rows = csvCheck.row_count;
+        if (!csvCheck.ok) {
+          for (const csvErr of csvCheck.errors) {
+            addViolation(csvErr);
+          }
+        }
+      }
+
+      // Check format=datapack (full/default -> 200 JSON + schedule; quick -> 402 + json check)
+      if (resolvedTierKind !== "quick") {
+        const dpRes = await readJsonSafe(await callLocal(`${ffBase}&format=datapack`));
+        tierAudit.datapack_status = dpRes.status;
+        if (dpRes.status !== 200 || !dpRes.json || typeof dpRes.json !== "object" || Array.isArray(dpRes.json)) {
+          addViolation(`paid format=datapack expected HTTP 200 JSON object, got HTTP ${dpRes.status}`);
+        } else {
+          const dpSerialized = JSON.stringify(dpRes.json);
+          const dpTokens = Array.from(new Set([...findBrokenTokens(dpRes.text), ...findBrokenTokens(dpSerialized)]));
+          if (dpTokens.length > 0) {
+            addViolation(`paid format=datapack contains broken token(s): ${dpTokens.join(", ")}`);
+          }
+          const dpContam = Array.from(
+            new Set([
+              ...findContaminationViolations(auditSlug, dpRes.text),
+              ...findContaminationViolations(auditSlug, dpSerialized),
+            ])
+          );
+          if (dpContam.length > 0) {
+            addViolation(`paid format=datapack cross-domain contamination: ${dpContam.join(", ")}`);
+          }
+          const sched = dpRes.json.reconciliation_schedule;
+          if (!Array.isArray(sched) || sched.length === 0) {
+            addViolation("paid format=datapack missing non-empty reconciliation_schedule");
+          } else {
+            const labels = sched.map((row) =>
+              String((row && (row.line_item || row.label || row.title)) || "").trim()
+            );
+            if (!labels.some((lbl) => lbl.length > 0)) {
+              addViolation("paid format=datapack reconciliation_schedule has empty line-item labels");
+            } else {
+              if (tierName === "full") {
+                scheduleSignatures[auditSlug] = JSON.stringify(labels);
+              }
+              tierAudit.reconciliation_labels_count = labels.length;
+            }
+          }
+        }
+      } else {
+        const dpQuickRes = await readJsonSafe(await callLocal(`${ffBase}&format=datapack`));
+        tierAudit.datapack_status = dpQuickRes.status;
+        if (dpQuickRes.status !== 402) {
+          addViolation(`quick paid format=datapack expected HTTP 402, got ${dpQuickRes.status}`);
+        }
+        const jsonQuickRes = await readJsonSafe(await callLocal(ffBase));
+        if (jsonQuickRes.status !== 200 || !jsonQuickRes.json) {
+          addViolation(`quick paid format=json expected HTTP 200, got ${jsonQuickRes.status}`);
+        } else {
+          const qTokens = findBrokenTokens(jsonQuickRes.text);
+          if (qTokens.length > 0) {
+            addViolation(`quick paid format=json contains broken token(s): ${qTokens.join(", ")}`);
+          }
+          const qContam = findContaminationViolations(auditSlug, jsonQuickRes.text);
+          if (qContam.length > 0) {
+            addViolation(`quick paid format=json cross-domain contamination: ${qContam.join(", ")}`);
+          }
+        }
+      }
+
+      toolReport.tiers[tierName] = tierAudit;
+    }
+    perToolReports[auditSlug] = toolReport;
+  }
+
+  let differentiationChecked = false;
+  let differentiationPassed = true;
+  const sigEntries = Object.entries(scheduleSignatures);
+  if (CFG.is_legacy_tenant && sigEntries.length >= 2) {
+    differentiationChecked = true;
+    for (let i = 0; i < sigEntries.length; i += 1) {
+      for (let j = i + 1; j < sigEntries.length; j += 1) {
+        const [slugA, sigA] = sigEntries[i];
+        const [slugB, sigB] = sigEntries[j];
+        if (sigA === sigB) {
+          differentiationPassed = false;
+          assetIssues.push(
+            `Tool-Category Differentiation failed: '${slugA}' and '${slugB}' emitted byte-identical reconciliation_schedule line-item labels`
+          );
+        }
+      }
+    }
+  }
+
+  for (const aIssue of assetIssues) {
+    issues.push(`[asset_content_quality] ${aIssue}`);
+  }
+
+  details.asset_content_quality = {
+    status: assetIssues.length === 0 ? "PASS" : "FAIL",
+    passed: assetIssues.length === 0,
+    property_id: CFG.property_id,
+    is_legacy_tenant: Boolean(CFG.is_legacy_tenant),
+    audited_tools: [...assetAuditSlugs],
+    tools_audited_count: assetAuditSlugs.length,
+    tiers_checked: ["full", "quick", "default_sku"],
+    differentiation_checked: differentiationChecked,
+    differentiation_passed: differentiationPassed,
+    violations_count: assetIssues.length,
+    violations: assetIssues,
+    per_tool: perToolReports,
+  };
+
   console.log(JSON.stringify({
     passed: issues.length === 0,
     issues,
@@ -1051,6 +1544,10 @@ def verify_local_edge_commerce_replay(
         "property_id": prop,
         "canonical_base": matrix["canonical_base"],
         "valid_tool_slug": matrix["valid_tool_slug"],
+        "asset_audit_slugs": matrix["audit_tool_slugs"],
+        "is_legacy_tenant": bool(matrix["is_legacy_tenant"]),
+        "expected_csv_columns": 7,
+        "contamination_blocklist": {k.lower(): list(v) for k, v in _CROSS_DOMAIN_CONTAMINATION_BLOCKLIST.items()},
         "foreign_sku": matrix["foreign_sku"],
         "tiers": matrix["tiers"],
         "files": {k: str(v.resolve()) for k, v in required_files.items()},
@@ -1129,6 +1626,19 @@ def verify_local_edge_commerce_replay(
     if proc.returncode != 0 and not issues:
         issues.append(f"Node edge replay exited with code {proc.returncode}: {(proc.stderr or '').strip()}")
 
+    asset_quality = details.get("asset_content_quality")
+    if not isinstance(asset_quality, dict):
+        asset_quality = {
+            "status": "FAIL",
+            "passed": False,
+            "property_id": prop,
+            "audited_tools": list(matrix["audit_tool_slugs"]),
+            "tools_audited_count": 0,
+            "violations_count": 1,
+            "violations": ["asset_content_quality summary missing from node replay output"],
+        }
+        issues.append("[asset_content_quality] summary missing from node replay output")
+
     passed = len(issues) == 0 and proc.returncode == 0
     return {
         "status": "PASS" if passed else "FAIL",
@@ -1138,6 +1648,7 @@ def verify_local_edge_commerce_replay(
         "dist_dir": str(eff_dist) if eff_dist else "",
         "issues": issues,
         "details": details,
+        "asset_content_quality": asset_quality,
     }
 
 

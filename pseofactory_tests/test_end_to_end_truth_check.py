@@ -2551,8 +2551,30 @@ def test_gainhelm_edge_direct_contract_upgrades_and_post_checkout_monetization(t
       if (!data.playbook_url || !data.custom_parameter_ledger) process.exit(46);
       const tableCount = String(data.html_report || "").split("<table").length - 1;
       if (tableCount < 3 || String(data.html_report || "").length < 4500) process.exit(47);
-      const csvLines = String(data.csv_content || "").trim().split("\\n");
-      if (csvLines.length !== 19) process.exit(48);
+      const csvText = String(data.csv_content || "");
+      const csvLines = csvText.trim().split("\\n");
+      if (csvLines.length !== 24) process.exit(48);
+      for (const metaCode of ["META-TOOL", "META-STATE", "META-SKU", "META-LEAD", "META-YEAR"]) {{
+        if (!csvText.includes(metaCode)) process.exit(50);
+      }}
+      for (const rowLine of csvLines) {{
+        const cols = [];
+        let cur = "";
+        let inQuotes = false;
+        for (let i = 0; i < rowLine.length; i++) {{
+          const ch = rowLine[i];
+          if (ch === '"') {{
+            if (inQuotes && rowLine[i + 1] === '"') {{ cur += '"'; i++; }}
+            else inQuotes = !inQuotes;
+          }} else if (ch === "," && !inQuotes) {{
+            cols.push(cur); cur = "";
+          }} else {{
+            cur += ch;
+          }}
+        }}
+        cols.push(cur);
+        if (cols.length !== 7) process.exit(51);
+      }}
       process.exit(0);
     }})().catch(err => {{ console.error(err); process.exit(98); }});
     """
