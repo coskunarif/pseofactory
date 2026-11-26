@@ -5455,3 +5455,126 @@ dispatch_automated_indexing = _default_indexer.dispatch_automated_indexing
 get_latest_indexing_audit_log = _default_indexer.get_latest_indexing_audit_log
 run_full_indexing_sweep = _default_indexer.run_full_indexing_sweep
 
+
+def push_changed_urls_to_indexnow_post_deploy(
+    dist_dir: Union[str, Path],
+    domain: str,
+    dry_run: bool = False,
+    ledger_path: Optional[Union[str, Path]] = None,
+    indexnow_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Post-deploy IndexNow hook: reads dist_dir/sitemap.xml, enforces Retry-After backoff
+    ledger and per-URL content-hash ledger filtering, and submits only changed URLs
+    via PushIndexer.submit_indexnow_batch.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import html as _xml_html
+
+    dist_path = Path(dist_dir)
+    clean_domain = (
+        str(domain or "")
+        .strip()
+        .lower()
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .split("/")[0]
+        .removeprefix("www.")
+    )
+    sitemap_path = dist_path / "sitemap.xml"
+    if not sitemap_path.is_file():
+        return {
+            "host": clean_domain,
+            "dist_dir": str(dist_path),
+            "status": "NO_SITEMAP",
+            "urls_submitted": 0,
+            "urls_dispatched": 0,
+            "urls_skipped_unchanged": 0,
+            "results": [],
+        }
+
+    raw_xml = sitemap_path.read_text(encoding="utf-8", errors="ignore")
+    raw_locs = re.findall(r"<loc>\s*(.*?)\s*</loc>", raw_xml, flags=re.IGNORECASE | re.DOTALL)
+    sitemap_urls: List[str] = []
+    seen = set()
+    for raw_loc in raw_locs:
+        u = urllib.parse.urldefrag(_xml_html.unescape(raw_loc).strip())[0].strip()
+        if not u or not (u.startswith("https://") or u.startswith("http://")):
+            continue
+        if clean_domain:
+            u_host = (urllib.parse.urlparse(u).hostname or "").lower().removeprefix("www.")
+            if u_host and u_host != clean_domain and not u_host.endswith(f".{clean_domain}"):
+                continue
+        if u not in seen:
+            seen.add(u)
+            sitemap_urls.append(u)
+
+    if not sitemap_urls:
+        return {
+            "host": clean_domain,
+            "dist_dir": str(dist_path),
+            "status": "EMPTY_SITEMAP",
+            "urls_submitted": 0,
+            "urls_dispatched": 0,
+            "urls_skipped_unchanged": 0,
+            "results": [],
+        }
+
+    base_dir = dist_path.resolve().parent
+    resolved_ledger = Path(ledger_path) if ledger_path else (base_dir / ".agy" / "index_push_ledger.json")
+    indexer = PushIndexer(
+        domain=clean_domain or DEFAULT_DOMAIN,
+        canonical_base=f"https://{clean_domain}" if clean_domain else DEFAULT_CANONICAL_BASE,
+        indexnow_key=indexnow_key or DEFAULT_INDEXNOW_KEY,
+        base_dir=base_dir,
+        dist_dir=dist_path,
+        ledger_path=resolved_ledger,
+    )
+
+    now_dt = _utc_now()
+    backoff_state = indexer._load_indexnow_backoff_state()
+    persisted_until_raw = str(backoff_state.get("retry_after_until") or "").strip()
+    if persisted_until_raw:
+        try:
+            until_dt = datetime.fromisoformat(persisted_until_raw.replace("Z", "+00:00"))
+            if until_dt.tzinfo is None:
+                until_dt = until_dt.replace(tzinfo=timezone.utc)
+            if until_dt > now_dt:
+                return {
+                    "host": indexer.domain,
+                    "dist_dir": str(dist_path),
+                    "status": "RATE_LIMITED_COOLDOWN",
+                    "skipped": True,
+                    "retry_after_until": persisted_until_raw,
+                    "urls_submitted": len(sitemap_urls),
+                    "urls_dispatched": 0,
+                    "urls_skipped_unchanged": 0,
+                    "results": [],
+                }
+        except ValueError:
+            pass
+
+    to_push, skipped = indexer.filter_unchanged_push_urls(sitemap_urls, force=False, engine="indexnow")
+    if not to_push:
+        return {
+            "host": indexer.domain,
+            "dist_dir": str(dist_path),
+            "status": "IDEMPOTENT_NO_OP",
+            "urls_submitted": len(sitemap_urls),
+            "urls_dispatched": 0,
+            "urls_skipped_unchanged": len(skipped),
+            "results": [],
+        }
+
+    res = indexer.submit_indexnow_batch(
+        urls=to_push,
+        include_sitemap=False,
+        dry_run=dry_run,
+        force=False,
+    )
+    res["dist_dir"] = str(dist_path)
+    res["urls_submitted"] = len(sitemap_urls)
+    res["urls_skipped_unchanged"] = len(skipped) + int(res.get("urls_skipped_unchanged") or 0)
+    res["changed_urls"] = list(to_push)
+    return res
+

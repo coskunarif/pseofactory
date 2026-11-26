@@ -9272,20 +9272,41 @@ def _normalize_page_structure_and_geo_parity(
                                 page_has_related_to = True
                                 mod_g = True
                             elif isinstance(existing_rel, list) and existing_rel:
+                                from pseofactory.estate_common import sanitize_retired_estate_url
+
                                 deduped_rel: List[Any] = []
                                 seen_rel_keys: Set[str] = set()
+                                rel_sanitized = False
                                 for rel_item in existing_rel:
                                     if isinstance(rel_item, dict):
+                                        raw_r_url = str(rel_item.get("url") or rel_item.get("@id") or "").strip()
+                                        if raw_r_url and "/tools/" in raw_r_url:
+                                            clean_r_url = sanitize_retired_estate_url(raw_r_url, property_id=prop_l)
+                                            if clean_r_url is None:
+                                                rel_sanitized = True
+                                                continue
+                                            if clean_r_url != raw_r_url:
+                                                rel_item = dict(rel_item)
+                                                if "url" in rel_item:
+                                                    rel_item["url"] = clean_r_url
+                                                if "@id" in rel_item:
+                                                    rel_item["@id"] = clean_r_url
+                                                rel_sanitized = True
                                         r_key = str(rel_item.get("url") or rel_item.get("@id") or rel_item.get("name") or "").strip().lower()
                                     else:
                                         r_key = str(rel_item).strip().lower()
                                     if r_key and r_key not in seen_rel_keys:
                                         seen_rel_keys.add(r_key)
                                         deduped_rel.append(rel_item)
-                                if len(deduped_rel) != len(existing_rel):
-                                    n["isRelatedTo"] = deduped_rel
+                                    elif r_key:
+                                        rel_sanitized = True
+                                if rel_sanitized or len(deduped_rel) != len(existing_rel):
+                                    if deduped_rel:
+                                        n["isRelatedTo"] = deduped_rel
+                                    else:
+                                        n.pop("isRelatedTo", None)
                                     mod_g = True
-                                page_has_related_to = True
+                                page_has_related_to = bool(deduped_rel)
                     from pseofactory.contracts import normalize_statutory_acronym_casing
                     for str_field in ("name", "headline", "description"):
                         if isinstance(n.get(str_field), str):
@@ -12582,8 +12603,24 @@ class RetroReflectionEngine:
             if "callout_message_match" not in missing:
                 missing.append("callout_message_match")
         if not missing:
+            from pseofactory.estate_common import (
+                sanitize_retired_estate_links_in_html,
+                sync_h1_to_title_core_coverage,
+            )
+            from pseofactory.porcelain_shell import get_porcelain_tenant_profile
+
+            fast_brand = str(get_porcelain_tenant_profile(property_id).get("brand_name") or "")
+            fast_updated = sync_h1_to_title_core_coverage(
+                html_content,
+                rel_path=audit_rel_path or "",
+                brand_name=fast_brand,
+            )
+            fast_updated = sanitize_retired_estate_links_in_html(fast_updated, property_id=property_id)
+            fast_repaired: List[str] = (
+                ["h1_title_and_link_hygiene"] if fast_updated != html_content else []
+            )
             if dist_dir is not None and (
-                'id="pseo-runtime-sync"' in html_content or "id='pseo-runtime-sync'" in html_content
+                'id="pseo-runtime-sync"' in fast_updated or "id='pseo-runtime-sync'" in fast_updated
             ):
                 from pseofactory.visual_primitives import (
                     has_current_external_runtime_sync_tag,
@@ -12591,15 +12628,16 @@ class RetroReflectionEngine:
                     write_runtime_synchronizer_asset,
                 )
 
-                if not has_current_external_runtime_sync_tag(html_content, property_id=property_id):
+                if not has_current_external_runtime_sync_tag(fast_updated, property_id=property_id):
                     ext_html, _ = normalize_html_visual_primitives(
-                        html_content,
+                        fast_updated,
                         dist_dir=dist_dir,
                         property_id=property_id,
                     )
-                    if ext_html != html_content:
+                    if ext_html != fast_updated:
+                        fast_repaired.append("deterministic_visual_primitives")
                         if cache_key is not None:
-                            cls._retrofit_cache_set(cache_key, (ext_html, ["deterministic_visual_primitives"]))
+                            cls._retrofit_cache_set(cache_key, (ext_html, list(fast_repaired)))
                             ext_digest = hashlib.sha256(ext_html.encode("utf-8", errors="ignore")).hexdigest()
                             cls._retrofit_cache_set(
                                 (
@@ -12614,12 +12652,27 @@ class RetroReflectionEngine:
                                 ),
                                 (ext_html, []),
                             )
-                        return ext_html, ["deterministic_visual_primitives"]
+                        return ext_html, fast_repaired
                 elif not runtime_sync_asset_written:
                     write_runtime_synchronizer_asset(Path(dist_dir), property_id=property_id)
             if cache_key is not None:
-                cls._retrofit_cache_set(cache_key, (html_content, []))
-            return html_content, []
+                cls._retrofit_cache_set(cache_key, (fast_updated, list(fast_repaired)))
+                if fast_repaired:
+                    fast_digest = hashlib.sha256(fast_updated.encode("utf-8", errors="ignore")).hexdigest()
+                    cls._retrofit_cache_set(
+                        (
+                            fast_digest,
+                            cache_key[1],
+                            cache_key[2],
+                            cache_key[3],
+                            cache_key[4],
+                            cache_key[5],
+                            cache_key[6],
+                            cache_key[7],
+                        ),
+                        (fast_updated, []),
+                    )
+            return fast_updated, fast_repaired
 
         repaired: List[str] = []
         updated = html_content
@@ -13253,6 +13306,24 @@ class RetroReflectionEngine:
             if (ws_iso_changed or updated != html_content) and "gainhelm_framework_isolation" not in repaired:
                 repaired.append("gainhelm_framework_isolation")
 
+        from pseofactory.estate_common import (
+            sanitize_retired_estate_links_in_html,
+            sync_h1_to_title_core_coverage,
+        )
+        from pseofactory.porcelain_shell import get_porcelain_tenant_profile
+
+        ret_brand = str(get_porcelain_tenant_profile(property_id).get("brand_name") or "")
+        updated_h1 = sync_h1_to_title_core_coverage(
+            updated,
+            rel_path=audit_rel_path or "",
+            brand_name=ret_brand,
+        )
+        updated_links = sanitize_retired_estate_links_in_html(updated_h1, property_id=property_id)
+        if updated_links != updated:
+            updated = updated_links
+            if "h1_title_and_link_hygiene" not in repaired:
+                repaired.append("h1_title_and_link_hygiene")
+
         if cache_key is not None:
             cls._retrofit_cache_set(cache_key, (updated, list(repaired)))
             updated_digest = hashlib.sha256(updated.encode("utf-8", errors="ignore")).hexdigest()
@@ -13782,6 +13853,13 @@ class RetroReflectionEngine:
                             except Exception:
                                 pass
                             ov_reconciled = True
+                        from pseofactory.estate_common import sanitize_overlay_hub_links
+
+                        if isinstance(raw_ov.get("hub_links"), list):
+                            cleaned_hl = sanitize_overlay_hub_links(raw_ov["hub_links"], property_id=property_id)
+                            if cleaned_hl != raw_ov["hub_links"]:
+                                raw_ov["hub_links"] = cleaned_hl
+                                ov_reconciled = True
                         if ov_reconciled:
                             ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
                         if cls._overlay_spec_needs_heal(ov_s, raw_ov):
@@ -14974,6 +15052,17 @@ class RetroReflectionEngine:
                 if not hf.name.startswith(".") and hf.name != "404.html"
             )
 
+        tenant_pseo_cfg: Dict[str, Any] = {}
+        for cfg_cand in ((d.parent / ".pseofactory.json") if d.name.lower() == "dist" else (d / ".pseofactory.json"), d / ".pseofactory.json"):
+            if cfg_cand.is_file():
+                try:
+                    raw_cfg = json.loads(cfg_cand.read_text(encoding="utf-8"))
+                    if isinstance(raw_cfg, dict):
+                        tenant_pseo_cfg = raw_cfg
+                        break
+                except Exception:
+                    pass
+
         media_kit_payload = {
             "schema_version": "2026.10.26",
             "property_id": (
@@ -14995,9 +15084,6 @@ class RetroReflectionEngine:
                 )
             ),
             "legal_entity": entity_label,
-            "ein_masked": "41-***1423",
-            "jurisdiction": "Washington Secretary of State (Spokane, WA)",
-            "headquarters": "522 W Riverside Ave Ste N, Spokane, WA 99201",
             "domain": (
                 "prexvo.com"
                 if is_prexvo
@@ -15105,6 +15191,10 @@ class RetroReflectionEngine:
                 "sitemap_url": f"{canon}/sitemap.xml",
             },
         }
+        for opt_entity_key in ("ein_masked", "jurisdiction", "headquarters"):
+            opt_val = str(tenant_pseo_cfg.get(opt_entity_key) or "").strip()
+            if opt_val:
+                media_kit_payload[opt_entity_key] = opt_val
         mk_file = d / "media-kit.json"
         try:
             new_mk_txt = json.dumps(media_kit_payload, indent=2) + "\n"
@@ -17294,7 +17384,7 @@ def _has_pending_downstream_work(
 
     repo_root = Path(getattr(adapter, "repo_path", None) or Path(dist_dir).parent)
 
-    # 1. Check syndication packs (must have ghost.json + github_gist.json and zero reddit.md)
+    # 1. Check syndication packs (must have active Batch 3A artifacts and zero purged reddit/ghost/github_gist files)
     synd_dir = repo_root / "syndication"
     central_synd = (
         Path("/home/ubuntuadmin/projects/pseofactory/syndication")
@@ -17306,22 +17396,30 @@ def _has_pending_downstream_work(
         if str(repo_root).startswith("/home/ubuntuadmin/projects/") and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
         else None
     )
+    if not (synd_dir / "github_repo_bundle" / "README.md").is_file():
+        return True
+    if central_synd is not None and not (central_synd / "github_repo_bundle" / "README.md").is_file():
+        return True
     for s in built_slugs:
         tool_synd = synd_dir / s
         if (
             not (tool_synd / "syndication_pack.json").is_file()
-            or not (tool_synd / "ghost.json").is_file()
-            or not (tool_synd / "github_gist.json").is_file()
+            or not (tool_synd / "outreach_pitch.txt").is_file()
+            or not (tool_synd / "youtube_metadata.json").is_file()
             or (tool_synd / "reddit.md").is_file()
+            or (tool_synd / "ghost.json").is_file()
+            or (tool_synd / "github_gist.json").is_file()
         ):
             return True
         if central_synd is not None:
             c_synd = central_synd / s
             if (
                 not (c_synd / "syndication_pack.json").is_file()
-                or not (c_synd / "ghost.json").is_file()
-                or not (c_synd / "github_gist.json").is_file()
+                or not (c_synd / "outreach_pitch.txt").is_file()
+                or not (c_synd / "youtube_metadata.json").is_file()
                 or (c_synd / "reddit.md").is_file()
+                or (c_synd / "ghost.json").is_file()
+                or (c_synd / "github_gist.json").is_file()
             ):
                 return True
 
@@ -21253,6 +21351,190 @@ def finalize_workspace_reflection_state(
 recompile_drifted_assets = reflect_and_recompile_all_assets
 
 
+def audit_external_authority_liveness(
+    repo_root: Optional[Union[str, Path]] = None,
+    property_id: Optional[str] = None,
+    target_domain: str = "",
+    fetcher: Optional[Callable[[str], Any]] = None,
+    max_urls: int = 25,
+    perform_network_checks: bool = False,
+    ledger_path: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    Bounded, strictly read-only audit of per-tenant .agy/external_authority_ledger.json
+    covering embed URLs (with rel='nofollow' verification), GitHub Org repos, and B2B directory profiles.
+    Never mutates the ledger on disk.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.parasite_ledger import (
+        AUTHORITY_SURFACE_EMBED,
+        LIVE,
+        REMOVED,
+        UNREACHABLE,
+        ParasiteLedger,
+        classify_status,
+        default_html_fetcher,
+        resolve_tenant_external_authority_ledger_path,
+        verify_embed_attribution_html,
+    )
+
+    eff_prop = str(property_id or "").strip().lower()
+    eff_repo = Path(repo_root) if repo_root is not None else None
+    eff_domain = str(target_domain or "").strip().lower()
+
+    if eff_repo is None and eff_prop:
+        try:
+            adapter = TenantRegistry.default().get_adapter(eff_prop)
+            if adapter is not None:
+                if getattr(adapter, "repo_path", None):
+                    eff_repo = Path(adapter.repo_path)
+                elif getattr(adapter, "dist_dir", None):
+                    eff_repo = Path(adapter.dist_dir).parent
+                if not eff_domain and getattr(adapter, "domain", None):
+                    eff_domain = str(adapter.domain).strip().lower()
+        except Exception:
+            pass
+
+    if ledger_path is not None:
+        eff_ledger_path = Path(ledger_path)
+    elif eff_repo is not None:
+        eff_ledger_path = resolve_tenant_external_authority_ledger_path(eff_repo)
+    else:
+        return {
+            "status": "NO_LEDGER",
+            "property_id": eff_prop or "unknown",
+            "ledger_path": "",
+            "read_only": True,
+            "tracked_count": 0,
+            "checked_count": 0,
+            "live_count": 0,
+            "removed_count": 0,
+            "unreachable_count": 0,
+            "attribution_failures": [],
+            "by_surface": {},
+            "records": {},
+        }
+
+    if not eff_ledger_path.is_file():
+        return {
+            "status": "NO_LEDGER",
+            "property_id": eff_prop or (eff_repo.name if eff_repo else "unknown"),
+            "ledger_path": str(eff_ledger_path),
+            "read_only": True,
+            "tracked_count": 0,
+            "checked_count": 0,
+            "live_count": 0,
+            "removed_count": 0,
+            "unreachable_count": 0,
+            "attribution_failures": [],
+            "by_surface": {},
+            "records": {},
+        }
+
+    # Load directly without creating lock/file mutations
+    try:
+        loaded = json.loads(eff_ledger_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            loaded = {}
+    except Exception:
+        loaded = {}
+
+    bound = max(0, int(max_urls))
+    items = list(loaded.items())[:bound]
+    live_count = 0
+    removed_count = 0
+    unreachable_count = 0
+    checked_count = 0
+    attribution_failures: List[Dict[str, Any]] = []
+    by_surface: Dict[str, Dict[str, int]] = {}
+    audited_records: Dict[str, Dict[str, Any]] = {}
+    run_fetch = bool(perform_network_checks or fetcher is not None)
+    eff_fetcher = fetcher or default_html_fetcher
+
+    for url, rec in items:
+        if not isinstance(rec, dict):
+            continue
+        surface = str(rec.get("surface_type") or "syndication").strip().lower()
+        surf_bucket = by_surface.setdefault(surface, {"tracked": 0, "live": 0, "removed": 0, "unreachable": 0})
+        surf_bucket["tracked"] += 1
+        rec_domain = str(rec.get("target_domain") or eff_domain or "").strip().lower()
+
+        latest: Optional[Dict[str, Any]] = None
+        if run_fetch:
+            raw_res = eff_fetcher(url)
+            if isinstance(raw_res, tuple) and len(raw_res) == 2:
+                status = int(raw_res[0])
+                html_body = str(raw_res[1] or "")
+            else:
+                status = int(raw_res)
+                html_body = ""
+            state = classify_status(status)
+            latest = {
+                "http_status": status,
+                "state": state,
+                "surface_type": surface,
+                "attribution_valid": None,
+                "attribution_reason": None,
+            }
+            if state == LIVE and surface == AUTHORITY_SURFACE_EMBED and rec_domain:
+                attr_res = verify_embed_attribution_html(html_body, rec_domain)
+                latest["attribution_valid"] = bool(attr_res["valid"])
+                latest["attribution_reason"] = attr_res["reason"]
+        else:
+            checks = rec.get("checks") or []
+            if isinstance(checks, list) and checks:
+                last = checks[-1]
+                if isinstance(last, dict):
+                    latest = dict(last)
+
+        if latest is not None:
+            checked_count += 1
+            st = str(latest.get("state") or "")
+            if st == LIVE:
+                live_count += 1
+                surf_bucket["live"] += 1
+            elif st == REMOVED:
+                removed_count += 1
+                surf_bucket["removed"] += 1
+            elif st == UNREACHABLE:
+                unreachable_count += 1
+                surf_bucket["unreachable"] += 1
+            if latest.get("attribution_valid") is False:
+                attribution_failures.append(
+                    {
+                        "url": url,
+                        "platform": rec.get("platform", ""),
+                        "reason": latest.get("attribution_reason") or "INVALID_ATTRIBUTION",
+                    }
+                )
+        audited_records[url] = {
+            "surface_type": surface,
+            "platform": rec.get("platform", ""),
+            "tenant": rec.get("tenant", eff_prop),
+            "latest": latest,
+        }
+
+    overall_status = "PASS"
+    if removed_count > 0 or attribution_failures:
+        overall_status = "ATTENTION_REQUIRED"
+
+    return {
+        "status": overall_status,
+        "property_id": eff_prop or (eff_repo.name if eff_repo else "unknown"),
+        "ledger_path": str(eff_ledger_path),
+        "read_only": True,
+        "tracked_count": len(loaded),
+        "inspected_count": len(audited_records),
+        "checked_count": checked_count,
+        "live_count": live_count,
+        "removed_count": removed_count,
+        "unreachable_count": unreachable_count,
+        "attribution_failures": attribution_failures,
+        "by_surface": by_surface,
+        "records": audited_records,
+    }
+
+
 __all__ = [
     "DriftReason",
     "AssetDriftRecord",
@@ -21286,6 +21568,7 @@ __all__ = [
     "cascade_drift_lifecycle",
     "reflect_and_recompile_all_assets",
     "recompile_drifted_assets",
+    "audit_external_authority_liveness",
     "parse_subprocess_envelope",
 ]
 

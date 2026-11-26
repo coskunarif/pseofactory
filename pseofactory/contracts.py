@@ -1223,6 +1223,158 @@ def assert_snippet_length_contract(
     return True
 
 
+_VOID_HTML_TAGS_FOR_NOSNIPPET: FrozenSet[str] = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+
+
+def detect_data_nosnippet_markup_issues(html_text: str) -> List[str]:
+    """
+    Validates selective data-nosnippet markup hygiene in HTML documents.
+    Permits balanced bare <div data-nosnippet>...</div > (and non-root, non-quick-answer
+    containers like <footer data-nosnippet>), while failing closed on:
+    1. Value-bearing boolean attribute traps (data-nosnippet="false", data-nosnippet="true",
+       data-nosnippet="", or any data-nosnippet=...).
+    2. Root container placement (html, body, main).
+    3. Quick-answer container placement, ancestor wrapping, or descendant placement.
+    4. Unclosed or unbalanced <tag data-nosnippet> wrappers.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not isinstance(html_text, str) or not html_text.strip():
+        return []
+
+    from html.parser import HTMLParser
+
+    issues: List[str] = []
+    # Strip comments, script, style, and template blocks before tag inspection
+    cleaned = re.sub(r"<!--[\s\S]*?-->", "", html_text)
+    cleaned = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", "", cleaned, flags=re.IGNORECASE)
+
+    # 1. Raw attribute regex check catches any data-nosnippet=... boolean trap
+    for tag_m in re.finditer(r"<([a-zA-Z][a-zA-Z0-9_-]*)\b([^>]*)>", cleaned):
+        t_name = tag_m.group(1).lower()
+        raw_attrs = tag_m.group(2)
+        if re.search(r"(?<![a-zA-Z0-9_-])data-nosnippet\s*=", raw_attrs, flags=re.IGNORECASE):
+            issues.append(
+                f"HTML contains value-bearing 'data-nosnippet=...' boolean attribute trap on <{t_name}>; "
+                "use bare 'data-nosnippet' without '=' or value"
+            )
+
+    class _NosnippetBalanceParser(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=False)
+            self.stack: List[Tuple[str, bool, bool]] = []
+            self.qa_depth: int = 0
+            self.local_issues: List[str] = []
+
+        @staticmethod
+        def _is_qa_element(attrs_dict: Dict[str, Optional[str]]) -> bool:
+            cls_tokens = set(str(attrs_dict.get("class") or "").lower().split())
+            id_tokens = set(str(attrs_dict.get("id") or "").lower().split())
+            qa_names = {"quick-answer", "quick_answer"}
+            return bool((cls_tokens & qa_names) or (id_tokens & qa_names))
+
+        def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+            t_low = tag.lower()
+            attrs_dict: Dict[str, Optional[str]] = {}
+            has_ns = False
+            for k, v in attrs:
+                k_low = k.lower()
+                attrs_dict[k_low] = v
+                if k_low == "data-nosnippet":
+                    has_ns = True
+            is_qa = self._is_qa_element(attrs_dict)
+
+            if has_ns:
+                if t_low in ("html", "body", "main"):
+                    self.local_issues.append(
+                        f"Page root container <{t_low}> contains 'data-nosnippet', excluding page content from AI Overviews"
+                    )
+                if is_qa or self.qa_depth > 0:
+                    self.local_issues.append(
+                        f"Page quick-answer container contains 'data-nosnippet' on <{t_low}>, excluding direct answer from AI Overviews"
+                    )
+
+            if is_qa and any(ns for _, ns, _ in self.stack):
+                self.local_issues.append(
+                    "Page quick-answer container contains 'data-nosnippet' via ancestor wrapper, excluding direct answer from AI Overviews"
+                )
+
+            if t_low not in _VOID_HTML_TAGS_FOR_NOSNIPPET:
+                self.stack.append((t_low, has_ns, is_qa))
+                if is_qa:
+                    self.qa_depth += 1
+
+        def handle_startendtag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+            t_low = tag.lower()
+            has_ns = any(k.lower() == "data-nosnippet" for k, _ in attrs)
+            if has_ns:
+                if t_low in ("html", "body", "main"):
+                    self.local_issues.append(
+                        f"Page root container <{t_low}> contains 'data-nosnippet', excluding page content from AI Overviews"
+                    )
+                elif self.qa_depth > 0:
+                    self.local_issues.append(
+                        f"Page quick-answer container contains 'data-nosnippet' on descendant <{t_low}>, excluding direct answer from AI Overviews"
+                    )
+
+        def handle_endtag(self, tag: str) -> None:
+            t_low = tag.lower()
+            if t_low in _VOID_HTML_TAGS_FOR_NOSNIPPET:
+                return
+            match_idx = -1
+            for idx in range(len(self.stack) - 1, -1, -1):
+                if self.stack[idx][0] == t_low:
+                    match_idx = idx
+                    break
+            if match_idx == -1:
+                return
+            for idx in range(len(self.stack) - 1, match_idx, -1):
+                popped_tag, popped_ns, popped_qa = self.stack.pop()
+                if popped_qa and self.qa_depth > 0:
+                    self.qa_depth -= 1
+                if popped_ns:
+                    self.local_issues.append(
+                        f"Unbalanced <{popped_tag} data-nosnippet> element closed prematurely by </{t_low}>"
+                    )
+            _, _, closed_qa = self.stack.pop()
+            if closed_qa and self.qa_depth > 0:
+                self.qa_depth -= 1
+
+    parser = _NosnippetBalanceParser()
+    parser.feed(cleaned)
+    parser.close()
+
+    for unclosed_tag, unclosed_ns, _ in parser.stack:
+        if unclosed_ns:
+            parser.local_issues.append(f"Unclosed <{unclosed_tag} data-nosnippet> element missing closing </{unclosed_tag}>")
+
+    issues.extend(parser.local_issues)
+    # Preserve insertion order while deduplicating
+    seen: Set[str] = set()
+    deduped: List[str] = []
+    for item in issues:
+        if item not in seen:
+            seen.add(item)
+            deduped.append(item)
+    return deduped
+
+
 def assert_ai_crawl_access_and_snippet_eligibility(
     html_content: str,
     route: str = "/",
@@ -1235,7 +1387,8 @@ def assert_ai_crawl_access_and_snippet_eligibility(
     2. Zero nosnippet directives from robots or AI search bots.
     3. Zero noindex or none directives on public routes.
     4. max-snippet must not be 0, and quick-answer length must not exceed max-snippet limit.
-    5. Zero data-nosnippet on root containers (html, body, main) or quick-answer elements.
+    5. Zero data-nosnippet on root containers (html, body, main) or quick-answer elements,
+       and zero malformed/unbalanced or value-bearing data-nosnippet attributes.
     Zero em-dashes. Zero en-dashes.
     """
     ctx = f" in {context}" if context else ""
@@ -1274,6 +1427,10 @@ def assert_ai_crawl_access_and_snippet_eligibility(
         raise ValueError(
             f"HTML{ctx} quick-answer container contains 'data-nosnippet', excluding direct answer from AI Overviews"
         )
+
+    nosnippet_markup_issues = detect_data_nosnippet_markup_issues(html_content)
+    if nosnippet_markup_issues:
+        raise ValueError(f"HTML{ctx} data-nosnippet markup violation: {nosnippet_markup_issues[0]}")
 
     return True
 
@@ -10595,6 +10752,7 @@ __all__ = [
     "check_search_intent_cannibalization",
     "assert_search_intent_qualified",
     "assert_snippet_length_contract",
+    "detect_data_nosnippet_markup_issues",
     "assert_ai_crawl_access_and_snippet_eligibility",
     "assert_ai_crawl_access",
     "assert_snippet_eligibility",

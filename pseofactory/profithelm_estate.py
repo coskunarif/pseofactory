@@ -1724,6 +1724,13 @@ def normalize_html_seo_invariants(content: str, rel_p: str = "") -> str:
         cleaned,
         flags=re.IGNORECASE | re.DOTALL,
     )
+    from pseofactory.estate_common import (
+        sanitize_retired_estate_links_in_html,
+        sync_h1_to_title_core_coverage,
+    )
+
+    cleaned = sanitize_retired_estate_links_in_html(cleaned, property_id=PROFITHELM_PROPERTY_ID)
+    cleaned = sync_h1_to_title_core_coverage(cleaned, rel_path=rel_p, brand_name=SITE_NAME)
     return cleaned
 
 
@@ -3644,6 +3651,7 @@ def build_machine_endpoints(
         all_tools=unescaped_tools,
         quick_answers=clean_quick_answers,
     )
+    _sanitize_manifests_dir(dist)
     _sanitize_catalog_json(dist)
     _sanitize_llms_files(dist)
 
@@ -3874,10 +3882,24 @@ def _clean_unlisted_citations(text: str, slug: str = "") -> str:
         out = re.sub(pat, repl, out, flags=re.IGNORECASE)
     if "workers-comp" in s_low or "payroll-burden" in s_low:
         out = re.sub(r"\b18(?:\.0+)?%", "employer payroll and benefit rates", out, flags=re.IGNORECASE)
-    if any(tok in s_low for tok in ("1031", "qsbs", "1202", "crypto")):
+    if s_low and not any(tok in s_low for tok in ("199a", "qbi", "s-corp")):
         out = re.sub(
-            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*)?(?:IRC\s+)?(?:Sections?\s+|Sec\.?\s*)?199A\b",
+            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*)?(?:IRC\s+)?(?:Sections?\s+|Sec\.?\s*)?199A(?:\([a-zA-Z0-9]+\))*\b",
             "pass-through business tax rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+    if s_low and not any(tok in s_low for tok in ("179", "equipment-lease")):
+        out = re.sub(
+            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*(?:(?:IRC\s+)?(?:Sections?\s+|Sec\.?\s*|§\s*))?|IRC\s+(?:Sections?\s+|Sec\.?\s*|§\s*)?)179(?:\([a-zA-Z0-9]+\))*\b",
+            "business equipment expensing rules",
+            out,
+            flags=re.IGNORECASE,
+        )
+    if s_low and not any(tok in s_low for tok in ("280g", "parachute")):
+        out = re.sub(
+            r"\b(?:26\s*U\.?\s*S\.?\s*C\.?\s*(?:(?:IRC\s+)?(?:Sections?\s+|Sec\.?\s*|§\s*))?|IRC\s+(?:Sections?\s+|Sec\.?\s*|§\s*)?)280G(?:\([a-zA-Z0-9]+\))*\b",
+            "executive change-in-control payment rules",
             out,
             flags=re.IGNORECASE,
         )
@@ -3945,6 +3967,84 @@ def _sanitize_nested_strings(obj: Any, slug: str = "") -> Any:
     if isinstance(obj, dict):
         return {k: _sanitize_nested_strings(v, slug=slug) for k, v in obj.items()}
     return obj
+
+
+def _sanitize_manifest_payload(mf_obj: Dict[str, Any], slug: str = "") -> Dict[str, Any]:
+    """Sanitizes top-level metadata, statutory_economic_matrix, and proprietary_telemetry per slug."""
+    eff_slug = str(slug or mf_obj.get("slug") or "").strip().lower()
+    is_179_slug = any(tok in eff_slug for tok in ("179", "equipment-lease"))
+    is_199a_slug = any(tok in eff_slug for tok in ("199a", "qbi", "s-corp"))
+
+    for mk in ("model_name", "statutory_authority", "economic_dataset", "sample_calculation", "title"):
+        if isinstance(mf_obj.get(mk), str):
+            mf_obj[mk] = _clean_unlisted_citations(mf_obj[mk], slug=eff_slug)
+
+    mat = mf_obj.get("statutory_economic_matrix")
+    if isinstance(mat, dict):
+        raw_series = mat.get("series")
+        if isinstance(raw_series, list):
+            filtered_series: List[Any] = []
+            for item in raw_series:
+                if not isinstance(item, dict):
+                    filtered_series.append(item)
+                    continue
+                sid = str(item.get("series_id") or "").strip().lower()
+                if eff_slug:
+                    if not is_179_slug and sid.startswith("irs_sec179"):
+                        continue
+                    if not is_199a_slug and sid.startswith("irs_sec199a"):
+                        continue
+                filtered_series.append(_sanitize_nested_strings(item, slug=eff_slug))
+            mat["series"] = filtered_series
+            mat["series_count"] = len(filtered_series)
+
+        if isinstance(mat.get("statutory_authority"), str):
+            raw_mat_auth = mat["statutory_authority"]
+            cleaned_mat_auth = _clean_unlisted_citations(raw_mat_auth, slug=eff_slug)
+            if cleaned_mat_auth != raw_mat_auth and isinstance(mat.get("series"), list):
+                fallback_cit = next(
+                    (
+                        str(s.get("statutory_citation") or "").strip()
+                        for s in mat["series"]
+                        if isinstance(s, dict) and str(s.get("statutory_citation") or "").strip()
+                    ),
+                    "",
+                )
+                if fallback_cit:
+                    cleaned_mat_auth = _clean_unlisted_citations(fallback_cit, slug=eff_slug)
+            mat["statutory_authority"] = cleaned_mat_auth
+
+        for mat_k, mat_v in list(mat.items()):
+            if mat_k not in ("series", "series_count", "statutory_authority"):
+                mat[mat_k] = _sanitize_nested_strings(mat_v, slug=eff_slug)
+
+    pt = mf_obj.get("proprietary_telemetry")
+    if isinstance(pt, dict):
+        mf_obj["proprietary_telemetry"] = _sanitize_nested_strings(pt, slug=eff_slug)
+
+    return mf_obj
+
+
+def _sanitize_manifests_dir(dist: Path) -> None:
+    """Guarantees every sidecar dist/manifests/*.json file has zero disallowed cross-topic citations."""
+    manifests_dir = dist / "manifests"
+    if not manifests_dir.is_dir():
+        return
+    for mf_file in sorted(manifests_dir.glob("*.json")):
+        if mf_file.name.startswith("."):
+            continue
+        try:
+            raw_txt = mf_file.read_text(encoding="utf-8")
+            mf_obj = json.loads(raw_txt)
+            if not isinstance(mf_obj, dict):
+                continue
+            mf_slug = str(mf_obj.get("slug") or mf_file.stem).strip()
+            sanitized = _sanitize_manifest_payload(mf_obj, slug=mf_slug)
+            new_txt = json.dumps(sanitized, indent=2, ensure_ascii=False) + "\n"
+            if new_txt != raw_txt:
+                mf_file.write_text(new_txt, encoding="utf-8")
+        except Exception:
+            pass
 
 
 def _sanitize_dynamic_or_void_spec(raw_spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -4485,14 +4585,14 @@ def _build_state_tax_spoke_page(state: Dict[str, Any], all_states: Sequence[Dict
         f"<h2>{html_lib.escape(s_name)} Entity Tax &amp; Capital Allocation Suite</h2>"
         f"<p>Coordinate {html_lib.escape(s_name)} individual income tax projections with commercial real estate exchanges and Section 179 asset expensing.</p>"
         "<ul>"
-        f'<li><a href="/tools/section-1031-calculator/{html_lib.escape(s_slug)}/" class="touch-target">{html_lib.escape(s_name)} Section 1031 Exchange Calculator</a></li>'
+        '<li><a href="/tools/section-1031-calculator/" class="touch-target">Section 1031 Exchange Calculator</a></li>'
         f'<li><a href="/tools/section-179-calculator/" class="touch-target">{html_lib.escape(s_name)} Section 179 Deduction &amp; Vehicles</a></li>'
         "</ul>"
         "</section>"
     )
     main_html = (
         f'<nav class="breadcrumbs" aria-label="Breadcrumb"><a href="/" class="touch-target">Home</a> / '
-        f'<a href="/tools/irs-2027-tax-brackets/" class="touch-target">IRS 2026-2027 Brackets</a> / <span>{html_lib.escape(s_name)}</span></nav>'
+        f'<a href="/tools/irs-tax-brackets/" class="touch-target">IRS 2026-2027 Brackets</a> / <span>{html_lib.escape(s_name)}</span></nav>'
         f'<section class="hero-section"><h1>{html_lib.escape(title)}</h1>'
         f'<p class="hero-desc">{html_lib.escape(desc)}</p>{render_byline()}</section>'
         f"{render_above_the_fold_ftc_disclosure(True)}"
@@ -4607,7 +4707,7 @@ def _build_state_1031_spoke_page(state: Dict[str, Any], all_states: Sequence[Dic
         f"<h2>{html_lib.escape(s_name)} Tax Planning &amp; Commercial Entity Suite</h2>"
         f"<p>Interconnected statutory models linking {html_lib.escape(s_name)} commercial real estate exchanges, income tax brackets, and Section 179 expensing.</p>"
         "<ul>"
-        f'<li><a href="/tools/irs-2027-tax-brackets/{html_lib.escape(s_slug)}/" class="touch-target">{html_lib.escape(s_name)} 2026-2027 Tax Brackets Calculator</a></li>'
+        '<li><a href="/tools/irs-tax-brackets/" class="touch-target">IRS 2026-2027 Tax Brackets Calculator</a></li>'
         f'<li><a href="/tools/section-179-calculator/" class="touch-target">{html_lib.escape(s_name)} Section 179 Deduction Limits</a></li>'
         "</ul>"
         "</section>"
@@ -4819,8 +4919,8 @@ def _build_vehicle_179_spoke_page(
         "<h2>State Commercial Tax Models &amp; Real Estate Exchanges</h2>"
         "<p>Coordinate commercial fleet write-offs with state income tax brackets and Section 1031 like-kind exchanges.</p>"
         "<ul>"
-        '<li><a href="/tools/irs-2027-tax-brackets/california/" class="touch-target">California 2026-2027 Tax Brackets</a></li>'
-        '<li><a href="/tools/section-1031-calculator/california/" class="touch-target">California Section 1031 Exchange</a></li>'
+        '<li><a href="/tools/irs-tax-brackets/" class="touch-target">IRS 2026-2027 Tax Brackets</a></li>'
+        '<li><a href="/tools/section-1031-calculator/" class="touch-target">Section 1031 Like-Kind Exchange</a></li>'
         "</ul>"
         "</section>"
     )
@@ -5497,11 +5597,7 @@ def _post_process_estate_invariants(
                     try:
                         mf_obj = json.loads(mf_m.group(2).strip())
                         if isinstance(mf_obj, dict):
-                            # Preserve statutory_economic_matrix & proprietary_telemetry parity with RetroReflectionEngine;
-                            # clean only top-level citation/text metadata keys.
-                            for mk in ("model_name", "statutory_authority", "economic_dataset", "sample_calculation", "title"):
-                                if isinstance(mf_obj.get(mk), str):
-                                    mf_obj[mk] = _clean_unlisted_citations(mf_obj[mk], slug=page_slug)
+                            mf_obj = _sanitize_manifest_payload(mf_obj, slug=page_slug)
                             synced_manifest_obj = mf_obj
                         parts[idx] = f"{mf_m.group(1)}{json.dumps(mf_obj, ensure_ascii=False)}{mf_m.group(3)}"
                     except Exception:
@@ -5563,6 +5659,7 @@ def _post_process_estate_invariants(
             )
         except Exception:
             pass
+    _sanitize_manifests_dir(dist)
     _sanitize_catalog_json(dist)
     _sanitize_llms_files(dist)
 

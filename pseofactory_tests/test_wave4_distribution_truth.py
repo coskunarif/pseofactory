@@ -358,11 +358,11 @@ def test_lienbond_broadcast_ledger_self_heals_foreign_urls_and_company_ids(tmp_p
             assert "lienbond.com" in str(entry["url"]).lower()
         assert "facebook_permalink" not in entry
         disp = entry["dispatches"]
-        assert disp["x"] == dist_mod.CHANNEL_STATUS_POLICY_DISABLED
+        for purged_ch in ("x", "facebook", "ghost", "github_gist", "quora", "google_sites", "linkedin_pulse", "substack_teardown"):
+            assert purged_ch not in disp
         assert disp["linkedin"] == dist_mod.CHANNEL_STATUS_BLOCKED_ADMIN_ACCESS
-        assert disp["facebook"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
-        assert disp["ghost"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
-        assert disp["github_gist"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        assert disp["outreach_pitch"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
+        assert disp["github_statutory_repo"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
         if "newsletter" in disp:
             assert disp["newsletter"] == dist_mod.CHANNEL_STATUS_LOCAL_DRAFT_ONLY
         assert "SUCCESS" not in disp.values()
@@ -460,20 +460,22 @@ def test_honest_channel_taxonomy_and_delivery_summary_partitions_all_channels(tm
     summary = res_err["channel_delivery_summary"]
     assert summary["total_channels"] == len(res_err["channels"])
     assert sum(summary["counts"].values()) == len(res_err["channels"])
-    assert summary["policy_disabled"] == ["x"]
+    assert summary["policy_disabled"] == []
     assert summary["blocked_admin_access"] == ["linkedin"]
     assert summary["upload_error"] == ["youtube"]
     assert summary["live_published"] == []
-    assert "facebook" in summary["local_draft_only"]
-    assert "ghost" in summary["local_draft_only"]
-    assert "github_gist" in summary["local_draft_only"]
+    assert "outreach_pitch" in summary["local_draft_only"]
+    assert "github_statutory_repo" in summary["local_draft_only"]
+    for purged_ch in ("x", "facebook", "ghost", "github_gist", "quora", "google_sites", "linkedin_pulse", "substack_teardown"):
+        assert purged_ch not in res_err["channels"]
 
     ledger_err = json.loads((gh_repo / ".agy" / "broadcast_ledger.json").read_text(encoding="utf-8"))
     assert ledger_err[0]["mode"] == "SYNDICATED_STAGED"
-    assert ledger_err[0]["dispatches"]["x"] == "POLICY_DISABLED"
+    assert "x" not in ledger_err[0]["dispatches"]
     assert ledger_err[0]["dispatches"]["linkedin"] == "BLOCKED_ADMIN_ACCESS"
     assert ledger_err[0]["dispatches"]["youtube"] == "UPLOAD_ERROR"
-    assert ledger_err[0]["dispatches"]["facebook"] == "LOCAL_DRAFT_ONLY"
+    assert ledger_err[0]["dispatches"]["outreach_pitch"] == "LOCAL_DRAFT_ONLY"
+    assert ledger_err[0]["dispatches"]["github_statutory_repo"] == "LOCAL_DRAFT_ONLY"
 
     # YouTube ALREADY_UPLOADED_IDEMPOTENT with video_id -> LIVE_PUBLISHED + SYNDICATED_VERIFIED
     # while all_three_platforms_publicly_verifiable remains False when LI & FB are not live
@@ -515,7 +517,7 @@ def test_honest_channel_taxonomy_and_delivery_summary_partitions_all_channels(tm
     ledger_live = json.loads((gh_repo / ".agy" / "broadcast_ledger.json").read_text(encoding="utf-8"))
     assert ledger_live[0]["mode"] == "SYNDICATED_VERIFIED"
     assert ledger_live[0]["dispatches"]["youtube"] == "LIVE_PUBLISHED"
-    assert ledger_live[0]["dispatches"]["x"] == "POLICY_DISABLED"
+    assert "x" not in ledger_live[0]["dispatches"]
 
 
 def test_youtube_caption_and_comment_flags_preserved_from_existing_broadcast_ledger(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 from __future__ import annotations
 
+import csv
 import inspect
 import json
 import os
@@ -25,7 +26,7 @@ import time
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, Union
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -10127,3 +10128,429 @@ def run_all_seo_growth_workflows(
 
     assert_no_forbidden_dashes(json.dumps(summary["workflows"]), context="seo_growth_workflows_summary")
     return summary
+
+
+def _extract_gsc_row_field(row: Any, *names: str, default: Any = None) -> Any:
+    if isinstance(row, Mapping):
+        for name in names:
+            if name in row and row[name] is not None:
+                return row[name]
+        return default
+    for name in names:
+        if hasattr(row, name):
+            val = getattr(row, name)
+            if val is not None:
+                return val
+    return default
+
+
+def _is_branded_query(query: str, compiled_patterns: Sequence[re.Pattern[str]]) -> bool:
+    q_norm = " ".join(str(query or "").strip().lower().split())
+    if not q_norm:
+        return False
+    return any(pat.search(q_norm) for pat in compiled_patterns)
+
+
+def compute_branded_vs_nonbranded_gsc_split(
+    gsc_rows: Iterable[Any],
+    brand_tokens: Union[str, Iterable[str]],
+    prior_gsc_rows: Optional[Iterable[Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Splits GSC query rows into branded vs non-branded buckets using word/token boundaries
+    and computes exact clicks, impressions, share, CTR, and chronological trend.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if isinstance(brand_tokens, str):
+        raw_tokens = [brand_tokens]
+    else:
+        raw_tokens = list(brand_tokens or [])
+
+    norm_tokens: List[str] = []
+    seen_tok = set()
+    for tok in raw_tokens:
+        t = " ".join(str(tok or "").strip().lower().split())
+        if t and t not in seen_tok:
+            seen_tok.add(t)
+            norm_tokens.append(t)
+
+    compiled_patterns = [
+        re.compile(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", re.IGNORECASE)
+        for t in norm_tokens
+    ]
+
+    def _accumulate(rows_iter: Iterable[Any]) -> Dict[str, Any]:
+        b_clicks = 0
+        b_impr = 0
+        b_queries: Set[str] = set()
+        nb_clicks = 0
+        nb_impr = 0
+        nb_queries: Set[str] = set()
+        daily_map: Dict[str, Dict[str, int]] = {}
+        row_count = 0
+
+        for row in rows_iter or []:
+            row_count += 1
+            q_val = _extract_gsc_row_field(row, "query", "keyword", default="")
+            if not q_val:
+                keys_val = _extract_gsc_row_field(row, "keys", default=None)
+                if isinstance(keys_val, (list, tuple)) and keys_val:
+                    q_val = str(keys_val[0] or "")
+            q_str = str(q_val or "").strip()
+            clicks = max(0, int(round(float(_extract_gsc_row_field(row, "clicks", default=0) or 0))))
+            impr = max(0, int(round(float(_extract_gsc_row_field(row, "impressions", default=0) or 0))))
+            dt_raw = str(_extract_gsc_row_field(row, "date", "metric_date", "window", "period", default="") or "").strip()
+            dt_key = dt_raw[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", dt_raw) else dt_raw
+
+            branded = _is_branded_query(q_str, compiled_patterns)
+            if branded:
+                b_clicks += clicks
+                b_impr += impr
+                if q_str:
+                    b_queries.add(q_str.lower())
+            else:
+                nb_clicks += clicks
+                nb_impr += impr
+                if q_str:
+                    nb_queries.add(q_str.lower())
+
+            if dt_key:
+                bucket = daily_map.setdefault(
+                    dt_key,
+                    {
+                        "branded_clicks": 0,
+                        "branded_impressions": 0,
+                        "nonbranded_clicks": 0,
+                        "nonbranded_impressions": 0,
+                    },
+                )
+                if branded:
+                    bucket["branded_clicks"] += clicks
+                    bucket["branded_impressions"] += impr
+                else:
+                    bucket["nonbranded_clicks"] += clicks
+                    bucket["nonbranded_impressions"] += impr
+
+        return {
+            "row_count": row_count,
+            "branded_clicks": b_clicks,
+            "branded_impressions": b_impr,
+            "branded_queries": b_queries,
+            "nonbranded_clicks": nb_clicks,
+            "nonbranded_impressions": nb_impr,
+            "nonbranded_queries": nb_queries,
+            "daily_map": daily_map,
+        }
+
+    acc = _accumulate(gsc_rows)
+    b_clicks = acc["branded_clicks"]
+    b_impr = acc["branded_impressions"]
+    nb_clicks = acc["nonbranded_clicks"]
+    nb_impr = acc["nonbranded_impressions"]
+    tot_clicks = b_clicks + nb_clicks
+    tot_impr = b_impr + nb_impr
+
+    b_click_share = round(b_clicks / tot_clicks, 4) if tot_clicks > 0 else 0.0
+    nb_click_share = round(nb_clicks / tot_clicks, 4) if tot_clicks > 0 else 0.0
+    b_impr_share = round(b_impr / tot_impr, 4) if tot_impr > 0 else 0.0
+    nb_impr_share = round(nb_impr / tot_impr, 4) if tot_impr > 0 else 0.0
+    b_ctr = round(b_clicks / b_impr, 4) if b_impr > 0 else 0.0
+    nb_ctr = round(nb_clicks / nb_impr, 4) if nb_impr > 0 else 0.0
+
+    daily_series: List[Dict[str, Any]] = []
+    for dt_key in sorted(acc["daily_map"].keys()):
+        d = acc["daily_map"][dt_key]
+        d_tot_c = d["branded_clicks"] + d["nonbranded_clicks"]
+        d_tot_i = d["branded_impressions"] + d["nonbranded_impressions"]
+        daily_series.append(
+            {
+                "date": dt_key,
+                "branded_clicks": d["branded_clicks"],
+                "branded_impressions": d["branded_impressions"],
+                "nonbranded_clicks": d["nonbranded_clicks"],
+                "nonbranded_impressions": d["nonbranded_impressions"],
+                "branded_click_share": round(d["branded_clicks"] / d_tot_c, 4) if d_tot_c > 0 else 0.0,
+                "branded_impression_share": round(d["branded_impressions"] / d_tot_i, 4) if d_tot_i > 0 else 0.0,
+            }
+        )
+
+    if prior_gsc_rows is not None:
+        prior_acc = _accumulate(prior_gsc_rows)
+        p_tot_c = prior_acc["branded_clicks"] + prior_acc["nonbranded_clicks"]
+        p_tot_i = prior_acc["branded_impressions"] + prior_acc["nonbranded_impressions"]
+        p_b_c_share = round(prior_acc["branded_clicks"] / p_tot_c, 4) if p_tot_c > 0 else 0.0
+        p_b_i_share = round(prior_acc["branded_impressions"] / p_tot_i, 4) if p_tot_i > 0 else 0.0
+        r_b_c_share = b_click_share
+        r_b_i_share = b_impr_share
+        has_trend = True
+    elif len(daily_series) >= 2:
+        mid = len(daily_series) // 2
+        prior_half = daily_series[:mid]
+        recent_half = daily_series[mid:]
+        p_bc = sum(x["branded_clicks"] for x in prior_half)
+        p_nbc = sum(x["nonbranded_clicks"] for x in prior_half)
+        p_bi = sum(x["branded_impressions"] for x in prior_half)
+        p_nbi = sum(x["nonbranded_impressions"] for x in prior_half)
+        r_bc = sum(x["branded_clicks"] for x in recent_half)
+        r_nbc = sum(x["nonbranded_clicks"] for x in recent_half)
+        r_bi = sum(x["branded_impressions"] for x in recent_half)
+        r_nbi = sum(x["nonbranded_impressions"] for x in recent_half)
+        p_b_c_share = round(p_bc / (p_bc + p_nbc), 4) if (p_bc + p_nbc) > 0 else 0.0
+        p_b_i_share = round(p_bi / (p_bi + p_nbi), 4) if (p_bi + p_nbi) > 0 else 0.0
+        r_b_c_share = round(r_bc / (r_bc + r_nbc), 4) if (r_bc + r_nbc) > 0 else 0.0
+        r_b_i_share = round(r_bi / (r_bi + r_nbi), 4) if (r_bi + r_nbi) > 0 else 0.0
+        has_trend = True
+    else:
+        p_b_c_share = r_b_c_share = b_click_share
+        p_b_i_share = r_b_i_share = b_impr_share
+        has_trend = False
+
+    c_delta = round(r_b_c_share - p_b_c_share, 4)
+    i_delta = round(r_b_i_share - p_b_i_share, 4)
+    if not has_trend:
+        direction = "insufficient_dates"
+    elif i_delta >= 0.02 or c_delta >= 0.02:
+        direction = "branded_growing"
+    elif i_delta <= -0.02 or c_delta <= -0.02:
+        direction = "nonbranded_growing"
+    else:
+        direction = "stable"
+
+    trend = {
+        "has_chronological_trend": has_trend,
+        "periods_observed": len(daily_series),
+        "prior_branded_click_share": p_b_c_share,
+        "recent_branded_click_share": r_b_c_share,
+        "branded_click_share_delta": c_delta,
+        "prior_branded_impression_share": p_b_i_share,
+        "recent_branded_impression_share": r_b_i_share,
+        "branded_impression_share_delta": i_delta,
+        "direction": direction,
+    }
+
+    return {
+        "brand_tokens": norm_tokens,
+        "total_rows": acc["row_count"],
+        "total_clicks": tot_clicks,
+        "total_impressions": tot_impr,
+        "branded_clicks": b_clicks,
+        "branded_impressions": b_impr,
+        "nonbranded_clicks": nb_clicks,
+        "nonbranded_impressions": nb_impr,
+        "branded_click_share": b_click_share,
+        "nonbranded_click_share": nb_click_share,
+        "branded_impression_share": b_impr_share,
+        "nonbranded_impression_share": nb_impr_share,
+        "branded": {
+            "clicks": b_clicks,
+            "impressions": b_impr,
+            "ctr": b_ctr,
+            "query_count": len(acc["branded_queries"]),
+            "click_share": b_click_share,
+            "impression_share": b_impr_share,
+        },
+        "nonbranded": {
+            "clicks": nb_clicks,
+            "impressions": nb_impr,
+            "ctr": nb_ctr,
+            "query_count": len(acc["nonbranded_queries"]),
+            "click_share": nb_click_share,
+            "impression_share": nb_impr_share,
+        },
+        "share": {
+            "branded_click_share": b_click_share,
+            "nonbranded_click_share": nb_click_share,
+            "branded_impression_share": b_impr_share,
+            "nonbranded_impression_share": nb_impr_share,
+        },
+        "trend": trend,
+        "daily_series": daily_series,
+    }
+
+
+def _parse_bing_numeric(val: Any) -> float:
+    s = str(val or "").strip().replace(",", "").replace("%", "")
+    if not s or s in ("-", "--", "N/A", "n/a"):
+        return 0.0
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def ingest_bing_ai_performance_csv(
+    csv_path: Union[str, Path],
+    domain: str,
+) -> Dict[str, Any]:
+    """
+    Parses a monthly Bing Webmaster AI Performance / Topic Portfolio CSV export for a domain,
+    normalizing cited URLs, topics, grounding queries, citations, clicks, and impressions.
+    Zero em-dashes. Zero en-dashes.
+    """
+    path = Path(csv_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Bing AI Performance CSV not found: {path}")
+
+    norm_domain = (
+        str(domain or "")
+        .strip()
+        .lower()
+        .removeprefix("https://")
+        .removeprefix("http://")
+        .split("/")[0]
+        .removeprefix("www.")
+    )
+
+    records: List[Dict[str, Any]] = []
+    by_url: Dict[str, Dict[str, Any]] = {}
+    by_topic: Dict[str, Dict[str, Any]] = {}
+    skipped_foreign_domain = 0
+    total_citations = 0
+    total_clicks = 0
+    total_impressions = 0
+
+    with path.open("r", encoding="utf-8-sig", newline="") as fh:
+        reader = csv.DictReader(fh)
+        for raw_row in reader:
+            row = {
+                re.sub(r"[^a-z0-9]+", "_", str(k or "").strip().lower()).strip("_"): (v or "").strip()
+                for k, v in (raw_row or {}).items()
+                if k is not None
+            }
+            if not any(row.values()):
+                continue
+
+            raw_url = (
+                row.get("cited_page")
+                or row.get("cited_url")
+                or row.get("page_url")
+                or row.get("page")
+                or row.get("url")
+                or row.get("top_pages")
+                or row.get("landing_page")
+                or ""
+            )
+            resolved_url = ""
+            if raw_url:
+                if raw_url.startswith("/"):
+                    resolved_url = f"https://{norm_domain}{raw_url}"
+                elif raw_url.startswith("http://") or raw_url.startswith("https://"):
+                    resolved_url = raw_url
+                else:
+                    resolved_url = f"https://{raw_url}"
+
+                parsed_host = (urllib.parse.urlparse(resolved_url).hostname or "").lower().removeprefix("www.")
+                if norm_domain and parsed_host and parsed_host != norm_domain and not parsed_host.endswith(f".{norm_domain}"):
+                    skipped_foreign_domain += 1
+                    continue
+
+            topic = (
+                row.get("topic")
+                or row.get("topic_name")
+                or row.get("portfolio_topic")
+                or row.get("category")
+                or ""
+            )
+            grounding_raw = (
+                row.get("grounding_queries")
+                or row.get("grounding_query")
+                or row.get("query")
+                or row.get("search_query")
+                or ""
+            )
+            grounding_queries = [
+                q.strip()
+                for q in re.split(r"[|;\n]+", grounding_raw)
+                if q.strip()
+            ]
+            citations = max(
+                0,
+                int(
+                    round(
+                        _parse_bing_numeric(
+                            row.get("citations")
+                            or row.get("ai_citations")
+                            or row.get("citation_count")
+                            or row.get("cited_pages")
+                        )
+                    )
+                ),
+            )
+            clicks = max(0, int(round(_parse_bing_numeric(row.get("clicks") or row.get("ai_clicks")))))
+            impressions = max(0, int(round(_parse_bing_numeric(row.get("impressions") or row.get("ai_impressions")))))
+            period = row.get("date") or row.get("month") or row.get("period") or row.get("reporting_month") or ""
+
+            rec = {
+                "url": resolved_url,
+                "topic": topic,
+                "grounding_queries": grounding_queries,
+                "citations": citations,
+                "clicks": clicks,
+                "impressions": impressions,
+                "period": period,
+            }
+            records.append(rec)
+            total_citations += citations
+            total_clicks += clicks
+            total_impressions += impressions
+
+            if resolved_url:
+                p = urllib.parse.urlparse(resolved_url)
+                canon_key = f"{(p.hostname or '').lower().removeprefix('www.')}{p.path}".rstrip("/").lower()
+                u_bucket = by_url.setdefault(
+                    canon_key,
+                    {
+                        "canonical_key": canon_key,
+                        "url": resolved_url,
+                        "citations": 0,
+                        "clicks": 0,
+                        "impressions": 0,
+                        "topics": [],
+                        "grounding_queries": [],
+                    },
+                )
+                u_bucket["citations"] += citations
+                u_bucket["clicks"] += clicks
+                u_bucket["impressions"] += impressions
+                if topic and topic not in u_bucket["topics"]:
+                    u_bucket["topics"].append(topic)
+                for gq in grounding_queries:
+                    if gq not in u_bucket["grounding_queries"]:
+                        u_bucket["grounding_queries"].append(gq)
+
+            if topic:
+                t_key = topic.lower()
+                t_bucket = by_topic.setdefault(
+                    t_key,
+                    {
+                        "topic": topic,
+                        "citations": 0,
+                        "clicks": 0,
+                        "impressions": 0,
+                        "urls": [],
+                        "grounding_queries": [],
+                    },
+                )
+                t_bucket["citations"] += citations
+                t_bucket["clicks"] += clicks
+                t_bucket["impressions"] += impressions
+                if resolved_url and resolved_url not in t_bucket["urls"]:
+                    t_bucket["urls"].append(resolved_url)
+                for gq in grounding_queries:
+                    if gq not in t_bucket["grounding_queries"]:
+                        t_bucket["grounding_queries"].append(gq)
+
+    return {
+        "domain": norm_domain,
+        "csv_path": str(path),
+        "rows_parsed": len(records),
+        "skipped_foreign_domain": skipped_foreign_domain,
+        "total_citations": total_citations,
+        "total_clicks": total_clicks,
+        "total_impressions": total_impressions,
+        "unique_cited_urls": sorted(v["url"] for v in by_url.values()),
+        "unique_topics": sorted(v["topic"] for v in by_topic.values()),
+        "by_url": by_url,
+        "by_topic": by_topic,
+        "records": records,
+    }

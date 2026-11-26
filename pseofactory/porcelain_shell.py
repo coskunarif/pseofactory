@@ -21,6 +21,7 @@ import hashlib
 import html as html_lib
 import json
 import os
+import random
 import re
 import shutil
 import struct
@@ -100,6 +101,35 @@ TENANT_BRAND_PALETTES: Dict[str, Dict[str, str]] = {
         "default_gsc_token": "wonyZkQ-8DZKcbdV_GTbbxIZVWgA3kWYvABx0jSrN4Q",
     },
 }
+
+# Dynamic WCAG AA (>= 4.5:1) verified accent palette pool for 50+ multi-tenant estates
+_DYNAMIC_BRAND_PALETTE_POOL: Tuple[Dict[str, str], ...] = (
+    {"brand_primary": "#1d4ed8", "brand_hover": "#1e40af", "brand_soft": "#eff6ff", "brand_border": "#bfdbfe"},
+    {"brand_primary": "#0f766e", "brand_hover": "#115e59", "brand_soft": "#f0fdfa", "brand_border": "#99f6e4"},
+    {"brand_primary": "#047857", "brand_hover": "#065f46", "brand_soft": "#ecfdf5", "brand_border": "#a7f3d0"},
+    {"brand_primary": "#b45309", "brand_hover": "#92400e", "brand_soft": "#fffbeb", "brand_border": "#fde68a"},
+    {"brand_primary": "#4338ca", "brand_hover": "#3730a3", "brand_soft": "#eef2ff", "brand_border": "#c7d2fe"},
+    {"brand_primary": "#6d28d9", "brand_hover": "#5b21b6", "brand_soft": "#f5f3ff", "brand_border": "#ddd6fe"},
+    {"brand_primary": "#9f1239", "brand_hover": "#881337", "brand_soft": "#fff1f2", "brand_border": "#fecdd3"},
+    {"brand_primary": "#0369a1", "brand_hover": "#075985", "brand_soft": "#f0f9ff", "brand_border": "#bae6fd"},
+)
+
+
+def is_nosnippet_split_test_enabled(profile: Optional[Dict[str, Any]] = None, property_id: str = "") -> bool:
+    """
+    Returns True ONLY when the safe 1-tenant data-nosnippet split-test flag is explicitly enabled
+    via profile['nosnippet_split_test_enabled'] or PSEUFACTORY_NOSNIPPET_SPLIT_TENANT env var.
+    Default fleet behavior is always False.
+    """
+    prop = str((profile or {}).get("property_id") or property_id or "").strip().lower()
+    if prop == "profithelm-platform":
+        prop = "profithelm"
+    if profile and bool(profile.get("nosnippet_split_test_enabled", False)):
+        return True
+    env_tenant = str(os.environ.get("PSEUFACTORY_NOSNIPPET_SPLIT_TENANT", "") or "").strip().lower()
+    if env_tenant == "profithelm-platform":
+        env_tenant = "profithelm"
+    return bool(prop and env_tenant and env_tenant == prop)
 
 
 def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
@@ -211,8 +241,11 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         if is_known_contract
         else (" ".join(w.capitalize() for w in prop.replace("-", "_").split("_") if w) or "Site")
     )
-    pal = dict(TENANT_BRAND_PALETTES.get(prop) or TENANT_BRAND_PALETTES["profithelm"])
-    if prop not in TENANT_BRAND_PALETTES:
+    if prop in TENANT_BRAND_PALETTES:
+        pal = dict(TENANT_BRAND_PALETTES[prop])
+    else:
+        pal_idx = hashlib.sha256(prop.encode("utf-8")).digest()[0] % len(_DYNAMIC_BRAND_PALETTE_POOL)
+        pal = dict(_DYNAMIC_BRAND_PALETTE_POOL[pal_idx])
         pal["default_gsc_token"] = ""
         pal["badge_letter"] = b_name[0].upper() if b_name else "S"
         pal["css_href"] = "/css/style.css"
@@ -446,6 +479,7 @@ def _build_porcelain_tenant_profile_uncached(prop: str) -> Dict[str, Any]:
         "partner_list_summary": partner_list_summary,
         "disclaimers_sections_html": disclaimers_sections_html,
         "default_tools": default_tools[:8],
+        "nosnippet_split_test_enabled": False,
         **pal,
     }
 
@@ -458,17 +492,336 @@ def extract_defined_and_referenced_css_vars(css_text: str) -> Tuple[Set[str], Se
     return defined, referenced
 
 
-@functools.lru_cache(maxsize=32)
+_PORCELAIN_FONT_STACKS_SANS: Tuple[str, ...] = (
+    '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    '"IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    '"Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, Arial, sans-serif',
+    '"DM Sans", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif',
+)
+
+_PORCELAIN_FONT_STACKS_MONO: Tuple[str, ...] = (
+    '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    '"Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace',
+    'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+)
+
+_PORCELAIN_METER_TIER_PALETTES: Tuple[Tuple[str, str, str, str, str, str, str], ...] = (
+    ("#93c5fd", "#60a5fa", "#3b82f6", "#1d4ed8", "#1e40af", "#1e3a8a", "#0f172a"),
+    ("#99f6e4", "#5eead4", "#2dd4bf", "#0f766e", "#115e59", "#134e4a", "#0f172a"),
+    ("#a7f3d0", "#6ee7b7", "#34d399", "#047857", "#065f46", "#064e3b", "#0f172a"),
+    ("#fde68a", "#fcd34d", "#f59e0b", "#b45309", "#92400e", "#78350f", "#0f172a"),
+    ("#c7d2fe", "#a5b4fc", "#818cf8", "#4338ca", "#3730a3", "#312e81", "#0f172a"),
+    ("#ddd6fe", "#c4b5fd", "#a78bfa", "#6d28d9", "#5b21b6", "#4c1d95", "#0f172a"),
+    ("#fecdd3", "#fda4af", "#fb7185", "#9f1239", "#881337", "#4c0519", "#0f172a"),
+    ("#bae6fd", "#7dd3fc", "#38bdf8", "#0369a1", "#075985", "#0c4a6e", "#0f172a"),
+)
+
+_PORCELAIN_CSS_LAYOUT_CLUSTERS: Tuple[Dict[str, Any], ...] = (
+    {
+        "cluster_name": "ledger-crisp",
+        "container_max": "1080px",
+        "flow_gap": "14px",
+        "card_pad": "1.375rem",
+        "radius_sm": "4px",
+        "radius_md": "6px",
+        "shadow_subtle": "0 1px 1px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_sm": "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_card": "0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04)",
+        "shadow_md": "0 4px 8px -2px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 12px 24px -6px rgba(15, 23, 42, 0.08), 0 6px 10px -4px rgba(15, 23, 42, 0.04)",
+        "hero_border": "border-top: 3px solid var(--brand-primary);",
+        "table_head_bg": "var(--bg-subtle)",
+        "qa_border_w": "4px",
+        "format_mode": "compact",
+    },
+    {
+        "cluster_name": "atelier-airy",
+        "container_max": "1140px",
+        "flow_gap": "20px",
+        "card_pad": "1.625rem",
+        "radius_sm": "8px",
+        "radius_md": "10px",
+        "shadow_subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.03)",
+        "shadow_sm": "0 2px 4px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_card": "0 2px 6px 0 rgba(15, 23, 42, 0.05), 0 1px 3px -1px rgba(15, 23, 42, 0.03)",
+        "shadow_md": "0 6px 12px -2px rgba(15, 23, 42, 0.06), 0 3px 6px -2px rgba(15, 23, 42, 0.03)",
+        "shadow_elevated": "0 14px 28px -6px rgba(15, 23, 42, 0.07), 0 8px 12px -6px rgba(15, 23, 42, 0.03)",
+        "hero_border": "border-left: 4px solid var(--brand-primary);",
+        "table_head_bg": "var(--brand-soft)",
+        "qa_border_w": "3px",
+        "format_mode": "indent4",
+    },
+    {
+        "cluster_name": "actuarial-grid",
+        "container_max": "1100px",
+        "flow_gap": "16px",
+        "card_pad": "1.5rem",
+        "radius_sm": "5px",
+        "radius_md": "7px",
+        "shadow_subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_sm": "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_card": "0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04)",
+        "shadow_md": "0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04)",
+        "hero_border": "border-top: 4px solid var(--brand-primary);",
+        "table_head_bg": "var(--bg-muted)",
+        "qa_border_w": "5px",
+        "format_mode": "expanded",
+    },
+    {
+        "cluster_name": "statute-folio",
+        "container_max": "1120px",
+        "flow_gap": "18px",
+        "card_pad": "1.75rem",
+        "radius_sm": "6px",
+        "radius_md": "8px",
+        "shadow_subtle": "0 1px 3px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_sm": "0 1px 3px 0 rgba(15, 23, 42, 0.06)",
+        "shadow_card": "0 2px 5px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04)",
+        "shadow_md": "0 5px 10px -2px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.05)",
+        "shadow_elevated": "0 12px 26px -5px rgba(15, 23, 42, 0.09), 0 8px 10px -6px rgba(15, 23, 42, 0.04)",
+        "hero_border": "border-bottom: 2px solid var(--brand-border);",
+        "table_head_bg": "var(--bg-subtle)",
+        "qa_border_w": "4px",
+        "format_mode": "compact_semi",
+    },
+    {
+        "cluster_name": "compliance-vault",
+        "container_max": "1090px",
+        "flow_gap": "15px",
+        "card_pad": "1.375rem",
+        "radius_sm": "5px",
+        "radius_md": "9px",
+        "shadow_subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.03)",
+        "shadow_sm": "0 1px 3px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_card": "0 2px 4px 0 rgba(15, 23, 42, 0.05), 0 1px 2px 0 rgba(15, 23, 42, 0.03)",
+        "shadow_md": "0 4px 9px -1px rgba(15, 23, 42, 0.06), 0 2px 4px -1px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 11px 22px -4px rgba(15, 23, 42, 0.08), 0 6px 9px -4px rgba(15, 23, 42, 0.04)",
+        "hero_border": "border-top: 3px solid var(--brand-hover);",
+        "table_head_bg": "var(--bg-inset)",
+        "qa_border_w": "3px",
+        "format_mode": "indent3_tight",
+    },
+    {
+        "cluster_name": "surety-column",
+        "container_max": "1130px",
+        "flow_gap": "17px",
+        "card_pad": "1.5rem",
+        "radius_sm": "4px",
+        "radius_md": "8px",
+        "shadow_subtle": "0 1px 1px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_sm": "0 2px 3px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_card": "0 1px 4px 0 rgba(15, 23, 42, 0.07), 0 1px 2px -1px rgba(15, 23, 42, 0.04)",
+        "shadow_md": "0 5px 8px -2px rgba(15, 23, 42, 0.07), 0 2px 5px -2px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 13px 25px -5px rgba(15, 23, 42, 0.08), 0 7px 11px -5px rgba(15, 23, 42, 0.04)",
+        "hero_border": "border-left: 3px solid var(--brand-primary);",
+        "table_head_bg": "var(--bg-muted)",
+        "qa_border_w": "5px",
+        "format_mode": "indent2_tagged",
+    },
+    {
+        "cluster_name": "counsel-brief",
+        "container_max": "1060px",
+        "flow_gap": "14px",
+        "card_pad": "1.625rem",
+        "radius_sm": "7px",
+        "radius_md": "9px",
+        "shadow_subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_sm": "0 1px 2px 0 rgba(15, 23, 42, 0.04)",
+        "shadow_card": "0 2px 6px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03)",
+        "shadow_md": "0 6px 10px -2px rgba(15, 23, 42, 0.06), 0 3px 5px -2px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 15px 28px -6px rgba(15, 23, 42, 0.08), 0 8px 12px -6px rgba(15, 23, 42, 0.03)",
+        "hero_border": "border-bottom: 3px solid var(--brand-primary);",
+        "table_head_bg": "var(--brand-soft)",
+        "qa_border_w": "4px",
+        "format_mode": "compact_spaced",
+    },
+    {
+        "cluster_name": "treasury-desk",
+        "container_max": "1110px",
+        "flow_gap": "19px",
+        "card_pad": "1.4375rem",
+        "radius_sm": "6px",
+        "radius_md": "7px",
+        "shadow_subtle": "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_sm": "0 1px 3px 0 rgba(15, 23, 42, 0.05)",
+        "shadow_card": "0 1px 3px 0 rgba(15, 23, 42, 0.07), 0 1px 2px -1px rgba(15, 23, 42, 0.05)",
+        "shadow_md": "0 4px 7px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.04)",
+        "shadow_elevated": "0 10px 24px -4px rgba(15, 23, 42, 0.09), 0 8px 10px -6px rgba(15, 23, 42, 0.05)",
+        "hero_border": "border-top: 2px solid var(--brand-border);",
+        "table_head_bg": "var(--bg-subtle)",
+        "qa_border_w": "3px",
+        "format_mode": "indent5_multi",
+    },
+)
+
+
+def _resolve_porcelain_css_cluster(prop_key: str, brand: str) -> Dict[str, Any]:
+    """Deterministically resolves a per-domain CSS token + layout cluster from SHA-256."""
+    seed_src = (prop_key or brand or "porcelain").strip().lower()
+    digest = hashlib.sha256(seed_src.encode("utf-8")).digest()
+    cluster_idx = digest[0] % len(_PORCELAIN_CSS_LAYOUT_CLUSTERS)
+    font_sans_idx = digest[1] % len(_PORCELAIN_FONT_STACKS_SANS)
+    font_mono_idx = digest[2] % len(_PORCELAIN_FONT_STACKS_MONO)
+    meter_idx = digest[3] % len(_PORCELAIN_METER_TIER_PALETTES)
+    base_cfg = dict(_PORCELAIN_CSS_LAYOUT_CLUSTERS[cluster_idx])
+    base_cfg["cluster_idx"] = cluster_idx
+    base_cfg["font_sans"] = _PORCELAIN_FONT_STACKS_SANS[font_sans_idx]
+    base_cfg["font_mono"] = _PORCELAIN_FONT_STACKS_MONO[font_mono_idx]
+    base_cfg["meter_tiers"] = _PORCELAIN_METER_TIER_PALETTES[meter_idx]
+    base_cfg["digest"] = digest
+    base_cfg["slug_tag"] = re.sub(r"[^a-z0-9]+", "-", seed_src).strip("-") or "porcelain"
+    return base_cfg
+
+
+def _polymorph_porcelain_css_structure(css_text: str, cluster: Dict[str, Any]) -> str:
+    """
+    Applies deterministic per-domain structural permutation, token-group ordering,
+    and formatting polymorphism while keeping cascade safety, WCAG AA, and all
+    Porcelain invariants intact.
+    """
+    digest: bytes = cluster["digest"]
+    fmt_mode: str = str(cluster.get("format_mode") or "expanded")
+    cluster_name: str = str(cluster.get("cluster_name") or "porcelain")
+
+    # 1. Permute :root token groups deterministically
+    root_m = re.search(r"(:root\s*\{)([\s\S]*?)(\n\})", css_text)
+    if root_m:
+        root_inner = root_m.group(2)
+        groups = re.split(r"(?=\n  /\* )", root_inner.strip("\n"))
+        groups = [g for g in groups if g.strip()]
+        if len(groups) > 1:
+            rng_tok = random.Random(int.from_bytes(digest[4:12], "big"))
+            rng_tok.shuffle(groups)
+            reordered_root = "\n".join(g.strip("\n") for g in groups)
+            css_text = css_text[: root_m.start(2)] + "\n" + reordered_root + css_text[root_m.end(2) :]
+
+    # 2. Permute independent component CSS sections between base foundation and @media breakpoints
+    # Keep header comment + :root + reset + skip-link + container + header + typography + links + focus + cards
+    # in base prefix; keep @media breakpoints at the tail.
+    split_start_marker = "/* Breadcrumbs, Quick Answer & Above-the-Fold Compliance Strip */"
+    split_end_marker = "/* Mobile Responsive Breakpoints */"
+    s_idx = css_text.find(split_start_marker)
+    e_idx = css_text.find(split_end_marker)
+    if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+        head_part = css_text[:s_idx]
+        mid_part = css_text[s_idx:e_idx]
+        tail_part = css_text[e_idx:]
+
+        # Split mid_part on top-level section comments (/* ... */ at start of line)
+        sections = re.split(r"(?m)(?=^/\* [A-Z][^\n]*\*/\s*$)", mid_part)
+        sections = [sec.strip() for sec in sections if sec.strip()]
+        if len(sections) > 2:
+            rng_sec = random.Random(int.from_bytes(digest[12:20], "big"))
+            rng_sec.shuffle(sections)
+            mid_part = "\n\n".join(sections) + "\n\n"
+        css_text = head_part + mid_part + tail_part
+
+    # 3. Apply deterministic cluster formatting & comment style on non-protected blocks
+    if fmt_mode == "indent4":
+        css_text = re.sub(r"(?m)^  (?![ /])", "    ", css_text)
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* [{cluster_name}] {m.group(1).strip()} */",
+            css_text,
+        )
+    elif fmt_mode == "compact":
+        # Collapse multi-line declaration bodies (except :root, @media, and exact .calc-grid > * guard) into single-line rules
+        def _compact_block(m: re.Match[str]) -> str:
+            hdr = m.group(1).strip()
+            body = m.group(2)
+            if hdr.startswith((":root", "@media")) or ".calc-grid > *" in hdr or "min-width: 0;" in body:
+                return m.group(0)
+            decls = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("/*")]
+            if not decls or any("{" in d or "}" in d for d in decls):
+                return m.group(0)
+            hdr_flat = re.sub(r"\s*\n\s*", " ", hdr)
+            return f"{hdr_flat} {{ {' '.join(decls)} }}"
+
+        css_text = re.sub(r"(?m)^([^\{\}@\n][^\{\}]*?)\s*\{([^{}]+)\}", _compact_block, css_text)
+        css_text = re.sub(r"/\* ([A-Z][^\n*]*?) \*/", lambda m: f"/* {m.group(1).strip().upper()} */", css_text)
+    elif fmt_mode == "compact_semi":
+        # Re-indent to 3 spaces and collapse multi-selector headers onto one line
+        css_text = re.sub(r"(?m)^  (?![ /])", "   ", css_text)
+        css_text = re.sub(
+            r"(?m)^([^@{}\n]+,\n(?:[^@{}\n]+,\n)*[^@{}\n]+\{)",
+            lambda m: re.sub(r",\s*\n\s*", ", ", m.group(1)),
+            css_text,
+        )
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* -- {m.group(1).strip()} -- */",
+            css_text,
+        )
+    elif fmt_mode == "indent3_tight":
+        css_text = re.sub(r"(?m)^  (?![ /])", "   ", css_text)
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* {cluster_name} :: {m.group(1).strip()} */",
+            css_text,
+        )
+    elif fmt_mode == "indent2_tagged":
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* @{cluster_name}: {m.group(1).strip()} */",
+            css_text,
+        )
+    elif fmt_mode == "compact_spaced":
+        def _compact_spaced_block(m: re.Match[str]) -> str:
+            hdr = m.group(1).strip()
+            body = m.group(2)
+            if hdr.startswith((":root", "@media")) or ".calc-grid > *" in hdr or "min-width: 0;" in body:
+                return m.group(0)
+            decls = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("/*")]
+            if not decls or any("{" in d or "}" in d for d in decls):
+                return m.group(0)
+            hdr_flat = re.sub(r"\s*\n\s*", " ", hdr)
+            return f"{hdr_flat} {{\n    {' '.join(decls)}\n}}"
+
+        css_text = re.sub(r"(?m)^([^\{\}@\n][^\{\}]*?)\s*\{([^{}]+)\}", _compact_spaced_block, css_text)
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* [{cluster_name}] :: {m.group(1).strip()} */",
+            css_text,
+        )
+    elif fmt_mode == "indent5_multi":
+        def _flat_short_block(m: re.Match[str]) -> str:
+            hdr = m.group(1).strip()
+            body = m.group(2)
+            if hdr.startswith((":root", "@media")) or ".calc-grid > *" in hdr or "min-width: 0;" in body:
+                return m.group(0)
+            decls = [ln.strip() for ln in body.splitlines() if ln.strip() and not ln.strip().startswith("/*")]
+            if not decls or len(decls) > 5 or any("{" in d or "}" in d for d in decls):
+                return m.group(0)
+            hdr_flat = re.sub(r"\s*\n\s*", " ", hdr)
+            return f"{hdr_flat} {{ {'  '.join(decls)} }}"
+
+        css_text = re.sub(r"(?m)^([^\{\}@\n][^\{\}]*?)\s*\{([^{}]+)\}", _flat_short_block, css_text)
+        css_text = re.sub(r"(?m)^  (?![ /])", "     ", css_text)
+        css_text = re.sub(
+            r"/\* ([A-Z][^\n*]*?) \*/",
+            lambda m: f"/* # {m.group(1).strip()} ({cluster_name}) */",
+            css_text,
+        )
+
+    return css_text
+
+
+@functools.lru_cache(maxsize=64)
 def _generate_porcelain_stylesheet_cached(
     brand: str,
     bp: str,
     bh: str,
     bs: str,
     bb: str,
+    prop_id: str = "",
 ) -> Tuple[str, str, FrozenSet[str]]:
     """Cached pure builder returning (css_text, sha256_10, defined_css_vars)."""
+    cluster = _resolve_porcelain_css_cluster(prop_id, brand)
+    mt1, mt2, mt3, mt4, mt5, mt6, mt7 = cluster["meter_tiers"]
     css = f"""/**
- * {brand} Canonical Porcelain Light Design System ({PORCELAIN_SHELL_VERSION})
+ * {brand} Canonical Porcelain Light Design System ({PORCELAIN_SHELL_VERSION} / {cluster["cluster_name"]})
  * Single-source-of-truth Porcelain tokens, layout primitives, WCAG AA contrast,
  * 44x44px touch ergonomics, and CPA print media rules.
  * Zero em-dashes. Zero en-dashes.
@@ -514,6 +867,7 @@ def _generate_porcelain_stylesheet_cached(
   --accent-secondary: {bh};
   --accent-subtle: {bs};
   --cta-fg: #ffffff;
+  --table-head-bg: {cluster["table_head_bg"]};
 
   /* Borders & Focus Indicators */
   --border-hairline: #e2e8f0;
@@ -541,26 +895,29 @@ def _generate_porcelain_stylesheet_cached(
   --status-negative-border: #fecaca;
 
   /* Progressive Bracket Meter Tokens */
-  --meter-tier-1: #93c5fd;
-  --meter-tier-2: #60a5fa;
-  --meter-tier-3: #3b82f6;
-  --meter-tier-4: #1d4ed8;
-  --meter-tier-5: #1e40af;
-  --meter-tier-6: #1e3a8a;
-  --meter-tier-7: #0f172a;
+  --meter-tier-1: {mt1};
+  --meter-tier-2: {mt2};
+  --meter-tier-3: {mt3};
+  --meter-tier-4: {mt4};
+  --meter-tier-5: {mt5};
+  --meter-tier-6: {mt6};
+  --meter-tier-7: {mt7};
 
   /* Elevation, Radius & Font Stacks */
-  --shadow-subtle: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
-  --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
-  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
-  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
-  --shadow-elevated: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --border-radius: 8px;
+  --shadow-subtle: {cluster["shadow_subtle"]};
+  --shadow-sm: {cluster["shadow_sm"]};
+  --shadow-card: {cluster["shadow_card"]};
+  --shadow-md: {cluster["shadow_md"]};
+  --shadow-elevated: {cluster["shadow_elevated"]};
+  --radius-sm: {cluster["radius_sm"]};
+  --radius-md: {cluster["radius_md"]};
+  --border-radius: {cluster["radius_md"]};
   --radius-card: 12px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --container-max: {cluster["container_max"]};
+  --flow-gap: {cluster["flow_gap"]};
+  --card-pad: {cluster["card_pad"]};
+  --font-sans: {cluster["font_sans"]};
+  --font-mono: {cluster["font_mono"]};
 }}
 
 *, *::before, *::after {{
@@ -623,7 +980,7 @@ body {{
 /* Layout Container & Locked Vertical Flow Rhythm */
 .container {{
   width: 100%;
-  max-width: 1120px;
+  max-width: var(--container-max);
   margin-left: auto;
   margin-right: auto;
   padding-left: 1.25rem;
@@ -643,7 +1000,7 @@ main#main-content {{
 main#main-content > .container {{
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--flow-gap);
 }}
 
 .site-main > .container > *,
@@ -973,8 +1330,8 @@ summary:focus-visible,
   color: var(--text-primary);
   border: 1px solid var(--border-subtle);
   border-radius: 12px !important;
-  padding: 1.5rem;
-  box-shadow: var(--shadow-sm);
+  padding: var(--card-pad);
+  box-shadow: var(--shadow-card);
 }}
 
 /* Breadcrumbs, Quick Answer & Above-the-Fold Compliance Strip */
@@ -1624,6 +1981,39 @@ template {{
 
 .cf-turnstile-slot:empty {{
   display: none;
+}}
+
+.pseo-attribution-group {{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}}
+
+.pseo-attribution-pills {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}}
+
+.pseo-attribution-pill {{
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}}
+
+.pseo-attribution-pill.active,
+.pseo-attribution-pill[aria-pressed="true"] {{
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
 }}
 
 .footer-grid {{
@@ -3541,6 +3931,62 @@ details.faq-accordion > summary::-webkit-details-marker {{
   margin-top: 0.75rem;
 }}
 
+/* Cluster-Variant Governance & Editorial Surface Primitives */
+.hero-section,
+.tool-hero {{
+  {cluster["hero_border"]}
+}}
+
+.quick-answer {{
+  border-left-width: {cluster["qa_border_w"]};
+}}
+
+.table-wrap thead th,
+.pseo-table-wrap thead th {{
+  background-color: var(--table-head-bg);
+}}
+
+.gov-meta-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.875rem;
+  margin: 0.75rem 0 0 0;
+  padding: 0;
+}}
+
+.gov-meta-grid dt {{
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.25rem;
+}}
+
+.gov-meta-grid dd {{
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.9375rem;
+}}
+
+.gov-steps {{
+  margin: 0.75rem 0 0 1.25rem;
+  padding: 0;
+  color: var(--text-secondary);
+}}
+
+.gov-steps li {{
+  margin-bottom: 0.5rem;
+}}
+
+.gov-callout {{
+  background-color: var(--brand-soft);
+  border-left: {cluster["qa_border_w"]} solid var(--brand-primary);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin: 0.75rem 0;
+}}
+
 /* Mobile Responsive Breakpoints */
 @media (max-width: 900px) {{
   .footer-grid {{
@@ -3799,6 +4245,7 @@ details.faq-accordion > summary::-webkit-details-marker {{
   }}
 }}
 """
+    css = _polymorph_porcelain_css_structure(css, cluster)
     defined, referenced = extract_defined_and_referenced_css_vars(css)
     undefined = sorted(referenced - defined)
     if undefined:
@@ -3810,12 +4257,14 @@ details.faq-accordion > summary::-webkit-details-marker {{
 def _get_porcelain_stylesheet_meta_from_profile(profile: Dict[str, Any]) -> Tuple[str, str, FrozenSet[str]]:
     """Validates profile WCAG palette and returns cached (css_text, sha256_10, defined_css_vars)."""
     assert_porcelain_palette_wcag(profile)
+    prop_key = str(profile.get("property_id") or profile.get("brand_name") or "").strip().lower()
     return _generate_porcelain_stylesheet_cached(
         str(profile["brand_name"]),
         str(profile["brand_primary"]),
         str(profile["brand_hover"]),
         str(profile["brand_soft"]),
         str(profile["brand_border"]),
+        prop_id=prop_key,
     )
 
 
@@ -5667,6 +6116,7 @@ def _enforce_calculator_leaf_slot_order(
     rel_path: str,
     profile: Dict[str, Any],
     body_attrs: str = "",
+    page_title: Optional[str] = None,
 ) -> str:
     """
     Enforces the locked calculator_leaf order inside div.container:
@@ -5677,6 +6127,15 @@ def _enforce_calculator_leaf_slot_order(
     5. Methodology, Scenario <table>s, Datasets & FAQ .cards
     """
     work = inner_html
+    if page_title:
+        from pseofactory.estate_common import sync_h1_to_title_core_coverage
+
+        work = sync_h1_to_title_core_coverage(
+            work,
+            rel_path=rel_path,
+            brand_name=str(profile.get("brand_name") or ""),
+            page_title=page_title,
+        )
     is_restricted = _is_restricted_public_service_leaf(work, rel_path, profile, body_attrs=body_attrs)
 
     # Strip all duplicate legacy YMYL / FTC disclaimer blocks anywhere in the leaf body
@@ -6680,6 +7139,161 @@ def _convert_preset_anchors_to_hash_buttons(html_chunk: str) -> str:
     return re.sub(r"<a\b([^>]*)>([\s\S]*?)</a>", _repl, html_chunk, flags=re.IGNORECASE)
 
 
+def _find_balanced_tag_end_pos(html_text: str, start_idx: int, tag_name: str) -> int:
+    """Returns exclusive end index of the balanced <tag_name>...</tag_name> starting at start_idx, or -1."""
+    tag_re = re.compile(rf"<(/?){re.escape(tag_name)}\b[^>]*>", re.IGNORECASE)
+    depth = 0
+    for tm in tag_re.finditer(html_text, start_idx):
+        raw = tm.group(0)
+        if tm.group(1):
+            depth -= 1
+            if depth <= 0:
+                return tm.end()
+        elif not raw.endswith("/>"):
+            depth += 1
+    return -1
+
+
+def _collect_open_ancestors_before(html_text: str, pos: int) -> List[Tuple[str, str]]:
+    """Returns active open ancestor (tag_lower, attrs_lower) frames active at byte/char offset pos."""
+    void_tags = {
+        "area", "base", "br", "col", "embed", "hr", "img",
+        "input", "link", "meta", "param", "source", "track", "wbr",
+    }
+    stack: List[Tuple[str, str]] = []
+    prefix = re.sub(r"<!--[\s\S]*?-->", lambda m: " " * len(m.group(0)), html_text[:pos])
+    for tm in re.finditer(r"<(/?)([a-zA-Z][a-zA-Z0-9_-]*)\b([^>]*)>", prefix):
+        is_close = bool(tm.group(1))
+        t_low = tm.group(2).lower()
+        attrs_raw = tm.group(3)
+        if t_low in void_tags:
+            continue
+        if is_close:
+            for idx in range(len(stack) - 1, -1, -1):
+                if stack[idx][0] == t_low:
+                    del stack[idx:]
+                    break
+        elif not attrs_raw.rstrip().endswith("/"):
+            stack.append((t_low, attrs_raw.lower()))
+    return stack
+
+
+def _wrap_eligible_div_blocks_with_nosnippet(
+    html_text: str,
+    open_div_re: re.Pattern[str],
+    is_eligible_fn: Any,
+) -> str:
+    """Wraps matching balanced <div> blocks in <div data-nosnippet>...</div> when eligible and not already wrapped."""
+    out: List[str] = []
+    cursor = 0
+    while True:
+        m = open_div_re.search(html_text, cursor)
+        if not m:
+            out.append(html_text[cursor:])
+            break
+        start = m.start()
+        end = _find_balanced_tag_end_pos(html_text, start, "div")
+        if end == -1 or end <= start:
+            out.append(html_text[cursor : m.end()])
+            cursor = m.end()
+            continue
+        block = html_text[start:end]
+        ancestors = _collect_open_ancestors_before(html_text, start)
+        if any("data-nosnippet" in a_attrs for _, a_attrs in ancestors):
+            out.append(html_text[cursor:end])
+            cursor = end
+            continue
+        if is_eligible_fn(block, ancestors):
+            out.append(html_text[cursor:start])
+            out.append(f"<div data-nosnippet>{block}</div>")
+            cursor = end
+        else:
+            out.append(html_text[cursor:end])
+            cursor = end
+    return "".join(out)
+
+
+def _apply_nosnippet_split_test_wrappers(inner_main: str) -> str:
+    """
+    Pilot 1-tenant split-test wrapper: wraps non-cliff secondary lookup tables and
+    workpaper preview blocks in balanced <div data-nosnippet>...</div> while keeping
+    the calculator form, quick-answer summary, and primary scope/cliff visualizer open.
+    Idempotent and zero boolean attribute traps.
+    """
+    if not inner_main:
+        return inner_main
+
+    stashed: List[str] = []
+
+    def _stash(m: re.Match[str]) -> str:
+        idx = len(stashed)
+        stashed.append(m.group(0))
+        return f"__PSEO_NS_STASH_{idx}__"
+
+    work = re.sub(r"<(script|style|template)\b[^>]*>[\s\S]*?</\1>", _stash, inner_main, flags=re.IGNORECASE)
+
+    # 1. Wrap workpaper preview blocks (.workpaper-preview-controls, #workpaper-preview-panel, .workpaper-preview-block)
+    preview_open_re = re.compile(
+        r'<div\b[^>]*(?:\bclass=["\'][^"\']*\bworkpaper-preview-(?:controls|panel|block)\b[^"\']*["\']'
+        r'|\bid=["\']workpaper-preview-panel["\'])[^>]*>',
+        re.IGNORECASE,
+    )
+
+    def _preview_eligible(block: str, ancestors: List[Tuple[str, str]]) -> bool:
+        for t_name, a_str in ancestors:
+            if t_name in ("form", "footer"):
+                return False
+            if "quick-answer" in a_str or "quick_answer" in a_str or "hero-section" in a_str:
+                return False
+        if re.search(r'\bclass=["\'][^"\']*\bquick-answer\b', block, flags=re.IGNORECASE):
+            return False
+        return True
+
+    work = _wrap_eligible_div_blocks_with_nosnippet(work, preview_open_re, _preview_eligible)
+
+    # 2. Wrap non-cliff secondary lookup tables (.table-wrap / .pseo-table-wrap / .calc-matrix-table-wrap)
+    table_wrap_open_re = re.compile(
+        r'<div\b[^>]*\bclass=["\'][^"\']*\b(?:table-wrap|pseo-table-wrap|calc-matrix-table-wrap)\b[^"\']*["\'][^>]*>',
+        re.IGNORECASE,
+    )
+    _blocked_ancestor_tokens = (
+        "quick-answer",
+        "quick_answer",
+        "hero-section",
+        "tool-hero",
+        "serp-cliff",
+        "multi-year-cliff",
+        "cliff-visualizer",
+        "calc-geo-answer-box",
+        "baseline-output-summary",
+        "statutory-sources",
+    )
+    _cliff_block_re = re.compile(
+        r"serp-cliff-matrix-table|serp-cliff-visualizer|multi-year-cliff|"
+        r"cliff-exposure-|cliff-bar-|scenario-cliff-delta|"
+        r"<table\b[^>]*(?:class|id)=[\"'][^\"']*cliff",
+        re.IGNORECASE,
+    )
+
+    def _table_eligible(block: str, ancestors: List[Tuple[str, str]]) -> bool:
+        for t_name, a_str in ancestors:
+            if t_name in ("form", "footer"):
+                return False
+            if any(tok in a_str for tok in _blocked_ancestor_tokens):
+                return False
+        if _cliff_block_re.search(block):
+            return False
+        if re.search(r'\bclass=["\'][^"\']*\bquick-answer\b', block, flags=re.IGNORECASE):
+            return False
+        return True
+
+    work = _wrap_eligible_div_blocks_with_nosnippet(work, table_wrap_open_re, _table_eligible)
+
+    for idx, raw in enumerate(stashed):
+        work = work.replace(f"__PSEO_NS_STASH_{idx}__", raw)
+    return work
+
+
 def normalize_html_to_porcelain_shell(
     html_content: str,
     rel_path: str,
@@ -6811,8 +7425,17 @@ def normalize_html_to_porcelain_shell(
         )
     )
 
+    head_title_m = re.search(r"<title\b[^>]*>(.*?)</title>", clean_head, flags=re.IGNORECASE | re.DOTALL)
+    head_title_raw = head_title_m.group(1) if head_title_m else None
+
     if blueprint == "calculator_leaf":
-        inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile, body_attrs=body_attrs)
+        inner_main = _enforce_calculator_leaf_slot_order(
+            inner_main,
+            rel_path,
+            profile,
+            body_attrs=body_attrs,
+            page_title=head_title_raw,
+        )
         inner_main = _convert_preset_anchors_to_hash_buttons(inner_main)
         if 'class="statutory-sources' not in inner_main and "class='statutory-sources" not in inner_main:
             explicit_stat_auth = _extract_explicit_statutory_authority_from_html(body_no_style)
@@ -6848,6 +7471,22 @@ def normalize_html_to_porcelain_shell(
         inner_main = _strip_legacy_disclaimer_clutter(inner_main, _NON_LEAF_CLUTTER_CLASSES)
 
     inner_main = _wrap_unwrapped_tables(inner_main)
+    from pseofactory.estate_common import (
+        sanitize_retired_estate_links_in_html,
+        sync_h1_to_title_core_coverage,
+    )
+
+    inner_main = sync_h1_to_title_core_coverage(
+        inner_main,
+        rel_path=rel_path,
+        brand_name=str(profile.get("brand_name") or ""),
+        page_title=head_title_raw,
+    )
+    prop_id_norm = str(profile.get("property_id") or "").strip().lower()
+    inner_main = sanitize_retired_estate_links_in_html(inner_main, property_id=prop_id_norm)
+    clean_head = sanitize_retired_estate_links_in_html(clean_head, property_id=prop_id_norm)
+    if blueprint == "calculator_leaf" and is_nosnippet_split_test_enabled(profile):
+        inner_main = _apply_nosnippet_split_test_wrappers(inner_main)
 
     def _strip_card_from_callouts(match: re.Match[str]) -> str:
         quote = match.group(1)
@@ -7100,6 +7739,82 @@ def _fit_seo_title(raw_title: str, brand: str) -> str:
     return t[:60].rstrip()
 
 
+def _governance_digest(profile: Dict[str, Any]) -> bytes:
+    """Returns deterministic SHA-256 digest keyed solely by normalized property_id."""
+    prop_key = str(profile.get("property_id") or profile.get("brand_name") or "porcelain").strip().lower()
+    if prop_key == "profithelm-platform":
+        prop_key = "profithelm"
+    return hashlib.sha256(prop_key.encode("utf-8")).digest()
+
+
+def _render_related_tools_card(
+    profile: Dict[str, Any],
+    active_tools: Sequence[Tuple[str, str]],
+    arch_idx: int,
+) -> str:
+    """Renders 1 of 8 distinct cross-linked tool directory cards for governance pages."""
+    brand = str(profile["brand_name"])
+    b_esc = html_lib.escape(brand)
+    topic = html_lib.escape(str(profile.get("tools_directory_topic_label") or f"{brand} Calculators"))
+    auth = html_lib.escape(str(profile.get("primary_statutory_authority") or "enacted statutory schedules"))
+    tool_links = "".join(
+        f'<li><a href="/tools/{html_lib.escape(s)}/" class="touch-target">{html_lib.escape(lbl)}</a></li>'
+        for s, lbl in list(active_tools)[:4]
+        if s
+    )
+    variants = (
+        (
+            f"Interactive {b_esc} Model Directory",
+            f"Inspect live scenario calculations across {topic}, calibrated to {auth}:",
+            f"Open Full {b_esc} Catalog",
+        ),
+        (
+            f"Production {b_esc} Decision Workbenches",
+            f"Run browser-local sensitivity probes across {b_esc} computational routes:",
+            f"Explore All {b_esc} Modules",
+        ),
+        (
+            f"Statutory Schedules &amp; Active Calculators",
+            f"Test these governance rules directly inside {b_esc} interactive workbooks:",
+            f"View Complete {b_esc} Index",
+        ),
+        (
+            f"Audited Quantitative Tools on {b_esc}",
+            f"Verify real-time parameter outputs across core {topic} modules:",
+            f"Launch {b_esc} Directory Hub",
+        ),
+        (
+            f"Reference Estimators &amp; Scenario Engines",
+            f"Evaluate deterministic benchmarks published under {b_esc} research standards:",
+            f"See All {b_esc} Estimators",
+        ),
+        (
+            f"Live {b_esc} Computational Endpoints",
+            f"Check enacted threshold behavior directly within these verified routes:",
+            f"Browse {b_esc} Tool Suite",
+        ),
+        (
+            f"Primary {b_esc} Planning Utilities",
+            f"Apply these transparency protocols while modeling outcomes in {topic}:",
+            f"Access {b_esc} Tool Archive",
+        ),
+        (
+            f"Deterministic {b_esc} Research Modules",
+            f"Cross-check inputs and statutory cliffs across published {b_esc} models:",
+            f"Inspect {b_esc} All-Tools Page",
+        ),
+    )
+    heading_html, intro_html, dir_label = variants[arch_idx % len(variants)]
+    return f"""      <section class="card">
+        <h2>{heading_html}</h2>
+        <p>{intro_html}</p>
+        <ul class="tools-list">
+          {tool_links}
+          <li><a href="/tools/" class="touch-target">{dir_label}</a></li>
+        </ul>
+      </section>"""
+
+
 def _render_governance_document(
     profile: Dict[str, Any],
     route_slug: str,
@@ -7122,6 +7837,18 @@ def _render_governance_document(
         desc = desc.rstrip(".") + f" Published by {brand} statutory research."
     if len(desc) > 152:
         desc = desc[:149].rsplit(" ", 1)[0].rstrip(".,;:") + "."
+
+    digest = _governance_digest(profile)
+    route_offsets = {
+        "about": 0,
+        "methodology": 1,
+        "privacy": 2,
+        "terms": 3,
+        "disclaimers": 4,
+        "contact": 5,
+        "partners": 6,
+    }
+    related_idx = (digest[0] + digest[3] + route_offsets.get(route_slug, 0)) % 8
 
     li_id = str(profile.get("linkedin_company_id") or "").strip()
     prop_key = str(profile.get("property_id") or "").strip().lower()
@@ -7202,19 +7929,7 @@ def _render_governance_document(
         "@graph": graph_nodes,
     }
 
-    tool_links = "".join(
-        f'<li><a href="/tools/{html_lib.escape(s)}/" class="touch-target">{html_lib.escape(lbl)}</a></li>'
-        for s, lbl in list(active_tools)[:4]
-        if s
-    )
-    related_card = f"""      <section class="card">
-        <h2>Verified Statutory Calculators &amp; Benchmarks</h2>
-        <p>Apply our published governance standards directly across these deterministic {html_lib.escape(brand)} tools:</p>
-        <ul class="tools-list">
-          {tool_links}
-          <li><a href="/tools/" class="touch-target">Browse Complete {html_lib.escape(brand)} Calculators Directory</a></li>
-        </ul>
-      </section>"""
+    related_card = _render_related_tools_card(profile, active_tools, related_idx)
 
     raw_doc = f"""<!DOCTYPE html>
 <html lang="en" data-theme="porcelain">
@@ -7264,22 +7979,1522 @@ def _render_governance_document(
     return norm_html
 
 
+def _clamp_governance_quick_answer(text: str, brand: str) -> str:
+    """Guarantees governance quick_answer_text stays strictly within 40-60 words and <= 2 sentences."""
+    clean = re.sub(r"\s+", " ", text.replace("\u2014", "-").replace("\u2013", "-")).strip()
+    words = clean.split()
+    if len(words) > 58:
+        clean = " ".join(words[:57]).rstrip(".,;:") + "."
+    clause_idx = hashlib.sha256(brand.strip().lower().encode("utf-8")).digest()[0] % 8
+    pad_clauses = (
+        f"with full runtime parity across {brand} specifications and manifest checksums",
+        f"backed by primary federal and state statutory provenance maintained by {brand}",
+        f"pairing historical public benchmark cohorts with transparent {brand} assumptions",
+        f"under strict fiduciary disclosure governance published directly by {brand}",
+        f"ready for practitioner scenario planning across verified {brand} workbooks",
+        f"verified against deterministic boundary assertions and {brand} oracle suites",
+        f"so every visitor inspects clear numbers directly on {brand} without hidden fees",
+        f"preserved in archival bulletins curated independently by {brand} editors",
+    )
+    extra_clauses = (
+        "for transparent public inspection",
+        "across all deterministic browser workflows",
+        "without hidden commercial bias",
+    )
+    if len(clean.split()) < 42:
+        clean = clean.rstrip(".") + ", " + pad_clauses[clause_idx] + "."
+    extra_i = 0
+    while len(clean.split()) < 42 and extra_i < len(extra_clauses):
+        clean = clean.rstrip(".") + ", " + extra_clauses[extra_i] + "."
+        extra_i += 1
+    words = clean.split()
+    if len(words) > 58:
+        clean = " ".join(words[:57]).rstrip(".,;:") + "."
+    return clean
+
+
+def _build_about_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+    tool_names_csv: str,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    legal = html_lib.escape(str(profile["legal_entity"]))
+    research = html_lib.escape(str(profile["research_entity"]))
+    ed_cls = html_lib.escape(str(profile["editorial_classification"]))
+    auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    ds = html_lib.escape(str(profile["economic_dataset_label"]))
+    email = html_lib.escape(str(profile["contact_email"]))
+    partners = html_lib.escape(str(profile["partner_list_summary"]))
+    topic = html_lib.escape(str(profile.get("home_topic_label") or f"{brand} Calculators"))
+    domain = html_lib.escape(str(profile["domain"]))
+    prexvo_note = (
+        " Refinancing federal student loans permanently waives federal protections including "
+        "Income-Driven Repayment (IDR), Public Service Loan Forgiveness (PSLF), and federal forbearance."
+        if str(profile.get("property_id") or "").strip().lower() == "prexvo"
+        else ""
+    )
+    mailto_link = f'<!--email_off--><a href="mailto:{email}" class="touch-target">{email}</a><!--/email_off-->'
+
+    specs = (
+        {
+            "raw_title": f"Quantitative Engineering & Modeling Charter | {profile['brand_name']}",
+            "h1_text": f"{profile['brand_name']} Quantitative Engineering Desk",
+            "meta_desc": f"Inspect the engineering charter, runtime parity controls, and statutory independence behind {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} engineers deterministic browser-side calculation engines for {profile['home_topic_label']}. "
+                f"Operated by {profile['legal_entity']}, the platform encodes enacted rules directly into open client math "
+                "paired with JSON verification manifests so practitioners inspect exact formula assumptions before engaging licensed advisors."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Computational Architecture &amp; Charter</h2>
+        <p>Inside {domain}, {research} translates statutory codes into closed-form algorithms covering {topic} ({ed_cls}). Rather than summarizing policy commentary, every workflow exposes input clamping, marginal breakpoints, and reproducible scenario math ({tool_names_csv}).</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Publisher</dt><dd>{legal}</dd></div>
+          <div><dt>Engineering Unit</dt><dd>{research}</dd></div>
+          <div><dt>Codified Sources</dt><dd>{auth}</dd></div>
+          <div><dt>Empirical Series</dt><dd>{ds}</dd></div>
+          <div><dt>Verification Desk</dt><dd>{mailto_link}</dd></div>
+        </dl>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Algorithmic Neutrality vs. Sponsorships</h2>
+        <p>Commercial placements ({partners}) stay strictly partitioned from calculation logic. Partner listings never reweight eligibility cutoffs or scenario rankings.{prexvo_note} Inspect our <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a> documentation.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Statutory Provenance & Mandate | {profile['brand_name']}",
+            "h1_text": "Statutory Provenance & Institutional Mandate",
+            "meta_desc": f"Understand how {profile['legal_entity']} anchors {profile['brand_name']} reference schedules to enacted federal and state authorities.",
+            "quick_answer": (
+                f"{profile['legal_entity']} publishes codified reference utilities across {profile['domain']} under {profile['research_entity']}. "
+                "Every computational schedule traces directly back to primary statutes, administrative rulemaking notices, and benchmark datasets, "
+                "maintaining complete editorial separation from commercial referral placements."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Primary Enactment Custody</h2>
+        <p>{legal} operates {brand} as a specialized statutory reference publisher ({ed_cls}). Each published schedule binds calculation constants to {auth} alongside empirical baselines from {ds}, enabling rapid verification across {tool_names_csv}.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Institutional Pillar</th><th scope="col">Recorded Designation</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Corporate Custodian</td><td>{legal}</td></tr>
+              <tr><td>Research Desk</td><td>{research}</td></tr>
+              <tr><td>Governing Enactments</td><td>{auth}</td></tr>
+              <tr><td>Reference Benchmarks</td><td>{ds}</td></tr>
+              <tr><td>Compliance Inbox</td><td>{mailto_link}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Editorial Autonomy Covenant</h2>
+        <p>Sponsored placements ({partners}) exercise zero influence over statutory thresholds, effective rates, or formula order.{prexvo_note} Full compliance boundaries appear on our <a href="/disclaimers/" class="touch-target">Disclaimers</a> and <a href="/methodology/" class="touch-target">Methodology</a> pages.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Actuarial Benchmark Desk & Entity Overview | {profile['brand_name']}",
+            "h1_text": "Actuarial Benchmark Desk & Entity Overview",
+            "meta_desc": f"Explore the empirical datasets, governance controls, and independent research mission guiding {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} combines empirical public datasets with auditable decision math across {profile['home_topic_label']}. "
+                f"Maintained by {profile['legal_entity']}, each interactive matrix pairs historical benchmark series with statutory boundary limits "
+                "while isolating referral listings from quantitative outputs."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Empirical Calibration &amp; Audience Scope</h2>
+        <p>{research}, an operating division of {legal}, calibrates quantitative tools for {topic}. Workbooks spanning {tool_names_csv} combine public economic series ({ds}) with codified rulebooks ({auth}) so analysts audit assumptions cleanly.</p>
+        <ol class="gov-steps">
+          <li><strong>Entity Custodian:</strong> {legal} ({domain})</li>
+          <li><strong>Analytical Unit:</strong> {research}</li>
+          <li><strong>Statutory Corpus:</strong> {auth}</li>
+          <li><strong>Benchmark Feed:</strong> {ds}</li>
+          <li><strong>Desk Email:</strong> {mailto_link}</li>
+        </ol>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Firewall Between Calibration &amp; Referrals</h2>
+        <p>No referral partner ({partners}) alters cohort medians, baseline parameters, or output sorting.{prexvo_note} Review technical audit rules on <a href="/methodology/" class="touch-target">Methodology</a> and legal notices on <a href="/disclaimers/" class="touch-target">Disclaimers</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Governance Charter | {profile['brand_name']} Standards",
+            "h1_text": f"{profile['brand_name']} Governance Charter & Oversight",
+            "meta_desc": f"Review the fiduciary separation, entity disclosures, and oversight protocols maintained by {profile['legal_entity']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} upholds a strict governance charter under {profile['legal_entity']}, separating statutory formula "
+                "custody from commercial referral operations. Analysts and enterprise buyers inspect transparent entity ownership, "
+                "primary regulatory references, and direct compliance contact channels prior to relying on modeled outputs."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Custodianship &amp; Accountability Record</h2>
+        <p>Under the oversight of {legal}, {research} administers {ed_cls} across {domain}. Modules including {tool_names_csv} expose intermediate statutory derivations without opaque black-box scoring.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Legal Operator</dt><dd>{legal}</dd></div>
+          <div><dt>Research Division</dt><dd>{research}</dd></div>
+          <div><dt>Regulatory Citations</dt><dd>{auth}</dd></div>
+          <div><dt>Economic Datasets</dt><dd>{ds}</dd></div>
+          <div><dt>Oversight Contact</dt><dd>{mailto_link}</dd></div>
+        </dl>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Commercial Separation Mandate</h2>
+        <div class="gov-callout">
+          <p>Affiliate relationships ({partners}) never modify mathematical thresholds or default model rankings.{prexvo_note} Consult <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a> for complete oversight terms.</p>
+        </div>
+      </section>""",
+        },
+        {
+            "raw_title": f"Practitioner Workbench & Modeling Mission | {profile['brand_name']}",
+            "h1_text": "Practitioner Workbench & Modeling Mission",
+            "meta_desc": f"See how operators and finance leads use {profile['brand_name']} scenario workbooks built by {profile['legal_entity']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} equips practitioners with fast, deterministic scenario workbooks for {profile['home_topic_label']}. "
+                f"Built by {profile['legal_entity']}, every workbench translates statutory provisions and benchmark schedules into transparent "
+                "client-side computations ready for internal planning and advisor review."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Built for Real-World Scenario Planning</h2>
+        <p>{legal} and {research} design interactive workbenches ({tool_names_csv}) tailored to {topic}. Operators test sensitivity ranges against {auth} and {ds} before exporting structured summaries for counsel.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Workbench Attribute</th><th scope="col">Verified Detail</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Operating Firm</td><td>{legal}</td></tr>
+              <tr><td>Modeling Team</td><td>{research}</td></tr>
+              <tr><td>Rulebook Anchor</td><td>{auth}</td></tr>
+              <tr><td>Dataset Anchor</td><td>{ds}</td></tr>
+              <tr><td>Support Mailbox</td><td>{mailto_link}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Unbiased Scenario Outputs</h2>
+        <p>Partner directories ({partners}) operate as clearly labeled post-calculation options and never override workbook math.{prexvo_note} Read our <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Reproducible Verification & Publisher Identity | {profile['brand_name']}",
+            "h1_text": "Reproducible Verification & Publisher Identity",
+            "meta_desc": f"Inspect the automated parity harness, ownership disclosures, and editorial independence rules of {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} operates a reproducible verification lab under {profile['legal_entity']}, testing every calculator against "
+                "boundary stress fixtures and primary statutory publications. Users inspect full entity attribution, dataset lineage, "
+                "and direct verification contacts across every public route."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Boundary Testing &amp; Lineage Matrix</h2>
+        <p>Every endpoint across {domain} ({tool_names_csv}) undergoes automated oracle validation led by {research} ({ed_cls}). Constants map directly to {auth} and {ds}.</p>
+        <ul>
+          <li><strong>Legal Publisher:</strong> {legal}</li>
+          <li><strong>Verification Desk:</strong> {research}</li>
+          <li><strong>Statutory Basis:</strong> {auth}</li>
+          <li><strong>Empirical Basis:</strong> {ds}</li>
+          <li><strong>Direct Audit Line:</strong> {mailto_link}</li>
+        </ul>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Zero-Bias Partner Partitioning</h2>
+        <p>Commercial sponsors ({partners}) cannot alter deterministic boundary tests or formula outputs.{prexvo_note} Further details live under <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Clear Estimates Without Hidden Assumptions | {profile['brand_name']}",
+            "h1_text": "Clear Estimates Without Hidden Assumptions",
+            "meta_desc": f"Learn who publishes {profile['brand_name']}, where our rate schedules originate, and how we keep calculations independent.",
+            "quick_answer": (
+                f"{profile['brand_name']} exists to make complex rules understandable through clear, browser-based estimators published by "
+                f"{profile['legal_entity']}. Visitors run real numbers directly against public government tables without account walls, "
+                "data-broker tracking, or sponsor interference in calculator math."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Plain-Language Institutional Facts</h2>
+        <p>{legal} maintains {brand} for visitors evaluating {topic}. Tools including {tool_names_csv} run transparently inside your browser using public rules from {auth} and {ds}.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Published By</dt><dd>{legal}</dd></div>
+          <div><dt>Editorial Team</dt><dd>{research}</dd></div>
+          <div><dt>Public Rules Used</dt><dd>{auth}</dd></div>
+          <div><dt>Public Data Used</dt><dd>{ds}</dd></div>
+          <div><dt>Write To Us</dt><dd>{mailto_link}</dd></div>
+        </dl>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>How Referrals Stay Separate</h2>
+        <p>When {brand} lists commercial providers ({partners}), those links never change your calculated numbers.{prexvo_note} See our <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a> anytime.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Editorial Masthead & Research Record | {profile['brand_name']}",
+            "h1_text": "Editorial Masthead & Research Publication Record",
+            "meta_desc": f"Review the editorial masthead, archive custody, and primary citation policies governing {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} serves as an independent quantitative publication operated by {profile['legal_entity']} across {profile['domain']}. "
+                "Our masthead documents research group custody, primary regulatory citations, empirical dataset archives, "
+                "and strict editorial separation between published calculation models and commercial partner listings."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Publication Masthead &amp; Archive Scope</h2>
+        <p>Issued by {legal}, the {research} bulletin series covers {topic} ({ed_cls}). Interactive publications ({tool_names_csv}) synthesize {auth} alongside {ds}.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Masthead Entry</th><th scope="col">Official Record</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Publishing Entity</td><td>{legal}</td></tr>
+              <tr><td>Editorial Desk</td><td>{research}</td></tr>
+              <tr><td>Primary Authorities</td><td>{auth}</td></tr>
+              <tr><td>Benchmark Archives</td><td>{ds}</td></tr>
+              <tr><td>Corrections Contact</td><td>{mailto_link}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Editorial Independence Policy</h2>
+        <p>Commercial listings ({partners}) remain strictly decoupled from masthead research and formula outputs.{prexvo_note} Examine our <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a> records.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{chosen['s2']}\n{chosen['s1']}" if order_bit % 2 == 1 else f"{chosen['s1']}\n{chosen['s2']}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
+def _build_privacy_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+    privacy_params: str,
+    raw_input_noun: str,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    legal = html_lib.escape(str(profile["legal_entity"]))
+    email = html_lib.escape(str(profile["contact_email"]))
+    domain = html_lib.escape(str(profile["domain"]))
+    p_params = html_lib.escape(privacy_params)
+    r_noun = html_lib.escape(raw_input_noun)
+    mailto_link = f'<!--email_off--><a href="mailto:{email}" class="touch-target">{email}</a><!--/email_off-->'
+    email_plain = f"<!--email_off-->{email}<!--/email_off-->"
+
+    specs = (
+        {
+            "raw_title": f"Client-Side Privacy & Telemetry Architecture | {profile['brand_name']}",
+            "h1_text": "Client-Side Privacy & Telemetry Architecture",
+            "meta_desc": f"Inspect how {profile['brand_name']} evaluates inputs inside browser memory without behavioral data brokerage.",
+            "quick_answer": (
+                f"{profile['brand_name']} runs interactive calculations inside local browser memory rather than storing user scenario inputs "
+                f"on origin databases. {profile['legal_entity']} collects email addresses solely when visitors explicitly request deliverables, "
+                "and honors verified access or erasure requests promptly via direct compliance email."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Zero-Persistence Browser Execution</h2>
+        <p>Scenario variables entered on {domain} ({p_params}) execute strictly inside client JavaScript memory. Raw {r_noun} entries never flow to third-party behavioral ad networks; bookmarked scenario URLs encode numbers only in your browser address bar.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Opt-In Delivery, Routing Telemetry &amp; Erasure</h2>
+        <p>When requesting workpapers or briefings, {legal} logs only your submitted email, slug identifier, and UTC timestamp. Partner clicks through <code>/r/</code> record non-identifying aggregate counts for FTC 16 CFR Part 255 auditing.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Numeric Inputs</dt><dd>Evaluated locally in browser RAM; zero origin persistence.</dd></div>
+          <div><dt>Briefing Opt-Ins</dt><dd>Used solely for delivery by {legal}; purged upon request to {email_plain}.</dd></div>
+          <div><dt>Edge &amp; Partner Logs</dt><dd>Aggregate <code>/r/</code> click telemetry; never resold to brokers.</dd></div>
+        </dl>
+        <p>Exercise CCPA/CPRA or GDPR access and deletion rights by writing {mailto_link}.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Statutory Privacy Rights & Data Governance | {profile['brand_name']}",
+            "h1_text": "Statutory Privacy Rights & Data Governance",
+            "meta_desc": f"Review statutory privacy protections, local scenario processing, and deletion protocols at {profile['brand_name']}.",
+            "quick_answer": (
+                f"Statutory privacy governance on {profile['domain']} restricts personal collection to explicit opt-in requests while evaluating "
+                "all numerical modeling inputs exclusively within your browser. Visitors exercise full CCPA, CPRA, and GDPR inspection "
+                f"or deletion rights directly through {profile['legal_entity']}."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>In-Browser Modeling Safeguards</h2>
+        <p>Calculators across {brand} process {p_params} without server-side profiling. Your {r_noun} figures remain on your device unless you manually copy a shareable fragment link.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Recorded Disclosures &amp; Statutory Rights</h2>
+        <p>Voluntary form submissions supply {legal} only with your address, requested tool code, and timestamp. Aggregate <code>/r/</code> attribution logs satisfy FTC 16 CFR Part 255 transparency without cross-site tracking.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Record Type</th><th scope="col">Custody Rule</th><th scope="col">User Remedy</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Model Parameters</td><td>Client-only evaluation</td><td>Cleared on tab close</td></tr>
+              <tr><td>Deliverable Email</td><td>{legal} transactional log</td><td>Erased via {email_plain}</td></tr>
+              <tr><td>Partner Redirects</td><td>Aggregate <code>/r/</code> counters</td><td>No behavioral profiling</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Submit statutory privacy inquiries to {mailto_link}.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Data Minimalism & Zero-Brokerage Policy | {profile['brand_name']}",
+            "h1_text": "Data Minimalism & Zero-Brokerage Policy",
+            "meta_desc": f"Read {profile['brand_name']} commitments on client-side privacy, minimal telemetry, and user deletion workflows.",
+            "quick_answer": (
+                f"{profile['brand_name']} practices strict data minimalism across {profile['domain']}. Modeling inputs never leave your device "
+                f"for analytics profiling, optional email signups store minimal fulfillment fields only, and {profile['legal_entity']} "
+                "never sells visitor contact information to outside lead brokers."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Local Memory &amp; Fragment Serialization</h2>
+        <p>Whenever you test {p_params} inside {brand}, calculations finish locally. Sharing a scenario serializes {r_noun} values in the URL fragment controlled solely by you.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Retention Boundaries &amp; Contact Channel</h2>
+        <ol class="gov-steps">
+          <li><strong>Interactive Numbers:</strong> Held strictly inside browser memory, never written to {legal} servers.</li>
+          <li><strong>Requested Workbooks:</strong> Email, tool slug, and timestamp stored purely for fulfillment; contact {email_plain} to delete.</li>
+          <li><strong>Attribution Counters:</strong> Outbound <code>/r/</code> links log aggregate counts under FTC 16 CFR Part 255 without cross-site resale.</li>
+        </ol>
+        <p>Under GDPR, CCPA/CPRA, and state statutes, request record correction or removal at {mailto_link}.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Visitor Confidentiality & Retention Charter | {profile['brand_name']}",
+            "h1_text": "Visitor Confidentiality & Minimal Retention Charter",
+            "meta_desc": f"Examine confidentiality rules, browser execution, and privacy erasure rights maintained by {profile['legal_entity']}.",
+            "quick_answer": (
+                f"{profile['legal_entity']} protects visitor confidentiality on {profile['brand_name']} by executing calculator logic "
+                "client-side and avoiding invasive tracking pixels. Email records submitted for workpapers are retained strictly "
+                "for delivery and removed promptly upon verified privacy request."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Device-Side Scenario Confidentiality</h2>
+        <p>All {p_params} entered across {brand} stay local to your browser session. No raw {r_noun} entries are syndicated to third-party trackers or credit bureaus.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Fulfillment Storage &amp; Access Rights</h2>
+        <div class="gov-callout">
+          <p>{legal} stores only opt-in email, tool identifier, and timestamp for requested downloads, alongside aggregate <code>/r/</code> click counts under FTC 16 CFR Part 255.</p>
+        </div>
+        <ul>
+          <li><strong>Session Inputs:</strong> Zero server storage; browser-only execution.</li>
+          <li><strong>Opt-In Records:</strong> Transactional fulfillment only; delete anytime via {email_plain}.</li>
+          <li><strong>Jurisdictional Rights:</strong> CCPA/CPRA and GDPR requests handled at {mailto_link}.</li>
+        </ul>
+      </section>""",
+        },
+        {
+            "raw_title": f"Operational Privacy & Browser Storage Rules | {profile['brand_name']}",
+            "h1_text": "Operational Privacy & Browser Storage Rules",
+            "meta_desc": f"See how {profile['brand_name']} handles browser inputs, workpaper opt-ins, and statutory deletion requests.",
+            "quick_answer": (
+                f"Operational privacy rules at {profile['brand_name']} keep calculator variables inside your browser while limiting server records "
+                f"to voluntary workpaper deliveries. {profile['legal_entity']} processes deletion, correction, and disclosure requests "
+                "under state and international privacy frameworks via direct email."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Browser Runtime &amp; Shareable Links</h2>
+        <p>Interactive inputs covering {p_params} never transmit {r_noun} payloads to external profiling tools. Bookmarking saves numeric settings strictly inside your local URL.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Minimal Edge &amp; Email Accounting</h2>
+        <p>Opt-in requests record email, tool slug, and submission time for {legal} fulfillment. Outbound <code>/r/</code> redirects count aggregate partner clicks without personal profiling.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Activity</th><th scope="col">Captured Fields</th><th scope="col">Deletion Mechanism</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Tool Calculation</td><td>None transmitted</td><td>Browser session only</td></tr>
+              <tr><td>Workbook Request</td><td>Email, tool slug, timestamp</td><td>Email {email_plain}</td></tr>
+              <tr><td><code>/r/</code> Attribution</td><td>Aggregate event tally</td><td>Non-identifying log</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Direct CCPA/CPRA or GDPR inquiries to {mailto_link}.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Zero-Tracking Policy & User Data Rights | {profile['brand_name']}",
+            "h1_text": "Zero-Tracking Policy & User Data Rights",
+            "meta_desc": f"Learn how {profile['brand_name']} avoids personal data resale and processes statutory privacy requests.",
+            "quick_answer": (
+                f"{profile['brand_name']} enforces zero-tracking calculation standards across {profile['domain']}. All interactive modeling "
+                "completes on your own device without third-party data resale, while voluntary email submissions remain isolated to "
+                f"requested report delivery and prompt deletion through {profile['legal_entity']}."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>On-Device Evaluation Guarantees</h2>
+        <p>Inputs such as {p_params} run strictly inside your client runtime. Your {r_noun} numbers never populate commercial ad audiences on {domain}.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Limited Collection &amp; Deletion Protocol</h2>
+        <p>Should you request a downloadable briefing, {legal} stores email, tool identifier, and timestamp solely for delivery. Aggregate <code>/r/</code> partner counters satisfy FTC 16 CFR Part 255 without cross-site tracking.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Calculator State</dt><dd>Browser memory and local URL hash only.</dd></div>
+          <div><dt>Email Delivery</dt><dd>Deleted on request via {email_plain}.</dd></div>
+          <div><dt>Privacy Desk</dt><dd>{mailto_link} for CCPA/CPRA and GDPR requests.</dd></div>
+        </dl>
+      </section>""",
+        },
+        {
+            "raw_title": f"How We Protect Your Numbers & Email Privacy | {profile['brand_name']}",
+            "h1_text": "How We Protect Your Numbers & Email",
+            "meta_desc": f"Plain-language guide explaining what {profile['brand_name']} keeps off our servers and how to delete email requests.",
+            "quick_answer": (
+                f"Everything you type into a {profile['brand_name']} calculator stays inside your own web browser and never gets sold to data brokers. "
+                f"If you ask for a downloadable report, {profile['legal_entity']} saves only what is needed to send it and deletes your record whenever asked."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Your Scenario Numbers Stay Local</h2>
+        <p>Numbers you enter for {p_params} stay in your browser window. {brand} never forwards your personal {r_noun} details to marketing brokers.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Email Opt-Ins &amp; Removal Requests</h2>
+        <p>Entering an email for a report lets {legal} save your address, tool choice, and timestamp to deliver that file. Partner links at <code>/r/</code> count aggregate clicks per FTC rules without tracking your identity.</p>
+        <ul>
+          <li><strong>Calculator entries:</strong> Stay strictly on your device.</li>
+          <li><strong>Saved emails:</strong> Removed upon request to {email_plain}.</li>
+          <li><strong>Privacy rights:</strong> Contact {mailto_link} under CCPA/CPRA or GDPR.</li>
+        </ul>
+      </section>""",
+        },
+        {
+            "raw_title": f"Privacy Notice & Information Custody Standards | {profile['brand_name']}",
+            "h1_text": "Privacy Notice & Information Custody Standards",
+            "meta_desc": f"Read official custody standards for browser calculations, opt-in fulfillment, and statutory privacy requests at {profile['brand_name']}.",
+            "quick_answer": (
+                f"Custody standards published for {profile['domain']} ensure interactive numeric inputs remain entirely within client browser sessions. "
+                f"{profile['legal_entity']} retains minimal transactional contact logs only upon explicit opt-in and fulfills statutory access, "
+                "correction, and erasure notices via direct compliance correspondence."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Client Memory Processing Scope</h2>
+        <p>Scenario fields covering {p_params} execute locally across {brand} pages without server capture of raw {r_noun} entries. URL serialization remains under visitor control.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Custody Register &amp; Statutory Compliance</h2>
+        <p>Transactional opt-ins store only address, tool identifier, and timestamp under {legal}. Aggregate <code>/r/</code> routing logs satisfy FTC 16 CFR Part 255 standards.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Custody Class</th><th scope="col">Handling Standard</th><th scope="col">Retention</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Browser Scenarios</td><td>Local memory calculation</td><td>Zero server retention</td></tr>
+              <tr><td>Opt-In Fulfillment</td><td>Managed by {legal}</td><td>Purged via {email_plain}</td></tr>
+              <tr><td>Partner Telemetry</td><td>Aggregate <code>/r/</code> routing</td><td>No third-party resale</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Send CCPA/CPRA or GDPR requests directly to {mailto_link}.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{chosen['s2']}\n{chosen['s1']}" if order_bit % 2 == 1 else f"{chosen['s1']}\n{chosen['s2']}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
+def _build_terms_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    legal = html_lib.escape(str(profile["legal_entity"]))
+    research = html_lib.escape(str(profile["research_entity"]))
+    auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    ds = html_lib.escape(str(profile["economic_dataset_label"]))
+    domain = html_lib.escape(str(profile["domain"]))
+
+    specs = (
+        {
+            "raw_title": f"Modeling License & Computational Usage Terms | {profile['brand_name']}",
+            "h1_text": "Modeling License & Computational Usage Terms",
+            "meta_desc": f"Inspect usage boundaries, scraping prohibitions, and liability limits for {profile['brand_name']} tools.",
+            "quick_answer": (
+                f"Use of {profile['brand_name']} computational tools and exported workpapers is licensed strictly for internal analytical "
+                "and educational evaluation. Accessing browser calculations never establishes an advisory, fiduciary, legal, or accounting "
+                f"engagement with {profile['legal_entity']}, and automated edge scraping remains prohibited."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Authorized Scope &amp; Automated Access Rules</h2>
+        <p>{legal} grants a revocable, non-exclusive license to execute {brand} calculators and review exported workpapers for personal or internal planning. Automated scraping that degrades {domain} availability, strips legal notices, or packages outputs as certified advice is forbidden.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Warranty Disclaimer &amp; Risk Allocation</h2>
+        <p>Although {research} cross-checks formulas against {auth} and {ds}, statutory revisions and entity-specific facts govern final filings. Materials are supplied as-is without implied warranties. {legal} disclaims indirect or consequential liability; inspect <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Statutory Reference Terms & Usage Conditions | {profile['brand_name']}",
+            "h1_text": "Statutory Reference Terms & Non-Advisory Conditions",
+            "meta_desc": f"Read binding license rules and statutory reliance disclaimers governing {profile['brand_name']} publications.",
+            "quick_answer": (
+                f"Binding conditions on {profile['domain']} restrict calculator and schedule usage to informational modeling only. "
+                f"Neither {profile['legal_entity']} nor {profile['research_entity']} assumes fiduciary or certified counsel duties, "
+                "and users must confirm statutory applicability with licensed professionals before filing."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Permitted Reference &amp; Citation Rights</h2>
+        <ol class="gov-steps">
+          <li><strong>Educational License:</strong> {legal} permits internal business evaluation and personal modeling across {brand}.</li>
+          <li><strong>Prohibited Conduct:</strong> High-volume scraping, disclaimer removal, or misrepresenting outputs as licensed opinions violates these Terms.</li>
+        </ol>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>No Fiduciary Warranty or Consequential Liability</h2>
+        <p>{research} calibrates tables to {auth} and {ds}, yet administrative rulings and state conformity rules shift continuously. All resources carry zero warranty of fitness for a particular regulatory filing, and {legal} bears no indirect damage liability. Review <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Benchmark Schedule Terms & Liability Limits | {profile['brand_name']}",
+            "h1_text": "Benchmark Schedule Terms & Liability Limits",
+            "meta_desc": f"Understand license permissions, empirical schedule caveats, and liability boundaries on {profile['brand_name']}.",
+            "quick_answer": (
+                f"Benchmark schedules and interactive calculators on {profile['brand_name']} operate under an informational use license "
+                f"from {profile['legal_entity']}. Quantitative outputs reflect public datasets rather than individualized legal or tax opinions, "
+                "and all materials are furnished without merchantability or filing-accuracy warranties."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Internal Planning License</h2>
+        <p>Visitors receive a non-transferable, revocable permission from {legal} to evaluate {brand} models and sensitivity workbooks. Bulk harvesting or stripping statutory provenance warnings voids permission immediately.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Empirical Caveats &amp; Damage Exclusions</h2>
+        <p>Schedules maintained by {research} track {auth} and {ds} on an informational as-is basis. Because actual outcomes depend on entity records, {legal} excludes incidental or consequential damages. See <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Governance Terms of Service | {profile['brand_name']}",
+            "h1_text": "Platform Governance Terms & Indemnification",
+            "meta_desc": f"Review binding governance terms, acceptable access limits, and non-reliance rules for {profile['brand_name']}.",
+            "quick_answer": (
+                f"Platform governance terms establish a limited educational license for {profile['brand_name']} calculators and research artifacts. "
+                f"{profile['legal_entity']} provides schedules strictly as-is without advisory duties, prohibits abusive automated scraping, "
+                "and excludes consequential liability arising from unverified scenario assumptions."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Acceptable Use &amp; Attribution Integrity</h2>
+        <p>{legal} authorizes internal planning and educational inspection across {domain}. Removing embedded compliance strips, scraping endpoints at scale, or claiming {brand} outputs represent certified counsel is strictly barred.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Exclusion of Warranties &amp; Related Policies</h2>
+        <div class="gov-callout">
+          <p>Models built by {research} mirror {auth} and {ds} without warranty of regulatory completeness. {legal} accepts no liability for indirect or consequential losses.</p>
+        </div>
+        <p>Consult <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a> before acting.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Workbook Access Conditions & Legal Boundaries | {profile['brand_name']}",
+            "h1_text": "Workbook Access Conditions & Legal Boundaries",
+            "meta_desc": f"Check acceptable planning use, workbook export rules, and liability limits for {profile['brand_name']}.",
+            "quick_answer": (
+                f"Workbook and calculator access across {profile['brand_name']} supports internal modeling and educational budgeting only. "
+                f"Running scenarios on {profile['domain']} creates no professional advisory contract with {profile['legal_entity']}, "
+                "and users remain responsible for validating final numbers with qualified counsel."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Internal Planning &amp; Export Conditions</h2>
+        <p>Subject to these conditions, {legal} grants revocable access to {brand} scenario workbooks and sensitivity matrices for internal planning. Abusive scraping or misrepresentation of outputs as formal opinions is prohibited.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>As-Is Basis &amp; Liability Cap</h2>
+        <p>While {research} aligns formulas with {auth} and {ds}, enacted codes and agency guidance evolve continuously. {legal} provides all tools as-is without implied warranties and assumes zero consequential damage liability. Review <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Service Conditions, Scraping Bans & Disclaimers | {profile['brand_name']}",
+            "h1_text": "Service Conditions, Scraping Bans & Disclaimers",
+            "meta_desc": f"Inspect service access terms, automated traffic limits, and warranty exclusions on {profile['brand_name']}.",
+            "quick_answer": (
+                f"Service conditions on {profile['domain']} permit human analytical evaluation while barring disruptive scraping and "
+                f"misrepresentation of calculator outputs. {profile['legal_entity']} furnishes every formula without professional "
+                "warranties or advisory obligations, subject to our published disclaimer and privacy rules."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Revocable Access &amp; Integrity Guards</h2>
+        <p>{legal} licenses {brand} tools exclusively for individual analysis and internal budgeting. Automated crawlers that degrade response latency or strip compliance notices lose access privileges immediately.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Non-Warranty &amp; Reference Policies</h2>
+        <dl class="gov-meta-grid">
+          <div><dt>Formula Sources</dt><dd>{research} validates against {auth} and {ds}.</dd></div>
+          <div><dt>Warranty Posture</dt><dd>As-is informational basis; zero fitness warranty.</dd></div>
+          <div><dt>Liability Limit</dt><dd>{legal} excludes indirect or consequential damages.</dd></div>
+        </dl>
+        <p>Read <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Plain Rules for Using Our Decision Tools | {profile['brand_name']}",
+            "h1_text": "Plain Rules for Using Our Decision Tools",
+            "meta_desc": f"Simple summary of how you may use {profile['brand_name']} models, what is not allowed, and why estimates are informational.",
+            "quick_answer": (
+                f"You may use {profile['brand_name']} calculators and downloadable workpapers for your own learning or internal planning. "
+                "Using these tools does not make us your lawyer, CPA, or financial advisor, and you should verify final decisions with "
+                "a licensed professional."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Permitted Personal &amp; Business Modeling</h2>
+        <p>{legal} gives you permission to run numbers and save summaries on {brand} for personal study or business planning. Do not scrape our pages aggressively or present {brand} estimates as certified legal or tax advice.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Information Provided As-Is</h2>
+        <p>{research} checks formulas against {auth} and {ds}, but laws change and every situation has unique facts. {legal} offers all pages as-is and is not liable for indirect losses. Visit <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Publication Access Terms & Liability Notice | {profile['brand_name']}",
+            "h1_text": "Publication Access Terms & Liability Notice",
+            "meta_desc": f"Review official publication access terms, intellectual boundaries, and warranty exclusions for {profile['brand_name']}.",
+            "quick_answer": (
+                f"Publication access terms issued by {profile['legal_entity']} govern all research tools and workpapers on {profile['domain']}. "
+                "Tools are delivered strictly for informational modeling without professional warranties, prohibit automated scraping, "
+                "and incorporate our statutory methodology, privacy, and disclaimer frameworks."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Licensed Evaluation &amp; Prohibitions</h2>
+        <p>{legal} extends a non-exclusive, revocable right to consult {brand} tables and calculators for internal planning. Stripping disclosures or running unauthorized scraping tools against {domain} is prohibited.</p>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Limitation of Liability &amp; Governing Notices</h2>
+        <p>Publications by {research} synthesize {auth} and {ds} without warranty of filing suitability. {legal} assumes no liability for consequential damages; consult <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a>.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{chosen['s2']}\n{chosen['s1']}" if order_bit % 2 == 1 else f"{chosen['s1']}\n{chosen['s2']}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
+def _build_contact_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+    revision_examples: str,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    legal = html_lib.escape(str(profile["legal_entity"]))
+    research = html_lib.escape(str(profile["research_entity"]))
+    auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    ds = html_lib.escape(str(profile["economic_dataset_label"]))
+    email = html_lib.escape(str(profile["contact_email"]))
+    domain = html_lib.escape(str(profile["domain"]))
+    rev_ex = html_lib.escape(revision_examples)
+    mailto_link = f'<!--email_off--><a href="mailto:{email}" class="touch-target">{email}</a><!--/email_off-->'
+
+    specs = (
+        {
+            "raw_title": f"Formula Bug Reports & Calculation Verification | {profile['brand_name']}",
+            "h1_text": "Formula Bug Reports & Calculation Verification",
+            "meta_desc": f"Report statutory table diffs, runtime edge cases, or privacy requests to the {profile['brand_name']} desk.",
+            "quick_answer": (
+                f"Reach the {profile['brand_name']} engineering verification desk to submit statutory parameter diffs, browser calculation "
+                f"edge cases, or privacy erasure notices. {profile['research_entity']} validates every citation against primary regulatory "
+                "publications before releasing updated calculation manifests and changelog timestamps."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Routing Channels for Technical &amp; Privacy Inquiries</h2>
+        <p>{research} and {legal} triage incoming notices for {domain} across formula verification, privacy removal, and commercial compliance.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Formula Verification</dt><dd>{research}: {mailto_link}</dd></div>
+          <div><dt>Privacy &amp; Terms</dt><dd>{legal} Governance: {mailto_link}</dd></div>
+          <div><dt>Audit Standards</dt><dd><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></dd></div>
+        </dl>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Reproducible Patch Submission Checklist</h2>
+        <p>When flagging an update involving {auth} or {ds}, supply the route URL, exact test inputs, and the {rev_ex}. Confirmed patches ship with synchronized browser math and manifest timestamps.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Statutory Schedule Updates & Editorial Contact | {profile['brand_name']}",
+            "h1_text": "Statutory Schedule Updates & Editorial Contact",
+            "meta_desc": f"Submit newly enacted statutory amendments or compliance inquiries to {profile['brand_name']} editors.",
+            "quick_answer": (
+                f"Contact the {profile['brand_name']} editorial desk regarding newly enacted rate amendments, citation corrections, "
+                "or statutory privacy filings. Every submitted reference undergoes direct comparison against official federal and state "
+                "publications prior to revising published schedules."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Designated Statutory Correspondence Desks</h2>
+        <p>Correspondence covering {domain} routes directly to {legal} and {research} according to subject matter.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Correspondence Subject</th><th scope="col">Custodian</th><th scope="col">Endpoint</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Enactment &amp; Table Audits</td><td>{research}</td><td>{mailto_link}</td></tr>
+              <tr><td>CCPA / GDPR &amp; Licensing</td><td>{legal}</td><td>{mailto_link}</td></tr>
+              <tr><td>Published Protocols</td><td>Reference Archive</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Amendment Intake Requirements</h2>
+        <p>Submissions citing {auth} or {ds} must specify the calculator path, input scenario, and the {rev_ex}. Verified updates propagate immediately across live tables and manifests.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Empirical Dataset Inquiries & Audit Support | {profile['brand_name']}",
+            "h1_text": "Empirical Dataset Inquiries & Audit Support",
+            "meta_desc": f"Connect with {profile['research_entity']} regarding public series updates, data requests, or partner compliance.",
+            "quick_answer": (
+                f"Write {profile['research_entity']} at {profile['brand_name']} to report revised benchmark series, request data deletion, "
+                "or verify empirical table provenance. Verified updates are benchmarked against published government releases before "
+                "updating production calculators and JSON calculation manifests."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Analytical &amp; Compliance Contacts</h2>
+        <ol class="gov-steps">
+          <li><strong>Benchmark &amp; Formula Audits ({research}):</strong> {mailto_link}</li>
+          <li><strong>Privacy &amp; Statutory Rights ({legal}):</strong> {mailto_link}</li>
+          <li><strong>Reference Rules:</strong> Review <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a>.</li>
+        </ol>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Dataset Revision Procedure</h2>
+        <p>Include the tool URL, tested numbers, and exact {rev_ex} when reporting changes under {auth} or {ds}. Confirmed revisions update both UI schedules and manifests.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Governance, Privacy & Editorial Oversight Desk | {profile['brand_name']}",
+            "h1_text": "Governance, Privacy & Editorial Oversight Desk",
+            "meta_desc": f"Reach {profile['legal_entity']} governance leads for compliance audits, privacy removals, and statutory corrections.",
+            "quick_answer": (
+                f"Contact {profile['legal_entity']} governance leadership for FTC compliance inquiries, GDPR or CCPA record erasure, "
+                f"and statutory schedule verification on {profile['domain']}. All technical and legal notices receive review against "
+                "enacted publications prior to publishing corrections."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Oversight Directory</h2>
+        <p>{legal} and {research} oversee regulatory accuracy and visitor data requests across {domain}.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Queue</th><th scope="col">Review Owner</th><th scope="col">Contact</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Citation &amp; Formula Review</td><td>{research}</td><td>{mailto_link}</td></tr>
+              <tr><td>Data Erasure &amp; Terms</td><td>{legal} Governance</td><td>{mailto_link}</td></tr>
+              <tr><td>Governance Docs</td><td>Compliance Archive</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Citation Audit Submission Guide</h2>
+        <div class="gov-callout">
+          <p>Reference the page URL, sample inputs, and the {rev_ex} whenever proposing revisions to {auth} or {ds} schedules.</p>
+        </div>
+      </section>""",
+        },
+        {
+            "raw_title": f"Practitioner Feedback & Scenario Audit Contact | {profile['brand_name']}",
+            "h1_text": "Practitioner Feedback & Scenario Audit Contact",
+            "meta_desc": f"Submit scenario boundary questions, statute updates, or privacy notices to {profile['brand_name']}.",
+            "quick_answer": (
+                f"Practitioners and finance teams can contact {profile['brand_name']} to flag boundary edge cases, statutory changes, "
+                f"or privacy requests. {profile['research_entity']} audits every concrete citation against official agency releases "
+                "before updating live calculators and JSON manifests."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Direct Support Queues</h2>
+        <p>Operators using {domain} can message {research} or {legal} directly through the channels listed below.</p>
+        <ul>
+          <li><strong>Scenario &amp; Math Feedback ({research}):</strong> {mailto_link}</li>
+          <li><strong>Privacy &amp; Terms Desk ({legal}):</strong> {mailto_link}</li>
+          <li><strong>Documentation:</strong> <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a></li>
+        </ul>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>How Corrections Are Verified</h2>
+        <p>For inquiries affecting {auth} or {ds}, attach the route URL, test values, and the {rev_ex}. Approved adjustments update client scripts and manifests together.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Regression Audit & Citation Verification Contact | {profile['brand_name']}",
+            "h1_text": "Regression Audit & Citation Verification Contact",
+            "meta_desc": f"Contact {profile['brand_name']} to challenge calculation parity, report rule updates, or request data deletion.",
+            "quick_answer": (
+                f"Send parity challenges, statutory boundary inquiries, or privacy deletion notices directly to {profile['brand_name']}. "
+                "Every report containing a primary regulatory citation is reproduced against our oracle suite and checked against "
+                "enacted government tables before deploying manifest updates."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Verification &amp; Privacy Endpoints</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Request Scope</th><th scope="col">Assigned Team</th><th scope="col">Direct Route</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Oracle &amp; Statute Parity</td><td>{research}</td><td>{mailto_link}</td></tr>
+              <tr><td>CCPA / GDPR / Terms</td><td>{legal}</td><td>{mailto_link}</td></tr>
+              <tr><td>Standards Index</td><td>Public Docs</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Required Reproduction Details</h2>
+        <p>Reports touching {auth} or {ds} should state the page URL, input tuple, and the {rev_ex} so {research} can verify and patch manifests deterministically.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"How to Reach Our Editorial & Privacy Team | {profile['brand_name']}",
+            "h1_text": "How to Reach Our Editorial & Privacy Team",
+            "meta_desc": f"Email {profile['brand_name']} to ask about calculator rules, report updated rates, or delete your email record.",
+            "quick_answer": (
+                f"Email the {profile['brand_name']} team anytime to share updated government rates, ask how a calculator works, "
+                f"or delete an email address you submitted. {profile['legal_entity']} reviews every statutory question against official "
+                "public documents before updating pages."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Email &amp; Reference Links</h2>
+        <p>You can write to {legal} and {research} for any question about {domain}.</p>
+        <dl class="gov-meta-grid">
+          <div><dt>Calculator Questions</dt><dd>{research}: {mailto_link}</dd></div>
+          <div><dt>Privacy &amp; Deletion</dt><dd>{legal}: {mailto_link}</dd></div>
+          <div><dt>How It Works</dt><dd><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></dd></div>
+        </dl>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Reporting a Rate or Rule Change</h2>
+        <p>To flag an update to {auth} or {ds}, send the page link, the numbers you entered, and the {rev_ex}. Confirmed updates go live across our calculators with updated verification dates.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Editorial Correspondence & Corrections Register | {profile['brand_name']}",
+            "h1_text": "Editorial Correspondence & Corrections Register",
+            "meta_desc": f"Official correspondence channels for {profile['brand_name']} editorial corrections, privacy notices, and archival queries.",
+            "quick_answer": (
+                f"Submit editorial correction notices, statutory table citations, and formal privacy inquiries to {profile['brand_name']} "
+                f"correspondence channels. {profile['research_entity']} cross-checks every citation against official federal and state "
+                "publications before revising archive schedules and calculation manifests."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Published Correspondence Directory</h2>
+        <p>{legal} and {research} maintain formal intake desks for {domain} publications.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Notice Type</th><th scope="col">Editorial Desk</th><th scope="col">Channel</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Archival &amp; Formula Corrections</td><td>{research}</td><td>{mailto_link}</td></tr>
+              <tr><td>Privacy &amp; Legal Notices</td><td>{legal}</td><td>{mailto_link}</td></tr>
+              <tr><td>Published Standards</td><td>Documentation</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>""",
+            "s2": f"""      <section class="card">
+        <h2>Formal Correction Protocol</h2>
+        <p>For updates involving {auth} or {ds}, specify the tool URL, scenario inputs, and the {rev_ex}. Verified updates publish with manifest timestamps.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{chosen['s2']}\n{chosen['s1']}" if order_bit % 2 == 1 else f"{chosen['s1']}\n{chosen['s2']}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
+def _build_partners_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+    partner_price_int: int,
+    partner_sku: str,
+    partner_deliverables_li: str,
+    default_partner_state: str,
+    firm_placeholder: str,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    ds = html_lib.escape(str(profile["economic_dataset_label"]))
+    prop_id = html_lib.escape(str(profile.get("property_id") or "profithelm").strip().lower())
+    topic = html_lib.escape(str(profile.get("tools_directory_topic_label") or f"{profile['brand_name']} Calculators"))
+    sku_esc = html_lib.escape(partner_sku)
+    ph_esc = html_lib.escape(firm_placeholder)
+
+    state_options = (
+        f'<option value="CA"{" selected" if default_partner_state == "CA" else ""}>California (CA)</option>\n'
+        f'              <option value="DE"{" selected" if default_partner_state == "DE" else ""}>Delaware (DE)</option>\n'
+        '              <option value="TX">Texas (TX)</option>\n'
+        '              <option value="NY">New York (NY)</option>\n'
+        '              <option value="FL">Florida (FL)</option>\n'
+        '              <option value="IL">Illinois (IL)</option>\n'
+        '              <option value="WA">Washington (WA)</option>\n'
+        '              <option value="MA">Massachusetts (MA)</option>'
+    )
+
+    drawer_variants = (
+        ("Reserve Your Partner Slot", "Enter organization and contact details below for Stripe Checkout verification.", "Organization Name", "Work Email", "Operating State", "Reserve Partner Slot"),
+        ("Partner Onboarding Intake", "Complete the verification intake form to activate your slot via Stripe Checkout.", "Licensed Firm Name", "Compliance / Desk Email", "Primary State", "Activate Partner Slot"),
+        ("Verified Provider Application", "Register your practice below to proceed to one-time Stripe Checkout onboarding.", "Practice / Agency Name", "Partner Contact Email", "Target Jurisdiction", "Continue to Checkout"),
+        ("Sponsor Placement Registration", "Submit firm credentials below to initiate verification and Stripe Checkout.", "Advisory / Provider Firm Name", "Partner Desk Work Email", "Primary Jurisdiction", "Apply & Reserve Partner Slot"),
+        ("Practitioner Directory Enrollment", "Provide firm details below to enroll in jurisdiction-filtered calculator referrals.", "Registered Firm Name", "Intake Email Address", "Licensed State", "Enroll & Reserve Slot"),
+        ("Audit & Referral Slot Intake", "Register your firm to receive SubID-tracked referrals via Stripe Checkout.", "Firm Legal Name", "Billing / Desk Email", "Service State", "Verify & Reserve Slot"),
+        ("Apply as a Verified Provider", "Share your firm name, work email, and state below to reserve your listing.", "Business or Firm Name", "Your Work Email", "Main State Served", "Reserve Listing"),
+        ("Commercial Desk Enrollment", "Submit institutional details below for verification review and Stripe Checkout.", "Entity / Advisory Name", "Official Desk Email", "Primary Jurisdiction", "Submit Partner Enrollment"),
+    )
+    from pseofactory.visual_primitives import build_self_attribution_field_html
+
+    d_h2, d_p, lbl_firm, lbl_email, lbl_state, btn_lbl = drawer_variants[arch_idx % len(drawer_variants)]
+    self_attr_html = build_self_attribution_field_html(input_id="partner-registration-form-attribution-source")
+
+    drawer_html = f"""      <section id="partner-registration-drawer" class="partner-registration-drawer card" data-partners-page="1" data-mechanic="partner_supply_registration" data-property="{prop_id}" data-offer-sku="{sku_esc}" data-offer-price="{partner_price_int}">
+        <h2>{d_h2} (${partner_price_int})</h2>
+        <p>{d_p}</p>
+        <form id="partner-registration-form" class="partner-registration-form" action="/api/lead-capture" method="post" data-offer-sku="{sku_esc}" data-offer-price="{partner_price_int}" novalidate>
+          <input type="hidden" name="intent" value="partner_registration">
+          <input type="hidden" name="offer_sku" value="{sku_esc}">
+          <div class="form-group">
+            <label for="partner-reg-firm-name">{lbl_firm}</label>
+            <input type="text" id="partner-reg-firm-name" name="firm_name" placeholder="{ph_esc}" required class="touch-target">
+          </div>
+          <div class="form-group">
+            <label for="partner-reg-email">{lbl_email}</label>
+            <input type="email" id="partner-reg-email" name="email" placeholder="partners@firm.com" required class="touch-target">
+          </div>
+          <div class="form-group">
+            <label for="quote-intake-partner-reg-state">{lbl_state}</label>
+            <select id="quote-intake-partner-reg-state" name="state" class="touch-target">
+              {state_options}
+            </select>
+          </div>
+{self_attr_html}
+          <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
+          <button type="submit" id="partner-registration-submit-btn" class="btn btn-cta touch-target">{btn_lbl} (${partner_price_int})</button>
+          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite"></div>
+        </form>
+      </section>"""
+
+    specs = (
+        {
+            "raw_title": f"{profile['brand_name']} Contextual Referral Slot & Attribution",
+            "h1_text": f"{profile['brand_name']} Contextual Referral Slot",
+            "meta_desc": f"Enroll in {profile['brand_name']} (${partner_price_int}) contextual calculator placements with SubID telemetry.",
+            "quick_answer": (
+                f"{profile['brand_name']} provisions one verified referral slot per matching workflow for a ${partner_price_int} activation fee. "
+                "Listings render beneath calculation results with SubID query attribution and FTC 16 CFR Part 255 labels while leaving "
+                "browser formula execution completely untouched."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Slot Specification &amp; Attribution Routing (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Approved firms appear on targeted {topic} endpoints built atop {auth} and {ds} (BLS and FRED benchmark series), using audited <code>/r/</code> links with SubID tracking and FTC 16 CFR Part 255 signage.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <dl class="gov-meta-grid">
+          <div><dt>Activation SKU</dt><dd>${partner_price_int} USD ({sku_esc})</dd></div>
+          <div><dt>Slot Density</dt><dd>Single post-calc placement per matching route</dd></div>
+          <div><dt>Click Telemetry</dt><dd><code>/r/</code> redirect carrying <code>source_tool</code> and <code>subid</code></dd></div>
+          <div><dt>Firewall Standard</dt><dd>FTC 16 CFR Part 255 math isolation</dd></div>
+        </dl>
+        <div class="table-wrap pseo-table-wrap">
+          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+            <thead>
+              <tr><th scope="col">Telemetry Dimension</th><th scope="col">Verified Parameter</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Onboarding Tariff</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Attribution Schema</td><td><code>/r/</code> SubID + FTC 16 CFR Part 255 notice</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Technical Referral FAQ</h2>
+        <h3>Which Organizations Qualify?</h3>
+        <p>Credentialed advisory practices, independent auditors, and regulated service firms actively licensed across target jurisdictions served by {brand} workflows may apply for verified slot review.</p>
+        <h3>How Are Clicks Tracked?</h3>
+        <p>Outbound <code>/r/</code> routes forward explicit tool slug and SubID attribution tags for reconciliation without ever reading, storing, or modifying user calculator inputs.</p>
+        <h3>Can Sponsors Adjust Formulas?</h3>
+        <p>No. Underlying {auth} rules and statutory schedules remain mathematically locked and isolated from commercial placements under FTC 16 CFR Part 255 guidelines.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Verified Statutory Provider Directory Slot | {profile['brand_name']}",
+            "h1_text": "Verified Statutory Provider Directory Slot",
+            "meta_desc": f"Apply for a ${partner_price_int} verified listing across {profile['brand_name']} statutory tools with full FTC disclosure.",
+            "quick_answer": (
+                f"Licensed specialists and regulated providers can reserve a single verified placement on {profile['brand_name']} for "
+                f"${partner_price_int} one-time activation. State-filtered routing pairs high-intent visitors with qualified firms "
+                "under FTC 16 CFR Part 255 separation rules and transparent SubID tracking."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Provider Qualification &amp; Fee Schedule (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Verified specialists gain exclusive post-calculation visibility across {topic} driven by {auth} and {ds} (BLS and FRED empirical series), governed by FTC 16 CFR Part 255 and <code>/r/</code> SubID attribution.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <div class="table-wrap pseo-table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Listing Rule</th><th scope="col">Published Terms</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Onboarding Fee</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Exclusivity Rule</td><td>One contextual card per calculator route</td></tr>
+              <tr><td>Routing Protocol</td><td><code>/r/</code> link passing <code>source_tool</code> and <code>subid</code></td></tr>
+              <tr><td>Disclosure Lock</td><td>FTC 16 CFR Part 255 editorial separation</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Statutory Listing Questions</h2>
+        <h3>Who Meets Eligibility Rules?</h3>
+        <p>State-licensed practitioners, regulated lenders, and accredited compliance assessors operating in good standing within active {brand} jurisdictions qualify for placement verification.</p>
+        <h3>What Does Routing Expose?</h3>
+        <p>Redirects passing through <code>/r/</code> transmit the originating tool slug and SubID attribution tag cleanly so partner desks can audit monthly conversion digests.</p>
+        <h3>How Is Independence Preserved?</h3>
+        <p>Strict FTC 16 CFR Part 255 disclosure separation and primary {auth} statutory provenance prohibit any commercial sponsor from influencing formula calculations.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"High-Intent Cohort Referral Program | {profile['brand_name']}",
+            "h1_text": "High-Intent Cohort Referral Program",
+            "meta_desc": f"Join {profile['brand_name']} cohort referrals (${partner_price_int}) filtered by jurisdiction with transparent SubID reporting.",
+            "quick_answer": (
+                f"{profile['brand_name']} connects qualified advisory firms with high-intent calculation cohorts for a ${partner_price_int} "
+                "one-time verification fee. Jurisdiction filters match visitors to licensed regional partners via SubID-tagged links "
+                "under strict FTC 16 CFR Part 255 disclosure governance."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Cohort Routing &amp; Activation Terms (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Participating firms capture jurisdiction-filtered inquiries across {topic} anchored to {auth} and {ds} (BLS and FRED datasets), backed by <code>/r/</code> SubID tracking and FTC 16 CFR Part 255 labeling.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <ol class="gov-steps">
+          <li><strong>Verification Fee:</strong> ${partner_price_int} USD ({sku_esc}) one-time activation.</li>
+          <li><strong>Post-Result Placement:</strong> Dedicated single-slot card below {brand} model metrics.</li>
+          <li><strong>Tracked Forwarding:</strong> <code>/r/</code> redirects carrying <code>source_tool</code> and <code>subid</code>.</li>
+          <li><strong>Compliance Lock:</strong> FTC 16 CFR Part 255 disclosure separation.</li>
+        </ol>
+        <div class="table-wrap pseo-table-wrap">
+          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+            <thead>
+              <tr><th scope="col">Cohort Control</th><th scope="col">Operational Threshold</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Regional Activation</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Jurisdiction Matching</td><td>State filter + FTC 16 CFR Part 255 SubID audit</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Cohort Partner FAQ</h2>
+        <h3>Which Firms May Participate?</h3>
+        <p>Licensed advisors, compliance auditors, and specialty providers serving active {brand} states with verified standing may reserve a regional placement slot.</p>
+        <h3>How Are Referrals Attributed?</h3>
+        <p>Every outbound partner click passes through our audited <code>/r/</code> redirect layer with explicit tool and SubID reconciliation parameters attached.</p>
+        <h3>Do Placements Affect Benchmark Math?</h3>
+        <p>Never; mandatory FTC 16 CFR Part 255 editorial rules and {auth} statutory schedules keep every benchmark table and output ranking neutral.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Verified Partner Supply & Disclosure Charter | {profile['brand_name']}",
+            "h1_text": "Verified Partner Supply & Disclosure Charter",
+            "meta_desc": f"Review fiduciary separation, ${partner_price_int} slot activation, and compliance onboarding at {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} enforces strict disclosure separation across its ${partner_price_int} Verified Partner Slot. "
+                "Qualified firms receive one post-calculation placement filtered by state jurisdiction with transparent SubID tracking, "
+                "while every underlying quantitative model stays locked to enacted statutes."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Chartered Slot Architecture (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Admitted partners receive priority placement across {topic} built on {auth} and {ds} (BLS/FRED reference feeds), paired with audited <code>/r/</code> SubID forwarding under FTC 16 CFR Part 255.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <div class="gov-callout">
+          <p><strong>${partner_price_int} USD ({sku_esc}):</strong> One contextual slot per tool route, routed via <code>/r/</code> with <code>source_tool</code> and <code>subid</code>, strictly governed by FTC 16 CFR Part 255.</p>
+        </div>
+        <div class="table-wrap pseo-table-wrap">
+          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+            <thead>
+              <tr><th scope="col">Charter Requirement</th><th scope="col">Enforced Baseline</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>One-Time Onboarding</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Editorial Separation</td><td>FTC 16 CFR Part 255 + state filtering</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Partner Oversight Questions</h2>
+        <h3>Who Passes Onboarding Review?</h3>
+        <p>Credentialed firms, compliance assessors, and regulated providers verified for active {brand} states pass onboarding checks prior to live placement activation.</p>
+        <h3>How Does Attribution Operate?</h3>
+        <p>Outbound clicks traverse <code>/r/</code> with explicit SubID tags for partner reporting while leaving all deterministic statutory schedules completely intact.</p>
+        <h3>What Protects Editorial Trust?</h3>
+        <p>Mandatory FTC 16 CFR Part 255 sponsored-placement labels alongside primary {auth} provenance guarantee transparent separation for every visitor.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Practitioner Referral Placement Program | {profile['brand_name']}",
+            "h1_text": "Practitioner Referral Placement Program",
+            "meta_desc": f"Reserve a ${partner_price_int} practitioner placement on {profile['brand_name']} calculators with state filtering.",
+            "quick_answer": (
+                f"Advisory practices and specialty providers can activate a single post-calculation partner slot on {profile['brand_name']} "
+                f"for ${partner_price_int}. State-targeted routing delivers qualified prospects from interactive workflows while honoring "
+                "FTC 16 CFR Part 255 disclosure rules and transparent SubID attribution."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Practitioner Slot Scope (${partner_price_int} Activation)</h2>
+        <p class="partner-slot-summary">Verified teams gain contextual placement across {topic} grounded in {auth} and {ds} (BLS and FRED macro series), routed via <code>/r/</code> with SubID attribution and FTC 16 CFR Part 255 notices.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <div class="table-wrap pseo-table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Slot Element</th><th scope="col">Operational Detail</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Activation Charge</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Page Position</td><td>1 contextual card post-calculation</td></tr>
+              <tr><td>Tracking Link</td><td><code>/r/</code> redirect with <code>source_tool</code> and <code>subid</code></td></tr>
+              <tr><td>Editorial Rule</td><td>FTC 16 CFR Part 255 strict separation</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Practitioner FAQ</h2>
+        <h3>Who Can Apply for Placement?</h3>
+        <p>Licensed advisory firms, independent auditors, and specialty operators actively serving clients in {brand} target states may apply for verification.</p>
+        <h3>How Do Visitors Reach Us?</h3>
+        <p>Qualified visitors reach your team through state-filtered <code>/r/</code> links carrying explicit SubID and source calculator attribution tags.</p>
+        <h3>Are Results Ever Altered?</h3>
+        <p>No; primary {auth} statutory provenance and FTC 16 CFR Part 255 compliance gates keep every calculator output independent from commercial placements.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Audited Partner Slot & Attribution Protocol | {profile['brand_name']}",
+            "h1_text": "Audited Partner Slot & Attribution Protocol",
+            "meta_desc": f"Inspect mechanical slot constraints, ${partner_price_int} onboarding, and SubID rules on {profile['brand_name']}.",
+            "quick_answer": (
+                f"Every ${partner_price_int} partner slot on {profile['brand_name']} enforces single-card density, state filtering, "
+                "and mandatory FTC 16 CFR Part 255 disclosure gates. Approved providers receive tracked SubID redirects from "
+                "post-calculation surfaces without modifying deterministic boundary outputs."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Mechanical Slot Guarantees (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Qualified providers occupy single-card slots across {topic} anchored to {auth} and {ds} (BLS and FRED indicators), audited for <code>/r/</code> SubID integrity and FTC 16 CFR Part 255 compliance.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <ul>
+          <li><strong>SKU &amp; Fee:</strong> ${partner_price_int} USD ({sku_esc})</li>
+          <li><strong>Card Cap:</strong> Strictly 1 referral card per calculator</li>
+          <li><strong>Redirect Spec:</strong> <code>/r/</code> with <code>source_tool</code> and <code>subid</code></li>
+          <li><strong>Compliance Lock:</strong> FTC 16 CFR Part 255 separation</li>
+        </ul>
+        <div class="table-wrap pseo-table-wrap">
+          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+            <thead>
+              <tr><th scope="col">Protocol Check</th><th scope="col">Verification Rule</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Slot Fee &amp; SKU</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Card Density Cap</td><td>1 verified link per calculator (FTC 16 CFR Part 255)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Protocol FAQ</h2>
+        <h3>Which Entities Pass Vetting?</h3>
+        <p>Credentialed practices, regulated lenders, and compliance assessors serving active {brand} jurisdictions with verifiable credentials pass vetting review.</p>
+        <h3>How Is Click Flow Audited?</h3>
+        <p>Click flow is audited via deterministic <code>/r/</code> redirects preserving explicit SubID and source route parameters for monthly reconciliation.</p>
+        <h3>Do Partners Influence Outputs?</h3>
+        <p>Zero partner influence is permitted; {auth} statutory provenance and schedules stay mathematically sealed under strict FTC 16 CFR Part 255 editorial rules.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Get Listed Alongside Our Calculators | {profile['brand_name']}",
+            "h1_text": "Get Listed Alongside Our Calculators",
+            "meta_desc": f"Reserve a ${partner_price_int} verified firm listing on {profile['brand_name']} to connect with users in your state.",
+            "quick_answer": (
+                f"Licensed firms can reserve a single verified listing on {profile['brand_name']} calculators for a one-time ${partner_price_int} "
+                "setup fee. Visitors in your state see your firm right after calculating their estimate, with clear FTC disclosures "
+                "and simple SubID click reporting."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Simple ${partner_price_int} Verified Firm Listing</h2>
+        <p class="partner-slot-summary">Approved firms appear on matching {topic} tools built from {auth} and {ds} (BLS and FRED public data), using clear <code>/r/</code> links with SubID tracking and FTC 16 CFR Part 255 disclosure.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <dl class="gov-meta-grid">
+          <div><dt>Setup Price</dt><dd>${partner_price_int} USD ({sku_esc})</dd></div>
+          <div><dt>Visibility</dt><dd>1 featured slot after calculation</dd></div>
+          <div><dt>Tracking</dt><dd><code>/r/</code> link with <code>source_tool</code> and <code>subid</code></dd></div>
+          <div><dt>Disclosure</dt><dd>FTC 16 CFR Part 255 compliant</dd></div>
+        </dl>
+        <div class="table-wrap pseo-table-wrap">
+          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+            <thead>
+              <tr><th scope="col">Listing Detail</th><th scope="col">Included Value</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>One-Time Setup</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Lead Routing</td><td>State match + FTC 16 CFR Part 255 SubID tag</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Common Listing Questions</h2>
+        <h3>Who Should Apply?</h3>
+        <p>Licensed advisors, compliance specialists, regulated lenders, and specialty service providers active in {brand} states should apply for listing review.</p>
+        <h3>How Are Leads Sent?</h3>
+        <p>Visitors click your tracked <code>/r/</code> referral link tagged with your SubID after completing their local browser scenario estimate.</p>
+        <h3>Does Listing Change Calculator Numbers?</h3>
+        <p>No; {brand} keeps {auth} statutory authority math 100% separate from partner referrals under FTC 16 CFR Part 255 disclosure standards.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Commercial Partner Registry & Placement Terms | {profile['brand_name']}",
+            "h1_text": "Commercial Partner Registry & Placement Terms",
+            "meta_desc": f"Apply for registry admission (${partner_price_int}) across {profile['brand_name']} statutory tools with SubID tracking.",
+            "quick_answer": (
+                f"The {profile['brand_name']} Commercial Partner Registry admits licensed firms into single-slot calculator placements "
+                f"for a ${partner_price_int} activation fee. Every placement carries FTC 16 CFR Part 255 labeling, state-level filtering, "
+                "and SubID attribution while keeping published research math completely independent."
+            ),
+            "info_card": f"""      <section class="card">
+        <h2>Registry Admission Standard (${partner_price_int})</h2>
+        <p class="partner-slot-summary">Admitted firms receive contextual placement across {topic} citing {auth} and {ds} (BLS and FRED benchmark series), supported by <code>/r/</code> SubID reporting under FTC 16 CFR Part 255.</p>
+        <ul class="partner-benefits-list">
+          {partner_deliverables_li}
+        </ul>
+        <div class="table-wrap pseo-table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Registry Field</th><th scope="col">Verified Specification</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Admission Fee</td><td>${partner_price_int} USD ({sku_esc})</td></tr>
+              <tr><td>Placement Cap</td><td>1 card per matching {brand} route</td></tr>
+              <tr><td>Link Attribution</td><td><code>/r/</code> redirect with <code>source_tool</code> and <code>subid</code></td></tr>
+              <tr><td>Independence Standard</td><td>FTC 16 CFR Part 255 disclosure lock</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <h2>Registry FAQ</h2>
+        <h3>Who Qualifies for Admission?</h3>
+        <p>Licensed advisory firms, independent auditors, regulated lenders, and specialty providers serving {brand} states qualify for commercial registry admission.</p>
+        <h3>How Does SubID Routing Work?</h3>
+        <p>Each approved listing routes outbound clicks via <code>/r/</code> with explicit SubID tags and zero interference with published formula outputs.</p>
+        <h3>How Is Compliance Enforced?</h3>
+        <p>Compliance is enforced through mandatory FTC 16 CFR Part 255 endorsement notices alongside primary {auth} statutory provenance.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{drawer_html}\n{chosen['info_card']}" if order_bit % 2 == 1 else f"{chosen['info_card']}\n{drawer_html}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
+def _build_methodology_governance_spec(
+    profile: Dict[str, Any],
+    arch_idx: int,
+    order_bit: int,
+) -> Dict[str, str]:
+    brand = html_lib.escape(str(profile["brand_name"]))
+    research = html_lib.escape(str(profile["research_entity"]))
+    auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    ds = html_lib.escape(str(profile["economic_dataset_label"]))
+
+    specs = (
+        {
+            "raw_title": f"Deterministic Calculation Methodology & Oracle Parity | {profile['brand_name']}",
+            "h1_text": "Deterministic Calculation Methodology & Oracle Parity",
+            "meta_desc": f"Inspect dual-dataset joins, statutory boundary clamping, and runtime parity checks on {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} calculators execute closed-form mathematical expressions anchored to enacted statutory "
+                "schedules and public benchmark series. Each interactive workflow enforces input boundary clamping, exports "
+                "machine-readable JSON manifests, and passes dual-runtime Python and browser verification with zero variance."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Dual-Authority Dataset Joins</h2>
+        <p>{research} joins enacted legal rules ({auth}) with empirical series ({ds}) across every calculator. Inputs clamp to statutory thresholds before evaluation and refresh whenever official bulletins revise tables.</p>
+      </section>""",
+            "s2": """      <section class="card">
+        <h2>Automated Verification Gates</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Control Layer</th><th scope="col">Verification Check</th><th scope="col">Pass Criterion</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>1. Rulebook Lock</td><td>Citation and effective-year check</td><td>Exact enacted match</td></tr>
+              <tr><td>2. Dual-Runtime Parity</td><td>Python vs browser JS oracle</td><td>Zero dollar variance</td></tr>
+              <tr><td>3. Cliff &amp; Ceiling Probes</td><td>Boundary and zero-input sweeps</td><td>Exact statutory clamp</td></tr>
+              <tr><td>4. Ergonomics Audit</td><td>WCAG AA and 44px touch targets</td><td>100% gate compliance</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Submit formula questions via our <a href="/contact/" class="touch-target">Editorial Contact</a> desk.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Statutory Schedule Joins & Boundary Audit Protocol | {profile['brand_name']}",
+            "h1_text": "Statutory Schedule Joins & Boundary Audit Protocol",
+            "meta_desc": f"Review how {profile['research_entity']} binds {profile['brand_name']} models to enacted statutes and datasets.",
+            "quick_answer": (
+                f"Every model published by {profile['research_entity']} binds deterministic client computations directly to "
+                "enacted statutes and public economic benchmarks. Automated regression probes verify boundary cliffs, phaseout "
+                "ceilings, and dual-runtime parity prior to publishing any update."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Enacted Schedule Integration</h2>
+        <p>Models curated by {research} pair codified authorities ({auth}) with empirical data ({ds}). Revised agency releases trigger immediate constant updates and full boundary re-verification across {brand}.</p>
+      </section>""",
+            "s2": """      <section class="card">
+        <h2>Four-Stage Verification Standard</h2>
+        <ol class="gov-steps">
+          <li><strong>Authority Verification:</strong> Exact match against enacted effective-year schedules.</li>
+          <li><strong>Runtime Parity:</strong> Identical outputs between server Python and browser JS engines.</li>
+          <li><strong>Boundary Clamping:</strong> Deterministic handling of zero, ceiling, and cliff thresholds.</li>
+          <li><strong>Accessibility Gate:</strong> Verified WCAG AA contrast and 44x44px touch controls.</li>
+        </ol>
+        <p>Flag statutory updates through <a href="/contact/" class="touch-target">Editorial Contact</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Empirical Calibration & Boundary Testing Standards | {profile['brand_name']}",
+            "h1_text": "Empirical Calibration & Boundary Testing Standards",
+            "meta_desc": f"Inspect how {profile['brand_name']} calibrates benchmark schedules and verifies marginal cliffs.",
+            "quick_answer": (
+                f"Benchmark tools across {profile['domain']} calibrate empirical series alongside primary government rules "
+                f"maintained by {profile['research_entity']}. Before deployment, automated boundary probes inspect zero inputs, "
+                "phaseout ceilings, and threshold transitions so every scenario matches server-side reference outputs."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Empirical Series &amp; Rulebook Alignment</h2>
+        <p>{research} reconciles published statistics ({ds}) against codified directives ({auth}). Whenever agencies release inflation adjustments or revised schedules, {brand} updates constants and reruns regression checks.</p>
+      </section>""",
+            "s2": """      <section class="card">
+        <h2>Calibration Acceptance Criteria</h2>
+        <dl class="gov-meta-grid">
+          <div><dt>Schedule Lock</dt><dd>100% alignment with enacted effective-year tables.</dd></div>
+          <div><dt>Runtime Parity</dt><dd>Zero discrepancy between Python and client JS math.</dd></div>
+          <div><dt>Edge Probes</dt><dd>Verified clamp behavior across zero and ceiling inputs.</dd></div>
+          <div><dt>Usability Gate</dt><dd>WCAG AA contrast and 44px minimum touch controls.</dd></div>
+        </dl>
+        <p>Report calibration questions via <a href="/contact/" class="touch-target">Editorial Contact</a>.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Closed-Form Verification & Manifest Governance | {profile['brand_name']}",
+            "h1_text": "Closed-Form Verification & Manifest Governance",
+            "meta_desc": f"Understand the closed-form math, JSON manifest checks, and accessibility rules on {profile['brand_name']}.",
+            "quick_answer": (
+                f"{profile['brand_name']} delivers zero-latency client modeling backed by JSON manifests and dual-runtime "
+                f"regression suites under {profile['research_entity']}. Each page links statutory tables to benchmark series, "
+                "clamps invalid inputs at regulatory bounds, and enforces strict contrast and touch-target gates."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Manifest-Backed Statutory Computation</h2>
+        <p>Every interactive surface on {brand} pairs {auth} with empirical baselines from {ds}. Inputs sanitize cleanly against statutory limits before generating browser outputs and structured JSON manifests.</p>
+      </section>""",
+            "s2": """      <section class="card">
+        <h2>Automated Release Gates</h2>
+        <ul>
+          <li><strong>Primary Provenance:</strong> Direct citation audit against enacted schedules.</li>
+          <li><strong>Cross-Runtime Oracle:</strong> Zero variance between backend Python and frontend JS.</li>
+          <li><strong>Threshold Stress Suite:</strong> Exact cliff, phaseout, and floor behavior.</li>
+          <li><strong>Accessibility Check:</strong> WCAG AA legibility and 44x44px touch targets.</li>
+        </ul>
+        <p>Submit revision citations at our <a href="/contact/" class="touch-target">Editorial Contact</a> desk.</p>
+      </section>""",
+        },
+        {
+            "raw_title": f"Quantified Formula Rules & Dataset Verification | {profile['brand_name']}",
+            "h1_text": "Quantified Formula Rules & Dataset Verification",
+            "meta_desc": f"Review how {profile['brand_name']} validates statutory formulas, empirical feeds, and browser parity.",
+            "quick_answer": (
+                f"Models across {profile['domain']} verify statutory formulas and empirical feeds deterministically prior to release. "
+                f"{profile['research_entity']} checks enacted effective-year parameters, zero-cliff clamping, and browser-to-Python "
+                "numerical equivalence while guaranteeing WCAG AA contrast and accessible interaction."
+            ),
+            "s1": f"""      <section class="card">
+        <h2>Synchronized Statutory &amp; Benchmark Tables</h2>
+        <p>Within {brand}, {research} locks codified clauses ({auth}) beside empirical indicators ({ds}) so every calculated figure reflects verifiable public rules.</p>
+      </section>""",
+            "s2": """      <section class="card">
+        <h2>Release Checklist &amp; Audit Thresholds</h2>
+        <div class="gov-callout">
+          <p>Zero runtime drift between Python oracles and browser calculations, exact effective-year table parity, and full 44px WCAG AA ergonomics.</p>
+        </div>
+        <p>Send citation revisions via <a href="/contact/" class="touch-target">Editorial Contact</a>.</p>
+      </section>""",
+        },
+    )
+    chosen = specs[arch_idx % len(specs)]
+    sections = f"{chosen['s2']}\n{chosen['s1']}" if order_bit % 2 == 1 else f"{chosen['s1']}\n{chosen['s2']}"
+    return {
+        "raw_title": chosen["raw_title"],
+        "h1_text": chosen["h1_text"],
+        "meta_desc": chosen["meta_desc"],
+        "quick_answer_text": _clamp_governance_quick_answer(chosen["quick_answer"], str(profile["brand_name"])),
+        "sections_html": sections,
+    }
+
+
 def build_governance_pages(
     profile: Dict[str, Any],
     active_tools: Optional[Sequence[Tuple[str, str]]] = None,
     gsc_token: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Generates all 6 real HTTP-200 governance pages from DeclarativeTenantContract metadata."""
+    """Generates all 7 real HTTP-200 governance pages with SHA-256 hash-selected structural & prose polymorphism."""
     tools = list(active_tools or profile.get("default_tools") or [])
     token = gsc_token or profile["default_gsc_token"]
     brand = profile["brand_name"]
-    legal = profile["legal_entity"]
-    research = profile["research_entity"]
-    auth = profile["primary_statutory_authority"]
-    ds = profile["economic_dataset_label"]
-    email = profile["contact_email"]
-    partners = profile["partner_list_summary"]
     prop_id = str(profile.get("property_id") or "profithelm").strip().lower()
+    digest = _governance_digest(profile)
+    base_arch = digest[0]
+    order_seed = digest[1]
+
+    tool_names_csv = ", ".join(html_lib.escape(lbl) for _, lbl in tools[:3] if lbl) or html_lib.escape(
+        str(profile.get("tools_directory_topic_label") or f"{brand} statutory calculators")
+    )
+
     privacy_params_map = {
         "gainhelm": "audit scopes, employee headcount, control counts, or compliance budgets",
         "lienbond": "contract values, payroll exposures, bond penalties, or project schedules",
@@ -7303,202 +9518,95 @@ def build_governance_pages(
     pages: Dict[str, str] = {}
 
     # 1. /about/
+    about_spec = _build_about_governance_spec(profile, base_arch, order_seed, tool_names_csv)
     pages["about"] = _render_governance_document(
         profile=profile,
         route_slug="about",
-        raw_title=f"About {brand} | Statutory Research & Editorial Standards",
-        h1_text="Independent Statutory Modeling & Research Desk",
-        meta_desc=f"Learn how {brand} publishes deterministic statutory decision models grounded in primary federal and state schedules and empirical public datasets.",
-        quick_answer_text=(
-            f"{brand} operates an independent quantitative research desk publishing deterministic statutory "
-            "calculation tools anchored to enacted federal and state schedules. Every interactive decision model "
-            "is formula-audited against primary regulatory tables and public economic datasets so operators and "
-            "analysts can verify exact scenario outputs transparently in real time."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Institutional Mission &amp; Quantitative Scope</h2>
-        <p>{html_lib.escape(legal)} publishes deterministic decision engines under {html_lib.escape(research)} ({html_lib.escape(profile["editorial_classification"])}). Rather than publishing generic prose summaries, every calculator encodes enacted statutory thresholds, phaseout ceilings, and empirical benchmark series directly into auditable client-side and server-verified math.</p>
-        <p>Each published decision surface pairs closed-form statutory computation with structured sensitivity matrices, citation-backed parameter tables, and downloadable scenario summaries so financial operators, compliance leads, and researchers can audit every intermediate step before consulting licensed counsel.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Governance Dimension</th><th scope="col">Published Standard</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Operating Legal Entity</td><td>{html_lib.escape(legal)}</td></tr>
-              <tr><td>Quantitative Research Group</td><td>{html_lib.escape(research)}</td></tr>
-              <tr><td>Primary Statutory Authorities</td><td>{html_lib.escape(auth)}</td></tr>
-              <tr><td>Empirical Benchmark Datasets</td><td>{html_lib.escape(ds)}</td></tr>
-              <tr><td>Editorial Verification Contact</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section class="card">
-        <h2>Editorial Independence &amp; Commercial Separation</h2>
-        <p>Formula parameters, statutory brackets, and default calculator assumptions are locked to primary government publications and regulatory tables. Commercial partner placements ({html_lib.escape(partners)}) never alter mathematical outputs, ranking order of statutory scenarios, or eligibility thresholds.{" Refinancing federal student loans permanently waives federal protections including Income-Driven Repayment (IDR), Public Service Loan Forgiveness (PSLF), and federal forbearance." if profile["property_id"] == "prexvo" else ""} Review our <a href="/methodology/" class="touch-target">Methodology</a> and <a href="/disclaimers/" class="touch-target">Disclaimers</a> for complete compliance protocols.</p>
-      </section>""",
+        raw_title=about_spec["raw_title"],
+        h1_text=about_spec["h1_text"],
+        meta_desc=about_spec["meta_desc"],
+        quick_answer_text=about_spec["quick_answer_text"],
+        sections_html=about_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
         schema_page_type="AboutPage",
     )
 
     # 2. /methodology/
+    meth_spec = _build_methodology_governance_spec(profile, base_arch + 1, order_seed >> 1)
     pages["methodology"] = _render_governance_document(
         profile=profile,
         route_slug="methodology",
-        raw_title=f"Statutory Calculation Methodology & Audit Rules | {brand}",
-        h1_text="Deterministic Statutory Calculation Methodology",
-        meta_desc=f"Review the mathematical verification architecture, statutory authority joins, and dataset audit rules powering {brand} research models.",
-        quick_answer_text=(
-            f"{brand} calculators execute deterministic closed-form mathematical formulas anchored to enacted "
-            "statutory tables and cross-checked against empirical public datasets. Each interactive model pairs "
-            "zero-latency browser computation with machine-readable JSON calculation manifests, statutory boundary "
-            "clamping, and dual-runtime regression oracle benchmarks to guarantee exact scenario parity."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Two-Tier Statutory &amp; Empirical Dataset Joins</h2>
-        <p>Every calculator published by {html_lib.escape(research)} joins at least two authoritative sources: enacted statutory or regulatory schedules ({html_lib.escape(auth)}) and empirical economic benchmark datasets ({html_lib.escape(ds)}). Inputs are sanitized and clamped to statutory floors and ceilings prior to evaluation.</p>
-        <p>Whenever federal agencies, state legislatures, or rating bureaus issue revised inflation adjustments, rate tables, or administrative rules, {html_lib.escape(research)} updates the canonical dataset constants and re-executes automated boundary verification across all affected hubs and spokes.</p>
-      </section>
-      <section class="card">
-        <h2>Automated Oracle Verification Protocol</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Verification Stage</th><th scope="col">Control Mechanism</th><th scope="col">Acceptance Threshold</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>1. Statutory Authority Lock</td><td>Primary citation &amp; effective-year table check</td><td>100% enacted schedule match</td></tr>
-              <tr><td>2. Deterministic Oracle Parity</td><td>Python &amp; browser JS dual-runtime evaluation</td><td>Zero dollar or basis-point variance</td></tr>
-              <tr><td>3. Boundary Stress Testing</td><td>Zero, phaseout ceiling, and marginal cliff probes</td><td>Exact statutory clamp behavior</td></tr>
-              <tr><td>4. Accessibility &amp; Clarity</td><td>WCAG AA contrast and 44x44px touch ergonomics</td><td>100% mechanical gate pass</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p>Report any statutory update or formula inquiry directly through our <a href="/contact/" class="touch-target">Editorial Contact</a> page.</p>
-      </section>""",
+        raw_title=meth_spec["raw_title"],
+        h1_text=meth_spec["h1_text"],
+        meta_desc=meth_spec["meta_desc"],
+        quick_answer_text=meth_spec["quick_answer_text"],
+        sections_html=meth_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
     )
 
     # 3. /privacy/
+    priv_spec = _build_privacy_governance_spec(profile, base_arch + 2, order_seed >> 2, privacy_params, raw_input_noun)
     pages["privacy"] = _render_governance_document(
         profile=profile,
         route_slug="privacy",
-        raw_title=f"Privacy Policy & Data Minimalism Standards | {brand}",
-        h1_text="Privacy Policy & Client-Side Data Governance",
-        meta_desc=f"Read the {brand} Privacy Policy covering local browser computation, minimal edge telemetry, email briefing opt-ins, and statutory privacy rights.",
-        quick_answer_text=(
-            f"{brand} enforces strict client-side data minimalism by evaluating all interactive scenario inputs "
-            "locally inside your web browser without selling personal records to data brokers. Voluntary email "
-            "submissions for downloadable workpapers or statutory rate briefings are processed exclusively for "
-            "requested fulfillment and deleted promptly upon verified user request."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Local Browser Calculation &amp; URL State</h2>
-        <p>All interactive scenario inputs entered into {html_lib.escape(brand)} calculators run locally in your web browser. Quantitative parameters such as {html_lib.escape(privacy_params)} are evaluated in client memory without transmitting raw {html_lib.escape(raw_input_noun)} inputs to third-party analytics trackers. When you share or bookmark a scenario link, numeric parameters are serialized into URL query parameters under your direct control.</p>
-      </section>
-      <section class="card">
-        <h2>Voluntary Lead Capture, Edge Telemetry &amp; Statutory Rights</h2>
-        <p>If you voluntarily submit an email address via a playbook, workpaper, or regulatory briefing form, {html_lib.escape(legal)} stores only your email address, requested tool identifier, and submission timestamp to deliver the requested resource. Outbound partner links routed via <code>/r/</code> record aggregate, non-identifying click attribution required under FTC 16 CFR Part 255 compliance standards.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Data Category</th><th scope="col">Processing Scope</th><th scope="col">Retention &amp; User Control</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Calculator Numeric Inputs</td><td>100% client-side browser evaluation</td><td>Never persisted on origin servers</td></tr>
-              <tr><td>Workpaper &amp; Briefing Email Opt-In</td><td>Transactional delivery via {html_lib.escape(legal)}</td><td>Deleted upon request to <!--email_off-->{html_lib.escape(email)}<!--/email_off--></td></tr>
-              <tr><td>Edge Security &amp; Outbound Attribution</td><td>Aggregate status and <code>/r/</code> partner routing</td><td>Zero cross-site behavioral resale</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <p>Under CCPA/CPRA, GDPR, and state privacy statutes, you may request access to, correction of, or deletion of any submitted contact record by emailing <!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off-->.</p>
-      </section>""",
+        raw_title=priv_spec["raw_title"],
+        h1_text=priv_spec["h1_text"],
+        meta_desc=priv_spec["meta_desc"],
+        quick_answer_text=priv_spec["quick_answer_text"],
+        sections_html=priv_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
     )
 
     # 4. /terms/
+    terms_spec = _build_terms_governance_spec(profile, base_arch + 3, order_seed >> 3)
     pages["terms"] = _render_governance_document(
         profile=profile,
         route_slug="terms",
-        raw_title=f"Terms of Use & Statutory Modeling Conditions | {brand}",
-        h1_text="Terms of Use & Modeling License Conditions",
-        meta_desc=f"Review the binding Terms of Use governing access to {brand} statutory decision models, downloadable workpapers, and educational research.",
-        quick_answer_text=(
-            f"Access to {brand} interactive statutory models, downloadable workpapers, and benchmark schedules "
-            "is provided strictly for educational and internal analytical scenario modeling. Using any published "
-            "calculation engine or sensitivity matrix on this platform does not create a legal, tax, accounting, "
-            "fiduciary, or certified advisory relationship of any kind."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Permitted Educational &amp; Internal Analytical Use</h2>
-        <p>Subject to these Terms, {html_lib.escape(legal)} grants you a revocable, non-exclusive, non-transferable license to access and use {html_lib.escape(brand)} calculators, sensitivity tables, and exported scenario workpapers for personal evaluation or internal business planning. Automated scraping that degrades edge availability, strips statutory disclaimers, or misrepresents {html_lib.escape(brand)} outputs as certified professional opinions is strictly prohibited.</p>
-      </section>
-      <section class="card">
-        <h2>No Warranties, Limitation of Liability &amp; Governing Standards</h2>
-        <p>While {html_lib.escape(research)} verifies calculation formulas against {html_lib.escape(auth)} and {html_lib.escape(ds)}, enacted statutes, agency guidance, judicial interpretations, and state conformity rules change periodically and depend on entity-specific facts. All tools and publications are provided on an "as-is" and "as-available" informational basis without warranties of completeness, merchantability, or fitness for a particular regulatory filing.</p>
-        <p>Under no circumstances shall {html_lib.escape(legal)} be liable for indirect, incidental, or consequential damages arising from reliance on unverified scenario assumptions. Review our <a href="/disclaimers/" class="touch-target">Disclaimers</a>, <a href="/methodology/" class="touch-target">Methodology</a>, and <a href="/privacy/" class="touch-target">Privacy Policy</a> before acting on any estimate.</p>
-      </section>""",
+        raw_title=terms_spec["raw_title"],
+        h1_text=terms_spec["h1_text"],
+        meta_desc=terms_spec["meta_desc"],
+        quick_answer_text=terms_spec["quick_answer_text"],
+        sections_html=terms_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
     )
 
     # 5. /disclaimers/
     disc_sections = str(profile.get("disclaimers_sections_html") or "")
-
+    disc_qa_variants = (
+        f"{brand} publishes independent educational scenario models for informational analysis only and never "
+        "provides personalized legal, tax, accounting, or certified financial advice. Pursuant to FTC 16 CFR "
+        "Part 255 guidelines, we transparently disclose referral compensation from vetted commercial partners "
+        "while locking every underlying mathematical formula strictly to enacted statutes.",
+        f"Every reference tool hosted by {brand} delivers educational scenario modeling rather than individualized legal, "
+        "tax, or underwriting advice. Under FTC 16 CFR Part 255, affiliate referral compensation is disclosed cleanly "
+        "while underlying statutory schedules remain locked to official government enactments and benchmark series.",
+    )
     pages["disclaimers"] = _render_governance_document(
         profile=profile,
         route_slug="disclaimers",
         raw_title=f"Statutory Disclaimers & FTC 16 CFR 255 Notice | {brand}",
         h1_text="Legal Disclaimers & FTC Compliance Disclosures",
         meta_desc=f"Review mandatory statutory disclaimers, non-affiliation notices, model limitations, and FTC 16 CFR Part 255 disclosures for {brand}.",
-        quick_answer_text=(
-            f"{brand} publishes independent educational scenario models for informational analysis only and never "
-            "provides personalized legal, tax, accounting, or certified financial advice. Pursuant to FTC 16 CFR "
-            "Part 255 guidelines, we transparently disclose referral compensation from vetted commercial partners "
-            "while locking every underlying mathematical formula strictly to enacted statutes."
-        ),
+        quick_answer_text=_clamp_governance_quick_answer(disc_qa_variants[base_arch % 2], brand),
         sections_html=disc_sections,
         active_tools=tools,
         gsc_token=token,
     )
 
     # 6. /contact/
+    contact_spec = _build_contact_governance_spec(profile, base_arch + 5, order_seed >> 4, revision_examples)
     pages["contact"] = _render_governance_document(
         profile=profile,
         route_slug="contact",
-        raw_title=f"Contact {brand} Research & Editorial Verification Desk",
-        h1_text="Editorial Verification & Statutory Research Contact Desk",
-        meta_desc=f"Contact the {brand} editorial research desk to report statutory rate updates, verify modeling methodology, or submit institutional inquiries.",
-        quick_answer_text=(
-            f"Contact the {brand} quantitative editorial desk to submit statutory rate updates, formula "
-            "verification inquiries, data privacy deletion requests, or institutional research questions. Every "
-            "substantive statutory citation or schedule accuracy submission is audited directly against primary "
-            "federal and state regulatory publications before updating our deterministic calculation manifests."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Direct Editorial &amp; Compliance Channels</h2>
-        <p>{html_lib.escape(legal)} and {html_lib.escape(research)} maintain a structured editorial review queue for statutory table updates, calculator boundary edge cases, privacy requests, and partner compliance inquiries across {html_lib.escape(profile["domain"])}.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Inquiry Type</th><th scope="col">Responsible Desk</th><th scope="col">Direct Contact</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Statutory Formula &amp; Dataset Verification</td><td>{html_lib.escape(research)}</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
-              <tr><td>Privacy, GDPR/CCPA &amp; Terms Requests</td><td>{html_lib.escape(legal)} Governance</td><td><!--email_off--><a href="mailto:{html_lib.escape(email)}" class="touch-target">{html_lib.escape(email)}</a><!--/email_off--></td></tr>
-              <tr><td>Methodology &amp; Disclosure Documentation</td><td>Published Standards</td><td><a href="/methodology/" class="touch-target">Methodology</a> &amp; <a href="/disclaimers/" class="touch-target">Disclaimers</a></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section class="card">
-        <h2>Statutory Revision &amp; Correction Protocol</h2>
-        <p>When submitting a formula verification inquiry or statutory threshold update concerning {html_lib.escape(auth)} or {html_lib.escape(ds)}, include the exact calculator URL, input parameters tested, and the {html_lib.escape(revision_examples)}. Verified statutory updates are propagated across both client-side calculators and machine-readable JSON manifests with full changelog timestamps.</p>
-      </section>""",
+        raw_title=contact_spec["raw_title"],
+        h1_text=contact_spec["h1_text"],
+        meta_desc=contact_spec["meta_desc"],
+        quick_answer_text=contact_spec["quick_answer_text"],
+        sections_html=contact_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
         schema_page_type="ContactPage",
@@ -7525,80 +9633,24 @@ def build_governance_pages(
         prop_id,
         f"{brand_base} Partner Advisory Group",
     )
+    partners_spec = _build_partners_governance_spec(
+        profile=profile,
+        arch_idx=base_arch + 6,
+        order_bit=order_seed >> 5,
+        partner_price_int=partner_price_int,
+        partner_sku=partner_sku,
+        partner_deliverables_li=partner_deliverables_li,
+        default_partner_state=default_partner_state,
+        firm_placeholder=firm_placeholder,
+    )
     pages["partners"] = _render_governance_document(
         profile=profile,
         route_slug="partners",
-        raw_title=f"Verified Calculator Partner Program | {brand}",
-        h1_text="Verified Calculator Partner Program",
-        meta_desc=(
-            f"Apply for a Verified Calculator Partner Slot (${partner_price_int}) on {brand} "
-            "to receive state-filtered high-intent referrals with transparent FTC disclosure."
-        ),
-        quick_answer_text=(
-            f"{brand} offers a single Verified Calculator Partner Slot (${partner_price_int} one-time activation fee) "
-            "for licensed advisory firms, compliance assessors, lenders, and specialty service providers. "
-            "Partner placements follow FTC 16 CFR Part 255 disclosure standards, provide state-filtered high-intent referrals "
-            "with transparent SubID attribution, and never alter underlying deterministic calculator outputs."
-        ),
-        sections_html=f"""      <section class="card">
-        <h2>Verified Calculator Partner Slot (${partner_price_int} One-Time Activation)</h2>
-        <p class="partner-slot-summary">Qualified providers receive priority contextual placement across relevant {html_lib.escape(brand)} calculator routes grounded in {html_lib.escape(auth)} and empirical datasets including {html_lib.escape(ds)} (BLS and FRED benchmark series), with transparent <code>/r/</code> SubID attribution under FTC 16 CFR Part 255 guidelines.</p>
-        <ul class="partner-benefits-list">
-          {partner_deliverables_li}
-        </ul>
-        <div class="table-wrap pseo-table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Program Parameter</th><th scope="col">Verified Standard</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>One-Time Verification &amp; Slot Activation</td><td>${partner_price_int} USD ({html_lib.escape(partner_sku)})</td></tr>
-              <tr><td>Placement Architecture</td><td>1 contextual referral card per matching calculator</td></tr>
-              <tr><td>Attribution &amp; Click Routing</td><td>Transparent <code>/r/</code> redirect with <code>source_tool</code> and <code>subid</code></td></tr>
-              <tr><td>Compliance &amp; Disclosure Standard</td><td>FTC 16 CFR Part 255 editorial separation lock</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <h2>Program Eligibility &amp; Attribution FAQ</h2>
-        <h3>Who Is Eligible for Verified Firm Placement?</h3>
-        <p>Licensed advisory practices, compliance auditors, regulated lenders, and specialty service firms operating in active target jurisdictions may apply for placement verification across deterministic {html_lib.escape(brand)} tools powered by primary statutory authority tables.</p>
-        <h3>How Does Referral Routing and Attribution Work?</h3>
-        <p>Each approved firm listing routes through a tracked <code>/r/</code> link with explicit SubID parameters while maintaining strict editorial and mathematical separation from all deterministic statutory schedule calculations.</p>
-        <h3>What Standards Govern Calculator Disclosure Separation?</h3>
-        <p>Every listed referral adheres strictly to FTC 16 CFR Part 255 endorsement disclosure guidelines alongside enacted {html_lib.escape(auth)} statutory provenance and benchmark schedules.</p>
-      </section>
-      <section id="partner-registration-drawer" class="partner-registration-drawer card" data-partners-page="1" data-mechanic="partner_supply_registration" data-property="{html_lib.escape(prop_id)}" data-offer-sku="{html_lib.escape(partner_sku)}" data-offer-price="{partner_price_int}">
-        <h2>Apply for a Verified Partner Slot (${partner_price_int})</h2>
-        <p>Submit your firm details below to register for verification and proceed to Stripe Checkout activation.</p>
-        <form id="partner-registration-form" class="partner-registration-form" action="/api/lead-capture" method="post" data-offer-sku="{html_lib.escape(partner_sku)}" data-offer-price="{partner_price_int}" novalidate>
-          <input type="hidden" name="intent" value="partner_registration">
-          <input type="hidden" name="offer_sku" value="{html_lib.escape(partner_sku)}">
-          <div class="form-group">
-            <label for="partner-reg-firm-name">Advisory / Provider Firm Name</label>
-            <input type="text" id="partner-reg-firm-name" name="firm_name" placeholder="{html_lib.escape(firm_placeholder)}" required class="touch-target">
-          </div>
-          <div class="form-group">
-            <label for="partner-reg-email">Partner Desk Work Email</label>
-            <input type="email" id="partner-reg-email" name="email" placeholder="partners@firm.com" required class="touch-target">
-          </div>
-          <div class="form-group">
-            <label for="quote-intake-partner-reg-state">Primary Jurisdiction</label>
-            <select id="quote-intake-partner-reg-state" name="state" class="touch-target">
-              <option value="CA"{" selected" if default_partner_state == "CA" else ""}>California (CA)</option>
-              <option value="DE"{" selected" if default_partner_state == "DE" else ""}>Delaware (DE)</option>
-              <option value="TX">Texas (TX)</option>
-              <option value="NY">New York (NY)</option>
-              <option value="FL">Florida (FL)</option>
-              <option value="IL">Illinois (IL)</option>
-              <option value="WA">Washington (WA)</option>
-              <option value="MA">Massachusetts (MA)</option>
-            </select>
-          </div>
-          <div class="cf-turnstile-slot" data-turnstile-slot="1"></div>
-          <button type="submit" id="partner-registration-submit-btn" class="btn btn-cta touch-target">Apply &amp; Reserve Partner Slot (${partner_price_int})</button>
-          <div id="partner-registration-status" class="partner-registration-status" role="status" aria-live="polite"></div>
-        </form>
-      </section>""",
+        raw_title=partners_spec["raw_title"],
+        h1_text=partners_spec["h1_text"],
+        meta_desc=partners_spec["meta_desc"],
+        quick_answer_text=partners_spec["quick_answer_text"],
+        sections_html=partners_spec["sections_html"],
         active_tools=tools,
         gsc_token=token,
     )
@@ -8386,6 +10438,7 @@ def compile_tenant_porcelain_estate_with_profile(
                 and og_rel_check.is_file()
                 and og_rel_check.stat().st_size > 0
                 and (target_dist / "site.webmanifest").is_file()
+                and (target_dist / "static" / "js" / "embed-widget.js").is_file()
                 and all((target_dist / g / "index.html").is_file() for g in GOVERNANCE_ROUTES)
             )
         )
@@ -8450,6 +10503,17 @@ def compile_tenant_porcelain_estate_with_profile(
         or (target_dist / "sitemap.xml").is_file()
         or any((target_dist / g / "index.html").is_file() for g in GOVERNANCE_ROUTES)
     )
+    if is_full_estate:
+        from pseofactory.compiler import write_static_embed_widget_assets
+
+        ew_res = write_static_embed_widget_assets(
+            dist_dir=target_dist,
+            domain=str(profile.get("domain") or f"{prop_id}.com"),
+            brand_name=str(profile.get("brand_name") or prop_id.capitalize()),
+            tools=[{"slug": s, "title": t} for s, t in active_tools],
+        )
+        if ew_res.get("js_changed") and "static/js/embed-widget.js" not in mutated_paths:
+            mutated_paths.append("static/js/embed-widget.js")
     governance_written = False
     if is_full_estate:
         gov_pages = build_governance_pages(profile, active_tools=active_tools, gsc_token=gsc_token)

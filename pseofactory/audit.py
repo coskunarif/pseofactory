@@ -1715,7 +1715,7 @@ def audit_code_slop_ratchet(
     }
 
 
-REQUIRED_SYNDICATION_CHANNELS = ("youtube", "linkedin", "facebook", "ghost", "github_gist")
+REQUIRED_SYNDICATION_CHANNELS = ("linkedin", "youtube", "outreach_pitch", "github_statutory_repo")
 STALE_STATUTORY_PATTERNS = (
     (r"\$1,220,000", "Stale Section 179 deduction cap ($1,220,000 vs statutory $2,560,000)"),
     (r"\$1,250,000\s+(?:maximum\s+)?(?:deduction|cap|Section\s+179)", "Stale Section 179 deduction cap ($1,250,000 vs statutory $2,560,000)"),
@@ -1797,7 +1797,18 @@ def _check_parasite_link_wheel_and_hub_spoke_gate(
         for pk in ("canonical_url", "parameterized_url"):
             _inspect_target_url(f"calculation_proof.{pk}", proof.get(pk))
 
-    for ch_name in ("youtube", "linkedin", "facebook", "ghost", "github_gist", "x", "linkedin_pulse", "substack_teardown"):
+    for ch_name in (
+        "youtube",
+        "linkedin",
+        "outreach_pitch",
+        "github_statutory_repo",
+        "facebook",
+        "ghost",
+        "github_gist",
+        "x",
+        "linkedin_pulse",
+        "substack_teardown",
+    ):
         ch_obj = asset_pack.get(ch_name)
         if isinstance(ch_obj, dict):
             for uk in ("target_url", "first_comment_url", "canonical_url", "url"):
@@ -1970,7 +1981,8 @@ def _check_calculation_proof_gate(asset_pack: Dict[str, Any], channel_texts: Dic
         if spoken_text and not any(tok in spoken_text for tok in formatted_tokens):
             violations.append("MISSING_CALCULATION_PROOF:youtube_transcript_missing_spoken_output")
 
-    violations.extend(_verify_gist_executable_proof(asset_pack.get("github_gist"), expected_val))
+    if asset_pack.get("github_gist") is not None:
+        violations.extend(_verify_gist_executable_proof(asset_pack.get("github_gist"), expected_val))
     return violations
 
 
@@ -1981,7 +1993,8 @@ def audit_syndication_asset_against_truth_store(
 ) -> Dict[str, Any]:
     """
     Outside truth-store audit for a tool's syndication asset pack.
-    Enforces Gates S1-S6 across canonical tools, YouTube, LinkedIn, Facebook, Ghost, and GitHub Gists.
+    Enforces Gates S1-S6 across canonical tools and active Batch 3A channels
+    (LinkedIn, YouTube, outreach_pitch, and github_statutory_repo).
     Deliberately rejects Reddit and classifies untested/missing channels as UNKNOWN.
     """
     from pseofactory.contracts import (
@@ -2026,6 +2039,14 @@ def audit_syndication_asset_against_truth_store(
     channel_texts: Dict[str, str] = {}
     channel_param_urls: Dict[str, bool] = {}
     for ch in REQUIRED_SYNDICATION_CHANNELS:
+        if ch == "github_statutory_repo" and ch not in asset_pack:
+            syn_dir_val = asset_pack.get("syndication_dir")
+            if syn_dir_val:
+                bundle_readme = Path(str(syn_dir_val)).parent / "github_repo_bundle" / "README.md"
+                if not bundle_readme.is_file():
+                    unknown_channels.append(ch)
+                    violations.append(f"MISSING_OR_UNKNOWN_CHANNEL:{ch}")
+            continue
         raw_ch = asset_pack.get(ch)
         extracted = _extract_channel_text_and_urls(ch, raw_ch)
         if not extracted["text"]:
@@ -2033,7 +2054,8 @@ def audit_syndication_asset_against_truth_store(
             violations.append(f"MISSING_OR_UNKNOWN_CHANNEL:{ch}")
         else:
             channel_texts[ch] = extracted["text"]
-            channel_param_urls[ch] = extracted["has_param_url"]
+            if ch != "github_statutory_repo":
+                channel_param_urls[ch] = extracted["has_param_url"]
 
     # Gate S3: Calculation proof & AST parity
     violations.extend(_check_calculation_proof_gate(asset_pack, channel_texts))
@@ -2207,10 +2229,8 @@ def audit_syndication_asset_against_truth_store(
 
     min_lengths = {
         "linkedin": 220,
-        "facebook": 180,
-        "ghost": 600,
-        "github_gist": 280,
         "youtube": 250,
+        "outreach_pitch": 200,
     }
     for ch, min_len in min_lengths.items():
         if ch in channel_texts and len(channel_texts[ch]) < min_len:
@@ -2391,7 +2411,7 @@ def inspect_raw_syndication_manifests_and_trails(
     syn_path = Path(syndication_root)
     pack_files = sorted(syn_path.glob("*/*/syndication_pack.json")) if syn_path.exists() else []
 
-    observed_channels: Dict[str, int] = {ch: 0 for ch in ("youtube", "linkedin", "facebook", "x", "reddit", "ghost", "github_gist")}
+    observed_channels: Dict[str, int] = {ch: 0 for ch in REQUIRED_SYNDICATION_CHANNELS}
     parameterized_url_packs = 0
     boolean_citation_packs = 0
     thin_substack_packs = 0
@@ -2402,7 +2422,10 @@ def inspect_raw_syndication_manifests_and_trails(
         except Exception:
             continue
         for ch in observed_channels:
-            if data.get(ch):
+            if ch == "github_statutory_repo":
+                if data.get(ch) or (pf.parent.parent / "github_repo_bundle" / "README.md").is_file():
+                    observed_channels[ch] += 1
+            elif data.get(ch):
                 observed_channels[ch] += 1
         if isinstance(data.get("dual_dataset_citations"), bool):
             boolean_citation_packs += 1

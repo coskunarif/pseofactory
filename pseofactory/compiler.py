@@ -4667,18 +4667,36 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         feed_items=lb_feed_items,
         indexnow_key=indexnow_key,
         catalog_tools=catalog_tools,
-        media_kit_payload={
-            "property_id": "lienbond",
-            "brand_name": "LienBond",
-            "domain": "lienbond.com",
-            "vertical": "construction_surety_workers_comp_mechanics_lien",
-            "deliverable_skus": ["lb_surety_lien_wh347_packet", "lb_workers_comp_emr_audit_packet"],
-        },
+        media_kit_payload=sanitize_public_media_kit_payload(
+            {
+                "property_id": "lienbond",
+                "brand_name": "LienBond",
+                "domain": "lienbond.com",
+                "vertical": "construction_surety_workers_comp_mechanics_lien",
+                "deliverable_skus": ["lb_surety_lien_wh347_packet", "lb_workers_comp_emr_audit_packet"],
+            },
+            repo_root=root,
+        ),
         header_routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
         + [f'/tools/{p["slug"]}/' for p in compiled_pages],
         machine_endpoints=["/feed.xml", "/llms.txt", "/sitemap.xml"],
         redirects_content=build_lienbond_canonical_redirects_content(dist),
     )
+    write_static_embed_widget_assets(
+        dist_dir=dist,
+        domain="lienbond.com",
+        brand_name="LienBond",
+        tools=compiled_pages,
+    )
+    lb_cfg_hq = ""
+    lb_cfg_path = root / ".pseofactory.json"
+    if lb_cfg_path.is_file():
+        try:
+            lb_cfg_obj = json.loads(lb_cfg_path.read_text(encoding="utf-8"))
+            if isinstance(lb_cfg_obj, dict):
+                lb_cfg_hq = str(lb_cfg_obj.get("headquarters") or "").strip()
+        except Exception:
+            lb_cfg_hq = ""
     write_llms_files(
         dist=dist,
         property_id="lienbond",
@@ -4688,7 +4706,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         header_tagline="Deterministic construction surety bond, NCCI workers compensation, 50-state mechanics lien, and Davis-Bacon WH-347 modeling.",
         author="LienBond Statutory Surety & Construction Compliance Research",
         legal_name="LienBond LLC",
-        headquarters="522 W Riverside Ave Ste N, Spokane, WA 99201",
+        headquarters=lb_cfg_hq,
         query_syntax_params="",
         statutory_notes="",
         all_tools=[{"slug": p["slug"], "title": p["title"], "description": f"Deterministic calculation scope for {p['title']}."} for p in compiled_pages],
@@ -5052,3 +5070,193 @@ def compile_prexvo_estate(
         extra_tools=extra_tools,
         repo_root=repo_root,
     )
+
+
+_SHARED_ENTITY_BOILERPLATE_EIN = "41-***1423"
+_SHARED_ENTITY_BOILERPLATE_HQ = "522 W Riverside Ave Ste N, Spokane, WA 99201"
+_SHARED_ENTITY_BOILERPLATE_JURISDICTION = "Washington Secretary of State (Spokane, WA)"
+
+
+def sanitize_public_media_kit_payload(
+    payload: Dict[str, Any],
+    repo_root: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Strip shared EIN and Spokane boilerplate from public media-kit.json payloads
+    unless explicitly configured in that tenant's own .pseofactory.json.
+    Zero em-dashes. Zero en-dashes.
+    """
+    cleaned = dict(payload or {})
+    tenant_cfg: Dict[str, Any] = {}
+    if repo_root is not None:
+        cfg_path = Path(repo_root) / ".pseofactory.json"
+        if cfg_path.is_file():
+            try:
+                raw_cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if isinstance(raw_cfg, dict):
+                    tenant_cfg = raw_cfg
+            except Exception:
+                tenant_cfg = {}
+
+    cfg_ein = str(tenant_cfg.get("ein_masked") or "").strip()
+    if cfg_ein:
+        cleaned["ein_masked"] = cfg_ein
+    elif cleaned.get("ein_masked") == _SHARED_ENTITY_BOILERPLATE_EIN or "ein_masked" in cleaned:
+        cleaned.pop("ein_masked", None)
+
+    cfg_hq = str(tenant_cfg.get("headquarters") or "").strip()
+    if cfg_hq:
+        cleaned["headquarters"] = cfg_hq
+    elif cleaned.get("headquarters") == _SHARED_ENTITY_BOILERPLATE_HQ or "headquarters" in cleaned:
+        cleaned.pop("headquarters", None)
+
+    cfg_jur = str(tenant_cfg.get("jurisdiction") or "").strip()
+    if cfg_jur:
+        cleaned["jurisdiction"] = cfg_jur
+    elif cleaned.get("jurisdiction") == _SHARED_ENTITY_BOILERPLATE_JURISDICTION:
+        cleaned.pop("jurisdiction", None)
+
+    return cleaned
+
+
+def _normalize_embed_domain(domain: str) -> str:
+    cleaned = re.sub(r"^https?://", "", str(domain or "").strip(), flags=re.IGNORECASE)
+    return cleaned.split("/", 1)[0].strip().lower()
+
+
+def build_embed_snippet_html(domain: str, brand_name: str, slug: str) -> str:
+    """
+    Build an embeddable widget HTML snippet with hardcoded pure-brand rel='nofollow' attribution.
+    Never uses exact-match keyword anchor text.
+    Zero em-dashes. Zero en-dashes.
+    """
+    clean_domain = _normalize_embed_domain(domain)
+    clean_slug = str(slug or "").strip().strip("/")
+    clean_brand = str(brand_name or "").replace("\u2014", "-").replace("\u2013", "-").strip() or clean_domain
+    safe_domain = _html.escape(clean_domain, quote=True)
+    safe_slug = _html.escape(clean_slug, quote=True)
+    safe_brand = _html.escape(clean_brand, quote=True)
+    tool_url = f"https://{safe_domain}/tools/{safe_slug}/"
+    script_url = f"https://{safe_domain}/static/js/embed-widget.js"
+    snippet = (
+        f'<div class="pseo-embed-widget" data-tool="{safe_slug}" data-domain="{safe_domain}">\n'
+        f'  <script async src="{script_url}" data-tool="{safe_slug}"></script>\n'
+        f'  <p class="pseo-embed-attribution">'
+        f'<a href="{tool_url}" rel="nofollow">Powered by {safe_brand}</a>'
+        f"</p>\n"
+        f"</div>"
+    )
+    assert_no_forbidden_dashes(snippet, context=f"embed_snippet:{clean_slug}")
+    return snippet
+
+
+def write_static_embed_widget_assets(
+    dist_dir: Any,
+    domain: str,
+    brand_name: str,
+    tools: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate zero-dependency dist/static/js/embed-widget.js and dist/embed/snippets.json.
+    Renders a lightweight iframe calculator container with pure-brand rel='nofollow' attribution.
+    Zero em-dashes. Zero en-dashes.
+    """
+    dist = Path(dist_dir)
+    clean_domain = _normalize_embed_domain(domain)
+    clean_brand = str(brand_name or "").replace("\u2014", "-").replace("\u2013", "-").strip() or clean_domain
+
+    js_dir = dist / "static" / "js"
+    js_dir.mkdir(parents=True, exist_ok=True)
+    embed_dir = dist / "embed"
+    embed_dir.mkdir(parents=True, exist_ok=True)
+
+    js_domain = json.dumps(clean_domain)
+    js_brand = json.dumps(clean_brand)
+    embed_js = (
+        "(function(){\n"
+        '  "use strict";\n'
+        f"  var DEFAULT_DOMAIN = {js_domain};\n"
+        f"  var DEFAULT_BRAND = {js_brand};\n"
+        "  function mountWidget(container, slug, domain) {\n"
+        '    if (!container || !slug || container.getAttribute("data-pseo-mounted") === "1") return;\n'
+        '    container.setAttribute("data-pseo-mounted", "1");\n'
+        "    var host = (domain || DEFAULT_DOMAIN).replace(/^https?:\\/\\//i, \"\").replace(/\\/+$/, \"\");\n"
+        '    var cleanSlug = String(slug).replace(/^\\/+|\\/+$/g, "");\n'
+        '    var baseUrl = "https://" + host + "/tools/" + encodeURIComponent(cleanSlug) + "/";\n'
+        '    var frame = document.createElement("iframe");\n'
+        '    frame.src = baseUrl + "?embed=1";\n'
+        '    frame.title = DEFAULT_BRAND + " Calculator";\n'
+        '    frame.loading = "lazy";\n'
+        '    frame.style.width = "100%";\n'
+        '    frame.style.minHeight = container.getAttribute("data-height") || "560px";\n'
+        '    frame.style.border = "1px solid #334155";\n'
+        '    frame.style.borderRadius = "8px";\n'
+        "    container.insertBefore(frame, container.firstChild);\n"
+        '    if (!container.querySelector("a[rel*=nofollow]")) {\n'
+        '      var p = document.createElement("p");\n'
+        '      p.className = "pseo-embed-attribution";\n'
+        '      var a = document.createElement("a");\n'
+        "      a.href = baseUrl;\n"
+        '      a.rel = "nofollow";\n'
+        '      a.textContent = "Powered by " + DEFAULT_BRAND;\n'
+        "      p.appendChild(a);\n"
+        "      container.appendChild(p);\n"
+        "    }\n"
+        "  }\n"
+        '  var scriptEl = document.currentScript;\n'
+        "  if (scriptEl) {\n"
+        '    var sSlug = scriptEl.getAttribute("data-tool") || "";\n'
+        '    var parent = scriptEl.parentElement;\n'
+        '    if (parent && parent.classList && parent.classList.contains("pseo-embed-widget")) {\n'
+        '      mountWidget(parent, sSlug || parent.getAttribute("data-tool"), parent.getAttribute("data-domain"));\n'
+        "    } else if (sSlug) {\n"
+        '      var box = document.createElement("div");\n'
+        '      box.className = "pseo-embed-widget";\n'
+        '      box.setAttribute("data-tool", sSlug);\n'
+        "      scriptEl.parentNode.insertBefore(box, scriptEl.nextSibling);\n"
+        "      mountWidget(box, sSlug, DEFAULT_DOMAIN);\n"
+        "    }\n"
+        "  }\n"
+        '  var nodes = document.querySelectorAll(".pseo-embed-widget[data-tool]");\n'
+        "  for (var i = 0; i < nodes.length; i++) {\n"
+        '    mountWidget(nodes[i], nodes[i].getAttribute("data-tool"), nodes[i].getAttribute("data-domain"));\n'
+        "  }\n"
+        "})();\n"
+    )
+    assert_no_forbidden_dashes(embed_js, context="embed-widget.js")
+    js_path = js_dir / "embed-widget.js"
+    js_changed = not js_path.is_file() or js_path.read_text(encoding="utf-8", errors="ignore") != embed_js
+    if js_changed:
+        js_path.write_text(embed_js, encoding="utf-8")
+
+    snippets: Dict[str, str] = {}
+    for item in (tools or []):
+        if isinstance(item, dict):
+            s_val = str(item.get("slug") or "").strip()
+        else:
+            s_val = str(item or "").strip()
+        if not s_val:
+            continue
+        snippets[s_val] = build_embed_snippet_html(clean_domain, clean_brand, s_val)
+
+    snippets_payload = {
+        "schema_version": "1.0.0",
+        "domain": clean_domain,
+        "brand_name": clean_brand,
+        "script_url": f"https://{clean_domain}/static/js/embed-widget.js",
+        "snippets": snippets,
+    }
+    snippets_json = json.dumps(snippets_payload, indent=2) + "\n"
+    assert_no_forbidden_dashes(snippets_json, context="embed/snippets.json")
+    snippets_path = embed_dir / "snippets.json"
+    snippets_changed = not snippets_path.is_file() or snippets_path.read_text(encoding="utf-8", errors="ignore") != snippets_json
+    if snippets_changed:
+        snippets_path.write_text(snippets_json, encoding="utf-8")
+
+    return {
+        "embed_js_path": str(js_path),
+        "snippets_json_path": str(snippets_path),
+        "tools_count": len(snippets),
+        "js_changed": js_changed,
+        "snippets_changed": snippets_changed,
+    }

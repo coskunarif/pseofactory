@@ -594,7 +594,6 @@ def _resolve_contextual_internal_links(
         if any(k in combined for k in ("tariff", "landed", "customs", "bond", "freight", "cbam", "hs-code", "301", "demurrage")):
             cluster = [
                 {"anchor": "Section 301 Tariff & Landed Cost Calculator", "href": "/tools/section-301-tariff-landed-cost-calculator/"},
-                {"anchor": "Contractor & Customs Surety Bond Cost Calculator", "href": "/tools/contractor-surety-bond-cost-calculator/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
                 {"anchor": "Equipment Lease vs Buy Section 179 Calculator", "href": "/tools/equipment-lease-vs-buy-section-179-calculator/"},
                 {"anchor": "Invoice Factoring vs Business Line of Credit Calculator", "href": "/tools/invoice-factoring-vs-business-line-of-credit-calculator/"},
@@ -604,64 +603,32 @@ def _resolve_contextual_internal_links(
                 {"anchor": "SaaS Burn Multiple & Cash Runway Calculator", "href": "/tools/saas-runway-calculator/"},
                 {"anchor": "R&D Tax Credit & Section 174 Amortization Calculator", "href": "/tools/r-and-d-tax-credit-section-174-amortization-calculator/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
-                {"anchor": "Workers Comp & Payroll Burden Calculator", "href": "/tools/workers-comp-and-payroll-burden-calculator/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
             ]
         elif any(k in combined for k in ("tax-bracket", "tax-rate", "tax bracket", "tax rate", "tcja", "capital-gains", "marginal")):
             cluster = [
-                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
-                {"anchor": "CA Tax Brackets 2026-2027 & California Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
+                {"anchor": "IRS Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-tax-brackets/"},
                 {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
-                {"anchor": "NJ Tax Bracket & New Jersey 2027 Income Tax Rate Calculator", "href": "/tools/irs-2027-tax-brackets/new-jersey/"},
-                {"anchor": "KY State Income Tax Rate 2027 & Kentucky Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/kentucky/"},
+                {"anchor": "Capital Gains Tax Calculator", "href": "/tools/capital-gains-calculator/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
             ]
-            if "/" in s_norm:
-                sp_parts = [p for p in s_norm.split("/") if p]
-                if len(sp_parts) == 2 and sp_parts[0] == "irs-2027-tax-brackets":
-                    st_slug = sp_parts[1]
-                    st_label = st_slug.replace("-", " ").title()
-                    cluster.insert(
-                        1,
-                        {
-                            "anchor": f"{st_label} Section 1031 Tax Deferral & Capital Gains Calculator",
-                            "href": f"/tools/section-1031-calculator/{st_slug}/",
-                        },
-                    )
         elif any(k in combined for k in ("1031", "cost-segregation", "cost segregation", "bonus-depreciation", "opportunity-zone", "dst", "721", "real-estate", "cap-rate")):
             cluster = [
                 {"anchor": "Section 1031 Tax Deferral & Like-Kind Exchange Calculator", "href": "/tools/section-1031-calculator/"},
-                {"anchor": "Texas Section 1031 Tax Deferral & Capital Gains Tax Calculator", "href": "/tools/section-1031-calculator/texas/"},
-                {"anchor": "California Section 1031 Tax Deferral & FTB Form 3840 Clawback Calculator", "href": "/tools/section-1031-calculator/california/"},
                 {"anchor": "Capital Gains & TCJA Sunset Tax Calculator", "href": "/tools/tcja-sunset-capital-gains/"},
-                {"anchor": "Maine Capital Gains Tax & Section 1031 Exchange Deferral Calculator", "href": "/tools/section-1031-calculator/maine/"},
-                {"anchor": "1031 Exchange Ohio & Real Estate Tax Deferral Calculator", "href": "/tools/section-1031-calculator/ohio/"},
+                {"anchor": "Capital Gains Tax Calculator", "href": "/tools/capital-gains-calculator/"},
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
             ]
-            if "/" in s_norm:
-                sp_parts = [p for p in s_norm.split("/") if p]
-                if len(sp_parts) == 2 and sp_parts[0] == "section-1031-calculator":
-                    st_slug = sp_parts[1]
-                    st_label = st_slug.replace("-", " ").title()
-                    cluster.insert(
-                        1,
-                        {
-                            "anchor": f"{st_label} 2027 Tax Brackets & Marginal Rate Calculator",
-                            "href": f"/tools/irs-2027-tax-brackets/{st_slug}/",
-                        },
-                    )
         else:
             cluster = [
                 {"anchor": "Section 179 Equipment Deduction Calculator", "href": "/tools/section-179-calculator/"},
-                {"anchor": "IRS 2027 Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-2027-tax-brackets/"},
-                {"anchor": "CA Tax Brackets 2026-2027 & California Tax Bracket Calculator", "href": "/tools/irs-2027-tax-brackets/california/"},
+                {"anchor": "IRS Federal Tax Tables & Statutory Tax Brackets Calculator", "href": "/tools/irs-tax-brackets/"},
                 {"anchor": "S-Corp Reasonable Salary Tax Calculator", "href": "/tools/s-corp-reasonable-salary-tax-calculator/"},
                 {"anchor": "Corporate Treasury Yield & Section 3124 Calculator", "href": "/tools/treasury-yield-calculator/"},
                 {"anchor": "R&D Tax Credit & Section 174 Amortization Calculator", "href": "/tools/r-and-d-tax-credit-section-174-amortization-calculator/"},
-                {"anchor": "GMC Yukon XL Section 179 Heavy SUV Deduction Calculator", "href": "/tools/section-179-calculator/gmc-yukon-xl/"},
             ]
 
     for_forbid_1031 = eff_tenant == "profithelm" and any(
@@ -679,7 +646,9 @@ def _resolve_contextual_internal_links(
                 "anchor": _strip_forbidden_dashes(item["anchor"]),
                 "href": item["href"],
             })
-    return selected
+    from pseofactory.estate_common import sanitize_overlay_hub_links
+
+    return sanitize_overlay_hub_links(selected, property_id=eff_tenant)
 
 
 def _select_vault_live_partner_candidate(
@@ -11499,7 +11468,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         injected_sections.append(dm_section_markup)
 
     # 4d. Injected Hub Links (for crawl budget signal lag / internal linking)
-    hub_links = overlay_data.get("hub_links", [])
+    from pseofactory.estate_common import sanitize_overlay_hub_links
+
+    hub_links = sanitize_overlay_hub_links(overlay_data.get("hub_links", []), property_id=ov_tenant)
     hub_links_markup = ""
     if hub_links:
         hl_parts = [
@@ -12136,6 +12107,15 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         html = normalize_html_callout_message_match(html, property_id=prop_for_norm)
     except Exception:
         pass
+
+    from pseofactory.estate_common import (
+        sanitize_retired_estate_links_in_html,
+        sync_h1_to_title_core_coverage,
+    )
+
+    eff_ov_rel = f"tools/{ov_slug_early or 'tool'}/index.html"
+    html = sync_h1_to_title_core_coverage(html, rel_path=eff_ov_rel, brand_name=ov_brand)
+    html = sanitize_retired_estate_links_in_html(html, property_id=ov_tenant)
 
     return _strip_forbidden_dashes(html)
 

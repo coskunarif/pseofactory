@@ -1834,6 +1834,19 @@ def finalize_estate_build(
         wire_tenant_substrate_bootstraps(root, prof["package_name"], prof["brand_name"])
     compile_tenant_porcelain_estate(dist, property_id, repo_root=root)
 
+    from pseofactory.compiler import write_static_embed_widget_assets
+    from pseofactory.porcelain_shell import _discover_estate_tools_and_gsc_token
+
+    widget_profile = get_porcelain_tenant_profile(property_id)
+    widget_tools_raw, _ = _discover_estate_tools_and_gsc_token(dist, widget_profile)
+    widget_tools = [{"slug": s, "title": t} for s, t in widget_tools_raw]
+    write_static_embed_widget_assets(
+        dist_dir=dist,
+        domain=str(widget_profile.get("domain") or f"{property_id}.com"),
+        brand_name=str(widget_profile.get("brand_name") or property_id.capitalize()),
+        tools=widget_tools,
+    )
+
     dist_functions = dist / "functions"
     if dist_functions.exists():
         shutil.rmtree(dist_functions, ignore_errors=True)
@@ -3124,3 +3137,485 @@ def build_thin_estate_builder_source(pkg_name: str) -> str:
         "            shutil.copytree(tmp_root / 'dist', target_dist)\n"
         "    return target_dist\n"
     )
+
+
+_TITLE_CORE_STOPWORDS: FrozenSet[str] = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "by", "for", "from",
+        "how", "in", "is", "it", "of", "on", "or", "the", "to",
+        "with", "your", "this", "that",
+    }
+)
+
+
+def _extract_clean_core_title(title_text: str, brand_name: str = "") -> str:
+    """Strips leading/trailing 'Brand | ...' or '... | Brand' / '... - Brand' suffix from a page <title>."""
+    core_title = re.sub(r"\s+", " ", str(title_text or "")).strip()
+    if not core_title:
+        return ""
+    if brand_name:
+        core_title = re.sub(
+            rf"\s*(?:\||-)\s*{re.escape(brand_name)}\s*$",
+            "",
+            core_title,
+            flags=re.IGNORECASE,
+        ).strip()
+        core_title = re.sub(
+            rf"^{re.escape(brand_name)}\s*(?:\||-)\s*",
+            "",
+            core_title,
+            flags=re.IGNORECASE,
+        ).strip()
+    if "|" in core_title:
+        head_part, tail_part = core_title.rsplit("|", 1)
+        head_part = head_part.strip()
+        tail_part = tail_part.strip()
+        if head_part and len(tail_part) <= 40:
+            if brand_name and head_part.lower() == brand_name.lower():
+                core_title = tail_part
+            elif not brand_name or tail_part.lower() == brand_name.lower() or " " not in tail_part:
+                core_title = head_part
+    return core_title
+
+
+def sync_h1_to_title_core_coverage(
+    html_content: str,
+    rel_path: str = "",
+    brand_name: str = "",
+    page_title: Optional[str] = None,
+    min_coverage: float = 0.60,
+) -> str:
+    """
+    Computes <h1>-to-<title> core token coverage using the exact same token rule as
+    MasterSEOVerifier.check_page_titles_gate and deterministically syncs <h1> text
+    to the clean core <title> whenever coverage < required threshold (0.60 on tool leaves,
+    0.30 on non-tool pages). Idempotent.
+    """
+    if not html_content:
+        return html_content
+
+    if page_title is not None:
+        title_raw = str(page_title)
+    else:
+        title_m = re.search(r"<title\b[^>]*>(.*?)</title>", html_content, flags=re.IGNORECASE | re.DOTALL)
+        if not title_m:
+            return html_content
+        title_raw = title_m.group(1)
+
+    title_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", title_raw))).strip()
+    if not title_text:
+        return html_content
+
+    h1_m = re.search(r"(<h1\b[^>]*>)([\s\S]*?)(</h1>)", html_content, flags=re.IGNORECASE)
+    if not h1_m:
+        return html_content
+
+    h1_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", h1_m.group(2)))).strip()
+    if not h1_text:
+        return html_content
+
+    h1_tokens = [
+        t for t in re.findall(r"[a-z0-9]+", h1_text.lower())
+        if len(t) >= 2 and t not in _TITLE_CORE_STOPWORDS
+    ]
+    seen_h1: Set[str] = set()
+    h1_core: List[str] = []
+    for tok in h1_tokens:
+        if tok not in seen_h1:
+            seen_h1.add(tok)
+            h1_core.append(tok)
+
+    rel_norm = str(rel_path or "").strip().lstrip("/").lower()
+    is_calc_leaf = rel_norm.startswith("tools/") and rel_norm.endswith("/index.html") and rel_norm.count("/") >= 2
+    min_tokens = 2 if is_calc_leaf else 3
+    if len(h1_core) < min_tokens:
+        return html_content
+
+    title_tokens = set(re.findall(r"[a-z0-9]+", title_text.lower()))
+    matched = [tok for tok in h1_core if tok in title_tokens]
+    coverage = len(matched) / float(len(h1_core))
+    eff_min_cov = min_coverage if is_calc_leaf else min(min_coverage, 0.30)
+    if coverage >= eff_min_cov:
+        return html_content
+
+    core_title = _extract_clean_core_title(title_text, brand_name=brand_name)
+    if not core_title or core_title == h1_text:
+        return html_content
+
+    escaped_h1 = html.escape(core_title, quote=False)
+    return html_content[: h1_m.start(2)] + escaped_h1 + html_content[h1_m.end(2) :]
+
+
+_PROFITHELM_GONE_TOOL_SLUG_RE = re.compile(
+    r"/tools/(?:"
+    r"contractor-surety-bond-cost-calculator"
+    r"|workers-comp-and-payroll-burden-calculator"
+    r"|prediction-market-odds"
+    r"|prediction-market-tax"
+    r")/?(?:[?#]|$)",
+    re.IGNORECASE,
+)
+
+_PREXVO_GONE_TOOL_SLUG_RE = re.compile(
+    r"/tools/student-loans-gov/?(?:[?#]|$)",
+    re.IGNORECASE,
+)
+
+_PROFITHELM_RETIRED_URL_REWRITES: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"/tools/irs-2027-tax-brackets(?:/[^\"'?#\s<)]*)?/?", re.IGNORECASE), "/tools/irs-tax-brackets/"),
+    (re.compile(r"/tools/irs-interest-calculator-2027/?", re.IGNORECASE), "/tools/irs-interest-calculator/"),
+    (re.compile(r"/tools/capital-gains-tax-rate-2021-calculator/?", re.IGNORECASE), "/tools/capital-gains-calculator/"),
+    (re.compile(r"/tools/1031-exchange-capital-gains-calculator/?", re.IGNORECASE), "/tools/section-1031-calculator/"),
+    (re.compile(r"/tools/section-1031-calculator/[a-z0-9-]+/?", re.IGNORECASE), "/tools/section-1031-calculator/"),
+    (re.compile(r"/tools/section-179-calculator/[a-z0-9-]+/?", re.IGNORECASE), "/tools/section-179-calculator/"),
+)
+
+_PREXVO_RETIRED_URL_REWRITES: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"/tools/parent-plus-double-consolidation-loophole-2026-calculator/?", re.IGNORECASE),
+        "/tools/parent-plus-double-consolidation/",
+    ),
+    (
+        re.compile(r"/tools/student-loan-forgiveness-2026/?", re.IGNORECASE),
+        "/tools/student-loan-forgiveness/",
+    ),
+)
+
+
+def _infer_estate_property_id(html_or_url: str, property_id: str = "") -> str:
+    prop_low = str(property_id or "").strip().lower()
+    if prop_low:
+        return prop_low
+    low = str(html_or_url or "").lower()
+    if (
+        "prexvo.com" in low
+        or "/tools/student-loans-gov" in low
+        or "/tools/student-loan-forgiveness-2026" in low
+        or "parent-plus-double-consolidation-loophole" in low
+    ):
+        return "prexvo"
+    if (
+        "profithelm.com" in low
+        or "/tools/irs-2027-tax-brackets" in low
+        or "/tools/contractor-surety-bond-cost-calculator" in low
+    ):
+        return "profithelm"
+    return ""
+
+
+def sanitize_retired_estate_url(url: str, property_id: str = "") -> Optional[str]:
+    """
+    Rewrites retired ProfitHelm/Prexvo internal URLs to canonical active destinations,
+    or returns None if the URL targets a 410-decommissioned off-vertical/retired route.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return raw
+    eff_prop = _infer_estate_property_id(raw, property_id)
+    if eff_prop not in ("profithelm", "prexvo"):
+        return raw
+
+    m_url = re.match(r"^(https?://[^/?#]+)?(/[^?#]*)(.*)$", raw, flags=re.IGNORECASE)
+    if not m_url:
+        return raw
+    origin = m_url.group(1) or ""
+    path_part = m_url.group(2) or ""
+    tail = m_url.group(3) or ""
+
+    if eff_prop == "profithelm":
+        if _PROFITHELM_GONE_TOOL_SLUG_RE.match(path_part):
+            return None
+        for pat, repl in _PROFITHELM_RETIRED_URL_REWRITES:
+            if pat.fullmatch(path_part):
+                return f"{origin}{repl}{tail}"
+    elif eff_prop == "prexvo":
+        if _PREXVO_GONE_TOOL_SLUG_RE.match(path_part):
+            return None
+        for pat, repl in _PREXVO_RETIRED_URL_REWRITES:
+            if pat.fullmatch(path_part):
+                return f"{origin}{repl}{tail}"
+    return raw
+
+
+def sanitize_overlay_hub_links(hub_links: Any, property_id: str = "") -> Any:
+    """Sanitizes and deduplicates persisted overlay hub_links against retired/410 routes."""
+    if not isinstance(hub_links, list):
+        return hub_links
+    cleaned: List[Dict[str, Any]] = []
+    seen_hrefs: Set[str] = set()
+    for item in hub_links:
+        if not isinstance(item, dict):
+            continue
+        href = str(item.get("href") or "").strip()
+        if not href:
+            continue
+        new_href = sanitize_retired_estate_url(href, property_id=property_id)
+        if new_href is None:
+            continue
+        norm_key = re.sub(r"^https?://[^/]+", "", new_href).rstrip("/").lower()
+        if norm_key in seen_hrefs:
+            continue
+        seen_hrefs.add(norm_key)
+        if new_href != href:
+            updated_item = dict(item)
+            updated_item["href"] = new_href
+            cleaned.append(updated_item)
+        else:
+            cleaned.append(item)
+    return cleaned
+
+
+def _sanitize_is_related_to_items(rel_val: Any, property_id: str = "") -> Tuple[Any, bool]:
+    """Rewrites retired URLs, drops 410-decommissioned URLs, and deduplicates JSON-LD isRelatedTo."""
+    if isinstance(rel_val, list):
+        out_list: List[Any] = []
+        seen_urls: Set[str] = set()
+        changed = False
+        for item in rel_val:
+            if isinstance(item, dict):
+                raw_u = item.get("url") or item.get("@id")
+                if isinstance(raw_u, str) and "/tools/" in raw_u:
+                    new_u = sanitize_retired_estate_url(raw_u, property_id=property_id)
+                    if new_u is None:
+                        changed = True
+                        continue
+                    if new_u != raw_u:
+                        item = dict(item)
+                        if "url" in item:
+                            item["url"] = new_u
+                        if "@id" in item:
+                            item["@id"] = new_u
+                        changed = True
+                u_key = str(item.get("url") or item.get("@id") or item.get("name") or "").rstrip("/").lower()
+                if u_key and u_key in seen_urls:
+                    changed = True
+                    continue
+                if u_key:
+                    seen_urls.add(u_key)
+                out_list.append(item)
+            elif isinstance(item, str) and "/tools/" in item:
+                new_u = sanitize_retired_estate_url(item, property_id=property_id)
+                if new_u is None:
+                    changed = True
+                    continue
+                if new_u != item:
+                    changed = True
+                u_key = new_u.rstrip("/").lower()
+                if u_key in seen_urls:
+                    changed = True
+                    continue
+                seen_urls.add(u_key)
+                out_list.append(new_u)
+            else:
+                out_list.append(item)
+        return out_list, changed
+
+    if isinstance(rel_val, dict):
+        raw_u = rel_val.get("url") or rel_val.get("@id")
+        if isinstance(raw_u, str) and "/tools/" in raw_u:
+            new_u = sanitize_retired_estate_url(raw_u, property_id=property_id)
+            if new_u is None:
+                return None, True
+            if new_u != raw_u:
+                out_item = dict(rel_val)
+                if "url" in out_item:
+                    out_item["url"] = new_u
+                if "@id" in out_item:
+                    out_item["@id"] = new_u
+                return out_item, True
+        return rel_val, False
+
+    if isinstance(rel_val, str) and "/tools/" in rel_val:
+        new_u = sanitize_retired_estate_url(rel_val, property_id=property_id)
+        if new_u is None:
+            return None, True
+        if new_u != rel_val:
+            return new_u, True
+    return rel_val, False
+
+
+def _sanitize_jsonld_node_retired_links(node: Any, property_id: str = "") -> Tuple[Any, bool]:
+    """Recursively cleans JSON-LD isRelatedTo references and 410-decommissioned list items."""
+    changed = False
+    if isinstance(node, list):
+        out_list: List[Any] = []
+        for elem in node:
+            cleaned_elem, elem_changed = _sanitize_jsonld_node_retired_links(elem, property_id=property_id)
+            if elem_changed:
+                changed = True
+            if cleaned_elem is None:
+                changed = True
+                continue
+            out_list.append(cleaned_elem)
+        return out_list, changed
+
+    if isinstance(node, dict):
+        out_dict = dict(node)
+        if "isRelatedTo" in out_dict:
+            new_rel, rel_changed = _sanitize_is_related_to_items(out_dict["isRelatedTo"], property_id=property_id)
+            if rel_changed:
+                changed = True
+                if new_rel:
+                    out_dict["isRelatedTo"] = new_rel
+                else:
+                    out_dict.pop("isRelatedTo", None)
+        if isinstance(out_dict.get("itemListElement"), list):
+            new_ile: List[Any] = []
+            ile_changed = False
+            for ile_item in out_dict["itemListElement"]:
+                if isinstance(ile_item, dict):
+                    raw_iu = ile_item.get("item") if isinstance(ile_item.get("item"), str) else ile_item.get("url")
+                    if isinstance(raw_iu, str) and "/tools/" in raw_iu:
+                        if sanitize_retired_estate_url(raw_iu, property_id=property_id) is None:
+                            ile_changed = True
+                            continue
+                new_ile.append(ile_item)
+            if ile_changed:
+                changed = True
+                for idx_i, ile_obj in enumerate(new_ile, start=1):
+                    if isinstance(ile_obj, dict) and "position" in ile_obj:
+                        ile_obj["position"] = idx_i
+                out_dict["itemListElement"] = new_ile
+        if isinstance(out_dict.get("@graph"), list):
+            new_g, g_changed = _sanitize_jsonld_node_retired_links(out_dict["@graph"], property_id=property_id)
+            if g_changed:
+                changed = True
+                out_dict["@graph"] = [g for g in new_g if g is not None]
+        return out_dict, changed
+
+    return node, False
+
+
+def sanitize_retired_estate_links_in_html(html_content: str, property_id: str = "") -> str:
+    """
+    Deterministically rewrites retired ProfitHelm/Prexvo internal links to canonical
+    destinations and strips any <a>, <li>, or JSON-LD isRelatedTo references to
+    decommissioned 410 off-vertical/retired slugs. Idempotent.
+    """
+    if not html_content:
+        return html_content
+    eff_prop = _infer_estate_property_id(html_content, property_id)
+    if eff_prop not in ("profithelm", "prexvo"):
+        return html_content
+
+    updated = html_content
+    gone_re = _PROFITHELM_GONE_TOOL_SLUG_RE if eff_prop == "profithelm" else _PREXVO_GONE_TOOL_SLUG_RE
+
+    def _is_gone_href(href_val: str) -> bool:
+        m = re.match(r"^(?:https?://[^/?#]+)?(/[^?#]*)", href_val.strip(), flags=re.IGNORECASE)
+        if not m:
+            return False
+        return bool(gone_re.match(m.group(1)))
+
+    # 1. Strip <li>...</li> wrapping any 410-decommissioned <a>
+    def _strip_gone_li(m: re.Match[str]) -> str:
+        block = m.group(0)
+        for hm in re.finditer(r'\bhref\s*=\s*(["\'])([^"\']+)\1', block, flags=re.IGNORECASE):
+            if _is_gone_href(hm.group(2)):
+                return ""
+        return block
+
+    updated = re.sub(
+        r"<li\b[^>]*>(?:(?!</?li\b)[\s\S])*?</li>\s*",
+        _strip_gone_li,
+        updated,
+        flags=re.IGNORECASE,
+    )
+
+    # 2. Strip standalone <a href="...">...</a> targeting a 410-decommissioned slug
+    def _strip_gone_anchor(m: re.Match[str]) -> str:
+        attrs = m.group(1)
+        hm = re.search(r'\bhref\s*=\s*(["\'])([^"\']+)\1', attrs, flags=re.IGNORECASE)
+        if hm and _is_gone_href(hm.group(2)):
+            return ""
+        return m.group(0)
+
+    updated = re.sub(
+        r"<a\b([^>]*)>[\s\S]*?</a>",
+        _strip_gone_anchor,
+        updated,
+        flags=re.IGNORECASE,
+    )
+
+    # 3. Rewrite retired href targets inside <a ...> tags (never mutate <link rel="canonical">)
+    def _rewrite_anchor_tag(m: re.Match[str]) -> str:
+        tag_open = m.group(0)
+        if "/tools/" not in tag_open:
+            return tag_open
+
+        def _rewrite_attr(hm: re.Match[str]) -> str:
+            prefix, q, raw_href = hm.group(1), hm.group(2), hm.group(3)
+            if "/tools/" not in raw_href:
+                return hm.group(0)
+            new_href = sanitize_retired_estate_url(raw_href, property_id=eff_prop)
+            if new_href is None or new_href == raw_href:
+                return hm.group(0)
+            return f"{prefix}{q}{new_href}{q}"
+
+        return re.sub(
+            r'(\bhref\s*=\s*)(["\'])([^"\']+)\2',
+            _rewrite_attr,
+            tag_open,
+            flags=re.IGNORECASE,
+        )
+
+    updated = re.sub(
+        r"<a\b[^>]*>",
+        _rewrite_anchor_tag,
+        updated,
+        flags=re.IGNORECASE,
+    )
+
+    # 4. Deduplicate consecutive or repeated <li><a href="..."> inside <ul> lists when collapsed
+    def _dedup_ul_links(m: re.Match[str]) -> str:
+        ul_open, ul_inner, ul_close = m.group(1), m.group(2), m.group(3)
+        if "/tools/" not in ul_inner or "<ul" in ul_inner.lower():
+            return m.group(0)
+        seen_hrefs: Set[str] = set()
+        changed_ul = False
+
+        def _check_li(li_m: re.Match[str]) -> str:
+            nonlocal changed_ul
+            li_txt = li_m.group(0)
+            hm = re.search(r'\bhref\s*=\s*(["\'])([^"\']+)\1', li_txt, flags=re.IGNORECASE)
+            if hm and "/tools/" in hm.group(2):
+                h_key = re.sub(r"^https?://[^/]+", "", hm.group(2)).rstrip("/").lower()
+                if h_key in seen_hrefs:
+                    changed_ul = True
+                    return ""
+                seen_hrefs.add(h_key)
+            return li_txt
+
+        new_inner = re.sub(r"[ \t]*<li\b[^>]*>(?:(?!</?li\b)[\s\S])*?</li>\s*", _check_li, ul_inner, flags=re.IGNORECASE)
+        if changed_ul:
+            return f"{ul_open}{new_inner}{ul_close}"
+        return m.group(0)
+
+    updated = re.sub(
+        r"(<ul\b[^>]*>)([\s\S]*?)(</ul>)",
+        _dedup_ul_links,
+        updated,
+        flags=re.IGNORECASE,
+    )
+
+    # 5. Clean JSON-LD <script type="application/ld+json"> isRelatedTo / itemListElement
+    def _clean_ld_json(m: re.Match[str]) -> str:
+        open_t, raw_j, close_t = m.group(1), m.group(2), m.group(3)
+        if "/tools/" not in raw_j:
+            return m.group(0)
+        try:
+            parsed = json.loads(raw_j.strip())
+        except Exception:
+            return m.group(0)
+        cleaned_obj, did_change = _sanitize_jsonld_node_retired_links(parsed, property_id=eff_prop)
+        if not did_change or cleaned_obj is None:
+            return m.group(0)
+        return f"{open_t}\n{json.dumps(cleaned_obj, indent=2)}\n{close_t}"
+
+    updated = re.sub(
+        r'(<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+        _clean_ld_json,
+        updated,
+        flags=re.IGNORECASE,
+    )
+    return updated

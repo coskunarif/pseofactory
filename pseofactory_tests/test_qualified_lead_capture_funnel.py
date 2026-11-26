@@ -1010,7 +1010,7 @@ def test_real_browser_e2e_interactive_surface_across_profithelm_and_prexvo(tmp_p
         )
 
         tenant_Matrix = [
-            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist"), 156, [
+            ("profithelm", Path("/home/ubuntuadmin/projects/profithelm-platform/dist"), 25, [
                 "index.html",
                 "tools/section-179-calculator/index.html",
                 "tools/crypto-tax-calculator/index.html",

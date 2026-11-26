@@ -608,8 +608,10 @@ def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobil
     raw_leaf = (
         '<!DOCTYPE html><html lang="en"><head><title>Bid Bond</title>'
         '<script type="application/ld+json">'
-        '{"@context":"https://schema.org","@type":"Organization","name":"ProfitHelm",'
-        '"sameAs":["https://www.wikidata.org/wiki/Q499388"]}</script></head>'
+        '{"@context":"https://schema.org","@graph":['
+        '{"@type":"Organization","name":"ProfitHelm","sameAs":["https://www.wikidata.org/wiki/Q499388"]},'
+        '{"@type":"WebPage","name":"Bid Bond","publisher":{"@type":"Organization","name":"ProfitHelm"}}'
+        ']}</script></head>'
         '<body><main id="main-content"><div class="container">'
         '<div class="calculation-container card">'
         '<p>For full details, <a href="/disclaimers/" class="touch-target">Read full disclosures</a> before filing.</p>'
@@ -634,9 +636,19 @@ def test_porcelain_shell_scrubs_q499388_marks_inline_prose_links_and_wraps_mobil
 
     norm_leaf = leaf_path.read_text(encoding="utf-8")
     assert "Q499388" not in norm_leaf
-    assert "https://www.wikidata.org/wiki/Q8161" in norm_leaf
+    assert "https://profithelm.com/#organization" in norm_leaf
     assert 'href="/disclaimers/" class="touch-target inline-prose-link"' in norm_leaf
     assert 'href="#scenario-b" class="touch-target"' in norm_leaf
+
+    norm_home = (dist / "index.html").read_text(encoding="utf-8")
+    assert "Q499388" not in norm_home
+    home_ld_m = re.search(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>', norm_home)
+    assert home_ld_m, "Expected consolidated JSON-LD on homepage"
+    home_graph = json.loads(home_ld_m.group(1))["@graph"]
+    org_nodes = [n for n in home_graph if n.get("@type") == "Organization"]
+    assert org_nodes, f"Expected Organization node on /, got: {home_graph}"
+    assert "https://www.wikidata.org/wiki/Q8161" in (org_nodes[0].get("knowsAbout") or [])
+    assert "Q8161" not in json.dumps(org_nodes[0].get("sameAs") or [])
 
     css = generate_porcelain_stylesheet("profithelm")
     assert "main a.inline-prose-link" in css

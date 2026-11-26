@@ -134,14 +134,47 @@ CHANNEL_STATUS_POLICY_DISABLED = "POLICY_DISABLED"
 CHANNEL_STATUS_UPLOAD_ERROR = "UPLOAD_ERROR"
 
 _LOCAL_DRAFT_ONLY_CHANNELS = (
-    "ghost",
-    "github_gist",
-    "quora",
-    "google_sites",
-    "linkedin_pulse",
-    "substack_teardown",
     "outreach_pitch",
     "newsletter",
+    "github_statutory_repo",
+)
+
+PURGED_SYNDICATION_CHANNELS = (
+    "google_sites",
+    "quora",
+    "github_gist",
+    "ghost",
+    "x",
+    "facebook",
+    "linkedin_company",
+    "linkedin_pulse",
+    "substack_teardown",
+)
+
+DEFAULT_ACTIVE_CHANNELS = (
+    "linkedin",
+    "youtube",
+    "outreach_pitch",
+    "github_statutory_repo",
+)
+
+PURGED_STALE_TOOL_FILES = (
+    "google_sites.html",
+    "quora.md",
+    "quora.txt",
+    "github_gist.json",
+    "github_gist.md",
+    "ghost.json",
+    "ghost_article.md",
+    "facebook.txt",
+    "facebook_teaser.txt",
+    "facebook_first_comment.txt",
+    "x_post.txt",
+    "linkedin_company.txt",
+    "linkedin_pulse.md",
+    "substack_teardown.md",
+    "reddit.md",
+    "reddit_teardown.md",
 )
 
 _YT_LIVE_UPLOAD_STATUSES = {
@@ -10469,6 +10502,142 @@ def _generate_lienbond_regulatory_lead_magnet(tool: Dict[str, Any], url: str) ->
     return {"content": content, "target_url": deep_url}
 
 
+def _is_retired_distributor_tool_slug(slug: str, property_id: str = "profithelm") -> bool:
+    """Returns True if slug is retired, consolidated, year-stamped, or a collapsed spoke."""
+    from pseofactory.qualification import is_retired_or_consolidated_slug
+
+    s_norm = str(slug or "").strip().lower()
+    if not s_norm:
+        return True
+    if is_retired_or_consolidated_slug(s_norm, property_id):
+        return True
+    norm_prop = _normalize_property_id(property_id)
+    if norm_prop == "profithelm":
+        try:
+            from pseofactory.profithelm_estate import (
+                _DEFAULT_25_VEHICLE_SLUGS,
+                _DEFAULT_51_STATE_SLUGS,
+                _is_retired_or_year_stamped_slug,
+            )
+
+            if _is_retired_or_year_stamped_slug(s_norm):
+                return True
+            for hub_pfx in (
+                "irs-2027-tax-brackets-",
+                "irs-tax-brackets-",
+                "section-1031-calculator-",
+                "section-179-calculator-",
+            ):
+                if s_norm.startswith(hub_pfx):
+                    tail = s_norm[len(hub_pfx):]
+                    if tail in _DEFAULT_51_STATE_SLUGS or tail in _DEFAULT_25_VEHICLE_SLUGS:
+                        return True
+        except Exception:
+            pass
+    return False
+
+
+def _resolve_profithelm_tools(
+    adapter: Any = None,
+    dist_dir: Optional[Path] = None,
+    include_extended: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Resolves active evergreen ProfitHelm tools, excluding retired/year-stamped/collapsed slugs
+    and guaranteeing evergreen `irs-tax-brackets` when falling back to defaults.
+    """
+    from pseofactory.maintenance import PROFITHELM_DEFAULT_TOOLS, PROFITHELM_EXTENDED_TOOLS
+
+    raw_tools: List[Any] = list(adapter.tools) if (adapter and getattr(adapter, "tools", None)) else []
+    if not raw_tools:
+        try:
+            import importlib
+            cfg = importlib.import_module("profithelm.config")
+            raw_tools = list(getattr(cfg, "TOOLS", None) or [])
+        except Exception:
+            pass
+    if not raw_tools:
+        if TOOLS:
+            raw_tools = list(TOOLS)
+        else:
+            try:
+                from pseofactory.profithelm_estate import CORE_TOOLS as _PH_CORE_TOOLS
+                raw_tools = list(_PH_CORE_TOOLS) + list(PROFITHELM_DEFAULT_TOOLS)
+            except Exception:
+                raw_tools = list(PROFITHELM_DEFAULT_TOOLS)
+    if include_extended:
+        raw_tools = list(raw_tools) + [
+            ext_t
+            for ext_t in PROFITHELM_EXTENDED_TOOLS
+            if str(ext_t.get("slug") or "") in (
+                "s-corp-reasonable-salary-tax-calculator",
+                "invoice-factoring-cost-apr-calculator",
+                "invoice-factoring-vs-business-line-of-credit-calculator",
+            )
+        ]
+
+    resolved: List[Dict[str, Any]] = []
+    seen_slugs: Set[str] = set()
+    for t in raw_tools:
+        slug_val = str(t["slug"] if isinstance(t, dict) else t).strip()
+        if not slug_val or slug_val in seen_slugs:
+            continue
+        if _is_retired_distributor_tool_slug(slug_val, "profithelm"):
+            continue
+        seen_slugs.add(slug_val)
+        resolved.append(_resolve_tool(t, property_id="profithelm") if isinstance(t, (str, dict)) else t)
+
+    if "irs-tax-brackets" not in seen_slugs:
+        resolved.insert(0, _resolve_tool("irs-tax-brackets", property_id="profithelm"))
+        seen_slugs.add("irs-tax-brackets")
+
+    eff_dist_dir = Path(dist_dir) if dist_dir else (
+        Path(adapter.dist_dir) if (adapter and getattr(adapter, "dist_dir", None)) else None
+    )
+    if eff_dist_dir is not None:
+        dt_dir = eff_dist_dir / "tools"
+        if dt_dir.is_dir():
+            for item in sorted(dt_dir.iterdir()):
+                if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                    if _is_retired_distributor_tool_slug(item.name, "profithelm"):
+                        continue
+                    if item.name not in seen_slugs:
+                        resolved.append(_resolve_tool(item.name, property_id="profithelm"))
+                        seen_slugs.add(item.name)
+
+    return resolved
+
+
+def _is_known_tenant_identifier(candidate: str, reg: Any = None) -> bool:
+    """Returns True when candidate matches a registered or truth-pack tenant property ID."""
+    cand = _normalize_property_id(candidate)
+    if not cand:
+        return False
+    if reg is not None:
+        try:
+            if reg.get_adapter(cand) is not None:
+                return True
+        except Exception:
+            pass
+    try:
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            REPO_DIR_TO_PROPERTY_ID,
+            SPAWNED_TENANT_DECLARATIONS,
+        )
+        if cand in CANONICAL_TENANT_DECLARATIONS or cand in SPAWNED_TENANT_DECLARATIONS or cand in REPO_DIR_TO_PROPERTY_ID:
+            return True
+    except Exception:
+        pass
+    try:
+        from pseofactory.truth_pack import discover_truth_pack_ids
+        if cand in set(discover_truth_pack_ids()):
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:
     """
     Compiles complete syndication copy and calculation-backed proof payloads across all tools.
@@ -10478,52 +10647,66 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
     from pseofactory.maintenance import TenantRegistry
     try:
         reg = TenantRegistry.default()
-        adapter = reg.get_adapter(property_id)
+    except Exception:
+        reg = None
+
+    if isinstance(tools, str):
+        raw_tool_str = tools.strip()
+        if _is_known_tenant_identifier(raw_tool_str, reg=reg):
+            property_id = _normalize_property_id(raw_tool_str)
+            tools = None
+        else:
+            tools = [raw_tool_str] if raw_tool_str else []
+
+    try:
+        adapter = reg.get_adapter(property_id) if reg is not None else None
     except Exception:
         adapter = None
 
     if tools is None:
-        from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, PROFITHELM_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
-        from pseofactory.qualification import is_retired_or_consolidated_slug
-        target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
-        if not target_tools:
-            try:
-                import importlib
-                cfg = importlib.import_module(f"{property_id}.config")
-                target_tools = list(getattr(cfg, "TOOLS", None) or [])
-            except Exception:
-                pass
-        if not target_tools:
-            if property_id == "prexvo":
-                target_tools = list(PREXVO_DEFAULT_TOOLS)
-            elif property_id == "gainhelm":
-                target_tools = list(GAINHELM_DEFAULT_TOOLS)
-            elif property_id == "lienbond":
-                target_tools = list(LIENBOND_DEFAULT_TOOLS)
-            else:
-                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
-        target_tools = [
-            t for t in target_tools
-            if not is_retired_or_consolidated_slug(
-                t["slug"] if isinstance(t, dict) else str(t),
-                property_id,
-            )
-        ]
-        known_slugs = {
-            t["slug"] if isinstance(t, dict) else str(t)
-            for t in target_tools
-            if isinstance(t, (dict, str))
-        }
-        if adapter and getattr(adapter, "dist_dir", None):
-            dt_dir = Path(adapter.dist_dir) / "tools"
-            if dt_dir.is_dir():
-                for item in sorted(dt_dir.iterdir()):
-                    if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
-                        if is_retired_or_consolidated_slug(item.name, property_id):
-                            continue
-                        if item.name not in known_slugs:
-                            target_tools.append(_resolve_tool(item.name, property_id=property_id))
-                            known_slugs.add(item.name)
+        if _normalize_property_id(property_id) == "profithelm":
+            target_tools = _resolve_profithelm_tools(adapter=adapter)
+        else:
+            from pseofactory.maintenance import PREXVO_DEFAULT_TOOLS, GAINHELM_DEFAULT_TOOLS, LIENBOND_DEFAULT_TOOLS
+            target_tools = list(adapter.tools) if (adapter and adapter.tools) else []
+            if not target_tools:
+                try:
+                    import importlib
+                    cfg = importlib.import_module(f"{property_id}.config")
+                    target_tools = list(getattr(cfg, "TOOLS", None) or [])
+                except Exception:
+                    pass
+            if not target_tools:
+                if property_id == "prexvo":
+                    target_tools = list(PREXVO_DEFAULT_TOOLS)
+                elif property_id == "gainhelm":
+                    target_tools = list(GAINHELM_DEFAULT_TOOLS)
+                elif property_id == "lienbond":
+                    target_tools = list(LIENBOND_DEFAULT_TOOLS)
+                else:
+                    target_tools = list(TOOLS) if TOOLS else []
+            target_tools = [
+                t for t in target_tools
+                if not _is_retired_distributor_tool_slug(
+                    t["slug"] if isinstance(t, dict) else str(t),
+                    property_id,
+                )
+            ]
+            known_slugs = {
+                t["slug"] if isinstance(t, dict) else str(t)
+                for t in target_tools
+                if isinstance(t, (dict, str))
+            }
+            if adapter and getattr(adapter, "dist_dir", None):
+                dt_dir = Path(adapter.dist_dir) / "tools"
+                if dt_dir.is_dir():
+                    for item in sorted(dt_dir.iterdir()):
+                        if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
+                            if _is_retired_distributor_tool_slug(item.name, property_id):
+                                continue
+                            if item.name not in known_slugs:
+                                target_tools.append(_resolve_tool(item.name, property_id=property_id))
+                                known_slugs.add(item.name)
     else:
         target_tools = tools
 
@@ -11056,8 +11239,6 @@ def prioritize_distribution_queue_by_referral_yield(
         from pseofactory.maintenance import (
             PREXVO_DEFAULT_TOOLS,
             PREXVO_EXTENDED_TOOLS,
-            PROFITHELM_DEFAULT_TOOLS,
-            PROFITHELM_EXTENDED_TOOLS,
             GAINHELM_DEFAULT_TOOLS,
             LIENBOND_DEFAULT_TOOLS,
         )
@@ -11079,23 +11260,15 @@ def prioritize_distribution_queue_by_referral_yield(
         elif norm_prop == "lienbond":
             raw_tools = list(LIENBOND_DEFAULT_TOOLS)
         else:
-            raw_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
-            seen_ph = {str(t.get("slug") if isinstance(t, dict) else t) for t in raw_tools}
-            for ext_t in PROFITHELM_EXTENDED_TOOLS:
-                ext_slug = str(ext_t.get("slug") or "")
-                if ext_slug in (
-                    "s-corp-reasonable-salary-tax-calculator",
-                    "invoice-factoring-cost-apr-calculator",
-                    "invoice-factoring-vs-business-line-of-credit-calculator",
-                ) and ext_slug not in seen_ph:
-                    raw_tools.append(ext_t)
-                    seen_ph.add(ext_slug)
+            raw_tools = _resolve_profithelm_tools(include_extended=True)
     else:
         raw_tools = list(tools)
 
     target_tools = []
     for t in raw_tools:
         slug_val = t["slug"] if isinstance(t, dict) else str(t)
+        if tools is None and _is_retired_distributor_tool_slug(slug_val, norm_prop):
+            continue
         if is_retired_or_consolidated_slug(slug_val, norm_prop):
             continue
         target_tools.append(_resolve_tool(t) if isinstance(t, (str, dict)) else t)
@@ -11333,6 +11506,517 @@ def prioritize_distribution_queue_by_referral_yield(
     return ranked
 
 
+def build_embed_snippet_html(domain: str, brand_name: str, slug: str) -> str:
+    """Delegate pure-brand rel='nofollow' embed snippet generation to compiler."""
+    from pseofactory.compiler import build_embed_snippet_html as _build_embed_snippet_html
+
+    return _build_embed_snippet_html(domain=domain, brand_name=brand_name, slug=slug)
+
+
+def write_static_embed_widget_assets(
+    dist_dir: Any,
+    domain: str,
+    brand_name: str,
+    tools: Optional[Sequence[Any]] = None,
+) -> Dict[str, Any]:
+    """Delegate static embed-widget.js generation to compiler."""
+    from pseofactory.compiler import write_static_embed_widget_assets as _write_static_embed_widget_assets
+
+    return _write_static_embed_widget_assets(
+        dist_dir=dist_dir,
+        domain=domain,
+        brand_name=brand_name,
+        tools=list(tools) if tools is not None else None,
+    )
+
+
+def build_reddit_monitoring_discovery_plan(
+    property_id: str,
+    tools: Optional[Sequence[Any]] = None,
+    subreddits: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Build a strictly read-only, zero-URL Reddit monitoring and discovery plan.
+    Never auto-posts to Reddit and never emits outbound domain URLs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.contracts import assert_no_forbidden_dashes
+
+    norm_prop = _normalize_property_id(property_id)
+    cfg = resolve_tenant_distribution_config(norm_prop)
+    brand_name = str(cfg.get("brand_name") or norm_prop.capitalize())
+    domain = str(cfg.get("domain") or f"{norm_prop}.com").strip().lower()
+
+    resolved_tools = [
+        _resolve_tool(t, property_id=norm_prop) if isinstance(t, (str, dict)) else t
+        for t in (tools or [])
+    ]
+    queries: List[Dict[str, str]] = []
+    for t in resolved_tools:
+        if not isinstance(t, dict):
+            continue
+        slug = str(t.get("slug") or "").strip()
+        raw_kw = str(t.get("primary_keyword") or t.get("title") or slug.replace("-", " ")).strip()
+        # Strip any accidental URL or domain tokens so discovery queries remain strictly zero-URL
+        clean_kw = re.sub(r"https?://\S+", "", raw_kw, flags=re.IGNORECASE).strip()
+        clean_kw = re.sub(re.escape(domain), "", clean_kw, flags=re.IGNORECASE).strip()
+        if not clean_kw:
+            clean_kw = slug.replace("-", " ")
+        assert_no_forbidden_dashes(clean_kw, context=f"reddit_discovery:{slug}")
+        queries.append(
+            {
+                "tool_slug": slug,
+                "monitoring_query": clean_kw,
+                "intent": "read_only_pain_point_discovery",
+            }
+        )
+
+    plan = {
+        "property_id": norm_prop,
+        "brand_name": brand_name,
+        "mode": "READ_ONLY_MONITORING_DISCOVERY",
+        "auto_post_enabled": False,
+        "never_auto_post": True,
+        "outbound_urls_allowed": 0,
+        "subreddits": [str(s).strip() for s in (subreddits or []) if str(s).strip()],
+        "monitoring_queries": queries,
+    }
+    assert_no_forbidden_dashes(json.dumps(plan), context=f"reddit_discovery:{norm_prop}")
+    return plan
+
+
+def _clean_bundle_text(val: Any) -> str:
+    txt = str(val or "").replace("\u2014", "-").replace("\u2013", "-")
+    txt = re.sub(r"https?://[^\s)\]]*coskunarif[^\s)\]]*", "", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"\bcoskunarif\b", "", txt, flags=re.IGNORECASE)
+    return " ".join(txt.split())
+
+
+def _is_official_citation_url(url: str) -> bool:
+    raw = str(url or "").strip()
+    if not raw:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except Exception:
+        return False
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    official_suffixes = (
+        ".gov",
+        ".mil",
+        ".europa.eu",
+        "pcisecuritystandards.org",
+        "aicpa-cima.com",
+        "iso.org",
+        "ncci.com",
+        "fasb.org",
+    )
+    return any(host.endswith(sfx) or host == sfx.lstrip(".") for sfx in official_suffixes)
+
+
+def export_brand_github_statutory_repo_bundle(
+    property_id: str,
+    domain: str = "",
+    tools: Optional[Sequence[Any]] = None,
+    truth_pack: Optional[Any] = None,
+    output_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate an autonomous, self-contained per-brand open statutory dataset repository bundle
+    inside syndication/github_repo_bundle/ (datasets/statutory_schedules.json,
+    datasets/statutory_schedules.csv, README.md, verify_schedules.py).
+    Zero personal coskunarif links. Zero em/en-dashes.
+    """
+    import csv
+    from pseofactory.contracts import assert_no_forbidden_dashes, assert_no_personal_attribution
+
+    norm_prop = _normalize_property_id(property_id)
+    cfg = resolve_tenant_distribution_config(norm_prop)
+    eff_domain = re.sub(
+        r"^https?://",
+        "",
+        str(domain or cfg.get("domain") or f"{norm_prop}.com").strip(),
+        flags=re.IGNORECASE,
+    ).rstrip("/").lower()
+    eff_brand = str(cfg.get("brand_name") or norm_prop.capitalize())
+    canon_url = f"https://{eff_domain}/"
+
+    if truth_pack is None:
+        try:
+            from pseofactory.truth_pack import load_truth_pack
+
+            truth_pack = load_truth_pack(norm_prop, allow_expired=True)
+        except Exception:
+            truth_pack = None
+
+    tp_dict: Dict[str, Any] = {}
+    if truth_pack is not None:
+        if hasattr(truth_pack, "to_dict"):
+            tp_dict = truth_pack.to_dict()
+        elif isinstance(truth_pack, dict):
+            tp_dict = dict(truth_pack)
+
+    if tp_dict.get("brand_name"):
+        eff_brand = _clean_bundle_text(tp_dict["brand_name"]) or eff_brand
+
+    if output_dir is None:
+        base_out = (
+            _register_test_temp_path(
+                Path(tempfile.gettempdir()) / f"pseofactory_test_github_repo_{norm_prop}_{os.getpid()}"
+            )
+            if _is_test_context(property_id=norm_prop)
+            else Path(f"/tmp/{norm_prop}_syndication")
+        )
+        bundle_dir = base_out / "github_repo_bundle"
+    else:
+        out_p = Path(output_dir)
+        bundle_dir = out_p if out_p.name == "github_repo_bundle" else (out_p / "github_repo_bundle")
+
+    datasets_dir = bundle_dir / "datasets"
+    datasets_dir.mkdir(parents=True, exist_ok=True)
+
+    allowlist_items: List[Dict[str, Any]] = []
+    raw_allowlist = tp_dict.get("citations_allowlist") or {}
+    if isinstance(raw_allowlist, dict):
+        allowlist_items = [v for v in raw_allowlist.values() if isinstance(v, dict)]
+    elif isinstance(raw_allowlist, list):
+        allowlist_items = [v for v in raw_allowlist if isinstance(v, dict)]
+
+    def _citation_allowed_by_truth_pack(cit_str: str) -> bool:
+        if not allowlist_items:
+            return True
+        try:
+            from pseofactory.truth_gate import _citation_matches_allow_item, _extract_citations
+
+            extracted = _extract_citations(cit_str)
+            if not extracted:
+                return True
+            for cit_tok, _ in extracted:
+                if not any(_citation_matches_allow_item(cit_tok, a_item)[0] for a_item in allowlist_items):
+                    return False
+            return True
+        except Exception:
+            return True
+
+    tool_slug_set = {
+        _clean_bundle_text(t["slug"] if isinstance(t, dict) else str(t))
+        for t in (tools or [])
+        if (isinstance(t, dict) and t.get("slug")) or isinstance(t, str)
+    }
+
+    schedules: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    raw_entries = tp_dict.get("entries") or {}
+    if isinstance(raw_entries, dict):
+        for entry_key in sorted(raw_entries.keys()):
+            entry = raw_entries[entry_key]
+            if not isinstance(entry, dict):
+                continue
+            rec_id = _clean_bundle_text(entry.get("key") or entry_key)
+            if not rec_id or rec_id in seen_ids:
+                continue
+            applies = entry.get("applies_to_slugs") or []
+            if tool_slug_set and isinstance(applies, list) and applies:
+                if not any(_clean_bundle_text(s) in tool_slug_set for s in applies):
+                    continue
+            citation_txt = _clean_bundle_text(entry.get("citation") or "Official Statutory Schedule")
+            if not _citation_allowed_by_truth_pack(citation_txt):
+                continue
+            seen_ids.add(rec_id)
+            raw_val = entry.get("value")
+            val_serialized = (
+                json.dumps(raw_val, sort_keys=True)
+                if isinstance(raw_val, (list, dict))
+                else _clean_bundle_text(raw_val)
+            )
+            tool_slug = _clean_bundle_text(applies[0]) if isinstance(applies, list) and applies else ""
+            tool_url = f"https://{eff_domain}/tools/{tool_slug}/" if tool_slug else canon_url
+            source_url = _clean_bundle_text(entry.get("primary_source_url") or "")
+            if not source_url or "coskunarif" in source_url.lower():
+                source_url = canon_url
+            schedules.append(
+                {
+                    "record_id": rec_id,
+                    "source_type": "truth_entry",
+                    "title": _clean_bundle_text(rec_id.replace("_", " ").title()),
+                    "effective_year": int(entry.get("effective_year") or 2026),
+                    "value": val_serialized,
+                    "unit": _clean_bundle_text(entry.get("unit") or "unit"),
+                    "citation": citation_txt,
+                    "primary_source_url": source_url,
+                    "publisher": _clean_bundle_text(entry.get("publisher") or "Official Authority"),
+                    "verified_at": _clean_bundle_text(entry.get("verified_at") or "2026-01-01"),
+                    "tool_slug": tool_slug,
+                    "tool_url": tool_url,
+                }
+            )
+
+    allowlist = tp_dict.get("citations_allowlist") or {}
+    fallback_official_url = ""
+    fallback_allowlisted_citation = ""
+    if isinstance(allowlist, dict):
+        for c_obj in allowlist.values():
+            if isinstance(c_obj, dict):
+                cand_u = _clean_bundle_text(c_obj.get("url") or c_obj.get("primary_source_url") or "")
+                cand_c = _clean_bundle_text(c_obj.get("label") or c_obj.get("citation") or "")
+                if not fallback_allowlisted_citation and cand_c and _citation_allowed_by_truth_pack(cand_c):
+                    fallback_allowlisted_citation = cand_c
+                if _is_official_citation_url(cand_u):
+                    fallback_official_url = cand_u
+                    break
+    if not fallback_official_url and schedules:
+        for row in schedules:
+            if _is_official_citation_url(row["primary_source_url"]):
+                fallback_official_url = row["primary_source_url"]
+                break
+    if not fallback_official_url:
+        fallback_official_url = canon_url
+
+    for raw_t in (tools or []):
+        t_obj = _resolve_tool(raw_t, property_id=norm_prop) if isinstance(raw_t, (str, dict)) else None
+        if not isinstance(t_obj, dict) or not t_obj.get("slug"):
+            continue
+        slug = _clean_bundle_text(t_obj["slug"])
+        rec_id = f"tool_schedule_{slug.replace('-', '_')}"
+        if rec_id in seen_ids:
+            continue
+        seen_ids.add(rec_id)
+        try:
+            proof = _resolve_tool_calculation_proof(t_obj, property_id=norm_prop)
+        except Exception:
+            proof = {}
+        stat_src = _clean_bundle_text(
+            proof.get("statutory_source")
+            or t_obj.get("statutory_authority")
+            or f"{eff_brand} Deterministic Statutory Model"
+        )
+        if not _citation_allowed_by_truth_pack(stat_src):
+            stat_src = fallback_allowlisted_citation or f"{eff_brand} Deterministic Statutory Model"
+        out_val = _clean_bundle_text(
+            proof.get("published_output_formatted")
+            or proof.get("published_output")
+            or t_obj.get("published_output")
+            or "0"
+        )
+        src_url = _clean_bundle_text(t_obj.get("primary_source_url") or fallback_official_url)
+        if not src_url or "coskunarif" in src_url.lower():
+            src_url = fallback_official_url
+        schedules.append(
+            {
+                "record_id": rec_id,
+                "source_type": "tool_proof",
+                "title": _clean_bundle_text(t_obj.get("title") or slug),
+                "effective_year": 2026,
+                "value": out_val,
+                "unit": "baseline_output",
+                "citation": stat_src,
+                "primary_source_url": src_url,
+                "publisher": _clean_bundle_text(eff_brand),
+                "verified_at": "2026-01-01",
+                "tool_slug": slug,
+                "tool_url": f"https://{eff_domain}/tools/{slug}/",
+            }
+        )
+
+    if not schedules:
+        schedules.append(
+            {
+                "record_id": f"{norm_prop}_statutory_baseline",
+                "source_type": "baseline",
+                "title": f"{eff_brand} Statutory Baseline",
+                "effective_year": 2026,
+                "value": "verified",
+                "unit": "status",
+                "citation": f"{eff_brand} Primary Statutory Schedule",
+                "primary_source_url": fallback_official_url,
+                "publisher": eff_brand,
+                "verified_at": "2026-01-01",
+                "tool_slug": "",
+                "tool_url": canon_url,
+            }
+        )
+
+    json_payload = {
+        "schema_version": "1.0.0",
+        "property_id": norm_prop,
+        "brand_name": eff_brand,
+        "domain": eff_domain,
+        "canonical_url": canon_url,
+        "generated_source": "TruthPack",
+        "record_count": len(schedules),
+        "schedules": schedules,
+    }
+    json_text = json.dumps(json_payload, indent=2) + "\n"
+    assert_no_forbidden_dashes(json_text, context=f"{norm_prop} statutory_schedules.json")
+    assert_no_personal_attribution(json_text, context=f"{norm_prop} statutory_schedules.json")
+    if "coskunarif" in json_text.lower():
+        raise ValueError(f"Personal attribution leak in {norm_prop} statutory_schedules.json")
+
+    json_path = datasets_dir / "statutory_schedules.json"
+    json_path.write_text(json_text, encoding="utf-8")
+
+    csv_fields = [
+        "record_id",
+        "source_type",
+        "title",
+        "effective_year",
+        "value",
+        "unit",
+        "citation",
+        "primary_source_url",
+        "publisher",
+        "verified_at",
+        "tool_slug",
+        "tool_url",
+    ]
+    csv_path = datasets_dir / "statutory_schedules.csv"
+    with open(csv_path, "w", encoding="utf-8", newline="") as csv_f:
+        writer = csv.DictWriter(csv_f, fieldnames=csv_fields, lineterminator="\n")
+        writer.writeheader()
+        for row in schedules:
+            writer.writerow({k: row.get(k, "") for k in csv_fields})
+    csv_text = csv_path.read_text(encoding="utf-8")
+    assert_no_forbidden_dashes(csv_text, context=f"{norm_prop} statutory_schedules.csv")
+    assert_no_personal_attribution(csv_text, context=f"{norm_prop} statutory_schedules.csv")
+
+    citation_lines: List[str] = []
+    seen_cites: set[str] = set()
+    for row in schedules:
+        cite_key = f"{row['citation']}|{row['primary_source_url']}"
+        if cite_key in seen_cites:
+            continue
+        seen_cites.add(cite_key)
+        citation_lines.append(f"- **{row['citation']}** ([Primary Source]({row['primary_source_url']}))")
+        if len(citation_lines) >= 25:
+            break
+
+    ymyl_note = ""
+    if norm_prop == "prexvo" or "refinanc" in " ".join(citation_lines).lower():
+        ymyl_note = (
+            "\n## Statutory Notice\n\n"
+            "Refinancing federal student loans into a private loan permanently forfeits federal protections.\n"
+        )
+
+    readme_text = (
+        f"# {eff_brand} Open Statutory Schedules\n\n"
+        f"Canonical Source: [{eff_brand}]({canon_url})\n\n"
+        f"This repository publishes versioned, deterministic statutory thresholds and reference schedules "
+        f"used by {eff_brand} calculators.\n\n"
+        f"## Included Datasets\n\n"
+        f"- `datasets/statutory_schedules.json` ({len(schedules)} verified rows)\n"
+        f"- `datasets/statutory_schedules.csv` (tabular export of the same schedule)\n\n"
+        f"## Official Primary-Source Citations\n\n"
+        + "\n".join(citation_lines)
+        + "\n"
+        + ymyl_note
+        + "\n## Deterministic Verification\n\n"
+        + "Run the included self-test script to verify row counts, non-empty citations, and schema validity:\n\n"
+        + "```bash\npython3 verify_schedules.py\n```\n"
+    )
+    assert_no_forbidden_dashes(readme_text, context=f"{norm_prop} github_repo_bundle README.md")
+    assert_no_personal_attribution(readme_text, context=f"{norm_prop} github_repo_bundle README.md")
+    if "coskunarif" in readme_text.lower():
+        raise ValueError(f"Personal attribution leak in {norm_prop} github_repo_bundle README.md")
+    readme_path = bundle_dir / "README.md"
+    readme_path.write_text(readme_text, encoding="utf-8")
+
+    verify_py = '''"""Deterministic self-test for open statutory schedules dataset."""
+
+import csv
+import json
+import sys
+from pathlib import Path
+
+REQUIRED_KEYS = (
+    "record_id",
+    "source_type",
+    "title",
+    "effective_year",
+    "value",
+    "unit",
+    "citation",
+    "primary_source_url",
+)
+
+
+def main() -> int:
+    root = Path(__file__).resolve().parent
+    json_path = root / "datasets" / "statutory_schedules.json"
+    csv_path = root / "datasets" / "statutory_schedules.csv"
+    readme_path = root / "README.md"
+
+    for req_file in (json_path, csv_path, readme_path):
+        if not req_file.is_file():
+            print(f"FAIL: missing {req_file}", file=sys.stderr)
+            return 1
+        raw_txt = req_file.read_text(encoding="utf-8")
+        if "\\u2014" in raw_txt or "\\u2013" in raw_txt:
+            print(f"FAIL: forbidden dash in {req_file.name}", file=sys.stderr)
+            return 1
+        disallowed_handle = "".join(("coskun", "arif"))
+        if disallowed_handle in raw_txt.lower():
+            print(f"FAIL: personal attribution in {req_file.name}", file=sys.stderr)
+            return 1
+
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    if not payload.get("schema_version"):
+        print("FAIL: missing schema_version", file=sys.stderr)
+        return 1
+    schedules = payload.get("schedules")
+    if not isinstance(schedules, list) or not schedules:
+        print("FAIL: empty schedules list", file=sys.stderr)
+        return 1
+    if int(payload.get("record_count", -1)) != len(schedules):
+        print("FAIL: record_count mismatch", file=sys.stderr)
+        return 1
+
+    for idx, row in enumerate(schedules):
+        if not isinstance(row, dict):
+            print(f"FAIL: row {idx} not an object", file=sys.stderr)
+            return 1
+        for k in REQUIRED_KEYS:
+            val = row.get(k)
+            if val is None or (isinstance(val, str) and not val.strip()):
+                print(f"FAIL: row {idx} missing {k}", file=sys.stderr)
+                return 1
+        src_u = str(row.get("primary_source_url") or "")
+        if not (src_u.startswith("https://") or src_u.startswith("http://")):
+            print(f"FAIL: row {idx} invalid primary_source_url", file=sys.stderr)
+            return 1
+
+    with open(csv_path, "r", encoding="utf-8", newline="") as cf:
+        csv_rows = list(csv.DictReader(cf))
+    if len(csv_rows) != len(schedules):
+        print(f"FAIL: CSV row count {len(csv_rows)} != JSON row count {len(schedules)}", file=sys.stderr)
+        return 1
+
+    print(json.dumps({"status": "PASS", "rows": len(schedules), "schema_version": payload["schema_version"]}))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+    assert_no_forbidden_dashes(verify_py, context=f"{norm_prop} verify_schedules.py")
+    verify_path = bundle_dir / "verify_schedules.py"
+    verify_path.write_text(verify_py, encoding="utf-8")
+
+    return {
+        "status": "PASS",
+        "property_id": norm_prop,
+        "domain": eff_domain,
+        "bundle_dir": str(bundle_dir),
+        "json_path": str(json_path),
+        "csv_path": str(csv_path),
+        "readme_path": str(readme_path),
+        "verify_script_path": str(verify_path),
+        "record_count": len(schedules),
+    }
+
+
 def export_all_syndication_files(
     output_dir = None,
     tools = None,
@@ -11420,11 +12104,11 @@ def export_all_syndication_files(
             elif property_id == "lienbond":
                 target_tools = list(LIENBOND_DEFAULT_TOOLS)
             else:
-                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
+                target_tools = _resolve_profithelm_tools()
 
         target_tools = [
             t for t in (target_tools or [])
-            if not is_retired_or_consolidated_slug(
+            if not _is_retired_distributor_tool_slug(
                 t["slug"] if isinstance(t, dict) else str(t),
                 property_id,
             )
@@ -11451,7 +12135,7 @@ def export_all_syndication_files(
             if dt_dir.is_dir():
                 for item in sorted(dt_dir.iterdir()):
                     if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
-                        if is_retired_or_consolidated_slug(item.name, property_id):
+                        if _is_retired_distributor_tool_slug(item.name, property_id):
                             continue
                         built_slugs.add(item.name)
                         if item.name not in known_slugs:
@@ -11482,7 +12166,7 @@ def export_all_syndication_files(
     if output_dir.exists() and not dry_run:
         import shutil as _shutil
         for item in sorted(output_dir.iterdir()):
-            if item.is_dir() and not item.name.startswith(".") and item.name != "ai_benchmarks":
+            if item.is_dir() and not item.name.startswith(".") and item.name not in ("ai_benchmarks", "github_repo_bundle"):
                 if is_retired_or_consolidated_slug(item.name, property_id) or (tools is None and item.name not in active_slugs):
                     _shutil.rmtree(item, ignore_errors=True)
             elif item.is_file():
@@ -11495,18 +12179,23 @@ def export_all_syndication_files(
     output_dir.mkdir(parents=True, exist_ok=True)
     all_assets = generate_all_distribution_assets(tools=target_tools, property_id=property_id)
     tool_map = {t["slug"]: t for t in target_tools}
-    fb_catalog: Dict[str, Any] = {}
+    export_tenant_cfg = resolve_tenant_distribution_config(property_id)
+    eff_export_domain = str(export_tenant_cfg.get("domain") or f"{_normalize_property_id(property_id)}.com").strip().lower()
+    eff_export_brand = str(export_tenant_cfg.get("brand_name") or _normalize_property_id(property_id).capitalize())
+    embed_snippets_map: Dict[str, str] = {}
 
     for slug, pack in all_assets.items():
         tool_dir = output_dir / slug
         tool_dir.mkdir(parents=True, exist_ok=True)
         tool_spec = tool_map.get(slug) or _resolve_tool(slug, property_id=property_id)
 
-        # Deliberately omit Reddit and purge any legacy Reddit files on disk
+        # Deliberately omit Reddit and purge all stale/dead-channel files on disk
         if "reddit" in pack or "reddit_teardown" in pack:
             raise ValueError(f"Reddit channel is prohibited in syndication pack for {slug}")
-        (tool_dir / "reddit.md").unlink(missing_ok=True)
-        (tool_dir / "reddit_teardown.md").unlink(missing_ok=True)
+        for stale_name in PURGED_STALE_TOOL_FILES:
+            (tool_dir / stale_name).unlink(missing_ok=True)
+        for stale_proof in tool_dir.glob("*_proof.py"):
+            stale_proof.unlink(missing_ok=True)
 
         # Enforce strict output contracts before file writes
         assert_x_post(pack["x"]["content"])
@@ -11541,66 +12230,20 @@ def export_all_syndication_files(
                 f"Syndication truth-store audit failed for {property_id}/{slug}: {truth_audit['failures']}"
             )
 
-        # 1. JSON complete pack
+        # 1. JSON complete pack & rel="nofollow" pure-brand embed snippet
         (tool_dir / "syndication_pack.json").write_text(json.dumps(pack, indent=2), encoding="utf-8")
+        embed_snippets_map[slug] = build_embed_snippet_html(eff_export_domain, eff_export_brand, slug)
 
-        # 2. LinkedIn Company Post
-        (tool_dir / "linkedin_company.txt").write_text(pack["linkedin"]["content"], encoding="utf-8")
-
-        # 3. LinkedIn Pulse Article (DR 98 Parasite Asset)
-        pulse_content = pack["linkedin_pulse"]["article_markdown"]
-        assert_no_forbidden_dashes(pulse_content, context=f"{slug} linkedin_pulse")
-        (tool_dir / "linkedin_pulse.md").write_text(pulse_content, encoding="utf-8")
-
-        # 3b. Google Sites HTML (DR 97 Entity Buffer)
-        gs_html = pack.get("google_sites") or generate_parasite_google_sites_html(tool_spec, property_id=property_id)
-        assert_no_forbidden_dashes(gs_html, context=f"{slug} google_sites")
-        (tool_dir / "google_sites.html").write_text(gs_html, encoding="utf-8")
-
-        # 3c. Substack / Hashnode Teardown (DR 94 Deep-Dive)
-        sub_pack = pack.get("substack_teardown") or generate_parasite_substack_teardown(tool_spec, property_id=property_id)
-        sub_content = sub_pack["article_markdown"]
-        assert_no_forbidden_dashes(sub_content, context=f"{slug} substack_teardown")
-        (tool_dir / "substack_teardown.md").write_text(sub_content, encoding="utf-8")
-
-        # 4. X / Twitter
-        (tool_dir / "x_post.txt").write_text(pack["x"]["content"], encoding="utf-8")
-
-        # 5. Facebook (full copy + zero-link teaser + first-comment canonical payload)
-        (tool_dir / "facebook.txt").write_text(pack["facebook"]["content"], encoding="utf-8")
-        (tool_dir / "facebook_teaser.txt").write_text(pack["facebook"].get("teaser_content", ""), encoding="utf-8")
-        (tool_dir / "facebook_first_comment.txt").write_text(pack["facebook"].get("first_comment", ""), encoding="utf-8")
-        fb_catalog[slug] = _build_facebook_groups_catalog_entry(slug, tool_spec, pack, property_id=property_id)
-
-        # 6. Ghost Article (Canonical Cross-Post & Full Mathematical Proof)
-        ghost_pack = pack["ghost"]
-        (tool_dir / "ghost_article.md").write_text(ghost_pack["markdown"], encoding="utf-8")
-        (tool_dir / "ghost.json").write_text(json.dumps(ghost_pack, indent=2), encoding="utf-8")
-
-        # 6b. Exact-Match GitHub Gist (Markdown + Executable Python Verification Script)
-        gist_pack = pack["github_gist"]
-        (tool_dir / "github_gist.md").write_text(gist_pack["content"], encoding="utf-8")
-        (tool_dir / "github_gist.json").write_text(json.dumps(gist_pack, indent=2), encoding="utf-8")
-        py_fname = gist_pack.get("python_filename")
-        if py_fname and isinstance(gist_pack.get("files"), dict) and py_fname in gist_pack["files"]:
-            py_content = gist_pack["files"][py_fname].get("content", "")
-            if py_content:
-                (tool_dir / py_fname).write_text(py_content, encoding="utf-8")
-
-        # 6c. Quora Thread Answer
-        (tool_dir / "quora.md").write_text(pack["quora"]["answer_markdown"], encoding="utf-8")
-        (tool_dir / "quora.txt").write_text(pack["quora"]["answer_markdown"], encoding="utf-8")
-
-        # 7. 1-to-1 Outreach Pitch
+        # 2. 1-to-1 Outreach Pitch
         (tool_dir / "outreach_pitch.txt").write_text(pack["outreach_pitch"]["pitch_text"], encoding="utf-8")
 
-        # 8. Newsletter Hook
+        # 3. Newsletter Hook
         (tool_dir / "newsletter.txt").write_text(pack["newsletter_hook"]["content"], encoding="utf-8")
 
-        # 9. Regulatory Alert Lead Magnet Copy (HWL-1076)
+        # 4. Regulatory Alert Lead Magnet Copy (HWL-1076)
         (tool_dir / "regulatory_lead_magnet.txt").write_text(pack["regulatory_lead_magnet"]["content"], encoding="utf-8")
 
-        # 9b. Root-level syndication discovery files required by GSC distribution readiness checks
+        # 5. Root-level syndication discovery files required by GSC distribution readiness checks
         proof_obj = pack.get("calculation_proof") or _resolve_tool_calculation_proof(tool_spec, property_id=property_id)
         param_url = str(pack.get("parameterized_url") or proof_obj.get("parameterized_url") or pack.get("url") or "")
         brand_label = (
@@ -11649,7 +12292,7 @@ def export_all_syndication_files(
         assert_no_forbidden_dashes(root_substack_notes, context=f"{slug}-Substack Notes-post.txt")
         (output_dir / f"{slug}-Substack Notes-post.txt").write_text(root_substack_notes, encoding="utf-8")
 
-        # 10. YouTube Syndication Copy & Metadata (HWL-1202)
+        # 6. YouTube Syndication Copy & Metadata (HWL-1202)
         yt_pack = pack.get("youtube") or generate_youtube_syndication(tool_spec, property_id=property_id)
         pinned_comment = yt_pack.get("pinned_comment", "")
 
@@ -11679,20 +12322,6 @@ def export_all_syndication_files(
         if not dry_run:
             expected_tool_files = {
                 "syndication_pack.json",
-                "linkedin_company.txt",
-                "linkedin_pulse.md",
-                "google_sites.html",
-                "substack_teardown.md",
-                "x_post.txt",
-                "facebook.txt",
-                "facebook_teaser.txt",
-                "facebook_first_comment.txt",
-                "ghost_article.md",
-                "ghost.json",
-                "github_gist.md",
-                "github_gist.json",
-                "quora.md",
-                "quora.txt",
                 "outreach_pitch.txt",
                 "newsletter.txt",
                 "regulatory_lead_magnet.txt",
@@ -11701,23 +12330,30 @@ def export_all_syndication_files(
                 "youtube_transcript.txt",
                 "youtube_metadata.json",
             }
-            if py_fname and isinstance(gist_pack.get("files"), dict) and py_fname in gist_pack["files"]:
-                expected_tool_files.add(py_fname)
             for existing_f in list(tool_dir.iterdir()):
                 if existing_f.is_file() and not existing_f.name.startswith(".") and existing_f.name not in expected_tool_files:
                     existing_f.unlink(missing_ok=True)
 
-    # Export Facebook Groups distribution catalog to tenant .agy/ directory when not in foreign test context
-    if fb_catalog and not dry_run and not _is_test_context(output_dir, property_id):
-        try:
-            agy_dir = output_dir.parent / ".agy"
-            agy_dir.mkdir(parents=True, exist_ok=True)
-            fb_json = json.dumps(fb_catalog, indent=2, ensure_ascii=False) + "\n"
-            assert_no_forbidden_dashes(fb_json, context="facebook_groups_catalog.json")
-            (agy_dir / "facebook_groups_catalog.json").write_text(fb_json, encoding="utf-8")
-            (agy_dir / "facebook_groups_catalog.dryrun.json").write_text(fb_json, encoding="utf-8")
-        except Exception:
-            pass
+    # Export pure-brand rel="nofollow" embed snippets manifest & autonomous GitHub statutory repo bundle
+    embed_snippets_payload = {
+        "schema_version": "1.0.0",
+        "property_id": _normalize_property_id(property_id),
+        "domain": eff_export_domain,
+        "brand_name": eff_export_brand,
+        "snippets": embed_snippets_map,
+    }
+    embed_snippets_json = json.dumps(embed_snippets_payload, indent=2) + "\n"
+    assert_no_forbidden_dashes(embed_snippets_json, context="embed_snippets.json")
+    (output_dir / "embed_snippets.json").write_text(embed_snippets_json, encoding="utf-8")
+    (output_dir / "google_sites_entity_buffers.md").unlink(missing_ok=True)
+
+    export_brand_github_statutory_repo_bundle(
+        property_id=property_id,
+        domain=eff_export_domain,
+        tools=target_tools,
+        truth_pack=None,
+        output_dir=output_dir / "github_repo_bundle",
+    )
 
     # Verify and memoize all affiliate routes for target tools in SQLite decision cache
     if not _is_test_context(output_dir, property_id):
@@ -11859,42 +12495,6 @@ Calculations and statutory rules derived from:
 - Real-Time WebSub RSS Feed: `{eff_base}/feed.xml`
 """
     (output_dir / "github_seed_discovery.md").write_text(github_seed_md, encoding="utf-8")
-
-    # Write root-level google_sites_entity_buffers.md, facebook_group_targets.md, and directory_manifest.json across all tenants
-    gs_buffer_notice = (
-        f"# Deprecation Notice: Google Sites Buffer Layer Superseded\n\n"
-        f"Target Platform: {eff_base}\n\n"
-        f"All authority, indexing, and SEO workflows are focused 100% directly on {eff_base} native assets.\n"
-        f"External Google Sites entity buffers are deprecated and no longer utilized in the {eff_brand} production architecture.\n"
-        f"Refer to github_seed_discovery.md and direct Google Indexing API workflows for primary crawler discovery.\n"
-    )
-    assert_no_forbidden_dashes(gs_buffer_notice, context="google_sites_entity_buffers.md")
-    if not (output_dir / "google_sites_entity_buffers.md").is_file() or property_id in ("prexvo", "gainhelm", "lienbond"):
-        (output_dir / "google_sites_entity_buffers.md").write_text(gs_buffer_notice, encoding="utf-8")
-
-    if fb_catalog and (not (output_dir / "facebook_group_targets.md").is_file() or property_id in ("prexvo", "gainhelm", "lienbond")):
-        total_fb_groups = sum(int(entry.get("total_unique_groups", 0)) for entry in fb_catalog.values())
-        fb_lines = [
-            f"# {eff_brand} Autonomous Facebook Group Discovery & Topic Routing Matrix",
-            f"Canonical Target: {eff_base}",
-            f"Total Tools Covered: {len(fb_catalog)} | Total Groups Discovered: {total_fb_groups}",
-            "",
-            f"This matrix maps each {eff_brand} statutory calculator to high-yield Facebook communities",
-            "ranked by active member scale, daily post velocity, and audience relevance.",
-            "",
-        ]
-        for s_key, fb_entry in fb_catalog.items():
-            t_title = fb_entry.get("tool_title", s_key)
-            q_str = ", ".join(fb_entry.get("queries_searched", []))
-            fb_lines.append(f"## {t_title} (`/tools/{s_key}/`)")
-            fb_lines.append(f"Target Keywords: {q_str}")
-            fb_lines.append("")
-            for grp in fb_entry.get("groups", []):
-                fb_lines.append(f"- **{grp.get('name')}** (Topic: {grp.get('topic')})")
-            fb_lines.append("")
-        fb_targets_md = "\n".join(fb_lines)
-        assert_no_forbidden_dashes(fb_targets_md, context="facebook_group_targets.md")
-        (output_dir / "facebook_group_targets.md").write_text(fb_targets_md, encoding="utf-8")
 
     if not (output_dir / "directory_manifest.json").is_file() or bool(property_id):
         first_slug = target_tools[0]["slug"] if target_tools else ""
@@ -12113,7 +12713,7 @@ Calculations and statutory rules derived from:
         _audit_files = sorted(output_dir.rglob("*"))
     else:
         _audit_files = []
-        for _root_name in ("directory_manifest.json", "github_seed_discovery.md"):
+        for _root_name in ("directory_manifest.json", "github_seed_discovery.md", "embed_snippets.json"):
             _rp = output_dir / _root_name
             if _rp.is_file():
                 _audit_files.append(_rp)
@@ -12127,6 +12727,9 @@ Calculations and statutory rules derived from:
                 _audit_files.extend(sorted(_td.rglob("*")))
         if ai_bench_dir.is_dir():
             _audit_files.extend(sorted(ai_bench_dir.rglob("*")))
+        _gh_bundle_dir = output_dir / "github_repo_bundle"
+        if _gh_bundle_dir.is_dir():
+            _audit_files.extend(sorted(_gh_bundle_dir.rglob("*")))
     for _sf in _audit_files:
         if not _sf.is_file() or _sf.name.startswith("."):
             continue
@@ -12159,7 +12762,7 @@ Calculations and statutory rules derived from:
                 central_synd_dir.mkdir(parents=True, exist_ok=True)
                 if tools is None:
                     for c_item in sorted(central_synd_dir.iterdir()):
-                        if c_item.is_dir() and not c_item.name.startswith(".") and c_item.name != "ai_benchmarks":
+                        if c_item.is_dir() and not c_item.name.startswith(".") and c_item.name not in ("ai_benchmarks", "github_repo_bundle"):
                             if is_retired_or_consolidated_slug(c_item.name, property_id) or c_item.name not in active_slugs:
                                 _shutil.rmtree(c_item, ignore_errors=True)
                         elif c_item.is_file():
@@ -12172,8 +12775,11 @@ Calculations and statutory rules derived from:
                     src_tool_dir = output_dir / slug
                     dst_tool_dir = central_synd_dir / slug
                     if src_tool_dir.is_dir():
-                        (dst_tool_dir / "reddit.md").unlink(missing_ok=True)
-                        (dst_tool_dir / "reddit_teardown.md").unlink(missing_ok=True)
+                        for stale_name in PURGED_STALE_TOOL_FILES:
+                            (dst_tool_dir / stale_name).unlink(missing_ok=True)
+                        if dst_tool_dir.is_dir():
+                            for stale_proof in dst_tool_dir.glob("*_proof.py"):
+                                stale_proof.unlink(missing_ok=True)
                         _shutil.copytree(src_tool_dir, dst_tool_dir, dirs_exist_ok=True)
                     for suffix in ("-linkedin.md", "-newsletter.md", "-Substack Notes-post.txt"):
                         root_f = output_dir / f"{slug}{suffix}"
@@ -12183,11 +12789,14 @@ Calculations and statutory rules derived from:
                     "github_seed_discovery.md",
                     "affiliate_routes_verified.json",
                     "directory_manifest.json",
-                    "facebook_group_targets.md",
-                    "google_sites_entity_buffers.md",
+                    "embed_snippets.json",
                 ):
                     if (output_dir / top_file).is_file():
                         _shutil.copy2(output_dir / top_file, central_synd_dir / top_file)
+                (central_synd_dir / "google_sites_entity_buffers.md").unlink(missing_ok=True)
+                src_gh_bundle = output_dir / "github_repo_bundle"
+                if src_gh_bundle.is_dir():
+                    _shutil.copytree(src_gh_bundle, central_synd_dir / "github_repo_bundle", dirs_exist_ok=True)
                 if ai_bench_dir.is_dir():
                     dst_bench = central_synd_dir / "ai_benchmarks"
                     dst_bench.mkdir(parents=True, exist_ok=True)
@@ -12883,12 +13492,11 @@ def dispatch_to_distribution_lead(
             elif property_id == "lienbond":
                 target_tools = list(LIENBOND_DEFAULT_TOOLS)
             else:
-                target_tools = list(TOOLS) if TOOLS else list(PROFITHELM_DEFAULT_TOOLS)
+                target_tools = _resolve_profithelm_tools(adapter=adapter)
 
-        from pseofactory.qualification import is_retired_or_consolidated_slug
         target_tools = [
             t for t in target_tools
-            if not is_retired_or_consolidated_slug(
+            if not _is_retired_distributor_tool_slug(
                 t["slug"] if isinstance(t, dict) else str(t),
                 property_id,
             )
@@ -12903,7 +13511,7 @@ def dispatch_to_distribution_lead(
             built_slugs = set()
             for item in sorted((eff_dist / "tools").iterdir()):
                 if item.is_dir() and not item.name.startswith(".") and (item / "index.html").is_file():
-                    if is_retired_or_consolidated_slug(item.name, property_id):
+                    if _is_retired_distributor_tool_slug(item.name, property_id):
                         continue
                     built_slugs.add(item.name)
                     if item.name not in known_slugs:
@@ -12931,19 +13539,7 @@ def dispatch_to_distribution_lead(
     wal_queue.reconcile_stale_events()
     wal_rec = wal_queue.enqueue({"run_id": eff_run_id, "property_id": property_id, "tools_count": len(target_tools)})
 
-    active_channels = [
-        "x",
-        "linkedin",
-        "facebook",
-        "youtube",
-        "ghost",
-        "github_gist",
-        "quora",
-        "google_sites",
-        "linkedin_pulse",
-        "substack_teardown",
-        "outreach_pitch",
-    ]
+    active_channels = list(DEFAULT_ACTIVE_CHANNELS)
 
     try:
         # Phase 1: Asset discovery and multi-channel syndication generation (Reddit omitted)
@@ -13238,16 +13834,14 @@ def dispatch_to_distribution_lead(
                                     dispatches_map = {}
                                     e["dispatches"] = dispatches_map
                                 dispatches_map.pop("reddit", None)
-                                dispatches_map["x"] = CHANNEL_STATUS_POLICY_DISABLED
+                                for purged_ch in PURGED_SYNDICATION_CHANNELS:
+                                    dispatches_map.pop(purged_ch, None)
                                 dispatches_map["linkedin"] = _compute_li_status(e_slug)
                                 if e_slug in fb_pub_by_slug:
-                                    dispatches_map["facebook"] = CHANNEL_STATUS_LIVE_PUBLISHED
                                     e["facebook_permalink"] = fb_pub_by_slug[e_slug]["permalink"]
                                 elif e_slug in fb_mod_by_slug:
-                                    dispatches_map["facebook"] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
                                     e["facebook_permalink"] = fb_mod_by_slug[e_slug]["permalink"]
                                 else:
-                                    dispatches_map["facebook"] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
                                     e.pop("facebook_permalink", None)
 
                                 yt_entry_st = _map_youtube_dispatch_status(
@@ -13270,13 +13864,8 @@ def dispatch_to_distribution_lead(
                                     e["youtube_url"] = u_info.get("video_url")
 
                                 for local_ch in (
-                                    "ghost",
-                                    "github_gist",
-                                    "quora",
-                                    "google_sites",
-                                    "linkedin_pulse",
-                                    "substack_teardown",
                                     "outreach_pitch",
+                                    "github_statutory_repo",
                                 ):
                                     dispatches_map[local_ch] = CHANNEL_STATUS_LOCAL_DRAFT_ONLY
                                 if "newsletter" in dispatches_map:
@@ -13368,17 +13957,10 @@ def dispatch_to_distribution_lead(
                         )
                         u_info = yt_upload_results.get(slug) if isinstance(yt_upload_results, dict) else None
                         new_dispatches = {
-                            "x": CHANNEL_STATUS_POLICY_DISABLED,
                             "linkedin": li_st,
-                            "facebook": fb_st,
                             "youtube": yt_st,
-                            "ghost": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
-                            "github_gist": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
-                            "quora": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
-                            "google_sites": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
-                            "linkedin_pulse": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
-                            "substack_teardown": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
                             "outreach_pitch": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
+                            "github_statutory_repo": CHANNEL_STATUS_LOCAL_DRAFT_ONLY,
                         }
                         has_live_ch = any(
                             v == CHANNEL_STATUS_LIVE_PUBLISHED for v in new_dispatches.values()
@@ -13557,7 +14139,7 @@ def dispatch_to_distribution_lead(
         "all_assets": all_assets,
         "channels": active_channels,
         "channel_delivery_summary": channel_delivery_summary,
-        "omitted_channels": ["reddit"],
+        "omitted_channels": ["reddit", *PURGED_SYNDICATION_CHANNELS],
         "budget_before": budget_before,
         "budget_after": budget_after,
         "voice_check_passed": voice_ok,

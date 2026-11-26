@@ -298,7 +298,14 @@ def test_workflow_4_compile_search_opportunity_briefs_includes_leaf_routes(tmp_p
 def test_workflow_5_discover_internal_linking_and_leaf_cluster_routing(tmp_path: Path) -> None:
     links_1031 = _resolve_contextual_internal_links("profithelm", "section-1031-calculator", "1031 exchange")
     hrefs_1031 = [item["href"] for item in links_1031]
-    assert "/tools/section-1031-calculator/texas/" in hrefs_1031
+    assert "/tools/tcja-sunset-capital-gains/" in hrefs_1031
+    assert "/tools/capital-gains-calculator/" in hrefs_1031
+    assert "/tools/section-1031-calculator/" not in hrefs_1031
+    assert not any(
+        h.startswith("/tools/section-1031-calculator/") and h != "/tools/section-1031-calculator/"
+        for h in hrefs_1031
+    )
+    assert not any("/tools/irs-2027-tax-brackets" in h for h in hrefs_1031)
     assert callable(discover_internal_linking_opportunities)
 
     repo_root = _seed_tenant_fixture(tmp_path)

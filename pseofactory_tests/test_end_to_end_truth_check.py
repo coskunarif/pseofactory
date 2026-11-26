@@ -115,6 +115,7 @@ def test_live_truth_audit_engine_end_to_end_verification():
           <span class="output-value">$245.83</span>
         </form>
         <p class="disclosure">Refinancing federal student loans into a private loan permanently forfeits access to federal IDR, RAP, and PSLF protections.</p>
+        <p class="primary-source">Official authority: <a href="https://studentaid.gov/idr/" target="_blank" rel="noopener noreferrer">StudentAid.gov Income-Driven Repayment Plans</a></p>
         <script type="application/json" class="calculation-manifest">
           {"formula": "round((agi * 0.05) / 12 - (dependents * 50 / 12), 2)", "inputs": {"agi": 60000, "dependents": 1}, "published_output": 245.83}
         </script>
@@ -876,12 +877,12 @@ def test_midnight_factory_build_dist_stash_and_redirect_rollup_self_healing(tmp_
     red_res = rollup_redirected_gsc_rows(
         [
             {"page": "https://profithelm.com/tools/2027-california-tax-brackets/", "query": "ca tax", "impressions": 20, "clicks": 2, "position": 7.0},
-            {"page": "https://profithelm.com/tools/irs-2027-tax-brackets/california", "query": "ca tax", "impressions": 10, "clicks": 1, "position": 9.0},
+            {"page": "https://profithelm.com/tools/irs-tax-brackets/", "query": "ca tax", "impressions": 10, "clicks": 1, "position": 9.0},
         ],
         property_id="profithelm",
     )
     assert len(red_res["rows"]) == 1
-    assert red_res["rows"][0]["page"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert red_res["rows"][0]["page"] == "https://profithelm.com/tools/irs-tax-brackets/"
     assert red_res["rows"][0]["impressions"] == 30
     assert red_res["rows"][0]["redirected_impressions"] == 20
     assert red_res["rows"][0]["direct_impressions"] == 10
@@ -1420,6 +1421,7 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
         export_all_syndication_files,
         generate_all_distribution_assets,
     )
+    from pseofactory.qualification import is_retired_or_consolidated_slug
 
     # 1. Single-pass inspection treats untested channels on legacy manifests as UNKNOWN
     legacy_synd_dir = tmp_path / "legacy_syndication" / "prexvo" / "rap-vs-ibr-calculator"
@@ -1444,8 +1446,8 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
         runs_dir="/home/ubuntuadmin/projects/.agy/runs",
     )
     assert diag["manifests_inspected"] == 1
-    assert diag["unknown_channels"].get("ghost") == "UNKNOWN"
-    assert diag["unknown_channels"].get("github_gist") == "UNKNOWN"
+    assert diag["unknown_channels"].get("outreach_pitch") == "UNKNOWN"
+    assert diag["unknown_channels"].get("github_statutory_repo") == "UNKNOWN"
     assert diag["observed_facts"]["boolean_citation_packs"] == 1
     assert diag["observed_facts"]["thin_substack_packs"] == 1
     assert len(diag["unverified_assumptions_falsified"]) >= 4
@@ -1457,38 +1459,58 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
         for slug, pack in assets.items():
             assert "reddit" not in pack
             assert "reddit_teardown" not in pack
-            for req_ch in ("youtube", "linkedin", "facebook", "ghost", "github_gist"):
+            for req_ch in ("linkedin", "youtube", "outreach_pitch"):
                 assert req_ch in pack and pack[req_ch]
             assert "?" in pack["url"] and "=" in pack["url"]
             audit_res = audit_syndication_asset_against_truth_store(pack, property_id=prop)
             assert audit_res["status"] == "PASS", f"{prop}/{slug} failed truth audit: {audit_res['failures']}"
             assert audit_res["unknown_channels"] == []
 
-        # Export to disk and verify reddit.md is purged while ghost & github_gist are written
+        # Export to disk and verify purged files are absent while active Batch 3A artifacts are written
         out_dir = tmp_path / "exported_syndication" / prop
-        stale_reddit = out_dir / next(iter(assets.keys())) / "reddit.md"
+        stale_slug = "section-179-calculator" if prop == "profithelm" and "section-179-calculator" in assets else next(iter(assets.keys()))
+        stale_reddit = out_dir / stale_slug / "reddit.md"
         stale_reddit.parent.mkdir(parents=True, exist_ok=True)
         stale_reddit.write_text("# Stale Reddit", encoding="utf-8")
 
         export_all_syndication_files(output_dir=out_dir, property_id=prop)
-        first_slug = next(iter(assets.keys()))
-        assert not (out_dir / first_slug / "reddit.md").exists()
-        assert (out_dir / first_slug / "ghost.json").is_file()
-        assert (out_dir / first_slug / "ghost_article.md").is_file()
-        assert (out_dir / first_slug / "github_gist.json").is_file()
-        assert (out_dir / first_slug / "github_gist.md").is_file()
+        assert not stale_reddit.exists()
+        exported_slugs = sorted(
+            d.name
+            for d in out_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".") and d.name not in ("ai_benchmarks", "github_repo_bundle")
+        )
+        assert exported_slugs, f"Expected exported syndication dirs for {prop}"
+        first_slug = next((s for s in exported_slugs if s in assets), exported_slugs[0])
+        for purged_f in (
+            "reddit.md",
+            "ghost.json",
+            "ghost_article.md",
+            "github_gist.json",
+            "github_gist.md",
+            "google_sites.html",
+        ):
+            assert not (out_dir / first_slug / purged_f).exists()
+        assert (out_dir / first_slug / "syndication_pack.json").is_file()
+        assert (out_dir / first_slug / "outreach_pitch.txt").is_file()
+        assert (out_dir / first_slug / "youtube_metadata.json").is_file()
+        assert (out_dir / "github_repo_bundle" / "README.md").is_file()
+        assert (out_dir / "github_repo_bundle" / "datasets" / "statutory_schedules.json").is_file()
 
-        # Verify dispatch_to_distribution_lead omits Reddit and passes draft audit
+        # Verify dispatch_to_distribution_lead omits Reddit/purged channels and passes draft audit
+        first_title = assets[first_slug]["title"] if first_slug in assets else first_slug.replace("-", " ").title()
         dist_res = dispatch_to_distribution_lead(
             run_id=f"test-truth-upgrade-{prop}",
             property_id=prop,
             dry_run=True,
             dist_dir=tmp_path / "dist",
-            tools=[{"slug": first_slug, "title": assets[first_slug]["title"]}],
+            tools=[{"slug": first_slug, "title": first_title}],
         )
         assert "reddit" not in dist_res["channels"]
-        assert "ghost" in dist_res["channels"]
-        assert "github_gist" in dist_res["channels"]
+        assert "outreach_pitch" in dist_res["channels"]
+        assert "github_statutory_repo" in dist_res["channels"]
+        for purged_ch in ("ghost", "github_gist", "facebook", "google_sites"):
+            assert purged_ch not in dist_res["channels"]
         assert dist_res["truth_store_audit"]["status"] == "PASS"
 
     # 3. Demonstrate that thin, Reddit-containing, unparameterized, formula-drifted, or statutory-mismatched drafts fail automatically
@@ -1501,14 +1523,14 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
     assert res_reddit["status"] == "FAIL"
     assert "PROHIBITED_CHANNEL_REDDIT" in res_reddit["violations"]
 
-    # 3b. Missing Ghost / GitHub Gist -> MISSING_OR_UNKNOWN_CHANNEL + marked UNKNOWN
+    # 3b. Missing outreach_pitch / empty github_statutory_repo -> MISSING_OR_UNKNOWN_CHANNEL + marked UNKNOWN
     missing_ch_pack = copy.deepcopy(valid_pack)
-    missing_ch_pack.pop("ghost", None)
-    missing_ch_pack.pop("github_gist", None)
+    missing_ch_pack.pop("outreach_pitch", None)
+    missing_ch_pack["github_statutory_repo"] = ""
     res_missing = audit_syndication_asset_against_truth_store(missing_ch_pack, property_id="profithelm")
     assert res_missing["status"] == "FAIL"
-    assert "ghost" in res_missing["unknown_channels"]
-    assert "github_gist" in res_missing["unknown_channels"]
+    assert "outreach_pitch" in res_missing["unknown_channels"]
+    assert "github_statutory_repo" in res_missing["unknown_channels"]
 
     # 3c. Calculation parity drift -> CALCULATION_PARITY_MISMATCH
     bad_math_pack = copy.deepcopy(valid_pack)
@@ -1526,13 +1548,13 @@ def test_syndication_workflow_truth_store_audit_and_historical_replay(tmp_path):
 
     # 3e. Unparameterized URL & generic filler -> UNPARAMETERIZED_CANONICAL_URL + THIN_PAYLOAD_STUB
     thin_pack = copy.deepcopy(valid_pack)
-    thin_pack["facebook"]["content"] = (
+    thin_pack["linkedin"]["content"] = (
         "Users analyze complex tax liabilities across multiple scenarios resulting in a 15% to 35% variance: "
         "https://profithelm.com/tools/section-179-calculator/"
     )
     res_thin = audit_syndication_asset_against_truth_store(thin_pack, property_id="profithelm")
     assert res_thin["status"] == "FAIL"
-    assert any("UNPARAMETERIZED_CANONICAL_URL:facebook" in v for v in res_thin["violations"])
+    assert any("UNPARAMETERIZED_CANONICAL_URL:linkedin" in v for v in res_thin["violations"])
     assert any("THIN_PAYLOAD_STUB" in v for v in res_thin["violations"])
 
     # 4. Replay against earlier historical repo runs in /home/ubuntuadmin/projects/.agy/runs
@@ -1577,21 +1599,21 @@ def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path)
 
     repo_dir = tmp_path / "profithelm-platform"
     dist_dir = repo_dir / "dist"
-    spoke_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "alabama"
+    spoke_dir = dist_dir / "tools" / "irs-tax-brackets"
     spoke_dir.mkdir(parents=True, exist_ok=True)
     (repo_dir / ".git").mkdir(parents=True, exist_ok=True)
 
-    # Copy a real compiled spoke page and its active overlay from profithelm-platform
-    src_spoke = Path("/home/ubuntuadmin/projects/profithelm-platform/dist/tools/irs-2027-tax-brackets/alabama/index.html")
+    # Copy a real compiled tool page and its active overlay from profithelm-platform
+    src_spoke = Path("/home/ubuntuadmin/projects/profithelm-platform/dist/tools/irs-tax-brackets/index.html")
     initial_spoke_html = src_spoke.read_text(encoding="utf-8")
     spoke_file = spoke_dir / "index.html"
     spoke_file.write_text(initial_spoke_html, encoding="utf-8")
 
     ov_dir = repo_dir / ".agy" / "overlays"
     ov_dir.mkdir(parents=True, exist_ok=True)
-    src_ov = Path("/home/ubuntuadmin/projects/profithelm-platform/.agy/overlays/irs-2027-tax-brackets-alabama.json")
+    src_ov = Path("/home/ubuntuadmin/projects/profithelm-platform/.agy/overlays/irs-tax-brackets.json")
     if src_ov.is_file():
-        shutil.copy2(src_ov, ov_dir / "irs-2027-tax-brackets-alabama.json")
+        shutil.copy2(src_ov, ov_dir / "irs-tax-brackets.json")
 
     def _build_all() -> bool:
         spoke_file.write_text(initial_spoke_html, encoding="utf-8")
@@ -1611,7 +1633,7 @@ def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path)
     cascade = RefactorCascadeEngine(evaluator=evaluator)
     rec = AssetDriftRecord(
         asset_path=str(spoke_file),
-        slug="alabama",
+        slug="irs-tax-brackets",
         reasons=[DriftReason.ENGINE_HASH_DRIFT],
         details=["Engine hash drift"],
     )
@@ -1642,7 +1664,7 @@ def test_post_overlay_retrofit_ordering_and_substrate_lock_drift_gates(tmp_path)
     evaluator._audit_cache.clear()
     drift_rep = evaluator.audit_all(adapter, check_engine_drift=True, check_ledger=False)
     drifted_rel_keys = {r.metadata.get("rel_key") for r in drift_rep.drifted_assets}
-    assert "tools/irs-2027-tax-brackets/alabama/index.html" in drifted_rel_keys
+    assert "tools/irs-tax-brackets/index.html" in drifted_rel_keys
     assert any(str(k).startswith("static/js/pseo-runtime-sync.") for k in drifted_rel_keys)
     assert drift_rep.drifted_assets_count == 2
     assert all(DriftReason.ENGINE_HASH_DRIFT in r.reasons for r in drift_rep.drifted_assets)
@@ -2052,10 +2074,12 @@ def test_comprehensive_truth_reconciliation_and_cross_element_parity_gates(tmp_p
     assert treasury_audit.gate_results["table_cell_truthfulness"] is True
 
     # 6. Syndication truth audit unpacks TenantFactStore.verify_claim tuple and catches stale claims
-    valid_scorp_pack = generate_social_syndication_pack(
-        "s-corp-reasonable-salary-tax-calculator",
+    from pseofactory.distributor import generate_all_distribution_assets
+
+    valid_scorp_pack = generate_all_distribution_assets(
+        tools=["s-corp-reasonable-salary-tax-calculator"],
         property_id="profithelm",
-    )
+    )["s-corp-reasonable-salary-tax-calculator"]
     scorp_synd_res = audit_syndication_asset_against_truth_store(
         valid_scorp_pack,
         property_id="profithelm",
@@ -2398,9 +2422,13 @@ def test_gainhelm_full_three_tenant_stage_parity(tmp_path):
 
     gh_synd_dir = tmp_path / "gh_syndication"
     export_all_syndication_files(output_dir=gh_synd_dir, property_id="gainhelm")
-    soc2_gs = (gh_synd_dir / "soc-2-audit-cost-calculator" / "google_sites.html").read_text(encoding="utf-8")
-    assert len(soc2_gs) > 3500
-    assert "application/ld+json" in soc2_gs
+    assert not (gh_synd_dir / "soc-2-audit-cost-calculator" / "google_sites.html").exists()
+    assert not (gh_synd_dir / "soc-2-audit-cost-calculator" / "ghost.json").exists()
+    assert not (gh_synd_dir / "soc-2-audit-cost-calculator" / "github_gist.json").exists()
+    assert (gh_synd_dir / "github_repo_bundle" / "README.md").is_file()
+    assert (gh_synd_dir / "github_repo_bundle" / "datasets" / "statutory_schedules.json").is_file()
+    assert (gh_synd_dir / "soc-2-audit-cost-calculator" / "outreach_pitch.txt").is_file()
+    assert (gh_synd_dir / "soc-2-audit-cost-calculator" / "youtube_metadata.json").is_file()
     soc2_pack = json.loads((gh_synd_dir / "soc-2-audit-cost-calculator" / "syndication_pack.json").read_text(encoding="utf-8"))
     assert soc2_pack["linkedin"]["post_mode"] == "zero_link_teaser_plus_first_comment"
     assert "--company-id 106482195" in soc2_pack["linkedin"]["command_hint"]

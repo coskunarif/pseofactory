@@ -1250,7 +1250,7 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
         px_pages = [
             p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
         ]
-        assert len(px_pages) >= 23
+        assert len(px_pages) >= 21
         assert fb_report["pages_scanned"] == len(px_pages)
         px_fb_mismatches = _collect_prexvo_slot_mismatches(dist_copy)
         assert px_fb_mismatches == [], f"Prexvo slot mismatches right after feedback_pass: {px_fb_mismatches}"
@@ -1325,16 +1325,16 @@ def test_four_tenant_real_estate_gsc_and_retrofit_convergence_and_callout_parity
             p for p in sorted((dist_copy / "tools").rglob("index.html")) if p.parent != dist_copy / "tools"
         ]
         ledger_data = json.loads((repo_copy / ".agy" / "gsc_affiliate_placement_ledger.json").read_text(encoding="utf-8"))
-        assert len(ph_pages) >= 156
+        assert len(ph_pages) >= 24
         assert fb_report["pages_scanned"] == len(ph_pages)
         assert len(ledger_data["page_reports"]) == fb_report["pages_scanned"], len(ledger_data["page_reports"])
         assert len(ledger_data["repositioned_pages"]) == fb_report["repositioned_pages_count"]
         persisted_ph = load_persisted_gsc_placement_metrics_by_slug(repo_copy / ".agy", "profithelm")
         assert "section-179-calculator" in persisted_ph and persisted_ph["section-179-calculator"]["impressions"] >= 70
         assert "tcja-sunset-capital-gains" in persisted_ph and persisted_ph["tcja-sunset-capital-gains"]["impressions"] >= 25
-        ca_html = (dist_copy / "tools/irs-2027-tax-brackets/california/index.html").read_text(encoding="utf-8")
-        m_ca = re.search(r'class=["\'][^"\']*\b(?:contextual-referral-card|calc-inline-cta)\b[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']', ca_html)
-        assert m_ca and m_ca.group(1) == promoted_before["tools/irs-2027-tax-brackets/california/index.html"]
+        tax_html = (dist_copy / "tools/irs-tax-brackets/index.html").read_text(encoding="utf-8")
+        m_tax = re.search(r'class=["\'][^"\']*\b(?:contextual-referral-card|calc-inline-cta)\b[^"\']*["\'][^>]*data-partner=["\']([^"\']+)["\']', tax_html)
+        assert m_tax and m_tax.group(1) == promoted_before["tools/irs-tax-brackets/index.html"]
     elif prop == "lienbond":
         for lp in sorted((dist_copy / "tools").rglob("index.html")):
             if lp.parent == dist_copy / "tools":

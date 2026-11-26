@@ -7,6 +7,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 
 import collections
 import concurrent.futures
+import difflib
 import fcntl
 import functools
 import hashlib
@@ -102,6 +103,7 @@ from pseofactory.contracts import (
     classify_subtopic_facets,
     evaluate_page_set_fan_out_coverage,
     assert_page_set_fan_out_coverage,
+    detect_data_nosnippet_markup_issues,
 )
 
 
@@ -3787,6 +3789,10 @@ class MasterSEOVerifier:
                                 issues.append(f"Page {rel} quick-answer ({len(parser.quick_answer_text)} chars) exceeds max-snippet:{parser.max_snippet} limit")
                     if parser.quick_answer_has_data_nosnippet:
                         issues.append(f"Page {rel} quick-answer container or ancestor contains 'data-nosnippet', excluding answer from search snippets and AI Overviews")
+                for ns_issue in detect_data_nosnippet_markup_issues(content):
+                    if parser.quick_answer_has_data_nosnippet and "quick-answer" in ns_issue.lower():
+                        continue
+                    issues.append(f"Page {rel}: {ns_issue}")
 
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -3824,6 +3830,12 @@ class MasterSEOVerifier:
                     issues.append(f"Page {rel} quick-answer container or ancestor contains 'data-nosnippet', excluding answer from search snippets and AI Overviews")
                 if parser.root_has_data_nosnippet:
                     issues.append(f"Page {rel} root or main container contains 'data-nosnippet', excluding content from search snippets and AI Overviews")
+                for ns_issue in detect_data_nosnippet_markup_issues(content):
+                    if parser.quick_answer_has_data_nosnippet and "quick-answer" in ns_issue.lower():
+                        continue
+                    if parser.root_has_data_nosnippet and "root container" in ns_issue.lower():
+                        continue
+                    issues.append(f"Page {rel}: {ns_issue}")
 
             headers_file = target / "_headers"
             if headers_file.is_file():
@@ -6637,6 +6649,12 @@ def verify_html_ai_crawl_access_and_snippet_eligibility(
         issues.append(f"Page {rel_path} quick-answer container or ancestor contains 'data-nosnippet', excluding answer from search snippets and AI Overviews")
     if parser.root_has_data_nosnippet:
         issues.append(f"Page {rel_path} root or main container contains 'data-nosnippet', excluding content from search snippets and AI Overviews")
+    for ns_issue in detect_data_nosnippet_markup_issues(html_content):
+        if parser.quick_answer_has_data_nosnippet and "quick-answer" in ns_issue.lower():
+            continue
+        if parser.root_has_data_nosnippet and "root container" in ns_issue.lower():
+            continue
+        issues.append(f"Page {rel_path}: {ns_issue}")
 
     return {
         "status": "PASS" if not issues else "FAIL",
@@ -12148,6 +12166,146 @@ def verify_estate_monetization_and_funnel_hygiene(
         "gate": "check_monetization_and_funnel_hygiene_gate",
         "property_id": prop,
         "pages_checked": pages_checked,
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
+def _extract_main_word_tokens_for_variance(html_text: str) -> List[str]:
+    """Extracts normalized lowercase word tokens from <main>...</main> (excluding scripts/styles)."""
+    if not html_text:
+        return []
+    m = re.search(r"<main\b[^>]*>([\s\S]*?)</main>", html_text, flags=re.IGNORECASE)
+    region = m.group(1) if m else html_text
+    region = re.sub(r"<(script|style|noscript|svg)\b[^>]*>[\s\S]*?</\1>", " ", region, flags=re.IGNORECASE)
+    plain = html.unescape(re.sub(r"<[^>]+>", " ", region))
+    return re.findall(r"[a-z0-9]+", plain.lower())
+
+
+def audit_cross_tenant_footprint_variance(
+    tenant_dist_map: Dict[str, Union[str, Path]],
+    max_main_similarity: float = 0.50,
+    max_css_similarity: float = 0.85,
+    routes: Sequence[str] = ("about", "partners"),
+) -> Dict[str, Any]:
+    """
+    Measures pairwise cross-tenant <main> word similarity on governance routes (/about/, /partners/)
+    and pairwise style.css similarity across compiled tenant dist directories.
+    Fails closed whenever any pairwise <main> similarity on required routes is >= max_main_similarity (0.50)
+    or pairwise style.css sequence similarity is >= max_css_similarity.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues: List[str] = []
+    normalized_map: Dict[str, Path] = {
+        str(k).strip().lower(): Path(v) for k, v in (tenant_dist_map or {}).items() if str(k).strip()
+    }
+    tenants = sorted(normalized_map.keys())
+    route_pairwise: Dict[str, Dict[str, Dict[str, float]]] = {}
+    max_main_sim = 0.0
+
+    def _read_route_html(dist_path: Path, slug: str) -> Optional[str]:
+        s = slug.strip("/")
+        for cand in (dist_path / s / "index.html", dist_path / f"{s}.html"):
+            if cand.is_file():
+                return cand.read_text(encoding="utf-8", errors="ignore")
+        return None
+
+    def _measure_route(slug: str, fail_on_threshold: bool) -> Dict[str, Dict[str, float]]:
+        nonlocal max_main_sim
+        tokens_by_tenant: Dict[str, List[str]] = {}
+        for tid in tenants:
+            raw = _read_route_html(normalized_map[tid], slug)
+            if raw is None:
+                if fail_on_threshold:
+                    issues.append(f"Tenant '{tid}' missing /{slug}/ HTML in {normalized_map[tid]}")
+                continue
+            tokens_by_tenant[tid] = _extract_main_word_tokens_for_variance(raw)
+
+        pair_metrics: Dict[str, Dict[str, float]] = {}
+        present = sorted(tokens_by_tenant.keys())
+        for i in range(len(present)):
+            for j in range(i + 1, len(present)):
+                t1, t2 = present[i], present[j]
+                w1, w2 = tokens_by_tenant[t1], tokens_by_tenant[t2]
+                s1, s2 = set(w1), set(w2)
+                jaccard = len(s1 & s2) / max(1, len(s1 | s2))
+                seq_ratio = difflib.SequenceMatcher(None, w1, w2, autojunk=False).ratio()
+                sim = max(jaccard, seq_ratio)
+                pair_key = f"{t1}__vs__{t2}"
+                pair_metrics[pair_key] = {
+                    "jaccard": round(jaccard, 4),
+                    "sequence": round(seq_ratio, 4),
+                    "similarity": round(sim, 4),
+                }
+                if fail_on_threshold:
+                    if sim > max_main_sim:
+                        max_main_sim = round(sim, 4)
+                    if sim >= max_main_similarity:
+                        issues.append(
+                            f"Cross-tenant /{slug}/ <main> similarity {sim:.4f} >= {max_main_similarity:.2f} "
+                            f"between '{t1}' and '{t2}' (jaccard={jaccard:.4f}, seq={seq_ratio:.4f})"
+                        )
+        return pair_metrics
+
+    for r_slug in routes:
+        route_pairwise[r_slug] = _measure_route(r_slug, fail_on_threshold=True)
+
+    diagnostic_routes: Dict[str, Dict[str, Dict[str, float]]] = {}
+    for diag_slug in ("contact", "terms", "privacy"):
+        if diag_slug not in routes:
+            diag_res = _measure_route(diag_slug, fail_on_threshold=False)
+            if diag_res:
+                diagnostic_routes[diag_slug] = diag_res
+
+    css_lines_by_tenant: Dict[str, List[str]] = {}
+    for tid in tenants:
+        dist_p = normalized_map[tid]
+        css_file = None
+        for cand_css in (dist_p / "css" / "style.css", dist_p / "static" / "css" / "style.css"):
+            if cand_css.is_file():
+                css_file = cand_css
+                break
+        if css_file is None:
+            issues.append(f"Tenant '{tid}' missing style.css in {dist_p}")
+            continue
+        css_lines_by_tenant[tid] = css_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+
+    css_pairwise: Dict[str, Dict[str, float]] = {}
+    max_css_sim = 0.0
+    css_present = sorted(css_lines_by_tenant.keys())
+    for i in range(len(css_present)):
+        for j in range(i + 1, len(css_present)):
+            t1, t2 = css_present[i], css_present[j]
+            l1, l2 = css_lines_by_tenant[t1], css_lines_by_tenant[t2]
+            seq_css = difflib.SequenceMatcher(None, l1, l2, autojunk=False).ratio()
+            s1 = {ln.strip() for ln in l1 if ln.strip()}
+            s2 = {ln.strip() for ln in l2 if ln.strip()}
+            jac_css = len(s1 & s2) / max(1, len(s1 | s2))
+            pair_key = f"{t1}__vs__{t2}"
+            css_pairwise[pair_key] = {
+                "line_sequence": round(seq_css, 4),
+                "line_jaccard": round(jac_css, 4),
+                "similarity": round(seq_css, 4),
+            }
+            if seq_css > max_css_sim:
+                max_css_sim = round(seq_css, 4)
+            if seq_css >= max_css_similarity:
+                issues.append(
+                    f"Cross-tenant style.css similarity {seq_css:.4f} >= {max_css_similarity:.2f} "
+                    f"between '{t1}' and '{t2}'"
+                )
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": not issues,
+        "gate": "audit_cross_tenant_footprint_variance",
+        "tenants": tenants,
+        "routes_checked": list(routes),
+        "route_pairwise": route_pairwise,
+        "max_main_similarity": round(max_main_sim, 4),
+        "diagnostic_routes": diagnostic_routes,
+        "css_pairwise": css_pairwise,
+        "max_css_similarity": round(max_css_sim, 4),
         "violations_count": len(issues),
         "issues": issues,
     }

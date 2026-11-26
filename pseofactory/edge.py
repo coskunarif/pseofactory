@@ -5207,6 +5207,21 @@ export async function onRequestPost(context) {{
     if (!payload.value_tier && (payload.ph_tier || props.value_tier || props.tier)) {{
       payload.value_tier = payload.ph_tier || props.value_tier || props.tier;
     }}
+    if (!payload.traffic_source && props.traffic_source) {{
+      payload.traffic_source = props.traffic_source;
+    }}
+    if (payload.traffic_source) {{
+      payload.traffic_source = String(payload.traffic_source).trim().slice(0, 64);
+    }}
+    const hasTextFragmentReferral = Boolean(
+      payload.text_fragment_referral === true ||
+      props.text_fragment_referral === true
+    );
+    if (hasTextFragmentReferral) {{
+      payload.text_fragment_referral = true;
+    }} else if (payload.text_fragment_referral !== undefined) {{
+      payload.text_fragment_referral = Boolean(payload.text_fragment_referral);
+    }}
 
     const path =
       typeof payload.path === "string" && payload.path
@@ -5266,6 +5281,8 @@ export async function onRequestPost(context) {{
               cta_slot: payload.cta_slot || null,
               subid: payload.subid || null,
               value_tier: payload.value_tier || null,
+              traffic_source: payload.traffic_source || null,
+              text_fragment_referral: Boolean(payload.text_fragment_referral),
               path: String(path || "/").slice(0, 160),
               timestamp: payload.timestamp,
             }};
@@ -5292,6 +5309,8 @@ export async function onRequestPost(context) {{
         tool_slug: payload.tool_slug || null,
         cta_slot: payload.cta_slot || null,
         subid: payload.subid || null,
+        traffic_source: payload.traffic_source || null,
+        text_fragment_referral: Boolean(payload.text_fragment_referral),
         path: path,
         timestamp: payload.timestamp,
       }}),
@@ -9481,6 +9500,7 @@ function buildEdgeLeadKvMetadata(rec) {
     zeptomail_dispatched: Boolean(rec.zeptomail_dispatched),
     email_message_id: String(rec.email_message_id || "").slice(0, 48),
     action_bus_dispatched: Boolean(rec.action_bus_dispatched),
+    attribution_source: String(rec.attribution_source || "").slice(0, 64),
     captured_at: String(rec.captured_at || "").slice(0, 32),
   };
 }
@@ -10673,6 +10693,7 @@ export async function onRequestPost(context) {
       );
     }
 
+    const attributionSource = String(body.attribution_source || body.how_did_you_find_us || reqUrl.searchParams.get("attribution_source") || "").trim().slice(0, 120);
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Surety & Insurance Partner Agency";
@@ -10691,6 +10712,7 @@ export async function onRequestPost(context) {
         email,
         firm_name: firmName,
         state,
+        attribution_source: attributionSource || null,
         offer_sku: partnerSku,
         offer_title: partnerOffer.title,
         offer_price_usd: partnerOffer.price_usd,
@@ -10794,6 +10816,7 @@ export async function onRequestPost(context) {
       offer_sku: offer.sku,
       offer_title: offer.title,
       offer_price_usd: offer.price_usd,
+      attribution_source: attributionSource || null,
       captured_at: new Date().toISOString(),
     };
     const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
@@ -11742,6 +11765,7 @@ function buildEdgeLeadKvMetadata(rec) {
     zeptomail_dispatched: Boolean(rec.zeptomail_dispatched),
     email_message_id: String(rec.email_message_id || "").slice(0, 48),
     action_bus_dispatched: Boolean(rec.action_bus_dispatched),
+    attribution_source: String(rec.attribution_source || "").slice(0, 64),
     captured_at: String(rec.captured_at || "").slice(0, 32),
   };
 }
@@ -13016,6 +13040,7 @@ export async function onRequestPost(context) {
       );
     }
 
+    const attributionSource = String(body.attribution_source || body.how_did_you_find_us || reqUrl.searchParams.get("attribution_source") || "").trim().slice(0, 120);
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
@@ -13034,6 +13059,7 @@ export async function onRequestPost(context) {
         email,
         firm_name: firmName,
         state,
+        attribution_source: attributionSource || null,
         offer_sku: partnerSku,
         has_explicit_sku: true,
         offer_title: partnerOffer.title,
@@ -13146,6 +13172,7 @@ export async function onRequestPost(context) {
       offer_sku: offer.sku,
       offer_title: offer.title,
       offer_price_usd: offer.price_usd,
+      attribution_source: attributionSource || null,
       captured_at: new Date().toISOString(),
     };
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "free_playbook");
@@ -13470,6 +13497,7 @@ function buildEdgeLeadKvMetadata(rec) {
     zeptomail_dispatched: Boolean(rec.zeptomail_dispatched),
     email_message_id: String(rec.email_message_id || "").slice(0, 48),
     action_bus_dispatched: Boolean(rec.action_bus_dispatched),
+    attribution_source: String(rec.attribution_source || "").slice(0, 64),
     captured_at: String(rec.captured_at || "").slice(0, 32),
   };
 }
@@ -14775,6 +14803,7 @@ export async function onRequestPost(context) {
       );
     }
 
+    const attributionSource = String(body.attribution_source || body.how_did_you_find_us || reqUrl.searchParams.get("attribution_source") || "").trim().slice(0, 120);
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
@@ -14799,6 +14828,7 @@ export async function onRequestPost(context) {
         email,
         firm_name: firmName,
         state: state || "CA",
+        attribution_source: attributionSource || null,
         offer_sku: partnerSku,
         offer_title: partnerOffer.title,
         offer_price_usd: partnerOffer.price_usd,
@@ -14906,6 +14936,7 @@ export async function onRequestPost(context) {
         scenario_inputs: scenarioInputs,
         scenario_outputs: scenarioOutputs,
         blueprint_state: blueprintState,
+        attribution_source: attributionSource || null,
         ...checkoutOffer,
         captured_at: ts,
       };
@@ -15067,6 +15098,7 @@ export async function onRequestPost(context) {
       scenario_inputs: scenarioInputs,
       scenario_outputs: scenarioOutputs,
       blueprint_state: blueprintState,
+      attribution_source: attributionSource || null,
       ...checkoutOffer,
       captured_at: ts,
     };
@@ -15522,6 +15554,7 @@ function buildEdgeLeadKvMetadata(rec) {
     zeptomail_dispatched: Boolean(rec.zeptomail_dispatched),
     email_message_id: String(rec.email_message_id || "").slice(0, 48),
     action_bus_dispatched: Boolean(rec.action_bus_dispatched),
+    attribution_source: String(rec.attribution_source || "").slice(0, 64),
     captured_at: String(rec.captured_at || "").slice(0, 32),
   };
 }
@@ -16784,6 +16817,7 @@ export async function onRequestPost(context) {
     const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSyntheticProbe, postCorsHeaders);
     if (!abuseGuard.allowed) return abuseGuard.response;
 
+    const attributionSource = String(body.attribution_source || body.how_did_you_find_us || reqUrl.searchParams.get("attribution_source") || "").trim().slice(0, 120);
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {
       if (!email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) {
@@ -16809,6 +16843,7 @@ export async function onRequestPost(context) {
         email,
         firm_name: firmName,
         state: partnerState,
+        attribution_source: attributionSource || null,
         offer_sku: partnerSku,
         offer_title: partnerOffer.title,
         offer_price_usd: partnerOffer.price_usd,
@@ -16917,6 +16952,7 @@ export async function onRequestPost(context) {
         scenario_inputs: scenarioInputs,
         scenario_outputs: scenarioOutputs,
         blueprint_state: blueprintState,
+        attribution_source: attributionSource || null,
         ...checkoutOffer,
         captured_at: ts,
       };
@@ -17082,6 +17118,7 @@ export async function onRequestPost(context) {
       scenario_inputs: scenarioInputs,
       scenario_outputs: scenarioOutputs,
       blueprint_state: blueprintState,
+      attribution_source: attributionSource || null,
       ...checkoutOffer,
       captured_at: ts,
     };
@@ -17352,6 +17389,7 @@ function buildEdgeLeadKvMetadata(rec) {{
     stripe_checkout_session_id: String(rec.stripe_checkout_session_id || "").slice(0, 64),
     attributed_revenue_usd: Number(rec.attributed_revenue_usd || 0),
     net_settled_revenue_usd: Number(rec.net_settled_revenue_usd || 0),
+    attribution_source: String(rec.attribution_source || "").slice(0, 64),
     captured_at: String(rec.captured_at || "").slice(0, 32),
   }};
 }}
@@ -18017,6 +18055,7 @@ export async function onRequestPost(context) {{
       return new Response(JSON.stringify({{ ok: false, success: false, error: "Please enter a valid email address." }}), {{ status: 400, headers: {{ "Content-Type": "application/json", ...postCorsHeaders }} }});
     }}
 
+    const attributionSource = String(body.attribution_source || body.how_did_you_find_us || reqUrl.searchParams.get("attribution_source") || "").trim().slice(0, 120);
     const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
     if (intentParam === "partner_registration") {{
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
@@ -18034,6 +18073,7 @@ export async function onRequestPost(context) {{
         email,
         firm_name: firmName,
         state,
+        attribution_source: attributionSource || null,
         offer_sku: partnerSku,
         offer_title: partnerOffer.title,
         offer_price_usd: partnerOffer.price_usd,
@@ -18068,6 +18108,7 @@ export async function onRequestPost(context) {{
       offer_sku: offer.sku,
       offer_title: offer.title,
       offer_price_usd: offer.price_usd,
+      attribution_source: attributionSource || null,
       captured_at: new Date().toISOString(),
     }};
     const bundle = buildDynamicTenantWorkpaperBundle(record, offer, "free_playbook");
