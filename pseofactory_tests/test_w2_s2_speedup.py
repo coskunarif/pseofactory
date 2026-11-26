@@ -152,18 +152,13 @@ def _build_minimal_dist(root: Path, prop: str = "profithelm", domain: str = "pro
     url_xml = "\n".join(f"  <url><loc>{u}</loc></url>" for u in urls)
     sm = f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{url_xml}\n</urlset>\n'
     (dist / "sitemap.xml").write_text(sm, encoding="utf-8")
-    (dist / "sitemap-hubs.xml").write_text(sm, encoding="utf-8")
-    (dist / "sitemap-leaves.xml").write_text(sm, encoding="utf-8")
     (dist / "robots.txt").write_text(
         f"User-agent: *\nAllow: /\nDisallow: /signal/\n"
-        f"Sitemap: https://{domain}/sitemap.xml\n"
-        f"Sitemap: https://{domain}/sitemap-hubs.xml\n"
-        f"Sitemap: https://{domain}/sitemap-leaves.xml\n",
+        f"Sitemap: https://{domain}/sitemap.xml\n",
         encoding="utf-8",
     )
-    (dist / "_headers").write_text("/*\n  X-Robots-Tag: all\n", encoding="utf-8")
+    (dist / "_headers").write_text("/*\n  Content-Signal: ai-train=no, search=yes, ai-input=yes\n  X-Robots-Tag: all\n", encoding="utf-8")
     (dist / "llms.txt").write_text(f"# {brand}\n\n> Authoritative statutory calculators.\n", encoding="utf-8")
-    (dist / "llms-full.txt").write_text(f"# {brand}\n\n> Full catalog.\n", encoding="utf-8")
     (dist / "feed.xml").write_text(f'<?xml version="1.0"?><rss version="2.0"><channel><title>{brand}</title></channel></rss>', encoding="utf-8")
     return dist
 

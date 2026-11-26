@@ -49,10 +49,12 @@ from pseofactory.contracts import (
 )
 from pseofactory.estate_common import (
     build_tools_directory_html,
+    cap_llms_txt_file,
     compile_schema_graph as _common_compile_schema_graph,
     finalize_estate_build,
     load_and_enrich_deployed_voids,
     prepare_estate_dirs,
+    sanitize_public_catalog_file,
     write_llms_files as _common_write_llms_files,
     write_machine_endpoints_and_headers,
     write_sitemaps_and_robots,
@@ -3207,7 +3209,7 @@ def cleanup_orphan_tools(
 
 
 def _sanitize_catalog_json(dist: Path) -> None:
-    """Scrubs unlisted/cross-tenant citations and forbidden dashes in dist/catalog.json."""
+    """Scrubs unlisted/cross-tenant citations, forbidden dashes, and strips heavy dump keys in dist/catalog.json."""
     catalog_file = dist / "catalog.json"
     if not catalog_file.is_file():
         return
@@ -3215,32 +3217,30 @@ def _sanitize_catalog_json(dist: Path) -> None:
         cat_data = json.loads(catalog_file.read_text(encoding="utf-8"))
         clean_cat = _sanitize_nested_strings(cat_data, slug="")
         catalog_file.write_text(json.dumps(clean_cat, indent=2) + "\n", encoding="utf-8")
+        sanitize_public_catalog_file(dist, property_id=PROFITHELM_PROPERTY_ID)
     except Exception:
         pass
 
 
 def _sanitize_llms_files(dist: Path) -> None:
-    """Guarantees plain-text HTML-unescaped llms.txt / llms-full.txt with Circular 230 notice and zero dashes."""
-    notice = TRUTH_CONSTANTS["disclosure_text"]
-    for fname in ("llms.txt", "llms-full.txt"):
-        p = dist / fname
-        if not p.is_file():
-            continue
-        raw = p.read_text(encoding="utf-8", errors="ignore")
-        cleaned = html_lib.unescape(raw).replace("\u2014", "-").replace("\u2013", "-")
-        cleaned_lines: List[str] = []
-        for line in cleaned.splitlines():
-            line = _clean_unlisted_citations(line, slug="")
-            if "http://" not in line and "https://" not in line:
-                line = re.sub(r"\b([A-Za-z]{2,})\s+\1\b", r"\1", line, flags=re.IGNORECASE)
-                line = re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", line)
-            else:
-                line = re.sub(r"(?<=\):)[ \t]+-[ \t]+", " ", line)
-            cleaned_lines.append(line)
-        body = "\n".join(cleaned_lines).rstrip()
-        if "Circular 230" not in body:
-            body = f"{body}\n\n## Statutory Disclosure\n{notice}"
-        p.write_text(body + "\n", encoding="utf-8")
+    """Guarantees capped plain-text HTML-unescaped llms.txt with Circular 230 notice and purges llms-full.txt."""
+    (dist / "llms-full.txt").unlink(missing_ok=True)
+    p = dist / "llms.txt"
+    if not p.is_file():
+        return
+    raw = p.read_text(encoding="utf-8", errors="ignore")
+    cleaned = html_lib.unescape(raw).replace("\u2014", "-").replace("\u2013", "-")
+    cleaned_lines: List[str] = []
+    for line in cleaned.splitlines():
+        line = _clean_unlisted_citations(line, slug="")
+        if "http://" not in line and "https://" not in line:
+            line = re.sub(r"\b([A-Za-z]{2,})\s+\1\b", r"\1", line, flags=re.IGNORECASE)
+            line = re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", line)
+        else:
+            line = re.sub(r"(?<=\):)[ \t]+-[ \t]+", " ", line)
+        cleaned_lines.append(line)
+    p.write_text("\n".join(cleaned_lines).rstrip() + "\n", encoding="utf-8")
+    cap_llms_txt_file(dist, property_id=PROFITHELM_PROPERTY_ID, canonical_base=CANONICAL_BASE)
 
 
 def build_machine_endpoints(
@@ -3265,17 +3265,14 @@ def build_machine_endpoints(
     for t in items:
         s = t["slug"]
         try:
-            m = generate_tool_calculation_manifest(t, repo_root=repo_root)
+            _ = generate_tool_calculation_manifest(t, repo_root=repo_root)
             catalog_tools.append(
                 {
                     "slug": s,
                     "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=s),
                     "url": f"{CANONICAL_BASE}/tools/{s}/",
-                    "manifest_url": f"{CANONICAL_BASE}/manifests/{s}.json",
-                    "statutory_authority": _clean_unlisted_citations(m["statutory_authority"], slug=s),
-                    "economic_dataset": m["economic_dataset"],
-                    "formula": m["formula"],
-                    "published_output": m["published_output"],
+                    "category": str(t.get("category") or "tax_and_capital"),
+                    **({"updated_at": t["updated_date"]} if t.get("updated_date") else {}),
                 }
             )
         except Exception:
@@ -3292,32 +3289,16 @@ def build_machine_endpoints(
         (f"{CANONICAL_BASE}/contact/", "0.7", "monthly"),
         (f"{CANONICAL_BASE}/partners/", "0.6", "monthly"),
     ]
-    ai_bots = [
-        "*",
-        "Googlebot",
-        "Bingbot",
-        "PerplexityBot",
-        "ClaudeBot",
-        "GPTBot",
-        "ChatGPT-User",
-        "OAI-SearchBot",
-        "CCBot",
-        "anthropic-ai",
-        "Cohere-ai",
-        "Applebot",
-        "Applebot-Extended",
-        "Meta-ExternalAgent",
-    ]
     sitemap_leaf_tools = list(items) + list(spokes)
     write_sitemaps_and_robots(
         dist=dist,
         canonical_base=CANONICAL_BASE,
         hub_specs=hub_specs,
         leaf_tools=sitemap_leaf_tools,
-        ai_bots=ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
-        allow_paths=["/", "/tools/"],
-        include_changefreq_and_priority=True,
+        ai_bots=None,
+        disallow_paths=["/api/", "/cdn-cgi/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        allow_paths=["/"],
+        include_changefreq_and_priority=False,
     )
 
     all_slugs = [t["slug"] for t in sitemap_leaf_tools]
@@ -3329,6 +3310,7 @@ def build_machine_endpoints(
             "title": _clean_unlisted_citations(html_lib.unescape(t["title"]), slug=t["slug"]),
             "url": f"{CANONICAL_BASE}/tools/{t['slug']}/",
             "description": _clean_unlisted_citations(html_lib.unescape(t["description"]), slug=t["slug"]),
+            **({"updated_date": t["updated_date"]} if t.get("updated_date") else {}),
         }
         for t in items
     ]
@@ -3349,7 +3331,7 @@ def build_machine_endpoints(
             "vertical": "us_tax_and_capital_strategy",
         },
         header_routes=header_routes,
-        machine_endpoints=["/feed.xml", "/llms.txt", "/llms-full.txt", "/sitemap.xml", "/sitemap-hubs.xml", "/sitemap-leaves.xml"],
+        machine_endpoints=["/feed.xml", "/llms.txt", "/sitemap.xml"],
         static_patterns=["/static/*", "/css/*"],
         redirects_content=(
             "/brackets /tools/irs-2027-tax-brackets/ 301\n"
@@ -3360,7 +3342,7 @@ def build_machine_endpoints(
             "/vs/ordermetrics/*  /tools/section-179-calculator/  301\n"
         ),
     )
-    # Remove stale legacy ai-benchmarks bundle written by shared helper (carries old $30,500 / $12,050 numbers)
+    # Remove stale legacy ai-benchmarks bundle
     ai_bench = dist / "ai-benchmarks"
     if ai_bench.is_dir():
         shutil.rmtree(ai_bench, ignore_errors=True)
@@ -3412,32 +3394,6 @@ def build_machine_endpoints(
         all_tools=unescaped_tools,
         quick_answers=clean_quick_answers,
     )
-    resolved_spokes = list(spokes)
-    if not resolved_spokes:
-        tools_root = dist / "tools"
-        if tools_root.is_dir():
-            for sp_idx in sorted(tools_root.glob("*/*/index.html")):
-                rel_sp = sp_idx.relative_to(tools_root).parent.as_posix()
-                resolved_spokes.append({"slug": rel_sp, "title": rel_sp.replace("/", " ").replace("-", " ").title()})
-    if resolved_spokes:
-        llms_p = dist / "llms.txt"
-        existing_llms = llms_p.read_text(encoding="utf-8") if llms_p.is_file() else ""
-        spoke_bullets = "\n".join(
-            f"- [{_clean_unlisted_citations(html_lib.unescape(str(sp.get('title') or sp['slug'])), slug=sp['slug'])}]"
-            f"({CANONICAL_BASE}/tools/{sp['slug']}/): Deterministic localized statutory tax model."
-            for sp in resolved_spokes
-            if f"/tools/{sp['slug']}/" not in existing_llms
-        )
-        if spoke_bullets:
-            if "## Documentation" in existing_llms:
-                existing_llms = existing_llms.replace(
-                    "## Documentation",
-                    f"## State & Vehicle Matrix Endpoints\n{spoke_bullets}\n\n## Documentation",
-                    1,
-                )
-            else:
-                existing_llms = existing_llms.rstrip() + f"\n\n## State & Vehicle Matrix Endpoints\n{spoke_bullets}\n"
-            llms_p.write_text(existing_llms, encoding="utf-8")
     _sanitize_catalog_json(dist)
     _sanitize_llms_files(dist)
 

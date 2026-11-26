@@ -432,9 +432,12 @@ def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_bou
     RetroReflectionEngine.sync_tenant_publisher_prerequisites(dist, "gainhelm", canonical_base="https://gainhelm.com")
 
     cat_obj = json.loads((dist / "catalog.json").read_text(encoding="utf-8"))
-    qa_extracted = cat_obj["tools"][0]["quick_answer"]
-    assert "AICPA SSAE 18" in qa_extracted
-    assert "directly to your inbox" not in qa_extracted
+    assert set(cat_obj["tools"][0].keys()) == {"slug", "title", "url", "category", "updated_at"}
+    for forbidden_key in ("quick_answer", "published_output", "inputs", "formula", "query_syntax"):
+        assert forbidden_key not in cat_obj["tools"][0]
+    llms_txt_out = (dist / "llms.txt").read_text(encoding="utf-8")
+    assert "directly to your inbox" not in llms_txt_out
+    assert not (dist / "llms-full.txt").exists()
     assert 'rel="tool-catalog"' in (t_dir / "index.html").read_text(encoding="utf-8")
     assert "/catalog.json" in (dist / "_headers").read_text(encoding="utf-8")
 

@@ -908,7 +908,7 @@ def test_lienbond_ci_deploy_syndication_and_metadata_parity(tmp_path: Path):
     lock_payload = write_substrate_lock(lb_repo, property_id="lienbond", expected_hash="cafebabe9999", sync_ledgers=True)
     # Fail-closed invariant: write_substrate_lock must NEVER fabricate a fake CERTIFIED_FRESH report when none exists
     assert not (lb_repo / "freshness_audit_report.json").exists()
-    assert (lb_repo / "dist" / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
+    assert not (lb_repo / "dist" / "ai-benchmarks").exists()
     assert lock_payload["substrate_hash"] == "cafebabe9999"
 
 

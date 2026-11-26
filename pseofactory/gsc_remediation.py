@@ -47,6 +47,120 @@ EXPECTED_CTR_CURVE: Dict[int, float] = {
 DEFAULT_REMEDIATION_QUEUE_PATH = Path("/home/ubuntuadmin/projects/.agy/gsc_remediation_queue.json")
 MIN_EMPIRICAL_EVAL_IMPRESSIONS: int = 15
 MIN_POST_OVERLAY_MATURE_DAYS: int = 7
+CRO_MEASUREMENT_LOCK_DAYS: int = 28
+INDEXING_VALIDATE_FIX_DAYS: int = 14
+CORE_CANARY_PATHS: Tuple[str, ...] = ("/", "/about/", "/methodology/")
+
+
+def evaluate_indexing_validation_poll(
+    submitted_at: Optional[str] = None,
+    now: Optional[datetime] = None,
+    validate_fix_days: int = INDEXING_VALIDATE_FIX_DAYS,
+) -> Dict[str, Any]:
+    """
+    Evaluates the 14-day GSC Validate Fix indexing polling window, decoupled
+    from the 28-day CRO/overlay measurement lock (CRO_MEASUREMENT_LOCK_DAYS).
+    Zero em-dashes. Zero en-dashes.
+    """
+    eff_days = max(1, int(validate_fix_days))
+    ref_now = now or datetime.now(timezone.utc)
+    if ref_now.tzinfo is None:
+        ref_now = ref_now.replace(tzinfo=timezone.utc)
+    if not submitted_at:
+        return {
+            "validate_fix_days": eff_days,
+            "cro_measurement_lock_days": CRO_MEASUREMENT_LOCK_DAYS,
+            "ready_for_validation_poll": False,
+            "days_elapsed": 0.0,
+            "validate_fix_until": (ref_now + timedelta(days=eff_days)).isoformat(),
+        }
+    try:
+        sub_dt = datetime.fromisoformat(str(submitted_at).strip().replace("Z", "+00:00"))
+        if sub_dt.tzinfo is None:
+            sub_dt = sub_dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return {
+            "validate_fix_days": eff_days,
+            "cro_measurement_lock_days": CRO_MEASUREMENT_LOCK_DAYS,
+            "ready_for_validation_poll": False,
+            "days_elapsed": 0.0,
+            "validate_fix_until": None,
+        }
+    until_dt = sub_dt + timedelta(days=eff_days)
+    elapsed_days = round(max(0.0, (ref_now - sub_dt).total_seconds() / 86400.0), 2)
+    return {
+        "validate_fix_days": eff_days,
+        "cro_measurement_lock_days": CRO_MEASUREMENT_LOCK_DAYS,
+        "ready_for_validation_poll": bool(ref_now >= until_dt),
+        "days_elapsed": elapsed_days,
+        "validate_fix_until": until_dt.isoformat(),
+    }
+
+
+def evaluate_core_page_canary(inspections: Any) -> Dict[str, Any]:
+    """
+    Deterministic core hub canary checking /, /about/, and /methodology/.
+    Returns P0_CORE_CANARY_ALERT status if any core hub reports
+    'Crawled - currently not indexed' or 'Discovered - currently not indexed'.
+    Zero em-dashes. Zero en-dashes.
+    """
+    entries: List[Tuple[str, Any]] = []
+    if isinstance(inspections, dict):
+        if isinstance(inspections.get("inspections"), list):
+            for item in inspections["inspections"]:
+                if isinstance(item, dict):
+                    k = str(item.get("url") or item.get("page_url") or item.get("path") or "")
+                    entries.append((k, item))
+        elif isinstance(inspections.get("url_states"), dict):
+            entries.extend((str(k), v) for k, v in inspections["url_states"].items())
+        elif isinstance(inspections.get("inspection_by_path"), dict):
+            entries.extend((str(k), v) for k, v in inspections["inspection_by_path"].items())
+        else:
+            entries.extend((str(k), v) for k, v in inspections.items())
+    elif isinstance(inspections, list):
+        for item in inspections:
+            if isinstance(item, dict):
+                k = str(item.get("url") or item.get("page_url") or item.get("path") or "")
+                entries.append((k, item))
+
+    alerts: List[Dict[str, str]] = []
+    observed_paths: Set[str] = set()
+    alert_triggers = (
+        "crawled - currently not indexed",
+        "discovered - currently not indexed",
+    )
+
+    for raw_key, rec in entries:
+        if isinstance(rec, dict):
+            raw_target = str(rec.get("url") or rec.get("page_url") or rec.get("path") or raw_key).strip()
+            cov = str(rec.get("coverage_state") or rec.get("coverageState") or "").strip()
+        else:
+            raw_target = str(raw_key).strip()
+            cov = str(rec or "").strip()
+
+        if not raw_target:
+            continue
+        parsed_path = urllib.parse.urlsplit(raw_target).path
+        norm_path = "/" if parsed_path in ("", "/") else ("/" + parsed_path.strip("/") + "/")
+        if norm_path not in CORE_CANARY_PATHS:
+            continue
+
+        observed_paths.add(norm_path)
+        cov_norm = re.sub(r"\s+", " ", cov.lower()).strip()
+        if any(trig in cov_norm for trig in alert_triggers):
+            alerts.append({
+                "path": norm_path,
+                "url": raw_target,
+                "coverage_state": cov,
+            })
+
+    return {
+        "status": "P0_CORE_CANARY_ALERT" if alerts else "OK",
+        "alert_triggered": bool(alerts),
+        "checked_paths": list(CORE_CANARY_PATHS),
+        "core_pages_observed": sorted(observed_paths),
+        "failing_core_pages": alerts,
+    }
 
 
 def _strip_forbidden_dashes(text: str) -> str:
@@ -8514,7 +8628,7 @@ def _iter_overlay_target_html_paths(root: Path, slug: str) -> List[Path]:
 
 def evaluate_expired_overlays(
     site_url: Optional[str] = None,
-    days_threshold: int = 28,
+    days_threshold: int = CRO_MEASUREMENT_LOCK_DAYS,
     base_dir: Optional[Union[str, Path]] = None,
     live_queries: Optional[List[Dict[str, Any]]] = None,
     default_base_dir: Optional[Path] = None,
@@ -12589,7 +12703,7 @@ def audit_gsc_cron_cohort_and_cooldown_stability(
     repo_root: Optional[Union[str, Path]] = None,
     live_queries: Optional[List[Dict[str, Any]]] = None,
     min_impressions_floor: int = 3,
-    measurement_lock_days: int = 28,
+    measurement_lock_days: int = CRO_MEASUREMENT_LOCK_DAYS,
     dry_run: bool = True,
 ) -> Dict[str, Any]:
     """

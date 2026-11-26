@@ -288,3 +288,51 @@ def test_zero_forbidden_dashes_invariant_check():
     # Valid regular hyphens must pass
     valid_intent = classifier.classify("section 179-calculator")
     assert valid_intent.target_asset_type == "interactive_calculator"
+
+
+def test_edge_routes_json_and_410_gone_middleware_no_redirects_410(tmp_path):
+    """
+    Verifies build_edge_routes_json includes /llms-full.txt and /ai-benchmarks/* with
+    exclude=[], ensure_gone_rules_in_redirects strips unsupported 410 rules from _redirects,
+    and functions/_middleware.js serves HTTP 410 Gone for both /llms-full.txt and /ai-benchmarks/*.
+    """
+    from pseofactory.edge import (
+        build_edge_routes_json,
+        ensure_gone_rules_in_redirects,
+        sync_tenant_edge_redirect_function,
+    )
+
+    routes_doc = json.loads(build_edge_routes_json())
+    assert routes_doc == {
+        "version": 1,
+        "include": ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"],
+        "exclude": [],
+    }
+
+    cleaned = ensure_gone_rules_in_redirects(
+        "/old-tool  /tools/new-tool/  301\n/llms-full.txt  /  410\n/ai-benchmarks/*  /  410\n"
+    )
+    assert "410" not in cleaned
+    assert "/old-tool  /tools/new-tool/  301" in cleaned
+
+    repo = tmp_path / "tenant"
+    (repo / "functions" / "r").mkdir(parents=True)
+    (repo / "dist").mkdir(parents=True)
+    (repo / "dist" / "_redirects").write_text("/llms-full.txt  /  410\n", encoding="utf-8")
+    mw_file = repo / "functions" / "_middleware.js"
+    mw_file.write_text(
+        "export async function onRequest(context) {\n"
+        "  const url = new URL(context.request.url);\n"
+        "  const hostname = url.hostname.toLowerCase();\n"
+        "  const pathname = url.pathname;\n"
+        "  const edgeRedirects = {};\n"
+        "  return await context.next();\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    sync_tenant_edge_redirect_function(repo, property_id="gainhelm")
+    assert "410" not in (repo / "dist" / "_redirects").read_text(encoding="utf-8")
+    mw_txt = mw_file.read_text(encoding="utf-8")
+    assert '"/llms-full.txt"' in mw_txt
+    assert 'pathname.startsWith("/ai-benchmarks/")' in mw_txt
+    assert "status: 410" in mw_txt

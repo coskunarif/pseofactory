@@ -20,7 +20,9 @@ import urllib.parse
 import urllib.error
 import urllib.robotparser
 import hashlib
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 from zoneinfo import ZoneInfo
@@ -287,7 +289,10 @@ class SitemapGovernor:
 
         eff_init = max(1, int(initial_batch_size))
         ratio = float(indexed_ratio) if indexed_ratio is not None else 1.0
-        if ratio < 0.70:
+        if len(deduped) < 500:
+            # Clean single sitemap (<500 URLs): expose full clean URL set without artificial 50/200 throttling
+            cap = eff_max
+        elif ratio < 0.70:
             cap = min(eff_max, eff_init)
         elif ratio < 0.90:
             cap = min(eff_max, eff_init * 4)
@@ -823,13 +828,9 @@ def _render_urlset_xml(records: List[Dict[str, Any]], default_lastmod: str) -> s
         if not loc:
             continue
         lastmod = _sanitize_sitemap_text(str(rec.get("lastmod") or default_lastmod)).strip()
-        changefreq = _sanitize_sitemap_text(str(rec.get("changefreq") or "weekly")).strip()
-        priority = _sanitize_sitemap_text(str(rec.get("priority") or "0.8")).strip()
         lines.append("  <url>")
         lines.append(f"    <loc>{loc}</loc>")
         lines.append(f"    <lastmod>{lastmod}</lastmod>")
-        lines.append(f"    <changefreq>{changefreq}</changefreq>")
-        lines.append(f"    <priority>{priority}</priority>")
         lines.append("  </url>")
     lines.append("</urlset>")
     xml_str = "\n".join(lines) + "\n"
@@ -1543,6 +1544,7 @@ class PushIndexer:
         else:
             self.indexmysite_project_id = inferred_tenant
         self.ledger_path = Path(ledger_path) if ledger_path else (self.base_dir / ".agy" / "index_push_ledger.json")
+        self.indexnow_backoff_ledger_path = self.ledger_path.parent / "indexnow_backoff_ledger.json"
         self.audit_log_path = Path(audit_log_path) if audit_log_path else (self.base_dir / ".agy" / "indexing_audit_log.json")
         self.rollover_queue_path = Path(rollover_queue_path) if rollover_queue_path else (self.base_dir / ".agy" / "gsc_rollover_queue.json")
         self.velocity_ledger_path = Path(velocity_ledger_path) if velocity_ledger_path else DEFAULT_INDEXING_VELOCITY_LEDGER
@@ -1587,7 +1589,16 @@ class PushIndexer:
                     rob_path = c
                     break
 
-        target_bots = ["Googlebot", "Bingbot", "PerplexityBot", "ClaudeBot", "GPTBot", "*"]
+        target_bots = [
+            "Googlebot",
+            "Bingbot",
+            "Applebot",
+            "OAI-SearchBot",
+            "PerplexityBot",
+            "Claude-SearchBot",
+            "*",
+        ]
+        target_bot_set = {b.lower() for b in target_bots}
         rp = urllib.robotparser.RobotFileParser()
         disallow_prefixes: List[str] = []
         has_robots = False
@@ -1596,12 +1607,30 @@ class PushIndexer:
             try:
                 lines = rob_path.read_text(encoding="utf-8").splitlines()
                 rp.parse(lines)
+                current_agents: List[str] = []
+                saw_rule_in_group = False
                 for line in lines:
-                    line_clean = line.strip()
-                    if line_clean.lower().startswith("disallow:"):
-                        rule_path = line_clean.split(":", 1)[1].strip()
-                        if rule_path and rule_path != "/":
-                            disallow_prefixes.append(rule_path)
+                    line_clean = line.split("#", 1)[0].strip()
+                    if not line_clean:
+                        current_agents = []
+                        saw_rule_in_group = False
+                        continue
+                    low = line_clean.lower()
+                    if low.startswith("user-agent:"):
+                        ua_val = line_clean.split(":", 1)[1].strip().lower()
+                        if saw_rule_in_group:
+                            current_agents = []
+                            saw_rule_in_group = False
+                        if ua_val:
+                            current_agents.append(ua_val)
+                    elif low.startswith("disallow:"):
+                        saw_rule_in_group = True
+                        if any(ua in target_bot_set for ua in current_agents):
+                            rule_path = line_clean.split(":", 1)[1].strip()
+                            if rule_path and rule_path != "/":
+                                disallow_prefixes.append(rule_path)
+                    elif ":" in line_clean:
+                        saw_rule_in_group = True
             except Exception:
                 pass
 
@@ -2305,6 +2334,55 @@ class PushIndexer:
             velocity_data["persistence_error"] = str(ex)
         return velocity_data
 
+    @staticmethod
+    def _parse_retry_after_seconds(
+        raw_header: Optional[str],
+        now_dt: Optional[datetime] = None,
+    ) -> Optional[float]:
+        """Parses an HTTP Retry-After header (seconds or HTTP-date) into delay seconds."""
+        if raw_header is None:
+            return None
+        val = str(raw_header).strip()
+        if not val:
+            return None
+        try:
+            return max(0.0, float(val))
+        except ValueError:
+            pass
+        try:
+            ref_now = now_dt or _utc_now()
+            dt = parsedate_to_datetime(val)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return max(0.0, (dt.astimezone(timezone.utc) - ref_now.astimezone(timezone.utc)).total_seconds())
+        except Exception:
+            return None
+
+    def _load_indexnow_backoff_state(self) -> Dict[str, Any]:
+        """Loads persisted IndexNow rate-limit cooldown state."""
+        path = getattr(self, "indexnow_backoff_ledger_path", None)
+        if not path or not Path(path).is_file():
+            return {}
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_indexnow_backoff_state(self, state: Dict[str, Any]) -> None:
+        """Persists IndexNow rate-limit cooldown state atomically."""
+        path = getattr(self, "indexnow_backoff_ledger_path", None)
+        if not path:
+            return
+        try:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+            tmp.replace(p)
+        except Exception:
+            pass
+
     def submit_indexnow_batch(
         self,
         urls: Optional[List[str]] = None,
@@ -2387,6 +2465,40 @@ class PushIndexer:
                 "intent_id": intent_id,
             }
 
+        now_dt = _utc_now()
+        backoff_state = self._load_indexnow_backoff_state()
+        persisted_until_raw = str(backoff_state.get("retry_after_until") or "").strip()
+        if persisted_until_raw:
+            try:
+                until_dt = datetime.fromisoformat(persisted_until_raw.replace("Z", "+00:00"))
+                if until_dt.tzinfo is None:
+                    until_dt = until_dt.replace(tzinfo=timezone.utc)
+                if until_dt > now_dt:
+                    dispatch_results = [
+                        {
+                            "endpoint": ep,
+                            "status_code": 429,
+                            "status": "RATE_LIMITED_COOLDOWN",
+                            "retry_after_until": persisted_until_raw,
+                            "message": f"IndexNow Retry-After cooldown active until {persisted_until_raw}",
+                        }
+                        for ep in endpoints
+                    ]
+                    self._commit_push_result(intent_id, [], status="RATE_LIMITED_COOLDOWN")
+                    return {
+                        "host": self.domain,
+                        "urls_submitted": len(urls),
+                        "urls_dispatched": 0,
+                        "urls_skipped_unchanged": 0,
+                        "results": dispatch_results,
+                        "status": "RATE_LIMITED_COOLDOWN",
+                        "skipped": True,
+                        "retry_after_until": persisted_until_raw,
+                        "intent_id": intent_id,
+                    }
+            except ValueError:
+                pass
+
         to_push, skipped = self.filter_unchanged_push_urls(urls, force=force, engine="indexnow")
 
         if not to_push:
@@ -2418,47 +2530,79 @@ class PushIndexer:
         }
         req_data = json.dumps(payload).encode("utf-8")
 
+        def _post_indexnow(ep_url: str) -> Dict[str, Any]:
+            req = urllib.request.Request(
+                ep_url,
+                data=req_data,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                is_success = resp.status in [200, 202]
+                return {
+                    "endpoint": ep_url,
+                    "status_code": resp.status,
+                    "status": "SUCCESS" if is_success else "FAIL",
+                    "message": "Submitted successfully" if is_success else f"HTTP {resp.status}",
+                }
+
         dispatch_results = []
+        max_retry_after_until: Optional[datetime] = None
         for ep in endpoints:
-            try:
-                req = urllib.request.Request(
-                    ep,
-                    data=req_data,
-                    headers={"Content-Type": "application/json; charset=utf-8"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    is_success = resp.status in [200, 202]
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    dispatch_results.append(_post_indexnow(ep))
+                    break
+                except urllib.error.HTTPError as he:
+                    retry_after = he.headers.get("Retry-After") if getattr(he, "headers", None) else None
+                    delay_secs = self._parse_retry_after_seconds(retry_after, now_dt=_utc_now())
+                    if he.code == 429 and attempt == 1 and delay_secs is not None and 0.0 < delay_secs <= 5.0:
+                        time.sleep(delay_secs)
+                        continue
+                    err_item: Dict[str, Any] = {
+                        "endpoint": ep,
+                        "status_code": he.code,
+                        "status": "FAIL",
+                        "message": f"HTTP {he.code}: {he.reason}",
+                    }
+                    if retry_after is not None:
+                        err_item["retry_after"] = str(retry_after)
+                    if he.code == 429:
+                        eff_delay = delay_secs if (delay_secs is not None and delay_secs > 0.0) else 60.0
+                        until_dt = _utc_now() + timedelta(seconds=eff_delay)
+                        err_item["retry_after_until"] = until_dt.isoformat()
+                        if max_retry_after_until is None or until_dt > max_retry_after_until:
+                            max_retry_after_until = until_dt
+                    dispatch_results.append(err_item)
+                    break
+                except Exception as e:
                     dispatch_results.append({
                         "endpoint": ep,
-                        "status_code": resp.status,
-                        "status": "SUCCESS" if is_success else "FAIL",
-                        "message": "Submitted successfully" if is_success else f"HTTP {resp.status}",
+                        "status_code": 500,
+                        "status": "ERROR",
+                        "message": str(e),
                     })
-            except urllib.error.HTTPError as he:
-                retry_after = he.headers.get("Retry-After") if getattr(he, "headers", None) else None
-                err_item: Dict[str, Any] = {
-                    "endpoint": ep,
-                    "status_code": he.code,
-                    "status": "FAIL",
-                    "message": f"HTTP {he.code}: {he.reason}",
+                    break
+
+        if max_retry_after_until is not None:
+            self._save_indexnow_backoff_state(
+                {
+                    "host": self.domain,
+                    "tenant_id": getattr(self, "tenant_id", ""),
+                    "retry_after_until": max_retry_after_until.isoformat(),
+                    "updated_at": _utc_now().isoformat(),
                 }
-                if retry_after is not None:
-                    err_item["retry_after"] = str(retry_after)
-                dispatch_results.append(err_item)
-            except Exception as e:
-                dispatch_results.append({
-                    "endpoint": ep,
-                    "status_code": 500,
-                    "status": "ERROR",
-                    "message": str(e),
-                })
+            )
 
         has_verified_success = bool(dispatch_results) and all(r.get("status_code") in [200, 202] for r in dispatch_results)
         has_failure_or_403 = any(r.get("status_code") == 403 or r.get("status") in ["FAIL", "ERROR"] for r in dispatch_results)
 
         if has_verified_success and not has_failure_or_403:
             self.record_pushed_urls(to_push, engine="indexnow")
+            if persisted_until_raw:
+                self._save_indexnow_backoff_state({"host": self.domain, "retry_after_until": None, "updated_at": _utc_now().isoformat()})
             overall_status = "DISPATCHED"
         else:
             self.purge_pushed_urls(to_push, engine="indexnow")
@@ -2467,7 +2611,7 @@ class PushIndexer:
 
         self._commit_push_result(intent_id, to_push, status=overall_status)
 
-        return {
+        out_res: Dict[str, Any] = {
             "host": self.domain,
             "urls_submitted": len(urls),
             "urls_dispatched": len(to_push),
@@ -2476,71 +2620,27 @@ class PushIndexer:
             "status": overall_status,
             "intent_id": intent_id,
         }
+        if max_retry_after_until is not None:
+            out_res["retry_after_until"] = max_retry_after_until.isoformat()
+        return out_res
 
     def ping_websub_hub(self, dry_run: bool = False) -> Dict[str, Any]:
-        """Pings Google's PubSubHubbub to trigger immediate Googlebot crawler passes on updated RSS."""
-        feed_url = f"{self.canonical_base}/feed.xml"
-        hub_url = "https://pubsubhubbub.appspot.com/"
-        intent_id = self._record_push_intent([feed_url], channel="websub")
-
-        if dry_run:
-            self._commit_push_result(intent_id, [feed_url], status="SIMULATED")
-            return {"hub": hub_url, "status": "SIMULATED", "message": "Dry-run verified (simulated WebSub ping)", "intent_id": intent_id}
-
-        data = urllib.parse.urlencode({
-            "hub.mode": "publish",
-            "hub.url": feed_url,
-        }).encode("utf-8")
-
-        try:
-            req = urllib.request.Request(hub_url, data=data, method="POST")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                is_success = 200 <= resp.status < 300
-                self._commit_push_result(intent_id, [feed_url], status="DISPATCHED" if is_success else "FAILED")
-                return {
-                    "hub": hub_url,
-                    "status": resp.status,
-                    "success": is_success,
-                    "message": "Feed pinged" if is_success else f"HTTP {resp.status}",
-                    "intent_id": intent_id,
-                }
-        except urllib.error.HTTPError as e:
-            self._commit_push_result(intent_id, [feed_url], status="FAILED")
-            return {"hub": hub_url, "status": e.code, "success": False, "note": f"HTTPError {e.code}: {e.reason}", "intent_id": intent_id}
-        except Exception as e:
-            self._commit_push_result(intent_id, [feed_url], status="ERROR")
-            return {"hub": hub_url, "status": "ERROR", "success": False, "note": str(e), "intent_id": intent_id}
+        """Disabled by policy: WebSub/PubSubHubbub pings are deprecated."""
+        return {
+            "status": "disabled_policy",
+            "skipped": True,
+            "reason": "websub_disabled_policy",
+        }
 
     ping_websub = ping_websub_hub
 
     def ping_pingomatic(self, dry_run: bool = False) -> Dict[str, Any]:
-        """Pings Ping-O-Matic XML-RPC aggregator for broad crawler signaling."""
-        blog_url = self.canonical_base
-        feed_url = f"{self.canonical_base}/feed.xml"
-
-        if dry_run:
-            return {"status": "SIMULATED", "message": "Dry-run verified (simulated Ping-O-Matic ping)"}
-
-        ping_url = (
-            f"http://pingomatic.com/ping/?title={urllib.parse.quote(self.domain)}"
-            f"&blogurl={urllib.parse.quote(blog_url)}"
-            f"&rssurl={urllib.parse.quote(feed_url)}"
-            f"&chk_weblogscom=on&chk_blogs=on&chk_feedburner=on&chk_technorati=on"
-        )
-
-        try:
-            req = urllib.request.Request(ping_url, headers={"User-Agent": "FastIndexer/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                is_success = 200 <= resp.status < 300
-                return {
-                    "status": resp.status,
-                    "success": is_success,
-                    "message": "Ping-O-Matic hubs notified" if is_success else f"HTTP {resp.status}",
-                }
-        except urllib.error.HTTPError as e:
-            return {"status": e.code, "success": False, "note": f"HTTPError {e.code}: {e.reason}"}
-        except Exception as e:
-            return {"status": "ERROR", "success": False, "note": str(e)}
+        """Disabled by policy: Ping-O-Matic XML-RPC pings are deprecated."""
+        return {
+            "status": "disabled_policy",
+            "skipped": True,
+            "reason": "pingomatic_disabled_policy",
+        }
 
     def _resolve_deployed_indexnow_key(self) -> str:
         """
@@ -2631,7 +2731,6 @@ class PushIndexer:
             "--domain", self.domain,
             "--url", target_url,
             "--feed", f"{self.canonical_base}/feed.xml",
-            "--pingomatic",
             "--skip-google",
         ]
         if dry_run:
@@ -4312,287 +4411,32 @@ class PushIndexer:
         hubs_only: bool = False,
         drain_rollover: bool = True,
     ) -> Dict[str, Any]:
-        self.ensure_indexnow_key_file()
-        rollover_loaded = self.load_gsc_rollover_queue() if drain_rollover else []
-
-        if not urls:
-            sitemap_file = self.dist_dir / "sitemap.xml"
-            if sitemap_file.exists():
-                import re
-                extracted = re.findall(r"<loc>(.*?)</loc>", sitemap_file.read_text(encoding="utf-8"))
-                if extracted:
-                    urls = [u.strip() for u in extracted if u.strip()]
-            if not urls:
-                urls = [f"{self.canonical_base}/"] + [f"{self.canonical_base}/tools/{t['slug']}/" for t in self.tools]
-
-        combined_urls = []
-        seen = set()
-        for u in rollover_loaded + urls:
-            if u and u not in seen:
-                seen.add(u)
-                combined_urls.append(u)
-        urls = combined_urls
-
-        if urls:
-            airlock_res = self.preflight_airlock(urls)
-            urls = list(airlock_res[0])
-            if not urls:
-                return {
-                    "site": self.gsc_site,
-                    "urls_targeted": 0,
-                    "results": [
-                        {
-                            "engine": "gsc_quarantined",
-                            "status": "QUARANTINED_ALL",
-                            "message": "All candidate URLs were quarantined by preflight airlock.",
-                        }
-                    ],
-                    "inspection_oracle": [],
-                    "child_sitemap_submissions": [],
-                    "sitemap_registration": {"status": "QUARANTINED_ALL", "submissions": []},
-                }
-
-        if hubs_only:
-            urls, _ = self.partition_indexing_urls(urls)
-
-        urls = self.prioritize_urls_for_indexing_allocation(urls)
-        domain_health = self.evaluate_domain_health_pacing(urls)
-        remaining_quota = int(domain_health.get("remaining_indexing_quota", GOOGLE_INDEXING_DAILY_QUOTA) or 0)
-        paced_batch_cap = int(domain_health.get("paced_gsc_batch_cap", GOOGLE_INDEXING_DAILY_QUOTA) or 0)
-        effective_daily_cap = (
-            min(GOOGLE_INDEXING_DAILY_QUOTA, remaining_quota, max(0, paced_batch_cap))
-            if int(domain_health.get("inspected_count", 0) or 0) > 0 or remaining_quota <= 0
-            else min(GOOGLE_INDEXING_DAILY_QUOTA, remaining_quota)
-        )
-        indexed_norm_set = {u.rstrip("/") for u in domain_health.get("indexed_urls", [])}
-        unindexed_norm_set = {u.rstrip("/") for u in domain_health.get("unindexed_urls", [])}
-
-        rollover_spillover = []
-        if len(urls) > GOOGLE_INDEXING_DAILY_QUOTA:
-            rollover_spillover = [
-                u for u in urls[GOOGLE_INDEXING_DAILY_QUOTA:]
-                if u.rstrip("/") not in indexed_norm_set
-            ]
-            urls = urls[:GOOGLE_INDEXING_DAILY_QUOTA]
-            if live:
-                self.save_gsc_rollover_queue(rollover_spillover)
-
-        intent_id = self._record_push_intent(urls, channel="google_indexing_api")
-
-        fast_res = self.submit_fast_index(urls=urls, dry_run=not live)
-        gsc_results = [
-            {
-                "engine": "fast-index",
-                "site": self.gsc_site,
-                "status": fast_res["status"],
-                "actions": fast_res["actions"],
-            }
-        ]
-
-        gsccli_candidates = [
-            shutil.which("gsccli"),
-            "/home/ubuntuadmin/.npm-global/bin/gsccli",
-            str(Path.home() / ".npm-global" / "bin" / "gsccli"),
-        ]
-        gsccli_bin = None
-        for cand in gsccli_candidates:
-            if cand and (Path(cand).is_file() or shutil.which(cand)):
-                gsccli_bin = str(cand)
-                break
-
-        to_push = []
-        skipped = []
-        quota_deferred_urls: List[str] = []
-        accepted_urls: List[str] = []
-        interrupted = False
-        sitemap_registration: Dict[str, Any] = {"status": "SKIPPED_INTERRUPTED", "submissions": []}
-        if live and gsccli_bin:
-            to_push, skipped = self.filter_unchanged_push_urls(
-                urls, force=False, engine="google", tenant_id=getattr(self, "tenant_id", None)
-            )
-            if unindexed_norm_set or indexed_norm_set:
-                to_push = sorted(
-                    to_push,
-                    key=lambda u: (
-                        0 if u.rstrip("/") in unindexed_norm_set else (2 if u.rstrip("/") in indexed_norm_set else 1)
-                    ),
-                )
-            if len(to_push) > effective_daily_cap:
-                overflow = to_push[effective_daily_cap:]
-                to_push = to_push[:effective_daily_cap]
-                for ov_u in overflow:
-                    if ov_u.rstrip("/") not in indexed_norm_set:
-                        rollover_spillover.append(ov_u)
-                        quota_deferred_urls.append(ov_u)
-                    elif ov_u not in skipped:
-                        skipped.append(ov_u)
-            api_results = []
-            accepted_urls = []
-            failed_urls = []
-            for idx, u in enumerate(to_push):
-                quota_chk = self.check_and_consume_gsc_quota(units=1, bucket="indexing")
-                if not quota_chk.get("allowed", True):
-                    for rem_u in to_push[idx:]:
-                        if rem_u.rstrip("/") not in indexed_norm_set:
-                            rollover_spillover.append(rem_u)
-                            quota_deferred_urls.append(rem_u)
-                        elif rem_u not in skipped:
-                            skipped.append(rem_u)
-                    break
-                try:
-                    cmd = [gsccli_bin, "index", "publish", u, "--type", "URL_UPDATED"]
-                    gsc_env = {**os.environ, "GSCCLI_MAX_RETRIES": os.environ.get("GSCCLI_MAX_RETRIES", "0")}
-                    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=12, env=gsc_env)
-                    status = "ACCEPTED" if proc.returncode == 0 else "FAIL"
-                    output_text = (proc.stdout or "").strip() or (proc.stderr or "").strip()
-                    api_results.append({
-                        "url": u,
-                        "status": status,
-                        "output": output_text,
-                    })
-
-                    is_429 = (
-                        proc.returncode != 0
-                        and (
-                            "429" in output_text
-                            or "quota" in output_text.lower()
-                            or "rate limit" in output_text.lower()
-                        )
-                    )
-
-                    if status == "ACCEPTED":
-                        accepted_urls.append(u)
-                    elif is_429:
-                        interrupted = True
-                        try:
-                            self.trip_gsc_quota_breaker(bucket="indexing", reason=output_text)
-                        except Exception:
-                            pass
-                        failed_urls.append(u)
-                        remaining_untried = to_push[idx + 1:]
-                        failed_urls.extend(remaining_untried)
-                        try:
-                            from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
-                            AtomicTelemetryLogger().log_event(
-                                TelemetryEvent(
-                                    event_type="INDEXING_ANOMALY",
-                                    tenant_id=getattr(self, "tenant_id", "profithelm"),
-                                    error_type="HTTP_429_QUOTA_EXHAUSTED",
-                                    error_message=f"429 Quota exhausted during GSC indexing on {u}: {output_text}",
-                                    action_taken="PRESERVED_ROLLOVER",
-                                )
-                            )
-                        except Exception:
-                            pass
-                        break
-                    else:
-                        failed_urls.append(u)
-                except subprocess.TimeoutExpired as tex:
-                    interrupted = True
-                    api_results.append({"url": u, "status": "ERROR", "note": f"Timeout expired: {tex}"})
-                    failed_urls.append(u)
-                    remaining_untried = to_push[idx + 1:]
-                    failed_urls.extend(remaining_untried)
-                    try:
-                        from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
-                        AtomicTelemetryLogger().log_event(
-                            TelemetryEvent(
-                                event_type="INDEXING_ANOMALY",
-                                tenant_id=getattr(self, "tenant_id", "profithelm"),
-                                error_type="NETWORK_TIMEOUT",
-                                error_message=f"Timeout expired during GSC indexing on {u}: {tex}",
-                                action_taken="PRESERVED_ROLLOVER",
-                            )
-                        )
-                    except Exception:
-                        pass
-                    break
-                except Exception as e:
-                    api_results.append({"url": u, "status": "ERROR", "note": str(e)})
-                    failed_urls.append(u)
-
-            if accepted_urls:
-                self.record_pushed_urls(accepted_urls, engine="google", tenant_id=getattr(self, "tenant_id", None))
-
-            # Preserve quota spillover and re-save FAIL/ERROR/untried URLs to rollover queue
-            remaining_rollover = []
-            seen_rem = set()
-            for u in rollover_spillover + failed_urls:
-                if u and u not in seen_rem:
-                    seen_rem.add(u)
-                    remaining_rollover.append(u)
-            self.save_gsc_rollover_queue(remaining_rollover)
-
-            if accepted_urls:
-                gsc_api_status = "PARTIAL_QUOTA_DEFERRED" if (quota_deferred_urls or interrupted) else "DISPATCHED"
-            elif quota_deferred_urls:
-                gsc_api_status = "QUOTA_DEFERRED"
-            elif interrupted:
-                gsc_api_status = "INTERRUPTED"
-            elif to_push:
-                gsc_api_status = "FAIL"
-            else:
-                gsc_api_status = "IDEMPOTENT_NO_OP"
-
-            gsc_results.append({
-                "engine": "google_indexing_api",
-                "status": gsc_api_status,
-                "notifications": api_results,
-                "urls_pushed": len(accepted_urls),
-                "urls_skipped": len(skipped),
-                "quota_deferred_count": len(quota_deferred_urls),
-                "rollover_queue_drained": len(rollover_loaded),
-                "rollover_queue_spillover": len(remaining_rollover),
-                "domain_health_tier": domain_health.get("domain_health_tier"),
-                "paced_gsc_batch_cap": effective_daily_cap,
-            })
-            if not interrupted:
-                sitemap_registration = self.submit_gsc_sitemaps(
-                    urls=urls,
-                    live=True,
-                    site=self.gsc_site,
-                    gsccli_bin=gsccli_bin,
-                )
-                for sm_item in sitemap_registration.get("submissions", []):
-                    gsc_results.append(sm_item)
-        elif not interrupted:
-            sitemap_registration = self.submit_gsc_sitemaps(
-                urls=urls,
-                live=False,
-                site=self.gsc_site,
-            )
-            for sm_item in sitemap_registration.get("submissions", []):
-                gsc_results.append(sm_item)
-
-        inspection_oracle = []
-        if not interrupted:
-            inspection_oracle = self.verify_gsc_indexation_loop(urls=urls, site=self.gsc_site, max_urls=5, live=live)
-
-        if not live:
-            commit_status = "SIMULATED"
-        elif interrupted:
-            commit_status = "INTERRUPTED"
-        elif not accepted_urls and quota_deferred_urls:
-            commit_status = "QUOTA_DEFERRED"
-        elif not to_push and not quota_deferred_urls:
-            commit_status = "IDEMPOTENT_NO_OP"
-        else:
-            commit_status = "DISPATCHED"
-        self._commit_push_result(intent_id, accepted_urls if live else urls, status=commit_status)
-
+        """
+        Disabled by policy: Google Indexing API URL_UPDATED/URL_DELETED calls and
+        gsc_rollover_queue.json pushes are disabled. Use submit_gsc_sitemaps,
+        read-only inspect_gsc_url, and submit_indexnow_batch instead.
+        """
         return {
+            "status": "disabled_policy",
+            "skipped": True,
+            "reason": "google_indexing_api_disabled_policy",
             "site": self.gsc_site,
-            "urls_targeted": len(urls),
-            "urls_submitted": len(to_push),
-            "submitted_urls": list(to_push),
-            "results": gsc_results,
-            "inspection_oracle": inspection_oracle,
-            "child_sitemap_submissions": sitemap_registration.get("submissions", []),
-            "sitemap_registration": sitemap_registration,
-            "domain_health_pacing": domain_health,
-            "rollover_queue_drained": len(rollover_loaded),
-            "rollover_queue_pending": len(self.load_gsc_rollover_queue()),
-            "intent_id": intent_id,
+            "urls_targeted": 0,
+            "urls_submitted": 0,
+            "submitted_urls": [],
+            "results": [
+                {
+                    "engine": "google_indexing_api",
+                    "status": "disabled_policy",
+                    "skipped": True,
+                    "message": "Google Indexing API URL_UPDATED/URL_DELETED disabled by policy.",
+                }
+            ],
+            "inspection_oracle": [],
+            "child_sitemap_submissions": [],
+            "sitemap_registration": {"status": "disabled_policy", "submissions": []},
+            "rollover_queue_drained": 0,
+            "rollover_queue_pending": 0,
         }
 
     submit_google_indexing_api = submit_gsc_indexing
@@ -4860,13 +4704,15 @@ class PushIndexer:
         feed_xml_exists = (self.dist_dir / "feed.xml").exists()
         sitemap_xml_exists = (self.dist_dir / "sitemap.xml").exists()
 
-        googlebot_allowed = "User-agent: Googlebot" in robots_text
-        bingbot_allowed = "User-agent: Bingbot" in robots_text
-        perplexity_allowed = "User-agent: PerplexityBot" in robots_text
-        gptbot_allowed = "User-agent: GPTBot" in robots_text
-        claude_allowed = "User-agent: ClaudeBot" in robots_text
-        meta_allowed = "User-agent: Meta-ExternalAgent" in robots_text
-        applebot_ext_allowed = "User-agent: Applebot-Extended" in robots_text
+        rp_audit = urllib.robotparser.RobotFileParser()
+        rp_audit.parse(robots_text.splitlines())
+        googlebot_allowed = rp_audit.can_fetch("Googlebot", "/")
+        bingbot_allowed = rp_audit.can_fetch("Bingbot", "/")
+        perplexity_allowed = rp_audit.can_fetch("PerplexityBot", "/")
+        gptbot_allowed = rp_audit.can_fetch("GPTBot", "/")
+        claude_allowed = rp_audit.can_fetch("ClaudeBot", "/")
+        meta_allowed = rp_audit.can_fetch("Meta-ExternalAgent", "/")
+        applebot_ext_allowed = rp_audit.can_fetch("Applebot-Extended", "/")
 
         pushed_ledger = self.load_pushed_ledger()
         rollover_pending_set = set(self.load_gsc_rollover_queue())
@@ -4934,16 +4780,16 @@ class PushIndexer:
                 claude_state = "ACCEPTED" if claude_allowed else "PENDING"
                 meta_state = "ACCEPTED" if meta_allowed else "PENDING"
                 apple_ext_state = "ACCEPTED" if applebot_ext_allowed else "PENDING"
-                websub_state = "ACCEPTED" if feed_xml_exists else "PENDING"
+                websub_state = "DISABLED_POLICY"
             else:
                 perp_state = "SIMULATED"
                 openai_state = "SIMULATED"
                 claude_state = "SIMULATED"
                 meta_state = "SIMULATED"
                 apple_ext_state = "SIMULATED"
-                websub_state = "SIMULATED"
+                websub_state = "DISABLED_POLICY"
 
-            ai_accepted = all(s in ["ACCEPTED", "SIMULATED"] for s in [perp_state, openai_state, claude_state, meta_state, apple_ext_state, websub_state])
+            ai_accepted = all(s in ["ACCEPTED", "SIMULATED"] for s in [perp_state, openai_state, claude_state, meta_state, apple_ext_state])
             accepted_by_all = google_accepted and bing_accepted and ai_accepted
 
             entries.append({
@@ -5031,11 +4877,6 @@ class PushIndexer:
         existing_assets = inspection["existing_assets"]
         all_urls = [a["url"] for a in inspection["assets"]]
 
-        rollover_pending = [
-            u for u in self.load_gsc_rollover_queue()
-            if isinstance(u, str) and self.domain.lower() in u.lower()
-        ]
-
         if force:
             candidate_urls = [
                 a["url"] for a in inspection["assets"]
@@ -5045,14 +4886,11 @@ class PushIndexer:
         elif urls:
             candidate_urls = [u for u in urls if isinstance(u, str)]
             dispatch_type = "EXPLICIT_URLS_SUBMITTED"
-        elif new_assets or rollover_pending:
+        elif new_assets:
             candidate_urls = [
                 a["url"] for a in new_assets
                 if a.get("asset_type") not in ("machine_endpoint", "leaf")
             ]
-            for ru in rollover_pending:
-                if ru not in candidate_urls:
-                    candidate_urls.append(ru)
             dispatch_type = "NEW_ASSETS_SUBMITTED" if candidate_urls else "IDEMPOTENT_NO_OP"
         else:
             candidate_urls = []
@@ -5080,11 +4918,6 @@ class PushIndexer:
             for bu in preflight_report.blocked_urls:
                 if bu not in blocked_urls:
                     blocked_urls.append(bu)
-            if rollover_pending and blocked_urls:
-                blocked_set = set(blocked_urls)
-                cleaned_rollover = [u for u in self.load_gsc_rollover_queue() if u not in blocked_set]
-                if len(cleaned_rollover) != len(rollover_pending):
-                    self.save_gsc_rollover_queue(cleaned_rollover)
             if blocked_urls and (
                 not os.environ.get("PYTEST_CURRENT_TEST")
                 or "/home/ubuntuadmin/projects" not in str(self.base_dir)
@@ -5106,7 +4939,6 @@ class PushIndexer:
             urls_to_submit = []
 
         engines_accepted = [
-            "Google Indexing API",
             "Google Search Console",
             "Microsoft Bing (IndexNow)",
             "Microsoft Copilot (IndexNow)",
@@ -5115,8 +4947,6 @@ class PushIndexer:
             "Anthropic ClaudeBot (Schema.org)",
             "Meta AI (Meta-ExternalAgent)",
             "Apple Intelligence (Applebot-Extended)",
-            "Googlebot RSS Feed (WebSub)",
-            "Ping-O-Matic XML-RPC Hubs",
         ]
 
         if (had_candidate_urls and not urls_to_submit) or (blocked_urls and not urls_to_submit):
@@ -5206,45 +5036,36 @@ class PushIndexer:
 
         if urls_to_submit:
             indexnow_res = self.submit_indexnow_batch(urls=urls_to_submit, dry_run=not live, force=force, hubs_only=hubs_only)
-            websub_res = self.ping_websub_hub(dry_run=not live)
-            pingomatic_res = self.ping_pingomatic(dry_run=not live)
-            gsc_res = self.submit_gsc_indexing(urls=urls_to_submit, live=live, hubs_only=hubs_only, drain_rollover=False)
+            websub_res = {"status": "disabled_policy", "skipped": True, "reason": "websub_disabled_policy"}
+            pingomatic_res = {"status": "disabled_policy", "skipped": True, "reason": "pingomatic_disabled_policy"}
+            sitemap_reg = self.submit_gsc_sitemaps(
+                urls=urls_to_submit,
+                live=live,
+                force=force,
+            )
+            oracle_res = self.verify_gsc_indexation_loop(
+                urls=urls_to_submit,
+                site=self.gsc_site,
+                max_urls=5,
+                live=live,
+            )
+            gsc_res = {
+                "site": self.gsc_site,
+                "urls_targeted": len(urls_to_submit),
+                "urls_submitted": 0,
+                "submitted_urls": [],
+                "status": "disabled_policy",
+                "skipped": True,
+                "results": [{"engine": "google_indexing_api", "status": "disabled_policy", "skipped": True}],
+                "inspection_oracle": oracle_res,
+                "child_sitemap_submissions": sitemap_reg.get("submissions", []),
+                "sitemap_registration": sitemap_reg,
+            }
             indexmysite_res = self.submit_indexmysite(urls=urls_to_submit, live=live, hubs_only=hubs_only, commercial=commercial)
-            fast_from_gsc = None
-            if isinstance(gsc_res, dict):
-                for r_it in gsc_res.get("results", []) or []:
-                    if isinstance(r_it, dict) and r_it.get("engine") == "fast-index":
-                        fast_from_gsc = {
-                            "engine": "fast-index",
-                            "domain": self.domain,
-                            "command": "",
-                            "status": r_it.get("status", "DISPATCHED" if live else "SIMULATED"),
-                            "actions": r_it.get("actions", []),
-                            "note": "",
-                        }
-                        break
-            fast_idx_res = fast_from_gsc or self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
+            fast_idx_res = self.submit_fast_index(urls=urls_to_submit, dry_run=not live)
             if live:
-                still_in_rollover = set(self.load_gsc_rollover_queue())
                 if indexnow_res.get("status") in ("DISPATCHED", "ACCEPTED", "SUCCESS", "IDEMPOTENT_NO_OP"):
                     self.record_pushed_urls(urls_to_submit, engine="indexnow")
-                if still_in_rollover:
-                    self.purge_pushed_urls(list(still_in_rollover), engine="google")
-                    ledger_now = self.load_pushed_ledger()
-                    ledger_changed = False
-                    for ru in still_in_rollover:
-                        if ru in ledger_now and isinstance(ledger_now[ru], dict):
-                            ledger_now[ru]["google_rollover_queued"] = True
-                            ledger_changed = True
-                    if ledger_changed:
-                        self.save_pushed_ledger(ledger_now)
-            sitemap_reg = gsc_res.get("sitemap_registration")
-            if not sitemap_reg or sitemap_reg.get("status") == "SKIPPED_INTERRUPTED":
-                sitemap_reg = self.submit_gsc_sitemaps(
-                    urls=urls_to_submit,
-                    live=live,
-                    force=force,
-                )
         else:
             airlock_all, _ = self.preflight_airlock(all_urls) if all_urls else ([], [])
             safe_all_urls = list(airlock_all)
@@ -5261,12 +5082,14 @@ class PushIndexer:
                 "status": "IDEMPOTENT_NO_OP",
                 "message": f"All {len(safe_all_urls)} assets are unchanged in push ledger. Zero byte churn.",
             }
-            websub_res = self.ping_websub_hub(dry_run=not live)
-            pingomatic_res = self.ping_pingomatic(dry_run=not live)
+            websub_res = {"status": "disabled_policy", "skipped": True, "reason": "websub_disabled_policy"}
+            pingomatic_res = {"status": "disabled_policy", "skipped": True, "reason": "pingomatic_disabled_policy"}
             oracle_sample = self.prioritize_urls_for_indexing_allocation(safe_all_urls)[:5]
             gsc_res = {
                 "site": self.gsc_site,
                 "urls_targeted": len(safe_all_urls),
+                "status": "disabled_policy",
+                "skipped": True,
                 "results": [{"engine": "gsc_idempotent", "status": "IDEMPOTENT_NO_OP", "message": "All assets already pushed"}],
                 "inspection_oracle": self.verify_gsc_indexation_loop(urls=oracle_sample, live=live) if oracle_sample else [],
                 "child_sitemap_submissions": sitemap_reg.get("submissions", []),
@@ -5351,9 +5174,19 @@ class PushIndexer:
 
     def run_full_indexing_sweep(self, live: bool = False, hubs_only: bool = False, commercial: bool = False) -> Dict[str, Any]:
         indexnow_res = self.submit_indexnow_batch(dry_run=not live, hubs_only=hubs_only)
-        websub_res = self.ping_websub_hub(dry_run=not live)
-        pingomatic_res = self.ping_pingomatic(dry_run=not live)
-        gsc_res = self.submit_gsc_indexing(live=live, hubs_only=hubs_only)
+        websub_res = {"status": "disabled_policy", "skipped": True, "reason": "websub_disabled_policy"}
+        pingomatic_res = {"status": "disabled_policy", "skipped": True, "reason": "pingomatic_disabled_policy"}
+        sitemap_reg = self.submit_gsc_sitemaps(live=live)
+        oracle_res = self.verify_gsc_indexation_loop(site=self.gsc_site, max_urls=5, live=live)
+        gsc_res = {
+            "status": "disabled_policy",
+            "skipped": True,
+            "reason": "google_indexing_api_disabled_policy",
+            "site": self.gsc_site,
+            "inspection_oracle": oracle_res,
+            "child_sitemap_submissions": sitemap_reg.get("submissions", []),
+            "sitemap_registration": sitemap_reg,
+        }
         indexmysite_res = self.submit_indexmysite(live=live, hubs_only=hubs_only, commercial=commercial)
         auto_audit = self.audit_asset_submission_status(live=live)
         return {
@@ -5363,9 +5196,9 @@ class PushIndexer:
             "websub": websub_res,
             "pingomatic": pingomatic_res,
             "gsc": gsc_res,
-            "gsc_inspection_oracle": gsc_res.get("inspection_oracle"),
-            "child_sitemap_submissions": gsc_res.get("child_sitemap_submissions", []),
-            "sitemap_registration": gsc_res.get("sitemap_registration"),
+            "gsc_inspection_oracle": oracle_res,
+            "child_sitemap_submissions": sitemap_reg.get("submissions", []),
+            "sitemap_registration": sitemap_reg,
             "indexmysite": indexmysite_res,
             "automated_audit": auto_audit,
         }

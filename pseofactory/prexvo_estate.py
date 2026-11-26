@@ -33,9 +33,11 @@ from pseofactory.contracts import (
 )
 from pseofactory.estate_common import (
     build_organization_schema,
+    cap_llms_txt_content,
     compile_schema_graph,
     normalize_tenant_seo_title,
     prepare_estate_dirs,
+    sanitize_public_catalog_file,
     sanitize_tenant_overlays,
     write_machine_endpoints_and_headers,
     write_sitemaps_and_robots,
@@ -3405,7 +3407,7 @@ def _build_disclaimers_html(css_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Clean Machine Surfaces (llms.txt, llms-full.txt, ai-benchmarks)
+# Clean Machine Surfaces (capped llms.txt; purge llms-full.txt & ai-benchmarks)
 # ---------------------------------------------------------------------------
 
 
@@ -3414,109 +3416,45 @@ def _write_clean_llms_files(
     all_tools: Sequence[Dict[str, Any]],
     pack: TruthPack,
 ) -> None:
-    """Writes clean llms.txt and llms-full.txt with zero duplicate words, stubs, or dead links."""
+    """Writes lightweight capped llms.txt (<= 5 top hub links) and purges llms-full.txt."""
+    _ = pack
     base = PREXVO_CANONICAL_BASE.rstrip("/")
     tool_lines = []
-    full_sections = []
 
     def _strip_spaced_hyphen(val: str) -> str:
         return re.sub(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ": ", str(val or "")).strip()
 
-    for idx, t in enumerate(all_tools, 1):
+    for t in all_tools:
         slug = t["slug"]
-        if not (dist / "tools" / slug / "index.html").is_file():
+        if "/" in slug or not (dist / "tools" / slug / "index.html").is_file():
             continue
         t_title = _strip_spaced_hyphen(_clean_tool_title(t["title"], slug))
         t_desc = _strip_spaced_hyphen(_clean_tool_description(t["description"], t_title, slug))
-        qa = _strip_spaced_hyphen(_clean_text_hygiene(_get_quick_answer_for_tool(slug, t_title, pack)))
         tool_lines.append(f"- [{t_title}]({base}/tools/{slug}/): {t_desc}")
-        full_sections.append(
-            f"## {idx}. {t_title}\n"
-            f"Canonical URL: {base}/tools/{slug}/\n"
-            f"Query Syntax: {base}/tools/{slug}/?agi={{agi}}&dependents={{dependents}}\n"
-            f"Summary: {t_desc}\n"
-            f"Direct Statutory Answer: {qa}\n"
-        )
+        if len(tool_lines) >= 2:
+            break
 
-    llms_txt = f"""# Prexvo: Title IV Federal Student Loan Modeling Engine
+    seed_txt = f"""# Prexvo: Title IV Federal Student Loan Modeling Engine
 
-> Deterministic student loan repayment and forgiveness modeling pursuant to P.L. 119-21 Section 82001, 34 CFR Part 685, and 91 FR 1797 (2026 HHS Poverty Guidelines: $15,960 for 1 person plus $5,680 per additional person).
+> Deterministic student loan repayment and forgiveness modeling pursuant to P.L. 119-21 Section 82001, 34 CFR Part 685, and 91 FR 1797.
 
-## Available Calculators
+## Top Hub Links
+- [Calculators Directory]({base}/tools/): Interactive calculator directory on {base}.
 {chr(10).join(tool_lines)}
-
-## Documentation
-- [Statutory Calculation Methodology]({base}/methodology/)
-- [Regulatory Notices and Disclaimers]({base}/disclaimers/)
+- [Statutory Calculation Methodology]({base}/methodology/): Primary statutory authorities and dataset sources.
+- [Regulatory Notices and Disclaimers]({base}/disclaimers/): Regulatory disclosures and methodology scope.
 """
-    assert_no_forbidden_dashes(llms_txt, context="prexvo llms.txt")
+    llms_txt = cap_llms_txt_content(seed_txt, property_id="prexvo", canonical_base=base, max_hub_links=5)
     (dist / "llms.txt").write_text(llms_txt, encoding="utf-8")
-
-    llms_full = f"""# Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest
-Domain: {PREXVO_DOMAIN}
-Base URL: {base}
-Research Entity: {PREXVO_AUTHOR}
-Legal Entity: Prexvo LLC
-Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201
-
-{YMYL_FORFEITURE_DISCLOSURE}
-
-{chr(10).join(full_sections)}
-## Title IV Statutory Parameter Specifications & Formula Definitions
-- 2026 HHS Poverty Guidelines (91 FR 1797, 42 U.S.C. 9902(2)): $15,960 for a 1-person household plus $5,680 for each additional person in the 48 contiguous states and D.C.
-- Repayment Assistance Plan (RAP, P.L. 119-21 Section 82001): Monthly payment ranges from 1% to 10% of AGI divided by 12 minus $50 per qualifying dependent ($10 minimum). Includes a 100% unpaid monthly interest subsidy, up to $50/mo principal match, and forgiveness after 360 qualifying monthly payments (30 years).
-- Income-Based Repayment (IBR, 34 CFR 685.221): Assesses 10% (new borrowers) or 15% (legacy borrowers) of discretionary income above 150% of 2026 HHS Poverty Guidelines, capped at the 10-year Standard Repayment schedule.
-- Public Service Loan Forgiveness (PSLF, 34 CFR 685.219): Discharges remaining Direct Loan balances after 120 qualifying monthly payments (10 years) while employed full-time by an eligible public service employer.
-- Tiered Standard Repayment (34 CFR Part 685): Fixed amortization terms from 120 to 360 months (10 to 30 years) based on loan balance.
-- Private Refinancing Truth in Lending Disclosure (12 CFR Part 1026): {YMYL_FORFEITURE_DISCLOSURE}
-"""
-    assert_no_forbidden_dashes(llms_full, context="prexvo llms-full.txt")
-    (dist / "llms-full.txt").write_text(llms_full, encoding="utf-8")
+    (dist / "llms-full.txt").unlink(missing_ok=True)
 
 
 def _write_clean_ai_benchmarks(dist: Path, pack: TruthPack) -> None:
-    """Writes TruthPack-accurate AI benchmark markdown & JSON files with allowlisted citations."""
+    """Actively purges retired dist/ai-benchmarks directory during compile."""
+    _ = pack
     bm_dir = dist / "ai-benchmarks"
     if bm_dir.exists():
-        shutil.rmtree(bm_dir)
-    bm_dir.mkdir(parents=True, exist_ok=True)
-
-    base_1 = float(pack.entries["hhs_poverty_2026_1person"].value)
-    per_add = float(pack.entries["hhs_poverty_2026_per_additional"].value)
-    rap_mos = int(pack.entries["rap_forgiveness_months"].value)
-    pslf_mos = int(pack.entries["pslf_qualifying_payments"].value)
-
-    rap_md = f"""# 2026 Title IV RAP vs IBR Statutory Benchmarks
-
-Under P.L. 119-21 Section 82001 and 34 CFR 685.221, borrowers compare the Repayment Assistance Plan (RAP) against Income-Based Repayment (IBR) anchored to 91 FR 1797 (2026 HHS Poverty Guidelines: ${base_1:,.0f} for 1 person plus ${per_add:,.0f} per additional person).
-
-| Plan Parameter | 2026 RAP (P.L. 119-21 Section 82001) | New IBR (34 CFR 685.221) | PSLF (34 CFR 685.219) |
-| :--- | :--- | :--- | :--- |
-| Income / Threshold | 1% to 10% AGI (-$50/dependent, $10 min) | 10% above 150% of ${base_1:,.0f} FPL | Qualifying IDR Plan |
-| Forgiveness Horizon | {rap_mos} qualifying monthly payments (30 years) | 240 qualifying monthly payments (20 years) | {pslf_mos} qualifying monthly payments (10 years) |
-| Interest / Principal Benefit | 100% unpaid interest subsidy + $50/mo match | 10-year Standard payment cap | Tax-free balance discharge |
-"""
-    rap_json = {
-        "topic": "2026 Title IV RAP vs IBR Benchmarks",
-        "plan_year": 2026,
-        "statutory_authority": [
-            "P.L. 119-21 Section 82001",
-            "34 CFR Part 685",
-            "34 CFR 685.221",
-            "34 CFR 685.219",
-            "91 FR 1797",
-        ],
-        "hhs_poverty_2026_1person": base_1,
-        "hhs_poverty_2026_per_additional": per_add,
-        "rap_forgiveness_months": rap_mos,
-        "pslf_qualifying_payments": pslf_mos,
-        "benchmarks": [
-            {"plan": "rap_2026", "agi": 65000.0, "dependents": 0, "monthly_payment_usd": 325.0, "forgiveness_months": rap_mos},
-            {"plan": "new_ibr_2026", "agi": 65000.0, "family_size": 1, "monthly_payment_usd": 342.17, "forgiveness_months": 240},
-        ],
-    }
-    (bm_dir / "rap-vs-ibr-2026.md").write_text(rap_md, encoding="utf-8")
-    (bm_dir / "rap-vs-ibr-2026.json").write_text(json.dumps(rap_json, indent=2), encoding="utf-8")
+        shutil.rmtree(bm_dir, ignore_errors=True)
 
 
 def _scrub_prexvo_truth_text(raw: str) -> str:
@@ -3583,6 +3521,7 @@ def _post_porcelain_truth_hygiene(dist: Path, all_tools: Sequence[Dict[str, Any]
         if cat_upd != cat_raw:
             assert_no_forbidden_dashes(cat_upd, context=str(cat_path))
             cat_path.write_text(cat_upd, encoding="utf-8")
+        sanitize_public_catalog_file(dist, property_id="prexvo")
 
     _write_clean_llms_files(dist, all_tools, pack)
     _write_clean_ai_benchmarks(dist, pack)
@@ -3787,11 +3726,8 @@ def compile_prexvo_estate_impl(
                 "slug": slug,
                 "title": tool["title"],
                 "url": f"{PREXVO_CANONICAL_BASE}/tools/{slug}/",
-                "manifest_url": f"{PREXVO_CANONICAL_BASE}/manifests/{slug}.json",
-                "statutory_authority": manifest_out["statutory_authority"],
-                "economic_dataset": manifest_out["economic_dataset"],
-                "formula": manifest_out["formula"],
-                "published_output": manifest_out["published_output"],
+                "category": str(tool.get("category") or "student_loans"),
+                **({"updated_at": tool["updated_date"]} if tool.get("updated_date") else {}),
             }
         )
 
@@ -3826,31 +3762,15 @@ def compile_prexvo_estate_impl(
         (f"{PREXVO_CANONICAL_BASE}/terms/", "0.5", "monthly"),
         (f"{PREXVO_CANONICAL_BASE}/contact/", "0.7", "monthly"),
     ]
-    px_ai_bots = [
-        "*",
-        "Googlebot",
-        "Bingbot",
-        "PerplexityBot",
-        "ClaudeBot",
-        "GPTBot",
-        "ChatGPT-User",
-        "OAI-SearchBot",
-        "CCBot",
-        "anthropic-ai",
-        "Cohere-ai",
-        "Applebot",
-        "Applebot-Extended",
-        "Meta-ExternalAgent",
-    ]
     write_sitemaps_and_robots(
         dist=dist,
         canonical_base=PREXVO_CANONICAL_BASE,
         hub_specs=hub_specs,
         leaf_tools=all_tools,
-        ai_bots=px_ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
-        allow_paths=["/", "/tools/"],
-        include_changefreq_and_priority=True,
+        ai_bots=None,
+        disallow_paths=["/api/", "/cdn-cgi/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        allow_paths=["/"],
+        include_changefreq_and_priority=False,
     )
 
     _, indexnow_stem = _resolve_prexvo_public_meta()
@@ -3869,6 +3789,7 @@ def compile_prexvo_estate_impl(
             "title": t["title"],
             "url": f"{PREXVO_CANONICAL_BASE}/tools/{t['slug']}/",
             "description": t["description"],
+            **({"updated_date": t["updated_date"]} if t.get("updated_date") else {}),
         }
         for t in all_tools
     ]
@@ -3896,10 +3817,7 @@ def compile_prexvo_estate_impl(
         machine_endpoints=[
             "/feed.xml",
             "/llms.txt",
-            "/llms-full.txt",
             "/sitemap.xml",
-            "/sitemap-hubs.xml",
-            "/sitemap-leaves.xml",
         ],
         static_patterns=["/static/*", "/css/*"],
         redirects_content=_PREXVO_REDIRECTS,

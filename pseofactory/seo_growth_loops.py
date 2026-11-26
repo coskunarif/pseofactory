@@ -6060,16 +6060,23 @@ def compile_ai_citation_digital_pr_queue(
         except Exception:
             pass
 
-    # Ensure tenant-specific AI benchmark nodes are generated and written to syndication/ai_benchmarks and dist/ai-benchmarks
+    # Purge retired dist/ai-benchmarks and dist/llms-full.txt dumps; keep internal syndication/ai_benchmarks if requested
     bench_res = generate_ai_benchmark_nodes(tenant=prop)
     if persist:
-        for b_dir in (root / "syndication" / "ai_benchmarks", d_dir / "ai-benchmarks"):
-            try:
-                b_dir.mkdir(parents=True, exist_ok=True)
-                for fname, fcontent in (bench_res.get("files") or {}).items():
-                    (b_dir / fname).write_text(fcontent, encoding="utf-8")
-            except Exception:
-                pass
+        try:
+            synd_b_dir = root / "syndication" / "ai_benchmarks"
+            synd_b_dir.mkdir(parents=True, exist_ok=True)
+            for fname, fcontent in (bench_res.get("files") or {}).items():
+                (synd_b_dir / fname).write_text(fcontent, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            dist_b_dir = d_dir / "ai-benchmarks"
+            if dist_b_dir.exists():
+                shutil.rmtree(dist_b_dir, ignore_errors=True)
+            (d_dir / "llms-full.txt").unlink(missing_ok=True)
+        except Exception:
+            pass
 
     has_llms_txt = (d_dir / "llms.txt").is_file()
     has_llms_full_txt = (d_dir / "llms-full.txt").is_file()

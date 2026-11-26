@@ -1548,7 +1548,6 @@ class DepartmentHandoffChainVerifier:
             "sitemap.xml",
             "robots.txt",
             "llms.txt",
-            "llms-full.txt",
             "feed.xml",
         )
 
@@ -1581,14 +1580,17 @@ class DepartmentHandoffChainVerifier:
                 rf_map[rf_name] = exists
                 if not exists:
                     t_errs.append(f"missing root discovery file: {rf_name}")
+            llms_full_exists = (dist_dir / "llms-full.txt").exists()
+            rf_map["llms-full.txt"] = llms_full_exists
+            if llms_full_exists:
+                t_errs.append("forbidden retired dump still exists in dist/: llms-full.txt")
             ai_bench_exists = (
-                (dist_dir / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
-                or (dist_dir / "ai-benchmarks" / "index.html").is_file()
+                (dist_dir / "ai-benchmarks").exists()
                 or (dist_dir / "ai-benchmarks.json").is_file()
             )
             rf_map["ai-benchmarks"] = ai_bench_exists
-            if not ai_bench_exists:
-                t_errs.append("missing ai-benchmarks discovery hub in dist/")
+            if ai_bench_exists:
+                t_errs.append("forbidden retired dump still exists in dist/: ai-benchmarks/")
 
             syn_roots = [p for p in (repo_path / "syndication", dist_dir / "syndication") if p.is_dir()]
             pack_files: List[Path] = []

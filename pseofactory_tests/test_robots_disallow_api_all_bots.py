@@ -15,7 +15,12 @@ import pytest
 
 from pseofactory import compiler
 from pseofactory.contracts import assert_robots_txt_crawler_policy
-from pseofactory.estate_common import write_sitemaps_and_robots
+from pseofactory.estate_common import (
+    GOOGLE_EXTENDED_BOT,
+    LIVE_SEARCH_ALLOW_BOTS,
+    TRAINING_DISALLOW_BOTS,
+    write_sitemaps_and_robots,
+)
 from pseofactory.porcelain_shell import _sync_sitemaps_headers_and_redirects
 from pseofactory.verifier import MasterSEOVerifier
 
@@ -39,17 +44,22 @@ def _assert_robots_blocks_api_and_cf_for_all_bots(
     robots_txt: str,
     domain: str,
     extra_probe_agents: Iterable[str] = ("*", "Googlebot", "Googlebot-Mobile", "Bingbot"),
+    expect_split_training_disallow: bool = False,
 ) -> None:
     """
     Validates robots.txt using BOTH explicit block parsing and urllib.robotparser.RobotFileParser.
-    Every User-agent block must explicitly disallow /api/ and /cdn-cgi/ while keeping
-    / and /tools/example/ crawlable.
+    Every User-agent block must explicitly disallow /api/ and /cdn-cgi/.
+    When expect_split_training_disallow is True, TRAINING_DISALLOW_BOTS must disallow /,
+    Google-Extended must disallow /workpapers/ and /datasets/ while allowing /,
+    LIVE_SEARCH_ALLOW_BOTS and * must allow / and /r/partner (no Disallow: /r/).
     """
     assert "\u2014" not in robots_txt, "Forbidden em-dash found in robots.txt"
     assert "\u2013" not in robots_txt, "Forbidden en-dash found in robots.txt"
 
     sections: Dict[str, Dict[str, List[str]]] = MasterSEOVerifier.parse_robots_txt_sections(robots_txt)
     assert "*" in sections, "robots.txt must include a User-agent: * block"
+
+    training_lower = {b.lower() for b in TRAINING_DISALLOW_BOTS}
 
     # Explicit block parsing check: EVERY declared User-agent group must disallow /api/ and /cdn-cgi/
     for agent_key, rules in sections.items():
@@ -60,12 +70,18 @@ def _assert_robots_blocks_api_and_cf_for_all_bots(
         assert "/cdn-cgi/" in disallows_lower, (
             f"[{domain}] User-agent '{agent_key}' block missing explicit 'Disallow: /cdn-cgi/'"
         )
+        assert "/r/" not in disallows_lower, (
+            f"[{domain}] User-agent '{agent_key}' must NOT emit 'Disallow: /r/'"
+        )
         assert MasterSEOVerifier.is_path_disallowed(
             "/api/lead-capture", rules["allow"], rules["disallow"]
         ), f"[{domain}] User-agent '{agent_key}' does not disallow /api/lead-capture"
         assert MasterSEOVerifier.is_path_disallowed(
             "/cdn-cgi/l/email-protection", rules["allow"], rules["disallow"]
         ), f"[{domain}] User-agent '{agent_key}' does not disallow /cdn-cgi/l/email-protection"
+        if expect_split_training_disallow and agent_key == GOOGLE_EXTENDED_BOT.lower():
+            assert "/workpapers/" in disallows_lower
+            assert "/datasets/" in disallows_lower
 
     # urllib.robotparser check across EVERY declared User-agent plus mandatory probe UAs
     rp = urllib.robotparser.RobotFileParser()
@@ -92,12 +108,26 @@ def _assert_robots_blocks_api_and_cf_for_all_bots(
         assert rp.can_fetch(ua, f"{base}/cdn-cgi/l/email-protection") is False, (
             f"[{domain}] RobotFileParser allowed '{ua}' to fetch /cdn-cgi/l/email-protection"
         )
-        assert rp.can_fetch(ua, f"{base}/") is True, (
-            f"[{domain}] RobotFileParser blocked '{ua}' on /"
-        )
-        assert rp.can_fetch(ua, f"{base}/tools/example/") is True, (
-            f"[{domain}] RobotFileParser blocked '{ua}' on /tools/example/"
-        )
+        if expect_split_training_disallow and ua.lower() in training_lower:
+            assert rp.can_fetch(ua, f"{base}/") is False, (
+                f"[{domain}] RobotFileParser allowed training bot '{ua}' on /"
+            )
+            assert rp.can_fetch(ua, f"{base}/tools/example/") is False, (
+                f"[{domain}] RobotFileParser allowed training bot '{ua}' on /tools/example/"
+            )
+        else:
+            assert rp.can_fetch(ua, f"{base}/") is True, (
+                f"[{domain}] RobotFileParser blocked '{ua}' on /"
+            )
+            assert rp.can_fetch(ua, f"{base}/tools/example/") is True, (
+                f"[{domain}] RobotFileParser blocked '{ua}' on /tools/example/"
+            )
+            assert rp.can_fetch(ua, f"{base}/r/partner") is True, (
+                f"[{domain}] RobotFileParser blocked '{ua}' on /r/partner"
+            )
+        if expect_split_training_disallow and ua.lower() == GOOGLE_EXTENDED_BOT.lower():
+            assert rp.can_fetch(ua, f"{base}/workpapers/pack") is False
+            assert rp.can_fetch(ua, f"{base}/datasets/table.json") is False
 
 
 def test_write_sitemaps_and_robots_enforces_api_and_cdn_cgi_for_every_bot(tmp_path: Path) -> None:
@@ -131,7 +161,11 @@ def test_write_sitemaps_and_robots_enforces_api_and_cdn_cgi_for_every_bot(tmp_pa
         validate_governor=False,
     )
     robots_txt = (dist / "robots.txt").read_text(encoding="utf-8")
-    _assert_robots_blocks_api_and_cf_for_all_bots(robots_txt, "example-tenant.com")
+    _assert_robots_blocks_api_and_cf_for_all_bots(
+        robots_txt,
+        "example-tenant.com",
+        expect_split_training_disallow=True,
+    )
 
 
 @pytest.mark.parametrize(
@@ -266,12 +300,20 @@ def test_compiled_gainhelm_and_lienbond_estates_disallow_api_and_cdn_cgi_all_bot
     gh_root = tmp_path / "gainhelm_out"
     compiler.compile_gainhelm_estate(gh_root, run_retrofit=False)
     gh_robots = (gh_root / "dist" / "robots.txt").read_text(encoding="utf-8")
-    _assert_robots_blocks_api_and_cf_for_all_bots(gh_robots, "gainhelm.com")
+    _assert_robots_blocks_api_and_cf_for_all_bots(
+        gh_robots,
+        "gainhelm.com",
+        expect_split_training_disallow=True,
+    )
 
     lb_root = tmp_path / "lienbond_out"
     compiler.compile_lienbond_estate(lb_root, run_retrofit=False)
     lb_robots = (lb_root / "dist" / "robots.txt").read_text(encoding="utf-8")
-    _assert_robots_blocks_api_and_cf_for_all_bots(lb_robots, "lienbond.com")
+    _assert_robots_blocks_api_and_cf_for_all_bots(
+        lb_robots,
+        "lienbond.com",
+        expect_split_training_disallow=True,
+    )
 
 
 def test_ensure_robots_txt_handles_edge_cases_and_rfc9309_shared_groups(tmp_path: Path) -> None:

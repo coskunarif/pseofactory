@@ -1828,6 +1828,185 @@ def test_all_five_partnership_models_and_greenfield_vertical_compiler_routing():
     }
 
 
+def test_naic_plma_sec13_unlicensed_insurance_and_cfpb_2024_01_neutral_sorting():
+    """
+    Verify Batch 1C regulatory gates in affiliates.py:
+    1. NAIC PLMA Sec. 13: blocks HYBRID_CPA_REVSHARE, percentage/revshare, 'issued bond', and
+       'bound policy' sale-contingent compensation models on insurance/surety verticals unless
+       producer_license_verified=True is explicitly set; allows non-sale-contingent FLAT_SPONSORSHIP,
+       CPC, or de minimis DIRECTORY_METADATA when unlicensed.
+    2. CFPB Circular 2024-01: on consumer/SMB finance & loan verticals without an explicit
+       'Sponsored Placement' label, does NOT silently sort offers by payout/bounty.
+    3. build_contextual_referral_card_html renders 'Sponsored Placement' + FTC 16 CFR 255 disclosure
+       above the first <a href="/r/..."> link.
+    """
+    from pseofactory.affiliates import (
+        AffiliatePartner,
+        GAINHELM_AFFILIATES,
+        LIENBOND_AFFILIATES,
+        build_contextual_referral_card_html,
+        resolve_optimal_partner_for_slug,
+        score_partner_yield,
+        select_conversion_slot_plan,
+        validate_insurance_surety_compensation_compliance,
+    )
+
+    # Active live catalogs for lienbond and coalition_cyber_insurance must pass unlicensed
+    lb_rep = validate_insurance_surety_compensation_compliance(
+        list(LIENBOND_AFFILIATES.values()),
+        property_id="lienbond",
+    )
+    assert lb_rep["status"] == "PASS", lb_rep["issues"]
+    coalition_rep = validate_insurance_surety_compensation_compliance(
+        [GAINHELM_AFFILIATES["coalition_cyber_insurance"]],
+        property_id="gainhelm",
+        slug="cyber-liability-insurance-calculator",
+    )
+    assert coalition_rep["status"] == "PASS", coalition_rep["issues"]
+
+    # Prohibited sale-contingent models on unlicensed insurance/surety must FAIL closed
+    bad_offers = [
+        {
+            "partner_key": "suretybonds_direct",
+            "partnership_model": "HYBRID_CPA_REVSHARE",
+            "category": "Contractor Surety Bonds",
+            "commission_est": "15% per issued bond",
+            "bounty_est": "$180 per bound policy",
+            "description": "Earn recurring revshare on every issued bond.",
+        }
+    ]
+    bad_unlicensed = validate_insurance_surety_compensation_compliance(
+        bad_offers,
+        property_id="lienbond",
+        slug="california-contractor-license-bond-calculator",
+        tenant_config={"producer_license_verified": False},
+    )
+    assert bad_unlicensed["status"] == "FAIL"
+    assert len(bad_unlicensed["issues"]) >= 3
+
+    # Explicitly verified producer license permits them
+    ok_licensed = validate_insurance_surety_compensation_compliance(
+        bad_offers,
+        property_id="lienbond",
+        slug="california-contractor-license-bond-calculator",
+        tenant_config={"producer_license_verified": True},
+    )
+    assert ok_licensed["status"] == "PASS", ok_licensed["issues"]
+
+    # Allowed non-sale-contingent FLAT_SPONSORSHIP / CPC / DIRECTORY_METADATA pass without license
+    safe_unlicensed = validate_insurance_surety_compensation_compliance(
+        [
+            {
+                "partner_key": "simply_business",
+                "partnership_model": "CPC",
+                "category": "Commercial Contractors Insurance",
+                "commission_est": "Fixed editorial CPC click placement",
+                "bounty_est": "Directory listing only",
+                "description": "Non-sale-contingent CPC directory referral.",
+            },
+            {
+                "partner_key": "next_insurance_b2b",
+                "partnership_model": "FLAT_SPONSORSHIP",
+                "category": "Workers Comp Insurance",
+                "commission_est": "Fixed monthly sponsorship",
+                "bounty_est": "Non-contingent placement",
+                "description": "Fixed editorial flat placement fee (non-contingent directory listing).",
+            },
+        ],
+        property_id="lienbond",
+        tenant_config={"producer_license_verified": False},
+    )
+    assert safe_unlicensed["status"] == "PASS", safe_unlicensed["issues"]
+
+    # CFPB Circular 2024-01: unlicensed/unlabeled finance/loan offers must NOT sort silently by bounty
+    low_bounty_partner = AffiliatePartner(
+        key="low_bounty_lender",
+        name="Low Bounty Lender",
+        category="Student Loan Refinancing",
+        property_id="prexvo",
+        status="live",
+        env_var="AFF_URL_LOW",
+        default_url="https://example.com/low",
+        badge="Partner",
+        commission_est="$25 CPA",
+        bounty_est="$25 CPA",
+        network="direct",
+        description="First objective match.",
+        target_tools=["private-student-loan-refinance-calculator"],
+        supported_params=[],
+        cta_text="Check Rate",
+    )
+    high_bounty_partner = AffiliatePartner(
+        key="high_bounty_lender",
+        name="High Bounty Lender",
+        category="Student Loan Refinancing",
+        property_id="prexvo",
+        status="live",
+        env_var="AFF_URL_HIGH",
+        default_url="https://example.com/high",
+        badge="Partner",
+        commission_est="$800 CPA",
+        bounty_est="$800 CPA",
+        network="direct",
+        description="High payout lender.",
+        target_tools=["private-student-loan-refinance-calculator"],
+        supported_params=[],
+        cta_text="Check Rate",
+    )
+    s_low_neutral = score_partner_yield(
+        low_bounty_partner,
+        property_id="prexvo",
+        slug="private-student-loan-refinance-calculator",
+        sponsored_placement_labeled=False,
+    )
+    s_high_neutral = score_partner_yield(
+        high_bounty_partner,
+        property_id="prexvo",
+        slug="private-student-loan-refinance-calculator",
+        sponsored_placement_labeled=False,
+    )
+    assert s_low_neutral == s_high_neutral == 100.0
+
+    s_low_sponsored = score_partner_yield(
+        low_bounty_partner,
+        property_id="prexvo",
+        slug="private-student-loan-refinance-calculator",
+        sponsored_placement_labeled=True,
+    )
+    s_high_sponsored = score_partner_yield(
+        high_bounty_partner,
+        property_id="prexvo",
+        slug="private-student-loan-refinance-calculator",
+        sponsored_placement_labeled=True,
+    )
+    assert s_high_sponsored > s_low_sponsored
+
+    # Product-fit beats payout on unlabeled Prexvo slug, whereas labeled mode allows yield sort
+    neutral_pick = resolve_optimal_partner_for_slug(
+        "prexvo",
+        "direct-plus-loan-payoff-calculator",
+        sponsored_placement_labeled=False,
+    )
+    assert neutral_pick is not None
+    # select_conversion_slot_plan stamps 'Sponsored Placement' only when labeled
+    plan_unlabeled = select_conversion_slot_plan(
+        "prexvo",
+        "student-loan-refinance-calculator",
+        [
+            {"partner_key": "splash_financial", "partner_name": "Splash", "status": "live", "bounty_est": "$200 CPA", "cta_text": "Compare", "target_tools": ["student-loan-refinance-calculator"]},
+            {"partner_key": "earnest", "partner_name": "Earnest", "status": "live", "bounty_est": "$500 CPA", "cta_text": "Check", "target_tools": []},
+        ],
+        vertical_family="consumer_student_debt_refinancing",
+        sponsored_placement_labeled=False,
+    )
+    assert plan_unlabeled["promoted_partner_key"] == "splash_financial"
+
+    card_html = build_contextual_referral_card_html("profithelm", "section-179-calculator")
+    assert "Sponsored Placement" in card_html
+    assert card_html.find("Sponsored Placement") < card_html.find('href="/r/')
+
+
+
 
 
 

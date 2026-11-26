@@ -1002,3 +1002,210 @@ def test_cli_commerce_audit_exit_codes(tmp_path: Path) -> None:
     assert sub.returncode == 1
     out_obj = json.loads(sub.stdout)
     assert out_obj["status"] == "FAIL"
+
+
+def test_commerce_gate_naic_plma_sec13_fail_closed_insurance_surety_gate(tmp_path: Path) -> None:
+    """
+    Verify commerce_gate.audit_insurance_surety_regulatory_compliance fails closed on unlicensed
+    sale-contingent compensation (HYBRID_CPA_REVSHARE, percentage revshare, 'issued bond',
+    'bound policy') unless producer_license_verified=True is set in tenant config, and allows
+    non-sale-contingent FLAT_SPONSORSHIP / CPC / directory metadata.
+    """
+    from pseofactory.commerce_gate import audit_insurance_surety_regulatory_compliance
+
+    repo = tmp_path / "lienbond"
+    dist = repo / "dist"
+    _build_compliant_dist(dist, "lienbond", "california-contractor-license-bond-calculator", 9, 19)
+    (repo / ".pseofactory.json").write_text(
+        json.dumps({"property_id": "lienbond", "domain": "lienbond.com", "producer_license_verified": False}),
+        encoding="utf-8",
+    )
+
+    clean_rep = audit_insurance_surety_regulatory_compliance(
+        property_id="lienbond",
+        repo_root=repo,
+        dist_dir=dist,
+    )
+    assert clean_rep["status"] == "PASS", clean_rep["issues"]
+    assert clean_rep["producer_license_verified"] is False
+
+    # Inject prohibited data-partnership-model="HYBRID_CPA_REVSHARE" + "bound policy" into rendered HTML
+    calc_html = dist / "tools" / "california-contractor-license-bond-calculator" / "index.html"
+    orig_html = calc_html.read_text(encoding="utf-8")
+    tampered_html = orig_html.replace(
+        "</body>",
+        '<aside class="contextual-referral-card" data-partner="suretybonds_direct" '
+        'data-partnership-model="HYBRID_CPA_REVSHARE">'
+        "<p>Earn per bound policy or issued bond.</p>"
+        '<a href="/r/suretybonds_direct">Compare Bond Quotes</a></aside></body>',
+    )
+    calc_html.write_text(tampered_html, encoding="utf-8")
+
+    fail_rep = audit_insurance_surety_regulatory_compliance(
+        property_id="lienbond",
+        repo_root=repo,
+        dist_dir=dist,
+    )
+    assert fail_rep["status"] == "FAIL"
+    assert fail_rep["violations_count"] >= 1
+    assert any("NAIC PLMA Sec. 13" in issue for issue in fail_rep["issues"])
+
+    # Verified producer license clears the fail-closed block
+    (repo / ".pseofactory.json").write_text(
+        json.dumps({"property_id": "lienbond", "domain": "lienbond.com", "producer_license_verified": True}),
+        encoding="utf-8",
+    )
+    licensed_rep = audit_insurance_surety_regulatory_compliance(
+        property_id="lienbond",
+        repo_root=repo,
+        dist_dir=dist,
+    )
+    assert licensed_rep["status"] == "PASS", licensed_rep["issues"]
+    assert licensed_rep["producer_license_verified"] is True
+
+
+def test_naic_plma_sec13_blocks_all_4_adversarial_bypass_payloads() -> None:
+    """
+    Reproduces all 4 adversarial NAIC PLMA Sec. 13 bypass payloads on unlicensed
+    insurance/surety offers and proves all 4 FAIL CLOSED in affiliates.py.
+    """
+    from pseofactory.affiliates import validate_insurance_surety_compensation_compliance
+
+    adversarial_payloads = [
+        # 1. Unrecognized partner_key under lienbond/bond/workers_comp/cyber_insurance/insurance scope
+        {
+            "tenant_key": "lienbond",
+            "partner_key": "unlisted_bond_broker",
+            "category": "Contractor Bond",
+            "cpa_bounty_usd": 175.0,
+            "description": "Fast contractor bond underwriting.",
+        },
+        # 2. Top-level recurring_revshare_pct / revshare_pct outside partnership_model_spec
+        {
+            "partner_key": "unlisted_wc_partner",
+            "category": "workers_comp",
+            "slug": "workers-comp-calculator",
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "recurring_revshare_pct": 12.5,
+            "description": "Commercial workers_comp directory placement.",
+        },
+        # 3. Claiming FLAT_SPONSORSHIP while hiding positive cpa_bounty_usd / cpl_lead_bounty_usd
+        {
+            "partner_key": "unlisted_cyber_broker",
+            "slug": "cyber_insurance_quote",
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "partnership_model_spec": {
+                "partnership_model": "FLAT_SPONSORSHIP",
+                "cpa_bounty_usd": 0.0,
+                "cpl_lead_bounty_usd": 65.0,
+            },
+            "description": "Active cyber insurance lead placement.",
+        },
+        # 4. Sale-contingent phrase or '%' hidden in usage_referral_basis / description
+        {
+            "partner_key": "generic_partner",
+            "category": "insurance",
+            "partnership_model": "CPC",
+            "usage_referral_basis": "10% per issued bond and bound policy",
+            "description": "Directory referral with compensation per bond.",
+        },
+    ]
+
+    for idx, payload in enumerate(adversarial_payloads, start=1):
+        res = validate_insurance_surety_compensation_compliance(
+            [payload],
+            tenant_config={"producer_license_verified": False},
+        )
+        assert res["status"] == "FAIL", f"Adversarial payload #{idx} bypassed NAIC gate: {res}"
+        assert res["passed"] is False
+        assert res["offers_checked"] == 1
+        assert res["violations_count"] >= 1
+
+
+def test_naic_plma_sec13_blocks_hybrid_bounties_nested_model_and_spelled_percent_bypasses() -> None:
+    """
+    Regression tests for the 3 adversarial NAIC PLMA Sec. 13 bypasses:
+    1) hybrid_stage_bounties_usd dollar bounties (top-level and nested in partnership_model_spec)
+    2) nested HYBRID_CPA_REVSHARE inside partnership_model_spec under top-level FLAT_SPONSORSHIP
+    3) '12 percent of policy premium' / 'of premium' without literal '%'
+    """
+    from pseofactory.affiliates import validate_insurance_surety_compensation_compliance
+
+    bypass_payloads = [
+        # 1a. Top-level hybrid_stage_bounties_usd dollar bounties under FLAT_SPONSORSHIP
+        {
+            "tenant_key": "lienbond",
+            "partner_key": "unlisted_bond_broker",
+            "category": "Contractor Bond",
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "hybrid_stage_bounties_usd": {"issued_bond_usd": 175.0},
+            "description": "Contractor surety bond directory placement.",
+        },
+        # 1b. Nested hybrid_stage_bounties_usd dollar bounties inside partnership_model_spec
+        {
+            "partner_key": "unlisted_cyber_broker",
+            "slug": "cyber_insurance_quote",
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "partnership_model_spec": {
+                "partnership_model": "FLAT_SPONSORSHIP",
+                "hybrid_stage_bounties_usd": {"qualified_stage_usd": 95.0},
+            },
+            "description": "Cyber insurance quote placement.",
+        },
+        # 2. Nested HYBRID_CPA_REVSHARE inside partnership_model_spec under top-level FLAT_SPONSORSHIP
+        {
+            "partner_key": "unlisted_wc_partner",
+            "category": "workers_comp",
+            "slug": "workers-comp-calculator",
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "partnership_model_spec": {
+                "partnership_model": "HYBRID_CPA_REVSHARE",
+            },
+            "description": "Commercial workers_comp directory placement.",
+        },
+        # 3. Spelled-out percentage and 'of policy premium' without literal '%'
+        {
+            "partner_key": "generic_partner",
+            "category": "insurance",
+            "partnership_model": "CPC",
+            "usage_referral_basis": "12 percent of policy premium",
+            "description": "Directory referral for commercial coverage.",
+        },
+    ]
+
+    for idx, payload in enumerate(bypass_payloads, start=1):
+        res = validate_insurance_surety_compensation_compliance(
+            [payload],
+            tenant_config={"producer_license_verified": False},
+        )
+        assert res["status"] == "FAIL", f"Bypass payload #{idx} bypassed NAIC gate: {res}"
+        assert res["passed"] is False
+        assert res["offers_checked"] == 1
+        assert res["violations_count"] >= 1
+
+    # Clean non-sale-contingent FLAT_SPONSORSHIP offer without hybrid bounties or percent terms passes
+    clean_payload = {
+        "tenant_key": "lienbond",
+        "partner_key": "suretybonds_direct",
+        "category": "Contractor Bond",
+        "partnership_model": "FLAT_SPONSORSHIP",
+        "partnership_model_spec": {
+            "partnership_model": "FLAT_SPONSORSHIP",
+            "cpa_bounty_usd": 0.0,
+            "cpl_lead_bounty_usd": 0.0,
+            "recurring_revshare_pct": 0.0,
+            "hybrid_stage_bounties_usd": {},
+        },
+        "usage_referral_basis": "Non-sale-contingent flat directory sponsorship",
+        "description": "Commercial surety bond underwriting directory listing.",
+    }
+    clean_res = validate_insurance_surety_compensation_compliance(
+        [clean_payload],
+        tenant_config={"producer_license_verified": False},
+    )
+    assert clean_res["status"] == "PASS", clean_res["issues"]
+    assert clean_res["passed"] is True
+    assert clean_res["offers_checked"] == 1
+
+
+

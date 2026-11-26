@@ -163,20 +163,25 @@ def test_shared_gcp_quota_breaker_and_no_duplicate_fast_index(tmp_path: Path) ->
         patch("subprocess.run", return_value=mock_proc_429) as run_mock,
     ):
         res = indexer.submit_gsc_indexing(urls=[u1, u2], live=True, drain_rollover=False)
-        gov_path = indexer._get_gsc_quota_governor_path()
-        assert gov_path.is_file(), "Quota governor file must be written when 429 breaker trips"
-        gov_data = json.loads(gov_path.read_text(encoding="utf-8"))
-        assert gov_data.get("indexing_used", 0) >= GOOGLE_INDEXING_DAILY_QUOTA
-        assert gov_data.get("quota_exhausted") is True
-
-        # Now a second call on another URL must see the exhausted quota and make 0 gsccli index publish calls
-        run_mock.reset_mock()
-        indexer.submit_gsc_indexing(urls=[u2], live=True, drain_rollover=False)
+        assert res["status"] == "disabled_policy"
+        assert res["skipped"] is True
         publish_calls = [
             call for call in run_mock.call_args_list
             if call.args and isinstance(call.args[0], list) and "publish" in call.args[0]
         ]
-        assert len(publish_calls) == 0, "No gsccli index publish calls may execute when quota governor is exhausted"
+        assert len(publish_calls) == 0, "gsccli index publish must NEVER be called"
+
+        # Shared quota breaker still persists governor file cleanly when tripped
+        indexer.trip_gsc_quota_breaker(bucket="indexing", reason="429 breaker check")
+        gov_path = indexer._get_gsc_quota_governor_path()
+        assert gov_path.is_file(), "Quota governor file must be written when breaker trips"
+        gov_data = json.loads(gov_path.read_text(encoding="utf-8"))
+        assert gov_data.get("indexing_used", 0) >= GOOGLE_INDEXING_DAILY_QUOTA
+        assert gov_data.get("quota_exhausted") is True
+
+        # Disabled no-ops for WebSub and Ping-O-Matic make zero network/CLI calls
+        assert indexer.ping_websub_hub(dry_run=False)["status"] == "disabled_policy"
+        assert indexer.ping_pingomatic(dry_run=False)["status"] == "disabled_policy"
 
 
 def test_sanitize_gsc_url_inspection_states_purges_test_and_synthetic_rows(tmp_path: Path) -> None:
@@ -469,11 +474,8 @@ def test_unpushed_empty_engines_entry_classified_new_and_dispatched(tmp_path: Pa
         ),
         patch.object(indexer, "ping_websub_hub", return_value={"status": "SIMULATED"}),
         patch.object(indexer, "ping_pingomatic", return_value={"status": "SIMULATED"}),
-        patch.object(
-            indexer,
-            "submit_gsc_indexing",
-            return_value={"results": [], "sitemap_registration": {"status": "ACCEPTED", "submissions": []}},
-        ),
+        patch.object(indexer, "submit_gsc_sitemaps", return_value={"status": "ACCEPTED", "submissions": []}),
+        patch.object(indexer, "verify_gsc_indexation_loop", return_value=[]),
         patch.object(indexer, "submit_indexmysite", return_value={"status": "SKIPPED"}),
         patch.object(indexer, "submit_fast_index", return_value={"status": "SKIPPED"}),
     ):
@@ -569,5 +571,90 @@ def test_deterministic_per_domain_indexnow_keys_across_50_plus_tenants(tmp_path:
         dist_dir=custom_dist,
     )
     assert idx_custom.indexnow_key == custom_key
+
+
+def test_indexnow_retry_after_backoff_and_persisted_cooldown(tmp_path: Path) -> None:
+    """
+    Verifies submit_indexnow_batch honors HTTP 429 Retry-After:
+      1. Small Retry-After (<= 5s) performs bounded sleep + retry and succeeds.
+      2. Large Retry-After (> 5s) persists retry_after_until in the IndexNow backoff
+         ledger without long sleep, and subsequent cron calls skip immediately until cooled down.
+    """
+    import io
+    import urllib.error
+    from email.message import Message
+
+    base_dir = tmp_path / "prexvo"
+    dist_dir = base_dir / "dist"
+    agy_dir = base_dir / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "robots.txt").write_text("User-agent: *\nAllow: /\n", encoding="utf-8")
+
+    url = "https://prexvo.com/tools/rap-payment-calculator/"
+    _write_test_html(dist_dir / "tools" / "rap-payment-calculator" / "index.html", url, "RAP Calc")
+
+    indexer = PushIndexer(
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=base_dir,
+        dist_dir=dist_dir,
+        ledger_path=agy_dir / "index_push_ledger.json",
+        tenant_id="prexvo",
+    )
+
+    class _FakeResp:
+        def __init__(self, status: int = 202) -> None:
+            self.status = status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    # Case 1: Small Retry-After (2s <= 5s) -> bounded sleep + retry succeeds
+    calls_small: list[str] = []
+
+    def _urlopen_small(req, timeout=10):
+        ep = req.full_url
+        calls_small.append(ep)
+        if calls_small.count(ep) == 1:
+            hdrs = Message()
+            hdrs["Retry-After"] = "2"
+            raise urllib.error.HTTPError(ep, 429, "Too Many Requests", hdrs, io.BytesIO(b"rate limit"))
+        return _FakeResp(202)
+
+    with (
+        patch("pseofactory.indexer.urllib.request.urlopen", side_effect=_urlopen_small),
+        patch("pseofactory.indexer.time.sleep") as sleep_mock,
+    ):
+        res_small = indexer.submit_indexnow_batch(urls=[url], dry_run=False, force=True)
+    assert res_small["status"] == "DISPATCHED"
+    assert sleep_mock.call_count == 2
+    assert all(call.args[0] == 2.0 for call in sleep_mock.call_args_list)
+
+    # Case 2: Large Retry-After (120s > 5s) -> persists retry_after_until, next call skips immediately
+    def _urlopen_large(req, timeout=10):
+        hdrs = Message()
+        hdrs["Retry-After"] = "120"
+        raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", hdrs, io.BytesIO(b"rate limit"))
+
+    with (
+        patch("pseofactory.indexer.urllib.request.urlopen", side_effect=_urlopen_large),
+        patch("pseofactory.indexer.time.sleep") as sleep_mock_2,
+    ):
+        res_large = indexer.submit_indexnow_batch(urls=[url], dry_run=False, force=True)
+    assert res_large["status"] == "FAILED"
+    assert "retry_after_until" in res_large
+    assert sleep_mock_2.call_count == 0
+    assert indexer.indexnow_backoff_ledger_path.is_file()
+
+    with patch("pseofactory.indexer.urllib.request.urlopen") as urlopen_should_not_run:
+        res_cooldown = indexer.submit_indexnow_batch(urls=[url], dry_run=False, force=True)
+    assert res_cooldown["status"] == "RATE_LIMITED_COOLDOWN"
+    assert res_cooldown["skipped"] is True
+    assert urlopen_should_not_run.call_count == 0
+
 
 

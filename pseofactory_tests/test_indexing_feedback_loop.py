@@ -254,21 +254,11 @@ def test_feedback_loop_network_partition_preserves_rollover_queue(tmp_path):
 
         res = indexer.submit_gsc_indexing(urls=urls, live=True, drain_rollover=False)
 
-        # First URL succeeded, second failed with 429, third never executed
-        assert call_count == 2
-
-        # Preserved in rollover queue: beta (failed with 429) + gamma (untried)
-        pending_rollover = indexer.load_gsc_rollover_queue()
-        assert "https://profithelm.com/tools/beta/" in pending_rollover
-        assert "https://profithelm.com/tools/gamma/" in pending_rollover
-        assert "https://profithelm.com/tools/alpha/" not in pending_rollover
-
-        # Verify telemetry event recorded
-        assert telemetry_path.exists()
-        lines = [json.loads(l) for l in telemetry_path.read_text(encoding="utf-8").splitlines() if l.strip()]
-        anomaly_events = [e for e in lines if e.get("event_type") == "INDEXING_ANOMALY"]
-        assert len(anomaly_events) >= 1
-        assert anomaly_events[0]["action_taken"] == "PRESERVED_ROLLOVER"
+        # Google Indexing API URL_UPDATED is disabled by policy: zero gsccli publish calls
+        assert call_count == 0
+        assert res["status"] == "disabled_policy"
+        assert res["skipped"] is True
+        assert indexer.load_gsc_rollover_queue() == []
 
 
 def test_maintenance_stage_10_does_not_swallow_errors(tmp_path):
@@ -1689,21 +1679,18 @@ def test_domain_health_pacing_and_unindexed_first_submission_governance(tmp_path
     assert health["unindexed_count"] == 6
     assert health["indexed_ratio"] == 0.5
     assert health["paced_gsc_batch_cap"] == 10
-    assert health["sitemap_exposure_cap"] == 50
+    assert health["sitemap_exposure_cap"] == 2000
+
+    # Prioritization ranks unindexed GSC URLs ahead of already-indexed URLs
+    ranked = indexer.prioritize_urls_for_indexing_allocation(urls)
+    assert set(ranked[:6]) == set(urls[6:12])
 
     with patch("shutil.which", return_value="/mock/bin/gsccli"), \
-         patch("subprocess.run", return_value=subprocess.CompletedProcess(["gsccli"], 0, stdout="ACCEPTED")):
+         patch("subprocess.run", return_value=subprocess.CompletedProcess(["gsccli"], 0, stdout="ACCEPTED")) as sub_mock:
         sub_res = indexer.submit_gsc_indexing(urls=urls, live=True, hubs_only=True, drain_rollover=False)
-    assert sub_res["urls_submitted"] == 10
-    assert sub_res["domain_health_pacing"]["domain_health_tier"] == "CONSERVATIVE_RECOVERY"
-    # First 6 submitted must be the 6 unindexed URLs (calc-6 through calc-11)
-    submitted_first_6 = sub_res["submitted_urls"][:6]
-    assert set(submitted_first_6) == set(urls[6:12])
-    # Overflow (5 URLs) contains 1 uninspected URL (calc-14) and 4 already-indexed PASS URLs;
-    # only the uninspected/unindexed URL may enter rollover queue (already-indexed PASS URLs are not queued)
-    rollover_saved = indexer.load_gsc_rollover_queue()
-    for r_u in rollover_saved:
-        assert r_u not in set(urls[:6])
+    assert sub_res["status"] == "disabled_policy"
+    assert sub_res["skipped"] is True
+    assert sub_mock.call_count == 0
 
 
 def test_exact_gsc_signals_embedded_in_ai_repair_prompt_and_merged_into_locked_overlay(tmp_path):
@@ -1804,6 +1791,71 @@ def test_exact_gsc_signals_embedded_in_ai_repair_prompt_and_merged_into_locked_o
     # Re-submitting identical exclusion_spec on the next tick is a strict no-op
     eff3, written3 = persist_overlay_respecting_lock(ov_file, exclusion_spec)
     assert written3 is False
+
+
+def test_decoupled_14d_validate_fix_and_core_page_canary():
+    """
+    Verifies Requirement 6:
+      1. INDEXING_VALIDATE_FIX_DAYS == 14 is decoupled from CRO_MEASUREMENT_LOCK_DAYS == 28.
+      2. evaluate_indexing_validation_poll uses the 14-day window for GSC indexing polling.
+      3. evaluate_core_page_canary checks /, /about/, /methodology/ and returns
+         P0_CORE_CANARY_ALERT if any core hub reports 'Crawled - currently not indexed'
+         or 'Discovered - currently not indexed'.
+    """
+    from datetime import datetime, timedelta, timezone
+    from pseofactory.gsc_remediation import (
+        CRO_MEASUREMENT_LOCK_DAYS,
+        INDEXING_VALIDATE_FIX_DAYS,
+        evaluate_core_page_canary,
+        evaluate_indexing_validation_poll,
+    )
+    from pseofactory.indexing import (
+        CRO_MEASUREMENT_LOCK_DAYS as IDX_CRO_DAYS,
+        INDEXING_VALIDATE_FIX_DAYS as IDX_VAL_DAYS,
+        evaluate_core_page_canary as idx_canary,
+    )
+
+    assert INDEXING_VALIDATE_FIX_DAYS == 14
+    assert CRO_MEASUREMENT_LOCK_DAYS == 28
+    assert IDX_VAL_DAYS == 14
+    assert IDX_CRO_DAYS == 28
+
+    t0 = datetime(2026, 11, 1, 0, 0, 0, tzinfo=timezone.utc)
+    poll_10d = evaluate_indexing_validation_poll(submitted_at=t0.isoformat(), now=t0 + timedelta(days=10))
+    assert poll_10d["validate_fix_days"] == 14
+    assert poll_10d["cro_measurement_lock_days"] == 28
+    assert poll_10d["ready_for_validation_poll"] is False
+
+    poll_14d = evaluate_indexing_validation_poll(submitted_at=t0.isoformat(), now=t0 + timedelta(days=14))
+    assert poll_14d["ready_for_validation_poll"] is True
+
+    # Core pages healthy -> OK
+    ok_res = idx_canary({
+        "https://profithelm.com/": {"coverageState": "Submitted and indexed"},
+        "https://profithelm.com/about/": {"coverageState": "Submitted and indexed"},
+        "https://profithelm.com/methodology/": {"coverageState": "Submitted and indexed"},
+        "https://profithelm.com/tools/calc/": {"coverageState": "Crawled - currently not indexed"},
+    })
+    assert ok_res["status"] == "OK"
+    assert ok_res["alert_triggered"] is False
+    assert ok_res["failing_core_pages"] == []
+
+    # Core hub unindexed -> P0_CORE_CANARY_ALERT
+    alert_crawled = evaluate_core_page_canary({
+        "https://gainhelm.com/": {"coverageState": "Submitted and indexed"},
+        "https://gainhelm.com/methodology/": {"coverageState": "Crawled - currently not indexed"},
+    })
+    assert alert_crawled["status"] == "P0_CORE_CANARY_ALERT"
+    assert alert_crawled["alert_triggered"] is True
+    assert len(alert_crawled["failing_core_pages"]) == 1
+    assert alert_crawled["failing_core_pages"][0]["path"] == "/methodology/"
+
+    alert_discovered = evaluate_core_page_canary({
+        "https://lienbond.com/about/": {"coverage_state": "Discovered - currently not indexed"},
+    })
+    assert alert_discovered["status"] == "P0_CORE_CANARY_ALERT"
+    assert alert_discovered["failing_core_pages"][0]["path"] == "/about/"
+
 
 
 

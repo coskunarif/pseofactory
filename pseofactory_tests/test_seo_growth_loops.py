@@ -366,7 +366,8 @@ def test_workflow_7_ai_citation_digital_pr_queue_supports_profithelm_and_prexvo(
     )
     assert pr_rep["workflow"] == "ai_citation_digital_pr_queue"
     assert pr_rep["queue_count"] >= 1
-    assert (repo_root / "dist" / "ai-benchmarks" / "ai_benchmarks_manifest.json").is_file()
+    assert (repo_root / "syndication" / "ai_benchmarks" / "ai_benchmarks_manifest.json").is_file()
+    assert not (repo_root / "dist" / "ai-benchmarks").exists()
 
 
 def test_workflow_8_monitor_post_release_seo_regressions_correlates_manifests(tmp_path: Path) -> None:

@@ -198,22 +198,28 @@ if (failures.length > 0) process.exit(1);
 
 def test_robots_txt_disallows_r_across_all_generators_and_groups(tmp_path: Path) -> None:
     """
-    Verifies Disallow: /r/ is emitted BEFORE Allow: / by default in:
-    - estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS and write_sitemaps_and_robots (50+-site default)
-    - estate_common.ensure_robots_txt_mandatory_disallows (across EVERY User-agent group per RFC 9309
-      AND urllib.robotparser.RobotFileParser first-match semantics)
-    - compiler.compile_lienbond_estate
-    - gainhelm_estate.compile_gainhelm_estate_impl
-    - MasterSEOVerifier.check_robots_txt_gate catches missing Disallow: /r/ when functions/r exists
+    Verifies /r/ is NOT disallowed in robots.txt across generators (while /api/ and /cdn-cgi/
+    ARE disallowed across every User-agent group, and /r/ remains protected at the edge by
+    X-Robots-Tag: noindex, nofollow + bot-click guard):
+    - estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS omits /r/ and enforces (/api/, /cdn-cgi/)
+    - estate_common.ensure_robots_txt_mandatory_disallows preserves /r/ crawlability
+    - compiler.compile_lienbond_estate and gainhelm_estate.compile_gainhelm_estate_impl
+    - MasterSEOVerifier.check_robots_txt_gate rejects Disallow: /r/ and passes without it
     """
-    assert "/r/" in estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS
+    assert "/r/" not in estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS
+    assert "/api/" in estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS
+    assert "/cdn-cgi/" in estate_common.MANDATORY_ROBOTS_DISALLOW_PATHS
 
-    def _assert_robotparser_blocks_r(robots_text: str, bots: tuple[str, ...]) -> None:
+    def _assert_robotparser_allows_r_and_blocks_api(robots_text: str, bots: tuple[str, ...]) -> None:
+        assert "Disallow: /r/" not in robots_text
         rp = urllib.robotparser.RobotFileParser()
         rp.parse(robots_text.splitlines())
         for bot in bots:
-            assert rp.can_fetch(bot, "https://example.com/r/rippling") is False, (
-                f"RobotFileParser allowed {bot} on /r/rippling"
+            assert rp.can_fetch(bot, "https://example.com/r/rippling") is True, (
+                f"RobotFileParser unexpectedly blocked {bot} on /r/rippling"
+            )
+            assert rp.can_fetch(bot, "https://example.com/api/lead-capture") is False, (
+                f"RobotFileParser allowed {bot} on /api/lead-capture"
             )
             assert rp.can_fetch(bot, "https://example.com/tools/sample-calc/") is True, (
                 f"RobotFileParser unexpectedly blocked {bot} on /tools/sample-calc/"
@@ -227,16 +233,17 @@ def test_robots_txt_disallows_r_across_all_generators_and_groups(tmp_path: Path)
         canonical_base="https://example.com",
         hub_specs=[("https://example.com/", "1.0", "daily")],
         leaf_tools=[{"slug": "sample-calc", "updated_date": "2026-11-23"}],
-        ai_bots=["*", "Googlebot", "Bingbot", "GPTBot", "ClaudeBot", "PerplexityBot"],
+        ai_bots=["*", "Googlebot", "Bingbot", "PerplexityBot"],
         disallow_paths=["/signal/"],
         validate_governor=False,
     )
     gen_robots = (generic_dist / "robots.txt").read_text(encoding="utf-8")
     gen_sections = MasterSEOVerifier.parse_robots_txt_sections(gen_robots)
-    for ua in ("*", "googlebot", "bingbot", "gptbot", "claudebot", "perplexitybot"):
-        assert MasterSEOVerifier.is_bot_blocked(ua, "/r/rippling", gen_sections), f"{ua} not blocked on /r/"
+    for ua in ("*", "googlebot", "bingbot", "perplexitybot"):
+        assert not MasterSEOVerifier.is_bot_blocked(ua, "/r/rippling", gen_sections), f"{ua} unexpectedly blocked on /r/"
+        assert MasterSEOVerifier.is_bot_blocked(ua, "/api/lead-capture", gen_sections), f"{ua} not blocked on /api/"
         assert not MasterSEOVerifier.is_bot_blocked(ua, "/tools/sample-calc/", gen_sections)
-    _assert_robotparser_blocks_r(gen_robots, ("*", "Googlebot", "Bingbot", "GPTBot", "ClaudeBot", "PerplexityBot"))
+    _assert_robotparser_allows_r_and_blocks_api(gen_robots, ("*", "Googlebot", "Bingbot", "PerplexityBot"))
 
     # 2. Multi-User-agent retrofit helper (profithelm / prexvo / all porcelain tenants)
     multi_agent_robots = (
@@ -250,7 +257,7 @@ def test_robots_txt_disallows_r_across_all_generators_and_groups(tmp_path: Path)
         "User-agent: Bingbot\n"
         "Allow: /\n"
         "Disallow: /signal/\n\n"
-        "User-agent: GPTBot\n"
+        "User-agent: PerplexityBot\n"
         "Allow: /\n"
         "Disallow: /signal/\n\n"
         "Sitemap: https://profithelm.com/sitemap.xml\n"
@@ -258,39 +265,38 @@ def test_robots_txt_disallows_r_across_all_generators_and_groups(tmp_path: Path)
     patched = estate_common.ensure_robots_txt_mandatory_disallows(multi_agent_robots)
     assert estate_common.ensure_robots_txt_mandatory_disallows(patched) == patched
     patched_sections = MasterSEOVerifier.parse_robots_txt_sections(patched)
-    for ua in ("*", "googlebot", "bingbot", "gptbot"):
-        assert MasterSEOVerifier.is_bot_blocked(ua, "/r/rippling", patched_sections), f"{ua} not blocked on /r/"
+    for ua in ("*", "googlebot", "bingbot", "perplexitybot"):
+        assert not MasterSEOVerifier.is_bot_blocked(ua, "/r/rippling", patched_sections), f"{ua} blocked on /r/"
         assert MasterSEOVerifier.is_bot_blocked(ua, "/api/lead-capture", patched_sections)
-    _assert_robotparser_blocks_r(patched, ("*", "Googlebot", "Bingbot", "GPTBot"))
+    _assert_robotparser_allows_r_and_blocks_api(patched, ("*", "Googlebot", "Bingbot", "PerplexityBot"))
 
     # 3. LienBond estate generator
     lb_out = tmp_path / "lienbond_out"
     compiler.compile_lienbond_estate(lb_out, run_retrofit=False)
     lb_robots = (lb_out / "dist" / "robots.txt").read_text(encoding="utf-8")
     lb_sections = MasterSEOVerifier.parse_robots_txt_sections(lb_robots)
-    for ua in ("*", "googlebot", "bingbot", "gptbot"):
-        assert MasterSEOVerifier.is_bot_blocked(ua, "/r/suretybonds_direct", lb_sections)
-    _assert_robotparser_blocks_r(lb_robots, ("*", "Googlebot", "Bingbot", "GPTBot"))
+    for ua in ("*", "googlebot", "bingbot", "perplexitybot"):
+        assert not MasterSEOVerifier.is_bot_blocked(ua, "/r/suretybonds_direct", lb_sections)
+    _assert_robotparser_allows_r_and_blocks_api(lb_robots, ("*", "Googlebot", "Bingbot", "PerplexityBot"))
 
     # 4. GainHelm estate generator
     gh_out = tmp_path / "gainhelm_out"
     gainhelm_estate.compile_gainhelm_estate_impl(gh_out, run_retrofit=False)
     gh_robots = (gh_out / "dist" / "robots.txt").read_text(encoding="utf-8")
     gh_sections = MasterSEOVerifier.parse_robots_txt_sections(gh_robots)
-    for ua in ("*", "googlebot", "bingbot", "gptbot"):
-        assert MasterSEOVerifier.is_bot_blocked(ua, "/r/vanta_security", gh_sections)
-    _assert_robotparser_blocks_r(gh_robots, ("*", "Googlebot", "Bingbot", "GPTBot"))
+    for ua in ("*", "googlebot", "bingbot", "perplexitybot"):
+        assert not MasterSEOVerifier.is_bot_blocked(ua, "/r/vanta_security", gh_sections)
+    _assert_robotparser_allows_r_and_blocks_api(gh_robots, ("*", "Googlebot", "Bingbot", "PerplexityBot"))
 
-    # 5. Verifier check_robots_txt_gate flags missing Disallow: /r/ when functions/r exists
+    # 5. Verifier check_robots_txt_gate rejects Disallow: /r/ and passes once removed,
+    #    while edge redirect guard still emits X-Robots-Tag: noindex, nofollow
     v_repo = tmp_path / "v_repo"
     (v_repo / "dist").mkdir(parents=True)
     (v_repo / "functions" / "r").mkdir(parents=True)
     (v_repo / "dist" / "robots.txt").write_text(
-        "User-agent: *\nDisallow: /api/\nDisallow: /cdn-cgi/\nAllow: /\nDisallow: /signal/\n\n"
+        "User-agent: *\nDisallow: /r/\nDisallow: /api/\nDisallow: /cdn-cgi/\nAllow: /\nDisallow: /signal/\n\n"
         "User-agent: Googlebot\nDisallow: /api/\nDisallow: /cdn-cgi/\nAllow: /\nDisallow: /signal/\n\n"
-        "Sitemap: https://example.com/sitemap.xml\n"
-        "Sitemap: https://example.com/sitemap-hubs.xml\n"
-        "Sitemap: https://example.com/sitemap-leaves.xml\n",
+        "Sitemap: https://example.com/sitemap.xml\n",
         encoding="utf-8",
     )
     verifier = MasterSEOVerifier(dist_dir=v_repo / "dist", strict_robots=False)
@@ -300,12 +306,14 @@ def test_robots_txt_disallows_r_across_all_generators_and_groups(tmp_path: Path)
 
     (v_repo / "dist" / "robots.txt").write_text(
         estate_common.ensure_robots_txt_mandatory_disallows(
-            (v_repo / "dist" / "robots.txt").read_text(encoding="utf-8")
+            (v_repo / "dist" / "robots.txt").read_text(encoding="utf-8").replace("Disallow: /r/\n", "")
         ),
         encoding="utf-8",
     )
     pass_res = verifier.check_robots_txt_gate()
     assert pass_res["status"] == "PASS", pass_res["issues"]
+    redirect_js = edge.generate_edge_redirect_function("profithelm")
+    assert "X-Robots-Tag" in redirect_js and "noindex, nofollow" in redirect_js
 
 
 def test_verify_outbound_link_health_requires_explicit_live_opt_in(monkeypatch) -> None:

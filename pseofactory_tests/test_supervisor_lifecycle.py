@@ -1029,18 +1029,19 @@ def test_three_tenant_uniform_lifecycle_contract_alignment(tmp_path: Path):
     assert not stale_clone_dir.exists()
     assert canonical_dir.exists()
 
-    # 5. Verify RetroReflectionEngine.sync_tenant_llms_manifests produces clean GainHelm manifest with zero ProfitHelm spoke leakage
+    # 5. Verify RetroReflectionEngine.sync_tenant_llms_manifests purges stale llms-full.txt and updates llms.txt with zero ProfitHelm spoke leakage
     (gh_dist / "llms-full.txt").write_text("# Stale Manifest\n", encoding="utf-8")
     llms_updated = RetroReflectionEngine.sync_tenant_llms_manifests(
         dist_dir=gh_dist,
         property_id="gainhelm",
         canonical_base="https://gainhelm.com",
     )
-    assert "llms-full.txt" in llms_updated
-    llms_full = (gh_dist / "llms-full.txt").read_text(encoding="utf-8")
-    assert "GainHelm" in llms_full
-    assert "Section 179" not in llms_full
-    assert "ProfitHelm" not in llms_full
+    assert "llms.txt" in llms_updated
+    assert not (gh_dist / "llms-full.txt").exists()
+    llms_txt = (gh_dist / "llms.txt").read_text(encoding="utf-8")
+    assert "GainHelm" in llms_txt
+    assert "Section 179" not in llms_txt
+    assert "ProfitHelm" not in llms_txt
 
 
 def test_declarative_tenant_registration_contract_derives_all_downstream_loops(tmp_path: Path):

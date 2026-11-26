@@ -1229,10 +1229,11 @@ def test_llms_txt_x_robots_tag_noindex_policy_and_reflection_sync(tmp_path: Path
     from pseofactory.porcelain_shell import _sync_sitemaps_headers_and_redirects
     from pseofactory.verifier import MasterSEOVerifier
 
-    # 1. edge.build_edge_headers emits X-Robots-Tag: noindex on /llms.txt and /llms-full.txt
+    # 1. edge.build_edge_headers emits X-Robots-Tag: noindex on /llms.txt and /catalog.json, and omits retired /llms-full.txt
     built_headers = build_edge_headers("https://fleetbond.com", routes=["/", "/tools/"])
     assert maintenance._headers_missing_llms_noindex(built_headers) is False
-    for ep in ("/llms.txt", "/llms-full.txt"):
+    assert "/llms-full.txt" not in built_headers
+    for ep in ("/llms.txt", "/catalog.json"):
         m_ep = re.search(rf"(?m)^{re.escape(ep)}\n((?:[ \t]+.+\n)*)", built_headers)
         assert m_ep and "X-Robots-Tag: noindex" in m_ep.group(1), f"Missing noindex on {ep}"
 

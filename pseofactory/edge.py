@@ -60,20 +60,44 @@ class EdgeConfigStandards:
     ]
 
 
+_NON_HTML_LINK_EXTENSIONS: Tuple[str, ...] = (
+    ".xml",
+    ".txt",
+    ".json",
+    ".pdf",
+    ".csv",
+    ".xlsx",
+    ".zip",
+)
+
+
+def _is_non_html_link_route(route_path: str) -> bool:
+    clean = str(route_path or "").strip().lower().split("?", 1)[0]
+    return any(clean.endswith(ext) for ext in _NON_HTML_LINK_EXTENSIONS)
+
+
+def _is_canonical_link_header(header_line: str) -> bool:
+    low = str(header_line or "").strip().lower()
+    return low.startswith("link:") and ('rel="canonical"' in low or "rel='canonical'" in low)
+
+
 def build_edge_routes_json(
     include: Optional[List[str]] = None,
     exclude: Optional[List[str]] = None,
 ) -> str:
     """
-    Builds deterministic Cloudflare Pages dist/_routes.json configuration so static assets,
-    stylesheets, scripts, videos, sitemaps, and machine manifests bypass Pages Functions
-    invocations (preserving the 100,000/day Free Tier invocation quota for HTML middleware,
-    /api/*, and /r/* routes).
+    Builds deterministic Cloudflare Pages dist/_routes.json configuration so 100% of static
+    HTML pages and static assets bypass Pages Functions invocations, reserving Worker
+    execution strictly for /api/*, /r/*, /llms-full.txt, and /ai-benchmarks/* routes.
     """
     payload = {
         "version": 1,
-        "include": include if include is not None else ["/*"],
-        "exclude": exclude if exclude is not None else list(EdgeConfigStandards.STATIC_FUNCTION_BYPASS_EXCLUDES),
+        "include": (
+            include
+            if include is not None
+            else ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"]
+        ),
+        "exclude": exclude if exclude is not None else [],
     }
     content = json.dumps(payload, indent=2) + "\n"
     assert_no_forbidden_dashes(content, "build_edge_routes_json")
@@ -91,11 +115,11 @@ def build_edge_headers(
     """
     Builds standard Cloudflare Pages dist/_headers syntax.
     Enforces immutable static asset caching, edge s-maxage and stale-while-revalidate
-    on root HTML, RFC 5988 canonical Link headers, and UTF-8 machine content types.
+    on root HTML, Content-Signal governance, and UTF-8 machine content types.
+    Emits RFC 8288 canonical Link headers strictly on non-HTML machine/download
+    endpoints (never on HTML routes).
     Caps active Cloudflare Pages header rules at max_active_rules (<= 95, under
-    Cloudflare Pages' 100-rule limit) while preserving overflow leaf canonical entries
-    for edge middleware and SEO verification parity.
-    Strictly forbids noindex or nosnippet on public routes.
+    Cloudflare Pages' 100-rule limit).
     """
     base = canonical_base.rstrip("/")
     lines: List[str] = [
@@ -122,12 +146,13 @@ def build_edge_headers(
         lines.append("")
         active_rules_count += 1
 
-    # 2. Root HTML fallback and security headers
+    # 2. Root HTML fallback, security headers, and Content-Signal
     seen_routes.add("/*")
     lines.append("/*")
     lines.append(f"  Cache-Control: {EdgeConfigStandards.HTML_MACHINE_CACHE}")
     for sec_header, sec_val in EdgeConfigStandards.SECURITY_HEADERS.items():
         lines.append(f"  {sec_header}: {sec_val}")
+    lines.append("  Content-Signal: ai-train=no, search=yes, ai-input=yes")
     lines.append("")
     active_rules_count += 1
 
@@ -138,7 +163,7 @@ def build_edge_headers(
     lines.append("")
     active_rules_count += 1
 
-    # 4. Machine endpoints (RFC 5988 canonical link and UTF-8 charset content-type)
+    # 4. Machine endpoints (RFC 8288 canonical link on non-HTML and UTF-8 charset content-type)
     raw_endpoints = list(
         machine_endpoints
         if machine_endpoints is not None
@@ -146,12 +171,9 @@ def build_edge_headers(
             "/robots.txt",
             "/feed.xml",
             "/llms.txt",
-            "/llms-full.txt",
             "/catalog.json",
             "/media-kit.json",
             "/sitemap.xml",
-            "/sitemap-hubs.xml",
-            "/sitemap-leaves.xml",
         ]
     )
     for required_ep in ("/robots.txt", "/catalog.json", "/media-kit.json"):
@@ -178,62 +200,55 @@ def build_edge_headers(
             continue
         seen_routes.add(path)
         lines.append(path)
-        lines.append(f'  Link: <{base}{path}>; rel="canonical"')
+        if _is_non_html_link_route(path):
+            lines.append(f'  Link: <{base}{path}>; rel="canonical"')
         ext = Path(path).suffix.lower()
         if ext in EdgeConfigStandards.MACHINE_CONTENT_TYPES:
             ct = EdgeConfigStandards.MACHINE_CONTENT_TYPES[ext]
             lines.append(f"  Content-Type: {ct}")
         if path in fresh_revalidate_endpoints:
             lines.append(f"  Cache-Control: {EdgeConfigStandards.CRAWLER_AND_FEED_CACHE}")
-        elif path in ("/catalog.json", "/media-kit.json"):
+        elif path == "/catalog.json":
+            lines.append(f"  Cache-Control: {EdgeConfigStandards.HTML_MACHINE_CACHE}")
+            lines.append("  X-Robots-Tag: noindex, nofollow")
+        elif path == "/media-kit.json":
             lines.append(f"  Cache-Control: {EdgeConfigStandards.HTML_MACHINE_CACHE}")
             lines.append("  X-Robots-Tag: index, follow")
         if path in llms_noindex_endpoints:
-            lines.append("  X-Robots-Tag: noindex")
+            lines.append("  X-Robots-Tag: noindex, nofollow")
         lines.append("")
         active_rules_count += 1
 
-    if "/ai-benchmarks/*" not in seen_routes and active_rules_count < max_active_rules:
-        seen_routes.add("/ai-benchmarks/*")
-        lines.append("/ai-benchmarks/*")
-        lines.append(f"  Cache-Control: {EdgeConfigStandards.CRAWLER_AND_FEED_CACHE}")
-        lines.append("")
-        active_rules_count += 1
-
-    # 5. Custom headers (prioritized before bulk HTML routes)
+    # 5. Custom headers (prioritized before bulk non-HTML download routes)
     if custom_headers:
         for route_key, header_list in custom_headers.items():
             path = route_key if route_key.startswith("/") else f"/{route_key}"
             if path in seen_routes:
                 continue
+            filtered_headers = (
+                [h for h in header_list if not _is_canonical_link_header(h)]
+                if not _is_non_html_link_route(path)
+                else list(header_list)
+            )
+            if not filtered_headers:
+                continue
             seen_routes.add(path)
             lines.append(path)
-            for h in header_list:
+            for h in filtered_headers:
                 lines.append(f"  {h}")
             lines.append("")
             active_rules_count += 1
 
-    # 6. Public HTML routes (RFC 5988 canonical link), prioritizing root and hub routes
+    # 6. Non-HTML download routes only (HTML routes rely on HTML <link rel="canonical"> only)
     if routes:
         normalized_routes: List[str] = []
         for r in routes:
             path = r if r.startswith("/") else f"/{r}"
-            if path not in seen_routes:
+            if path not in seen_routes and _is_non_html_link_route(path):
                 seen_routes.add(path)
                 normalized_routes.append(path)
 
-        def _route_priority(p: str) -> Tuple[int, int]:
-            segments = [s for s in p.strip("/").split("/") if s]
-            # Priority 0: root & top-level pages (/, /about/, /tools/, etc.)
-            # Priority 1: calculator hubs (/tools/<slug>/)
-            # Priority 2: programmatic leaf routes (/tools/<slug>/<leaf>/)
-            depth_tier = 0 if len(segments) <= 1 else (1 if len(segments) == 2 else 2)
-            return (depth_tier, len(segments))
-
-        prioritized_routes = [
-            p for _, p in sorted(enumerate(normalized_routes), key=lambda item: (_route_priority(item[1]), item[0]))
-        ]
-        for path in prioritized_routes:
+        for path in normalized_routes:
             if active_rules_count < max_active_rules:
                 lines.append(path)
                 lines.append(f'  Link: <{base}{path}>; rel="canonical"')
@@ -249,6 +264,7 @@ def build_edge_headers(
     # Validate against snippet policy if contracts available
     try:
         from pseofactory.contracts import assert_headers_snippet_policy
+
         assert_headers_snippet_policy(content, context="build_edge_headers")
     except ImportError:
         pass
@@ -262,10 +278,8 @@ def compact_edge_headers_to_cloudflare_cap(
 ) -> str:
     """
     Compacts an existing dist/_headers file so active non-comment route blocks never exceed
-    max_active_rules (<= 95, safely below Cloudflare Pages' 100-rule limit).
-    Prioritizes static assets, root /*, /404.html, machine endpoints (.xml, .txt, .json),
-    and top-level/hub routes in active blocks, and converts excess leaf blocks into
-    # [edge-middleware-canonical] declarations served dynamically at the edge.
+    max_active_rules (<= 95, safely below Cloudflare Pages' 100-rule limit), while stripping
+    canonical Link headers from HTML routes.
     """
     blocks: List[Tuple[str, List[str], bool]] = []
     cur_route: Optional[str] = None
@@ -306,16 +320,26 @@ def compact_edge_headers_to_cloudflare_cap(
     if not blocks:
         return content
 
-    # Deduplicate by route preserving merged headers (e.g. if /catalog.json was appended later)
+    # Deduplicate by route preserving merged headers, stripping canonical Link headers on HTML routes
     merged: Dict[str, List[str]] = {}
     order: List[str] = []
     for route, hdrs, _ in blocks:
+        is_non_html = _is_non_html_link_route(route)
+        filtered = [
+            h for h in hdrs
+            if is_non_html or not _is_canonical_link_header(h)
+        ]
+        if not filtered:
+            continue
         if route not in merged:
             merged[route] = []
             order.append(route)
-        for h in hdrs:
+        for h in filtered:
             if h not in merged[route]:
                 merged[route].append(h)
+
+    if not order:
+        return content
 
     def _block_priority(route: str) -> Tuple[int, int]:
         if any(pat in route for pat in ("/static", "/css", "/js", "/assets")):
@@ -486,6 +510,31 @@ def compact_edge_redirects_to_cloudflare_cap(
     return result
 
 
+def ensure_gone_rules_in_redirects(redirects_content: str) -> str:
+    """
+    Strips unsupported HTTP 410 rules from dist/_redirects (Cloudflare Pages _redirects
+    only supports 200/301/302/303/307/308). Retired /llms-full.txt and /ai-benchmarks/*
+    HTTP 410 Gone responses are served by functions/_middleware.js via dist/_routes.json.
+    """
+    existing = str(redirects_content or "")
+    kept_lines: List[str] = []
+    for line in existing.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        check_line = stripped
+        if check_line.startswith("# [edge-middleware-redirect]"):
+            check_line = check_line[len("# [edge-middleware-redirect]") :].strip()
+        if not check_line.startswith("#"):
+            parts = check_line.split()
+            if len(parts) >= 3 and parts[2].strip() == "410":
+                continue
+        kept_lines.append(stripped)
+    result = ("\n".join(kept_lines).rstrip() + "\n") if kept_lines else ""
+    assert_no_forbidden_dashes(result, "ensure_gone_rules_in_redirects")
+    return result
+
+
 def validate_edge_redirects_file(
     redirects_path: Union[str, Path],
     max_active_rules: int = EdgeConfigStandards.MAX_CLOUDFLARE_REDIRECTS_RULES,
@@ -512,8 +561,13 @@ def validate_edge_redirects_file(
         issues.append(
             f"Active _redirects rule count ({len(active_rules)}) exceeds Cloudflare Pages cap ({max_active_rules})"
         )
-    all_sources = {src for src, _dst, _code, _ov in all_rules}
-    for src, dst, _code, _ov in all_rules:
+    all_sources = {src for src, _dst, code, _ov in all_rules if code != "410"}
+    for src, dst, code, _ov in all_rules:
+        if code == "410":
+            issues.append(
+                f"Unsupported Cloudflare Pages _redirects status 410 for {src}; serve 410 via functions/_middleware.js and _routes.json"
+            )
+            continue
         if src != "/" and src.rstrip("/") == dst.rstrip("/"):
             issues.append(f"Self-redirect detected in _redirects: {src} -> {dst}")
         elif dst != "/" and dst in all_sources:
@@ -791,7 +845,7 @@ def _sync_middleware_redirect_table(
     ]
 
     obj_match = re.search(
-        r"(  const (legacySaaSRedirects|edgeRedirects) = \{\n)([\s\S]*?)(  \};)",
+        r"(  const (legacySaaSRedirects|edgeRedirects) = \{\n?)([\s\S]*?)(\n?  \};|(?<=\{)\s*\};)",
         working,
     )
     if not obj_match:
@@ -799,6 +853,8 @@ def _sync_middleware_redirect_table(
 
     var_name = obj_match.group(2)
     body_text = obj_match.group(3)
+    obj_open = obj_match.group(1) if obj_match.group(1).endswith("\n") else obj_match.group(1) + "\n"
+    obj_close = "  };"
     entry_pat = re.compile(r'^\s*"([^"]+)"\s*:\s*"([^"]+)"\s*,?\s*$')
     merged_entries: Dict[str, str] = {}
     entry_order: List[str] = []
@@ -847,7 +903,7 @@ def _sync_middleware_redirect_table(
 
     rendered_lines = [f'    "{k}": "{merged_entries[k]}",' for k in entry_order]
     inner_body = ("\n".join(rendered_lines) + "\n") if rendered_lines else ""
-    new_obj_block = obj_match.group(1) + inner_body + obj_match.group(4)
+    new_obj_block = obj_open + inner_body + obj_close
 
     post_part = working[obj_match.end() :]
     post_part = re.sub(
@@ -876,6 +932,9 @@ def _sync_middleware_redirect_table(
         if eff_apex
         else "url.origin"
     )
+    if "/llms-full.txt" not in merged_gone_set:
+        merged_gone_set.add("/llms-full.txt")
+        merged_gone.append("/llms-full.txt")
     dispatch_lines = [
         "  // [BEGIN_EDGE_REDIRECT_DISPATCH]",
         f"  const _canonicalOrigin = {origin_expr};",
@@ -888,7 +947,7 @@ def _sync_middleware_redirect_table(
         dispatch_lines.extend(
             [
                 "  ]);",
-                '  if (edgeGone.has(pathname) || edgeGone.has(_normRedirectPath) || edgeGone.has(_normRedirectPath + "/")) {',
+                '  if (pathname === "/ai-benchmarks" || pathname.startsWith("/ai-benchmarks/") || edgeGone.has(pathname) || edgeGone.has(_normRedirectPath) || edgeGone.has(_normRedirectPath + "/")) {',
                 "    return new Response(",
                 '      "<!DOCTYPE html><html lang=\\"en\\"><head><meta charset=\\"utf-8\\"><meta name=\\"robots\\" content=\\"noindex\\"><title>410 Gone</title></head><body><h1>410 Gone</h1><p>This page has been permanently removed.</p></body></html>",',
                 "      {",
@@ -1064,7 +1123,10 @@ def validate_edge_headers_file(
     # Contract verification
     try:
         from pseofactory.contracts import assert_headers_snippet_policy
+
         assert_headers_snippet_policy(content, context=str(hp))
+    except ImportError:
+        pass
     except Exception as e:
         issues.append(f"Snippet policy violation: {e}")
 
@@ -1114,7 +1176,7 @@ def validate_edge_headers_file(
                 issues.append(f"Machine endpoint '{r}' missing UTF-8 charset in Content-Type")
 
     # 4. Check for lethal crawler barriers on public routes
-    llms_noindex_routes = {"/llms.txt", "/llms-full.txt"}
+    llms_noindex_routes = {"/llms.txt", "/llms-full.txt", "/catalog.json"}
     for r, hdrs in route_headers.items():
         if r.startswith(("/signal", "/staging", "/test")):
             continue
@@ -9676,7 +9738,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
       const candidateEmail = String((bundle && bundle.email) || email || "").trim();
       const paramsObj = {
         mode: "payment",
-        "payment_method_types[0]": "card",
         client_reference_id: leadId,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -11969,7 +12030,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
       const candidateEmail = String((bundle && bundle.email) || email || "").trim();
       const paramsObj = {
         mode: "payment",
-        "payment_method_types[0]": "card",
         client_reference_id: leadId,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -13806,7 +13866,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     const candidateEmail = String((customRecord && customRecord.email) || email || "").trim();
     const paramsObj = {
       mode: "payment",
-      "payment_method_types[0]": "card",
       client_reference_id: leadId,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -15846,7 +15905,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     const candidateEmail = String((customRecord && customRecord.email) || email || "").trim();
     const paramsObj = {
       mode: "payment",
-      "payment_method_types[0]": "card",
       client_reference_id: leadId,
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -17455,7 +17513,6 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
       const candidateEmail = String((bundle && bundle.email) || email || "").trim();
       const paramsObj = {{
         mode: "payment",
-        "payment_method_types[0]": "card",
         client_reference_id: leadId,
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -18672,7 +18729,8 @@ def sync_tenant_edge_redirect_function(
         if redirects_file.is_file():
             try:
                 orig_redirects = redirects_file.read_text(encoding="utf-8")
-                compacted_redirects = compact_edge_redirects_to_cloudflare_cap(orig_redirects)
+                with_gone = ensure_gone_rules_in_redirects(orig_redirects)
+                compacted_redirects = compact_edge_redirects_to_cloudflare_cap(with_gone)
                 if compacted_redirects != orig_redirects:
                     redirects_file.write_text(compacted_redirects, encoding="utf-8")
                     dist_needs_update = True
@@ -18680,7 +18738,7 @@ def sync_tenant_edge_redirect_function(
                 pass
 
     # Ensure functions/_middleware.js enforces www->apex 301 redirects, legacy GSC 301 redirects,
-    # non-apex noindex lockdown, and RFC 5988 canonical Link header on apex HTML responses.
+    # 410 Gone for retired endpoints, and non-apex noindex lockdown (never HTML Link canonical headers).
     apex_domain = meta["domain"]
     existing_gov_routes = {
         g
@@ -18699,8 +18757,7 @@ def sync_tenant_edge_redirect_function(
         default_lb_mw = (
             "/**\n"
             f" * {apex_domain} Cloudflare Pages Functions Middleware\n"
-            " * Enforces www-to-apex 301 canonical redirects, staging lockdown on *.pages.dev,\n"
-            " * and RFC 5988 canonical Link headers on HTML routes.\n"
+            " * Enforces www-to-apex 301 canonical redirects, 410 Gone rules, and staging lockdown on *.pages.dev.\n"
             " * Zero em-dashes. Zero en-dashes.\n"
             " */\n\n"
             "export async function onRequest(context) {\n"
@@ -18870,23 +18927,16 @@ def sync_tenant_edge_redirect_function(
                 )
                 mw_new = mw_new.replace("  return response;\n}", non_apex_guard_snippet, 1)
 
-            if "rel=\"canonical\"" not in mw_new and "return response;\n}" in mw_new:
-                canonical_fallback_snippet = (
-                    "  if (response.status === 200 && !response.headers.get(\"Link\")) {\n"
-                    "    const ct = (response.headers.get(\"Content-Type\") || \"\").toLowerCase();\n"
-                    "    if (ct.includes(\"text/html\") || pathname.endsWith(\"/\")) {\n"
-                    "      const apexHdrs = new Headers(response.headers);\n"
-                    f"      apexHdrs.set(\"Link\", `<https://{apex_domain}${{pathname}}>; rel=\"canonical\"`);\n"
-                    "      return new Response(response.body, {\n"
-                    "        status: response.status,\n"
-                    "        statusText: response.statusText,\n"
-                    "        headers: apexHdrs,\n"
-                    "      });\n"
-                    "    }\n"
-                    "  }\n\n"
-                    "  return response;\n}"
-                )
-                mw_new = mw_new.replace("  return response;\n}", canonical_fallback_snippet)
+            mw_new = re.sub(
+                r'\n*^  if \(response\.status === 200 && !response\.headers\.get\("Link"\)\) \{[\s\S]*?rel=\\"canonical\\"[\s\S]*?\n  \}\n*',
+                "\n\n",
+                mw_new,
+                flags=re.MULTILINE,
+            )
+            mw_new = mw_new.replace(
+                " * and RFC 5988 canonical Link headers on HTML routes.",
+                " * and 410 Gone rules.",
+            )
             if mw_new != mw_orig:
                 mw_file.write_text(mw_new, encoding="utf-8")
                 dist_needs_update = True

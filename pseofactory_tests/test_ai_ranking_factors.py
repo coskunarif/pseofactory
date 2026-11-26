@@ -327,9 +327,9 @@ import pseofactory
 
 
 def test_zyppy_2026_ai_factors_spec_registration():
-    """Verifies ZYPPY_2026_AI_FACTORS_SPEC contains all 14 factors correctly weighted."""
+    """Verifies ZYPPY_2026_AI_FACTORS_SPEC contains all 13 active factors correctly weighted (Factor 13 llms.txt retired)."""
     assert isinstance(ZYPPY_2026_AI_FACTORS_SPEC, list)
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
 
     # Factor 1 must be AI Crawl Access & Snippet Eligibility with weight 2.20
     factor1 = ZYPPY_2026_AI_FACTORS_SPEC[0]
@@ -364,13 +364,13 @@ def test_zyppy_2026_ai_factors_spec_registration():
     weights = [f["weight"] for f in ZYPPY_2026_AI_FACTORS_SPEC]
     assert weights == sorted(weights, reverse=True)
     assert weights[0] == 2.20
-    assert weights[-1] == 0.05
+    assert weights[-1] == 0.80
 
     # Check re-exports from seo_verifier and pseofactory root
     assert seo_verifier.ZYPPY_2026_AI_FACTORS_SPEC is ZYPPY_2026_AI_FACTORS_SPEC
     assert pseofactory.ZYPPY_2026_AI_FACTORS_SPEC is ZYPPY_2026_AI_FACTORS_SPEC
     assert len(ZYPPY_2026_FACTORS_SPEC) == 12
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
 
 
 def test_ai_crawler_taxonomy():
@@ -380,16 +380,22 @@ def test_ai_crawler_taxonomy():
     training_set = set(AI_TRAINING_BOTS)
 
     assert "perplexitybot" in search_set
-    assert "claudebot" in search_set
+    assert "claude-searchbot" in search_set
+    assert "applebot" in search_set
     assert "oai-searchbot" in search_set
     assert "googlebot" in search_set
     assert "bingbot" in search_set
 
     assert "chatgpt-user" in user_set
+    assert "claude-user" in user_set
+    assert "perplexity-user" in user_set
 
     assert "gptbot" in training_set
+    assert "claudebot" in training_set
+    assert "claude-web" in training_set
     assert "ccbot" in training_set
-    assert "google-extended" in training_set
+    assert "googleother" in training_set
+    assert "applebot-extended" in training_set
     assert "anthropic-ai" in training_set
 
     # Search bots and training bots must be strictly disjoint
@@ -404,10 +410,16 @@ def test_single_pass_parser_ai_search_vs_training_bots():
     p1.feed('<!DOCTYPE html><html><head><meta name="perplexitybot" content="nosnippet"></head><body></body></html>')
     assert p1.has_nosnippet is True
 
-    # Search crawler claudebot with noindex
+    # Search crawler claude-searchbot with noindex
     p2 = SinglePassSEODocumentParser()
-    p2.feed('<!DOCTYPE html><html><head><meta name="claudebot" content="noindex"></head><body></body></html>')
+    p2.feed('<!DOCTYPE html><html><head><meta name="claude-searchbot" content="noindex"></head><body></body></html>')
     assert p2.has_noindex is True
+
+    # Training bot claudebot must NOT set has_nosnippet or has_noindex
+    p2b = SinglePassSEODocumentParser()
+    p2b.feed('<!DOCTYPE html><html><head><meta name="claudebot" content="noindex, nosnippet"></head><body></body></html>')
+    assert p2b.has_noindex is False
+    assert p2b.has_nosnippet is False
 
     # User-triggered bot chatgpt-user with nosnippet
     p3 = SinglePassSEODocumentParser()
@@ -505,11 +517,12 @@ def test_snippet_eligibility_headers_differentiation(tmp_path):
 
     verifier = MasterSEOVerifier(dist_dir=dist)
 
-    # 1. Restricting training bots (GPTBot, Google-Extended) on public route must PASS
+    # 1. Restricting training bots (GPTBot, GoogleOther, ClaudeBot) on public route must PASS
     (dist / "_headers").write_text(
         "/*\n"
         "  X-Robots-Tag: gptbot: noindex, nosnippet\n"
-        "  X-Robots-Tag: google-extended: noindex\n",
+        "  X-Robots-Tag: googleother: noindex\n"
+        "  X-Robots-Tag: claudebot: noindex\n",
         encoding="utf-8"
     )
     res1 = verifier.check_snippet_eligibility_gate(dist)
@@ -586,18 +599,18 @@ def test_snippet_eligibility_robots_txt_crawler_policies(tmp_path):
     assert res_perp["status"] == "FAIL"
     assert any("perplexitybot" in i.lower() for i in res_perp["issues"])
 
-    # 3. Disallowing ClaudeBot on /tools/ must FAIL
-    robots_block_claude = (
+    # 3. Disallowing Claude-SearchBot on /tools/ must FAIL
+    robots_block_claude_search = (
         "User-agent: *\n"
         "Allow: /\n\n"
-        "User-agent: ClaudeBot\n"
+        "User-agent: Claude-SearchBot\n"
         "Allow: /\n"
         "Disallow: /tools/\n"
     )
-    (dist / "robots.txt").write_text(robots_block_claude, encoding="utf-8")
+    (dist / "robots.txt").write_text(robots_block_claude_search, encoding="utf-8")
     res_claude = verifier.check_snippet_eligibility_gate(dist)
     assert res_claude["status"] == "FAIL"
-    assert any("claudebot" in i.lower() for i in res_claude["issues"])
+    assert any("claude-searchbot" in i.lower() for i in res_claude["issues"])
 
     # 4. Wildcard Disallow: / without allow override must FAIL for search bots
     robots_block_all = (
@@ -660,13 +673,14 @@ def test_get_ai_factor_spec_queries():
     f1_name = get_ai_factor_spec("  AI Crawl Access & Snippet Eligibility  ")
     assert f1_name == f1
 
-    # Factor 14 (last factor)
-    f14 = get_ai_factor_spec(14)
-    assert f14 is not None
-    assert f14["code"] == "llms_txt"
+    # Factor 13 (last active factor: Structured Data)
+    f13 = get_ai_factor_spec(13)
+    assert f13 is not None
+    assert f13["code"] == "structured_data"
 
-    # Out of bounds and unknown factors
+    # Out of bounds and unknown factors (Factor 13 llms_txt removed)
     assert get_ai_factor_spec(0) is None
+    assert get_ai_factor_spec(14) is None
     assert get_ai_factor_spec(15) is None
     assert get_ai_factor_spec(-1) is None
     assert get_ai_factor_spec("non_existent_factor") is None
@@ -689,10 +703,12 @@ def test_crawler_helpers_taxonomy_checks():
         assert is_ai_training_crawler(bot) is False
         assert is_ai_crawler(bot) is True
 
-    # Claude-web alias
-    assert is_ai_search_crawler("claude-web") is True
-    assert is_ai_training_crawler("claude-web") is False
+    # Claude-web is a training crawler, claude-searchbot is a search crawler
+    assert is_ai_search_crawler("claude-web") is False
+    assert is_ai_training_crawler("claude-web") is True
     assert is_ai_crawler("claude-web") is True
+    assert is_ai_search_crawler("claude-searchbot") is True
+    assert is_ai_training_crawler("claude-searchbot") is False
 
     # Training bots
     for bot in AI_TRAINING_BOTS:
@@ -883,25 +899,25 @@ def test_assert_robots_txt_crawler_policy_boundaries():
     with pytest.raises(ValueError, match="bot 'perplexitybot' is blocked on '/'"):
         assert_robots_txt_crawler_policy(robots_block_perp)
 
-    # Disallowing ClaudeBot on /tools/ fails
-    robots_block_claude = (
+    # Disallowing Claude-SearchBot on /tools/ fails
+    robots_block_claude_search = (
         "User-agent: *\n"
         "Allow: /\n\n"
-        "User-agent: ClaudeBot\n"
+        "User-agent: Claude-SearchBot\n"
         "Disallow: /tools/\n"
     )
-    with pytest.raises(ValueError, match="bot 'claudebot' is blocked on '/tools/'"):
-        assert_robots_txt_crawler_policy(robots_block_claude)
+    with pytest.raises(ValueError, match="bot 'claude-searchbot' is blocked on '/tools/'"):
+        assert_robots_txt_crawler_policy(robots_block_claude_search)
 
-    # Disallowing claude-web alias on / fails
-    robots_block_cweb = (
+    # Allowing training bot ClaudeBot / claude-web on / fails
+    robots_allow_cweb = (
         "User-agent: *\n"
         "Allow: /\n\n"
         "User-agent: claude-web\n"
-        "Disallow: /\n"
+        "Allow: /\n"
     )
-    with pytest.raises(ValueError, match="bot 'claudebot' is blocked on '/'"):
-        assert_robots_txt_crawler_policy(robots_block_cweb)
+    with pytest.raises(ValueError, match="AI training bot 'claude-web' has Allow: / or is not disallowed on '/'"):
+        assert_robots_txt_crawler_policy(robots_allow_cweb)
 
     # Disallowing OAI-SearchBot on / fails
     robots_block_oai = (
@@ -941,7 +957,8 @@ def test_assert_headers_snippet_policy_boundaries():
     headers_clean = (
         "/*\n"
         "  X-Robots-Tag: gptbot: noindex, nosnippet\n"
-        "  X-Robots-Tag: google-extended: noindex\n"
+        "  X-Robots-Tag: googleother: noindex\n"
+        "  X-Robots-Tag: claudebot: noindex\n"
         "  X-Robots-Tag: ccbot: noindex\n"
         "/signal/*\n"
         "  X-Robots-Tag: noindex, nosnippet\n"
@@ -975,9 +992,9 @@ def test_assert_headers_snippet_policy_boundaries():
     with pytest.raises(ValueError, match="applies 'max-snippet:0' to public route '/tools/\\*' for bot 'perplexitybot'"):
         assert_headers_snippet_policy(h_perp_max0)
 
-    # claudebot: noindex on public route fails
-    h_claude_noindex = "/tools/*\n  X-Robots-Tag: claudebot: noindex\n"
-    with pytest.raises(ValueError, match="applies 'noindex' to public route '/tools/\\*' for bot 'claudebot'"):
+    # claude-searchbot: noindex on public route fails
+    h_claude_noindex = "/tools/*\n  X-Robots-Tag: claude-searchbot: noindex\n"
+    with pytest.raises(ValueError, match="applies 'noindex' to public route '/tools/\\*' for bot 'claude-searchbot'"):
         assert_headers_snippet_policy(h_claude_noindex)
 
     # oai-searchbot: nosnippet on public route fails
@@ -1981,7 +1998,7 @@ def test_gate_aliases_and_checklist_integration_factor3(tmp_path):
 
 def test_zyppy_2026_ai_factors_spec_factor4():
     """Verifies Factor 4: Citable / Specific Facts is properly registered in ZYPPY_2026_AI_FACTORS_SPEC."""
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
 
     # Factor 4 (index 3) must be Citable / Specific Facts with weight 2.07
     f4 = ZYPPY_2026_AI_FACTORS_SPEC[3]
@@ -2534,7 +2551,7 @@ def test_gate_aliases_and_checklist_integration_factor4(tmp_path):
 
 def test_zyppy_2026_ai_factors_spec_factor5():
     """Verifies Factor 5: Organic Fan-Out Coverage Rankings is properly registered in ZYPPY_2026_AI_FACTORS_SPEC."""
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
 
     # Factor 5 (index 4) must be Organic Fan-Out Coverage Rankings with weight 1.91
     f5 = ZYPPY_2026_AI_FACTORS_SPEC[4]
@@ -3350,7 +3367,7 @@ def test_check_organic_fan_out_coverage_gate_page_set_flags_missing_subtopic(tmp
 
 def test_zyppy_2026_ai_factors_spec_factor6():
     """Verifies Factor 6: Organic Search Ranking is properly registered in ZYPPY_2026_AI_FACTORS_SPEC."""
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
 
     # Factor 6 (index 5) must be Organic Search Ranking with weight 1.89
     f6 = ZYPPY_2026_AI_FACTORS_SPEC[5]
@@ -6672,64 +6689,26 @@ def test_gate_aliases_and_checklist_integration_factor12(tmp_path):
 
 
 # =============================================================================
-# Factor 13: llms.txt File (+0.05) Tests
+# Retired Factor 13 (llms.txt) & Fail-Closed Forbidden Manifest Artifact Tests
 # =============================================================================
 
 
 def test_factor13_spec_registration():
-    """Verifies Factor 13 registration in ZYPPY_2026_AI_FACTORS_SPEC and factor resolver."""
-    factor13 = [f for f in ZYPPY_2026_AI_FACTORS_SPEC if f["code"] == "llms_txt"][0]
-    assert factor13["code"] == "llms_txt"
-    assert factor13["name"] == "llms.txt File"
-    assert factor13["factor"] == "llms.txt File"
-    assert factor13["weight"] == 0.05
-    assert factor13["positive_weight"] == 0.05
-    assert factor13["negative_weight"] == -0.05
+    """Verifies deprecated Factor 13 (llms_txt) is removed from ZYPPY_2026_AI_FACTORS_SPEC."""
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
+    assert [f for f in ZYPPY_2026_AI_FACTORS_SPEC if f["code"] == "llms_txt"] == []
 
-    # Aliases
-    aliases = factor13.get("aliases", [])
-    assert "llms.txt File" in aliases
-    assert "llms.txt" in aliases
-    assert "llms_txt_file" in aliases
-    assert "llms_txt" in aliases
-    assert "llms_full_txt" in aliases
-    assert "llmstxt" in aliases
-    assert "llms_txt_manifest" in aliases
-    assert "curated_llms_txt" in aliases
-    assert "Factor 13" in aliases
-
-    # Monotonic weights across all 14 factors
+    # Monotonic weights across all 13 active factors ending at Structured Data (0.80)
     weights = [f["weight"] for f in ZYPPY_2026_AI_FACTORS_SPEC]
     assert weights == sorted(weights, reverse=True)
-    assert weights[-1] == 0.05
+    assert weights[-1] == 0.80
 
-    # get_ai_factor_spec lookups
-    s_idx = get_ai_factor_spec(14)
-    assert s_idx is not None and s_idx["code"] == "llms_txt"
-
-    s_code = get_ai_factor_spec("llms_txt")
-    assert s_code is not None and s_code["code"] == "llms_txt"
-
-    s_alias = get_ai_factor_spec("llms_txt_file")
-    assert s_alias is not None and s_alias["weight"] == 0.05
-
-    s_name = get_ai_factor_spec("llms.txt File")
-    assert s_name is not None and s_name["code"] == "llms_txt"
-
-    s_short = get_ai_factor_spec("llms.txt")
-    assert s_short is not None and s_short["code"] == "llms_txt"
-
-    s_full = get_ai_factor_spec("llms_full_txt")
-    assert s_full is not None and s_full["code"] == "llms_txt"
-
-    s_manifest = get_ai_factor_spec("llms_txt_manifest")
-    assert s_manifest is not None and s_manifest["code"] == "llms_txt"
-
-    s_curated = get_ai_factor_spec("curated_llms_txt")
-    assert s_curated is not None and s_curated["code"] == "llms_txt"
-
-    s_factor13 = get_ai_factor_spec("Factor 13")
-    assert s_factor13 is not None and s_factor13["code"] == "llms_txt"
+    # get_ai_factor_spec lookups confirm llms_txt and index 14 are retired
+    assert get_ai_factor_spec(14) is None
+    assert get_ai_factor_spec("llms_txt") is None
+    assert get_ai_factor_spec("Factor 13") is None
+    s13 = get_ai_factor_spec(13)
+    assert s13 is not None and s13["code"] == "structured_data"
 
     # Re-exports
     assert seo_verifier.ZYPPY_2026_AI_FACTORS_SPEC is ZYPPY_2026_AI_FACTORS_SPEC
@@ -6737,27 +6716,22 @@ def test_factor13_spec_registration():
 
 
 def test_extract_llms_txt_metadata_and_parsing():
-    """Verifies extract_llms_txt_metadata parses compliant and malformed manifests."""
+    """Verifies backwards-compatible extract_llms_txt_metadata shim checks structural markers and dashes."""
     compliant_content = (
         "# ProfitHelm Platform\n\n"
         "> Deterministic programmatic calculation engine for US statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
         "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating qualified business income deductions.\n"
-        "- [Depreciation Schedule Tool](/tools/depreciation/): Deterministic asset depreciation schedules adhering to MACRS.\n\n"
-        "## Optional\n\n"
-        "- [Full Documentation](/llms-full.txt): Complete expanded reference documentation.\n"
     )
     meta = extract_llms_txt_metadata(compliant_content)
     assert meta["has_h1"] is True
-    assert meta["title"] == "ProfitHelm Platform"
     assert meta["has_blockquote"] is True
-    assert "Deterministic programmatic calculation engine" in meta["summary"]
-    assert len(meta["sections"]) == 2
-    assert len(meta["links"]) == 3
-    assert len(meta["category_hubs"]) == 2
     assert meta["is_llmstxt_compliant"] is True
-    assert meta["leaked_routes"] == []
     assert meta["forbidden_dashes"] == []
+
+    meta_dash = extract_llms_txt_metadata(compliant_content + chr(0x2014))
+    assert meta_dash["is_llmstxt_compliant"] is False
+    assert "em-dash (U+2014)" in meta_dash["forbidden_dashes"]
 
     # Non-string input
     meta_none = extract_llms_txt_metadata(None)
@@ -6768,119 +6742,30 @@ def test_extract_llms_txt_metadata_and_parsing():
     meta_empty = extract_llms_txt_metadata("")
     assert meta_empty["has_h1"] is False
 
-    # Leaked route detection
-    leaked_content = (
-        "# Leaked Platform\n\n"
-        "> Brief summary.\n\n"
-        "## Top Category Hubs\n\n"
-        "- [Admin Panel](/admin/dashboard): Administrative configuration.\n"
-    )
-    meta_leak = extract_llms_txt_metadata(leaked_content)
-    assert any("/admin/" in r for r in meta_leak["leaked_routes"])
-    assert meta_leak["is_llmstxt_compliant"] is False
-
 
 def test_detect_llms_txt_issues_boundary_conditions():
-    """Verifies detect_llms_txt_issues detects all edge case violations."""
-    # Compliant manifest
+    """Verifies backwards-compatible detect_llms_txt_issues shim catches forbidden dashes and internal route leaks."""
     compliant = (
         "# ProfitHelm Platform\n\n"
         "> Deterministic programmatic calculation engine for statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
         "- [Section 199A Calculator](/tools/qbi-calculator/): Concise summary of QBI calculation rules.\n"
-        "- [Depreciation Model](/tools/depreciation/): Concise summary of MACRS depreciation.\n\n"
-        "## Optional\n\n"
-        "- [Full Manifest](/llms-full.txt): Complete reference documentation.\n"
     )
     assert detect_llms_txt_issues(compliant) == []
-
-    # Non-string
-    assert "must be a string" in detect_llms_txt_issues(123)[0]
-
-    # Empty
-    assert "is empty" in detect_llms_txt_issues("   ")[0]
-
-    # Missing H1 title
-    no_h1 = (
-        "> Deterministic programmatic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        "- [QBI Tool](/tools/qbi/): Summary of QBI.\n"
-    )
-    issues_no_h1 = detect_llms_txt_issues(no_h1)
-    assert any("Missing required H1 project title" in i for i in issues_no_h1)
-
-    # Missing blockquote summary
-    no_bq = (
-        "# ProfitHelm Platform\n\n"
-        "## Top Category Hubs\n\n"
-        "- [QBI Tool](/tools/qbi/): Summary of QBI.\n"
-    )
-    issues_no_bq = detect_llms_txt_issues(no_bq)
-    assert any("Missing required blockquote summary" in i for i in issues_no_bq)
-
-    # Missing markdown sections
-    no_sec = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic programmatic calculation engine.\n\n"
-        "- [QBI Tool](/tools/qbi/): Summary of QBI.\n"
-    )
-    issues_no_sec = detect_llms_txt_issues(no_sec)
-    assert any("Missing required markdown sections" in i for i in issues_no_sec)
-
-    # Missing links
-    no_links = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic programmatic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        "Some text without any markdown links.\n"
-    )
-    issues_no_links = detect_llms_txt_issues(no_links)
-    assert any("Missing required markdown links" in i for i in issues_no_links)
-
-    # Category hub without summary
-    no_hub_summary = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic programmatic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        "- [QBI Calculator](/tools/qbi-calculator/)\n"
-    )
-    issues_no_hub_summary = detect_llms_txt_issues(no_hub_summary)
-    assert any("missing a concise markdown summary" in i for i in issues_no_hub_summary)
-
-    # Category hub summary too long (> 500 chars)
-    long_summary = "A" * 550
-    too_long = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic programmatic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        f"- [QBI Calculator](/tools/qbi-calculator/): {long_summary}\n"
-    )
-    issues_too_long = detect_llms_txt_issues(too_long)
-    assert any("summary exceeds 500 characters" in i for i in issues_too_long)
+    assert detect_llms_txt_issues(123) == []
+    assert detect_llms_txt_issues("   ") == []
 
     # Forbidden dashes: em-dash and en-dash
     em_dash_content = compliant + "\nHere is an em-dash: " + chr(0x2014)
     issues_em = detect_llms_txt_issues(em_dash_content)
-    assert any("forbidden em-dash" in i for i in issues_em)
+    assert any("forbidden dash" in i for i in issues_em)
 
     en_dash_content = compliant + "\nHere is an en-dash: " + chr(0x2013)
     issues_en = detect_llms_txt_issues(en_dash_content)
-    assert any("forbidden en-dash" in i for i in issues_en)
+    assert any("forbidden dash" in i for i in issues_en)
 
-    # Route leaks: /admin/, /internal/, /api/private, /staging/, /auth/login, localhost
-    route_leaks = [
-        "/admin/settings",
-        "/internal/telemetry",
-        "/api/private/keys",
-        "/staging/preview",
-        "/auth/login",
-        "http://localhost:8080/api",
-        "https://127.0.0.1:3000/dashboard",
-        "/tmp/debug.log",
-        "/tools/qbi/?token=secret123",
-        "file:///etc/shadow",
-    ]
-    for rk in route_leaks:
+    # Disallowed internal route leaks
+    for rk in ("/admin/settings", "/internal/telemetry", "/private/keys", "/staging/preview", "/signal/debug"):
         leaked_md = (
             "# ProfitHelm Platform\n\n"
             "> Deterministic programmatic calculation engine.\n\n"
@@ -6890,70 +6775,35 @@ def test_detect_llms_txt_issues_boundary_conditions():
         issues_rk = detect_llms_txt_issues(leaked_md)
         assert any("Disallowed internal route" in i for i in issues_rk), f"Expected route leak detection for {rk}"
 
-    # Prompt leakage terms & forbidden jargon
-    leak_prompt = compliant + "\nas an ai language model, here is the answer."
-    issues_leak = detect_llms_txt_issues(leak_prompt)
-    assert any("Prompt leakage detected" in i for i in issues_leak)
-
-    jargon_content = compliant + "\nThis tool is a game-changer for taxes."
-    issues_jargon = detect_llms_txt_issues(jargon_content)
-    assert any("Forbidden jargon detected" in i for i in issues_jargon)
-
-    # Expanded llms-full.txt issues
-    full_short = "# Title\nshort"
-    issues_short = detect_llms_txt_issues(full_short, is_full=True)
-    assert any("too short" in i for i in issues_short)
-
-    full_compliant = (
-        "# ProfitHelm Platform Full Reference Documentation\n\n"
-        "Comprehensive deterministic programmatic calculation reference documentation for US statutory codes.\n\n"
-        "## IRC Section 199A\nDetailed calculations.\n"
-    )
-    assert detect_llms_txt_issues(full_compliant, is_full=True) == []
-
 
 def test_assert_llms_txt_contracts():
-    """Verifies assert_llms_txt, assert_llms_manifest_pair, and route assertion contracts."""
+    """Verifies llms.txt shims enforce safety checks and assert_llms_manifest_pair rejects retired llms-full.txt."""
     compliant_llms = (
         "# ProfitHelm Platform\n\n"
         "> Deterministic programmatic calculation engine for US statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
         "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating qualified business income deductions.\n"
-        "- [Depreciation Schedule Tool](/tools/depreciation/): Deterministic asset depreciation schedules adhering to MACRS.\n\n"
-        "## Optional\n\n"
-        "- [Full Documentation](/llms-full.txt): Complete expanded reference documentation.\n"
-    )
-    compliant_full = (
-        "# ProfitHelm Platform Full Reference Documentation\n\n"
-        "Comprehensive deterministic programmatic calculation reference documentation for US statutory tax codes.\n\n"
-        "## IRC Section 199A\nDetailed calculations and statutory citations.\n"
     )
 
     assert assert_llms_txt(compliant_llms) is True
     assert assert_llms_txt_specification(compliant_llms) is True
     assert assert_llms_txt_compliance(compliant_llms) is True
-    assert assert_llms_full_txt_compliance(compliant_full) is True
-    assert assert_llms_manifest_pair(compliant_llms, compliant_full) is True
     assert assert_llms_txt_file(compliant_llms) is True
     assert assert_curated_llms_txt(compliant_llms) is True
     assert assert_no_internal_route_leaks(compliant_llms) is True
     assert assert_top_category_hubs_summaries(compliant_llms) is True
 
-    # Negative contract assertions
-    with pytest.raises(ValueError, match="llms.txt contract violation"):
-        assert_llms_txt("# Title\n\nMissing blockquote and sections.\n")
+    # Manifest pair contract rejects llms-full.txt (Factor 13 removed)
+    with pytest.raises(ValueError, match="dist/llms-full.txt is forbidden"):
+        assert_llms_manifest_pair(compliant_llms, "# Full Docs\n")
 
-    with pytest.raises(ValueError, match="Internal route leak violation"):
-        assert_no_internal_route_leaks("Check out /admin/dashboard for details.")
+    # Route leak in llms.txt still fails closed
+    with pytest.raises(ValueError, match="Disallowed internal route"):
+        assert_llms_txt("Check out /admin/dashboard for details.")
 
-    with pytest.raises(ValueError, match="Top category hubs violation"):
-        bad_hubs = (
-            "# Title\n\n> Summary.\n\n## Top Category Hubs\n\n- [No Summary](/tools/calc/)\n"
-        )
-        assert_top_category_hubs_summaries(bad_hubs)
-
-    with pytest.raises(ValueError, match="Content must be a string"):
-        assert_llms_txt(None)
+    # Forbidden dash fails closed
+    with pytest.raises(ValueError, match="Forbidden em-dash"):
+        assert_no_internal_route_leaks("Bad dash " + chr(0x2014))
 
 
 def test_verify_llms_txt_in_memory_helpers():
@@ -6963,29 +6813,13 @@ def test_verify_llms_txt_in_memory_helpers():
         "> Deterministic programmatic calculation engine for statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
         "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating deductions.\n"
-        "- [Depreciation Tool](/tools/depreciation/): Deterministic asset depreciation schedules.\n"
-    )
-    compliant_full = (
-        "# ProfitHelm Platform Expanded Documentation\n\n"
-        "Complete technical specification and calculation rules for all statutory tax engines.\n"
     )
 
     res1 = verify_llms_txt_content(compliant_llms)
     assert res1["status"] == "PASS"
     assert res1["violations_count"] == 0
-    assert res1["hubs_verified"] == 2
-    assert res1["links_verified"] == 2
     assert res1["has_h1"] is True
     assert res1["has_blockquote"] is True
-
-    res_pair = verify_llms_txt_manifest_pair(compliant_llms, compliant_full)
-    assert res_pair["status"] == "PASS"
-    assert res_pair["violations_count"] == 0
-    assert "llms_txt" in res_pair
-    assert "llms_full_txt" in res_pair
-
-    # In-memory helpers
-    assert verify_llms_full_txt_content(compliant_full, is_full=True)["status"] == "PASS"
 
     # Non-string
     res_err = verify_llms_txt_content(12345)
@@ -6999,7 +6833,7 @@ def test_verify_llms_txt_in_memory_helpers():
 
 
 def test_check_llms_txt_gate_on_directory(tmp_path):
-    """Verifies MasterSEOVerifier check_llms_txt_gate and all aliases on directory fixtures."""
+    """Verifies deprecated check_llms_txt_gate aliases delegate to fail-closed forbidden AI artifacts gate."""
     pos_dir = tmp_path / "dist_factor13_pos"
     pos_dir.mkdir()
 
@@ -7008,24 +6842,16 @@ def test_check_llms_txt_gate_on_directory(tmp_path):
         "> Deterministic programmatic calculation engine for US statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
         "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating qualified business income deductions.\n"
-        "- [Depreciation Schedule Tool](/tools/depreciation/): Deterministic asset depreciation schedules adhering to MACRS.\n\n"
-        "## Optional\n\n"
-        "- [Full Documentation](/llms-full.txt): Complete expanded reference documentation.\n"
     )
-    compliant_full = (
-        "# ProfitHelm Platform Full Reference Documentation\n\n"
-        "Comprehensive deterministic programmatic calculation reference documentation for US statutory codes.\n\n"
-        "## IRC Section 199A\nDetailed calculations and rules.\n"
-    )
-
     (pos_dir / "llms.txt").write_text(compliant_llms, encoding="utf-8")
-    (pos_dir / "llms-full.txt").write_text(compliant_full, encoding="utf-8")
+    (pos_dir / "catalog.json").write_text(
+        '{"brand": "ProfitHelm", "tools": [{"slug": "qbi-calculator", "url": "/tools/qbi-calculator/"}]}',
+        encoding="utf-8",
+    )
 
     verifier = MasterSEOVerifier(dist_dir=pos_dir, domain="profithelm.com")
     res_pos = verifier.check_llms_txt_gate(pos_dir)
-    assert res_pos["status"] == "PASS"
-    assert res_pos["manifests_checked"] == 2
-    assert res_pos["hubs_verified"] == 2
+    assert res_pos["status"] == "PASS", f"Expected PASS without llms-full.txt/ai-benchmarks, got: {res_pos['issues']}"
     assert res_pos["violations_count"] == 0
 
     # Method aliases
@@ -7053,93 +6879,33 @@ def test_check_llms_txt_gate_on_directory(tmp_path):
     assert verify_llmstxt(pos_dir)["status"] == "PASS"
     assert verify_curated_llms_txt(pos_dir)["status"] == "PASS"
 
-    # Negative tree 1: route leak in llms.txt
+    # Negative tree 1: forbidden dist/llms-full.txt fails closed
     neg_dir1 = tmp_path / "dist_factor13_neg1"
     neg_dir1.mkdir()
-    leaked_llms = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        "- [Admin Settings](/admin/dashboard): Leaked administrative path.\n"
-    )
-    (neg_dir1 / "llms.txt").write_text(leaked_llms, encoding="utf-8")
-    (neg_dir1 / "llms-full.txt").write_text(compliant_full, encoding="utf-8")
-
+    (neg_dir1 / "llms-full.txt").write_text("# Full Docs\n", encoding="utf-8")
     res_neg1 = verifier.check_llms_txt_gate(neg_dir1)
     assert res_neg1["status"] == "FAIL"
-    assert res_neg1["violations_count"] >= 1
-    assert any("Disallowed internal route" in i for i in res_neg1["issues"])
+    assert any("llms-full.txt" in i for i in res_neg1["issues"])
 
-    # Negative tree 2: route leak in llms-full.txt
+    # Negative tree 2: forbidden dist/ai-benchmarks/* fails closed
     neg_dir2 = tmp_path / "dist_factor13_neg2"
-    neg_dir2.mkdir()
-    leaked_full = (
-        "# Full Docs\n\n"
-        "Here is an internal route: https://localhost:8080/internal/api for developers.\n"
-    )
-    (neg_dir2 / "llms.txt").write_text(compliant_llms, encoding="utf-8")
-    (neg_dir2 / "llms-full.txt").write_text(leaked_full, encoding="utf-8")
-
+    (neg_dir2 / "ai-benchmarks").mkdir(parents=True)
+    (neg_dir2 / "ai-benchmarks" / "summary.json").write_text("{}", encoding="utf-8")
     res_neg2 = verifier.check_llms_txt_gate(neg_dir2)
     assert res_neg2["status"] == "FAIL"
-    assert any("Disallowed internal route" in i for i in res_neg2["issues"])
+    assert any("ai-benchmarks" in i for i in res_neg2["issues"])
 
-    # Negative tree 3: missing category hub summary
+    # Negative tree 3: raw formula/quick_answer leak in catalog.json fails closed
     neg_dir3 = tmp_path / "dist_factor13_neg3"
     neg_dir3.mkdir()
-    no_summary_llms = (
-        "# ProfitHelm Platform\n\n"
-        "> Deterministic calculation engine.\n\n"
-        "## Top Category Hubs\n\n"
-        "- [QBI Calculator](/tools/qbi-calculator/)\n"
-    )
-    (neg_dir3 / "llms.txt").write_text(no_summary_llms, encoding="utf-8")
-    (neg_dir3 / "llms-full.txt").write_text(compliant_full, encoding="utf-8")
-
+    (neg_dir3 / "catalog.json").write_text('{"tools": [{"slug": "x", "formula": "a+b"}]}', encoding="utf-8")
     res_neg3 = verifier.check_llms_txt_gate(neg_dir3)
     assert res_neg3["status"] == "FAIL"
-    assert any("missing a concise markdown summary" in i for i in res_neg3["issues"])
-
-    # Negative tree 4: forbidden em-dash
-    neg_dir4 = tmp_path / "dist_factor13_neg4"
-    neg_dir4.mkdir()
-    (neg_dir4 / "llms.txt").write_text(compliant_llms + chr(0x2014), encoding="utf-8")
-    (neg_dir4 / "llms-full.txt").write_text(compliant_full, encoding="utf-8")
-
-    res_neg4 = verifier.check_llms_txt_gate(neg_dir4)
-    assert res_neg4["status"] == "FAIL"
-    assert any("forbidden em-dash" in i for i in res_neg4["issues"])
-
-    # Negative tree 5: forbidden en-dash
-    neg_dir5 = tmp_path / "dist_factor13_neg5"
-    neg_dir5.mkdir()
-    (neg_dir5 / "llms.txt").write_text(compliant_llms, encoding="utf-8")
-    (neg_dir5 / "llms-full.txt").write_text(compliant_full + chr(0x2013), encoding="utf-8")
-
-    res_neg5 = verifier.check_llms_txt_gate(neg_dir5)
-    assert res_neg5["status"] == "FAIL"
-    assert any("forbidden en-dash" in i for i in res_neg5["issues"])
-
-    # Negative tree 6: incomplete manifest pair (only llms.txt)
-    neg_dir6 = tmp_path / "dist_factor13_neg6"
-    neg_dir6.mkdir()
-    (neg_dir6 / "llms.txt").write_text(compliant_llms, encoding="utf-8")
-
-    res_neg6 = verifier.check_llms_txt_gate(neg_dir6)
-    assert res_neg6["status"] == "FAIL"
-    assert any("Incomplete manifest pair" in i for i in res_neg6["issues"])
-
-    # Negative tree 7: strict mode with missing manifests
-    neg_dir7 = tmp_path / "dist_factor13_neg7"
-    neg_dir7.mkdir()
-    res_neg7 = verifier.check_llms_txt_gate(neg_dir7, require_strict=True)
-    assert res_neg7["status"] == "FAIL"
-    assert any("Missing llms.txt manifest" in i for i in res_neg7["issues"])
-    assert any("Missing llms-full.txt manifest" in i for i in res_neg7["issues"])
+    assert res_neg3["violations_count"] >= 1
 
 
 def test_gate_aliases_and_checklist_integration_factor13(tmp_path):
-    """Verifies Factor 13 gate aliases and audit_seo_checklist integration."""
+    """Verifies deprecated Factor 13 gate aliases and audit_seo_checklist integration without llms-full.txt."""
     pos_dir = tmp_path / "dist_factor13_integration"
     pos_dir.mkdir()
     tool_dir = pos_dir / "tools" / "qbi-calculator"
@@ -7180,16 +6946,9 @@ def test_gate_aliases_and_checklist_integration_factor13(tmp_path):
         "# ProfitHelm Platform\n\n"
         "> Deterministic programmatic calculation engine for US statutory tax codes.\n\n"
         "## Top Category Hubs\n\n"
-        "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating qualified business income deductions.\n\n"
-        "## Optional\n\n"
-        "- [Full Documentation](/llms-full.txt): Complete expanded reference documentation.\n"
-    )
-    compliant_full = (
-        "# ProfitHelm Platform Full Reference Documentation\n\n"
-        "Comprehensive deterministic programmatic calculation reference documentation for US statutory codes.\n"
+        "- [Section 199A QBI Calculator](/tools/qbi-calculator/): Interactive model evaluating qualified business income deductions.\n"
     )
     (pos_dir / "llms.txt").write_text(compliant_llms, encoding="utf-8")
-    (pos_dir / "llms-full.txt").write_text(compliant_full, encoding="utf-8")
 
     verifier = MasterSEOVerifier(dist_dir=pos_dir, domain="profithelm.com")
     audit_res = verifier.audit_seo_checklist(pos_dir, enforce_relevance=False)
@@ -7250,7 +7009,7 @@ def test_zyppy_2026_empirical_ranking_evidence_spec_and_blind_spot_contracts(tmp
 
     # 1. Empirical factor table completeness & backwards compatibility
     assert len(ZYPPY_2026_FACTORS_SPEC) == 12
-    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 14
+    assert len(ZYPPY_2026_AI_FACTORS_SPEC) == 13
     assert len(ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC) == 27
     assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[0]["name"] == "Search Intent Match"
     assert ZYPPY_2026_EMPIRICAL_RANKING_EVIDENCE_SPEC[0]["weight"] == 2.60

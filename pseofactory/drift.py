@@ -7,6 +7,7 @@ Zero AI slop. 100% mechanical verification. Zero em-dashes. Zero en-dashes.
 """
 
 import os
+import re
 import json
 import hashlib
 import threading
@@ -542,19 +543,14 @@ def write_substrate_lock(
             sync_uploaded_log_from_ledger(r_root, property_id=pid, dist_dir=eff_dist)
         except Exception:
             pass
-        if pid == "lienbond" and (eff_dist / "index.html").is_file():
-            ai_bench_manifest = eff_dist / "ai-benchmarks" / "ai_benchmarks_manifest.json"
-            if not ai_bench_manifest.is_file():
-                try:
-                    from pseofactory.distributor import generate_ai_benchmark_nodes
+        ai_bench_dir = eff_dist / "ai-benchmarks"
+        if ai_bench_dir.exists():
+            try:
+                import shutil
 
-                    bench_res = generate_ai_benchmark_nodes(tenant="lienbond")
-                    b_dir = eff_dist / "ai-benchmarks"
-                    b_dir.mkdir(parents=True, exist_ok=True)
-                    for fname, fcontent in (bench_res.get("files") or {}).items():
-                        (b_dir / fname).write_text(fcontent, encoding="utf-8")
-                except Exception:
-                    pass
+                shutil.rmtree(ai_bench_dir, ignore_errors=True)
+            except Exception:
+                pass
     eh = expected_hash or compute_engine_hash()
     freshness_f = r_root / "freshness_audit_report.json"
     if freshness_f.is_file():
@@ -1298,6 +1294,54 @@ def record_engine_hash(
         print(f"Warning: Failed to persist engine hash: {ex}")
 
     return final_hash
+
+
+def compute_url_substantive_hash(main_html: str, dataset_payload: Any = None) -> str:
+    """
+    Computes a deterministic SHA-256 hash over normalized <main> HTML content and
+    canonicalized dataset JSON so per-URL freshness (e.g. sitemap <lastmod>) is
+    driven strictly by real content or data changes rather than build timestamps.
+    Zero em-dashes. Zero en-dashes.
+    """
+    raw_html = str(main_html or "")
+    main_match = re.search(r"<main\b[^>]*>([\s\S]*?)</main>", raw_html, flags=re.IGNORECASE)
+    segment = main_match.group(0) if main_match else raw_html
+    # Strip HTML comments and normalize whitespace/inter-tag gaps deterministically
+    segment = re.sub(r"<!--[\s\S]*?-->", "", segment)
+    segment = re.sub(r"\s+", " ", segment).strip()
+    segment = re.sub(r">\s+<", "><", segment)
+
+    if dataset_payload is None:
+        dataset_str = ""
+    elif isinstance(dataset_payload, (bytes, bytearray)):
+        raw_ds = dataset_payload.decode("utf-8", errors="replace").strip()
+        try:
+            dataset_str = json.dumps(json.loads(raw_ds), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        except Exception:
+            dataset_str = raw_ds
+    elif isinstance(dataset_payload, str):
+        raw_ds = dataset_payload.strip()
+        if raw_ds:
+            try:
+                dataset_str = json.dumps(json.loads(raw_ds), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            except Exception:
+                dataset_str = raw_ds
+        else:
+            dataset_str = ""
+    else:
+        dataset_str = json.dumps(
+            dataset_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,
+        )
+
+    hasher = hashlib.sha256()
+    hasher.update(segment.encode("utf-8"))
+    hasher.update(b"\n")
+    hasher.update(dataset_str.encode("utf-8"))
+    return hasher.hexdigest()
 
 
 def compute_asset_fingerprint(asset_path: Union[str, Path]) -> str:

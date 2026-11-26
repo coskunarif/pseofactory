@@ -155,9 +155,17 @@ __all__ = [
     "CONTENT_DEPTH_DEFICIT",
     "ALGORITHMIC_EXPANSION_FREEZE",
     "UNKNOWN_OR_UNCLASSIFIED",
+    "CRO_MEASUREMENT_LOCK_DAYS",
+    "INDEXING_VALIDATE_FIX_DAYS",
+    "evaluate_core_page_canary",
+    "evaluate_indexing_validation_poll",
 ]
 
 from pseofactory.indexing.feedback_loop import (
+    CRO_MEASUREMENT_LOCK_DAYS,
+    INDEXING_VALIDATE_FIX_DAYS,
+    evaluate_core_page_canary,
+    evaluate_indexing_validation_poll,
     RootCauseClassification,
     DiagnosisResult,
     GSCRootCauseClassifier,

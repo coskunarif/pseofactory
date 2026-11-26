@@ -7,6 +7,7 @@ Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,50 +126,47 @@ def test_gsc_quota_governor_resets_on_pacific_time_not_utc(tmp_path: Path) -> No
     assert reset_ok["allowed"] is True
 
 
-def test_submit_gsc_indexing_quota_exhausted_reports_quota_deferred_and_honest_audit(tmp_path: Path) -> None:
+def test_submit_gsc_indexing_disabled_policy_and_honest_audit(tmp_path: Path) -> None:
     """
-    When GSC indexing quota is exhausted (effective_daily_cap == 0):
-    1. submit_gsc_indexing must report status='QUOTA_DEFERRED' (not 'IDEMPOTENT_NO_OP')
-       and preserve all URLs in gsc_rollover_queue.json.
-    2. WAL must commit status='QUOTA_DEFERRED' (not 'DISPATCHED').
-    3. audit_asset_submission_status(live=True) must NOT report google_accepted=True
+    1. submit_gsc_indexing is disabled by policy (returns status='disabled_policy', skipped=True)
+       with zero gsccli index publish calls and zero gsc_rollover_queue.json pushes.
+    2. audit_asset_submission_status(live=True) must NOT report google_accepted=True
        merely because dist/sitemap.xml exists, nor bing_accepted=True merely because
        the local IndexNow key file exists.
+    3. ai_crawlers acceptance does NOT depend on websub_state even if feed.xml is absent.
     """
-    base_dir, _, idx = _make_site(tmp_path, "gainhelm", "gainhelm.com", ["soc-2-calc", "cmmc-calc"])
+    base_dir, dist_dir, idx = _make_site(tmp_path, "gainhelm", "gainhelm.com", ["soc-2-calc", "cmmc-calc"])
     urls = [
         "https://gainhelm.com/tools/soc-2-calc/",
         "https://gainhelm.com/tools/cmmc-calc/",
     ]
-    idx.trip_gsc_quota_breaker(bucket="indexing", reason="HTTP 429 daily quota exhausted")
 
-    fake_gsccli = tmp_path / "gsccli"
-    fake_gsccli.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-
-    with (
-        patch("pseofactory.indexer.shutil.which", return_value=str(fake_gsccli)),
-        patch.object(idx, "submit_fast_index", return_value={"status": "DISPATCHED", "actions": []}),
-        patch.object(idx, "submit_gsc_sitemaps", return_value={"status": "ACCEPTED", "submissions": []}),
-        patch.object(idx, "verify_gsc_indexation_loop", return_value={"oracle_verdict": "PENDING_INDEXATION"}),
-    ):
+    with patch("subprocess.run") as subproc_mock:
         res = idx.submit_gsc_indexing(urls=urls, live=True, drain_rollover=False)
+        assert subproc_mock.call_count == 0
 
+    assert res["status"] == "disabled_policy"
+    assert res["skipped"] is True
     gsc_api_blocks = [r for r in res["results"] if r.get("engine") == "google_indexing_api"]
     assert len(gsc_api_blocks) == 1
-    assert gsc_api_blocks[0]["status"] == "QUOTA_DEFERRED"
-    assert gsc_api_blocks[0]["quota_deferred_count"] == 2
-    assert set(idx.load_gsc_rollover_queue()) == set(urls)
-
-    wal_path = base_dir / ".agy" / ".indexing_intent_wal.jsonl"
-    wal_rows = [json.loads(line) for line in wal_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    terminal = [r for r in wal_rows if r.get("intent_id") == res["intent_id"] and r.get("status") != "PENDING_INTENT"]
-    assert terminal and terminal[-1]["status"] == "QUOTA_DEFERRED"
+    assert gsc_api_blocks[0]["status"] == "disabled_policy"
+    assert idx.load_gsc_rollover_queue() == []
 
     # Honest audit: zero URLs pushed to Google or Bing, despite sitemap.xml and key file on disk
     audit = idx.audit_asset_submission_status(live=True)
     assert audit["summary"]["google_accepted_count"] == 0
     assert audit["summary"]["bing_accepted_count"] == 0
     assert audit["summary"]["overall_acceptance_rate_pct"] == 0.0
+
+    # Even when feed.xml is removed, ai_accepted does NOT depend on websub_state
+    (dist_dir / "feed.xml").unlink()
+    idx.record_pushed_urls(urls, engine="indexnow")
+    audit_no_feed = idx.audit_asset_submission_status(live=True)
+    assert audit_no_feed["summary"]["ai_crawlers_accepted_count"] == len(urls)
+    for entry in audit_no_feed["asset_entries"]:
+        if entry["url"] in urls:
+            assert entry["ai_crawlers"]["accepted"] is True
+        assert entry["ai_crawlers"]["websub_rss"]["status"] == "DISABLED_POLICY"
 
 
 def test_daily_indexing_inspector_detects_indexing_anomaly_429_events(tmp_path: Path) -> None:
@@ -275,7 +273,13 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
         }
     )
     fake_proc = MagicMock(returncode=0, stdout=fake_upload_stdout, stderr="")
+    tenant_yt_token = repo_dir / ".agy" / "youtube_token.json"
+    tenant_yt_token.parent.mkdir(parents=True, exist_ok=True)
+    tenant_yt_token.write_text('{"token":"fake"}', encoding="utf-8")
+    tenant_yt_channel = "UC_profithelm_123"
+
     with (
+        patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
         patch("pseofactory.video_factory.probe_media_file", return_value={"valid": True, "size_bytes": 4096, "duration_seconds": 15.0}),
         patch("pseofactory.video_factory.subprocess.run", return_value=fake_proc),
         patch("pseofactory.video_factory.sync_video_catalog_and_metadata"),
@@ -290,6 +294,8 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
             quota_governor=gov,
             upload_caption=True,
             post_pinned_comment=True,
+            youtube_token_path=tenant_yt_token,
+            youtube_channel_id=tenant_yt_channel,
         )
     assert up_res["status"] == "UPLOADED"
     saved2 = json.loads(ledger_path.read_text(encoding="utf-8"))["uploads"][f"profithelm:{slug2}"]
@@ -326,6 +332,7 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
 
     fixed_t = datetime(2026, 11, 22, 18, 0, 0, tzinfo=timezone.utc)
     with (
+        patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
         patch("pseofactory.video_factory._in_pytest", return_value=False),
         patch("pseofactory.video_factory.datetime", _frozen_datetime_cls(fixed_t)),
         patch("pseofactory.video_factory._load_upload_idempotency_map") as load_mock,
@@ -354,6 +361,8 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
             privacy="public",
             live_upload=True,
             quota_governor=gov,
+            youtube_token_path=tenant_yt_token,
+            youtube_channel_id=tenant_yt_channel,
         )
         r2 = upload_tool_video_to_youtube(
             slug=slug3,
@@ -363,6 +372,8 @@ def test_youtube_upload_ledger_merge_preserves_truth_flags_and_fresh_upload_pers
             privacy="public",
             live_upload=True,
             quota_governor=gov,
+            youtube_token_path=tenant_yt_token,
+            youtube_channel_id=tenant_yt_channel,
         )
     assert len(reconcile_calls) == 1
     assert reconcile_calls[0]["refresh_thumbnail"] is False

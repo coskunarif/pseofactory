@@ -630,3 +630,134 @@ def test_zero_forbidden_dashes_in_new_code():
         content = p.read_text(encoding="utf-8")
         assert "\u2014" not in content, f"Forbidden em-dash (\\u2014) detected in {p.name}"
         assert "\u2013" not in content, f"Forbidden en-dash (\\u2013) detected in {p.name}"
+
+
+def test_batch1c_bot_taxonomy_no_disallow_r_banned_ai_artifacts_and_header_gates(tmp_path: Path):
+    """
+    Verify Batch 1C verifier & contract fail-closed gates:
+    1. AI_SEARCH_BOTS vs AI_TRAINING_BOTS taxonomy (claudebot in training, applebot in search).
+    2. robots.txt: fails on Allow: / for training bots, Disallow: / for search bots, or Disallow: /r/.
+    3. Factor 13 removed; dist/llms-full.txt, dist/ai-benchmarks/*, and raw formula/quick_answer/published_output
+       keys in dist/catalog.json fail closed.
+    4. <500 URL domains validate one clean /sitemap.xml without sitemap-hubs.xml and fail on <changefreq>/<priority>.
+    5. _headers fails closed on HTTP Link: rel="canonical" on HTML routes and on missing Content-Signal: on /*.
+    """
+    from pseofactory.contracts import (
+        assert_catalog_json_no_raw_leaks,
+        assert_headers_no_html_link_canonical_and_has_content_signal,
+        assert_no_forbidden_dist_manifest_artifacts,
+        assert_robots_txt_crawler_policy,
+    )
+    from pseofactory.verifier import AI_SEARCH_BOTS, AI_TRAINING_BOTS, MasterSEOVerifier
+
+    assert "applebot" in AI_SEARCH_BOTS
+    assert "claudebot" not in AI_SEARCH_BOTS
+    for bot in ("googlebot", "bingbot", "applebot", "oai-searchbot", "chatgpt-user", "claude-searchbot", "claude-user", "perplexitybot", "perplexity-user"):
+        assert bot in AI_SEARCH_BOTS
+    assert "claudebot" in AI_TRAINING_BOTS
+    assert "applebot" not in AI_TRAINING_BOTS
+    for bot in ("gptbot", "claudebot", "anthropic-ai", "claude-web", "ccbot", "bytespider", "meta-externalagent", "applebot-extended", "googleother"):
+        assert bot in AI_TRAINING_BOTS
+
+    dist = tmp_path / "dist"
+    (dist / "tools" / "calc-one").mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text("<html><head><title>Home</title></head><body><h1>Home</h1></body></html>", encoding="utf-8")
+    (dist / "tools" / "index.html").write_text("<html><head><title>Tools</title></head><body><h1>Tools</h1></body></html>", encoding="utf-8")
+    (dist / "tools" / "calc-one" / "index.html").write_text("<html><head><title>Calc</title></head><body><h1>Calc</h1></body></html>", encoding="utf-8")
+    (dist / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url><loc>https://profithelm.com/</loc><lastmod>2026-11-01</lastmod></url>\n"
+        "  <url><loc>https://profithelm.com/tools/</loc><lastmod>2026-11-01</lastmod></url>\n"
+        "  <url><loc>https://profithelm.com/tools/calc-one/</loc><lastmod>2026-11-01</lastmod></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
+    clean_robots = (
+        "".join(
+            f"User-agent: {ua}\nDisallow: /api/\nDisallow: /cdn-cgi/\nDisallow: /signal/\nAllow: /\n\n"
+            for ua in ("Googlebot", "Bingbot", "Applebot", "OAI-SearchBot", "ChatGPT-User", "Claude-SearchBot", "Claude-User", "PerplexityBot", "Perplexity-User")
+        )
+        + "".join(
+            f"User-agent: {ua}\nDisallow: /\n\n"
+            for ua in ("GPTBot", "ClaudeBot", "anthropic-ai", "Claude-Web", "CCBot", "Bytespider", "meta-externalagent", "Applebot-Extended", "GoogleOther")
+        )
+        + "User-agent: *\nDisallow: /api/\nDisallow: /cdn-cgi/\nDisallow: /signal/\nAllow: /\n\n"
+        + "Sitemap: https://profithelm.com/sitemap.xml\n"
+    )
+    (dist / "robots.txt").write_text(clean_robots, encoding="utf-8")
+    clean_headers = (
+        "/*\n  Content-Signal: search=yes, ai-train=no\n  X-Content-Type-Options: nosniff\n\n"
+        "/robots.txt\n  Content-Type: text/plain; charset=utf-8\n\n"
+        "/sitemap.xml\n  Content-Type: application/xml; charset=utf-8\n"
+    )
+    (dist / "_headers").write_text(clean_headers, encoding="utf-8")
+    (dist / "catalog.json").write_text(
+        json.dumps({"brand": "ProfitHelm", "tools": [{"slug": "calc-one", "url": "/tools/calc-one/"}]}),
+        encoding="utf-8",
+    )
+
+    v = MasterSEOVerifier(dist_dir=dist, domain="profithelm.com", canonical_base="https://profithelm.com", allow_mutations=False)
+    assert v.check_robots_txt_gate(dist)["status"] == "PASS"
+    assert v.check_sitemap_gate(dist)["status"] == "PASS"
+    assert v.check_http_link_canonical_gate(dist)["status"] == "PASS"
+    assert v.check_forbidden_ai_artifacts_and_catalog_gate(dist)["status"] == "PASS"
+    assert assert_robots_txt_crawler_policy(clean_robots) is True
+    assert assert_headers_no_html_link_canonical_and_has_content_signal(clean_headers) is True
+    assert assert_no_forbidden_dist_manifest_artifacts(dist) is True
+    assert assert_catalog_json_no_raw_leaks(dist / "catalog.json") is True
+
+    # Negative robots.txt checks: Allow: / for ClaudeBot, Disallow: / for Applebot, Disallow: /r/
+    for bad_rob in (
+        clean_robots.replace("User-agent: ClaudeBot\nDisallow: /", "User-agent: ClaudeBot\nAllow: /"),
+        clean_robots.replace(
+            "User-agent: Applebot\nDisallow: /api/\nDisallow: /cdn-cgi/\nDisallow: /signal/\nAllow: /",
+            "User-agent: Applebot\nDisallow: /",
+        ),
+        clean_robots + "\nUser-agent: *\nDisallow: /r/\n",
+    ):
+        (dist / "robots.txt").write_text(bad_rob, encoding="utf-8")
+        assert v.check_robots_txt_gate(dist)["status"] == "FAIL"
+        with pytest.raises(ValueError):
+            assert_robots_txt_crawler_policy(bad_rob)
+
+    # Negative sitemap.xml check: <changefreq> or <priority>
+    (dist / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url><loc>https://profithelm.com/</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
+    assert v.check_sitemap_gate(dist)["status"] == "FAIL"
+
+    # Negative _headers checks: Link rel="canonical" on HTML route or missing Content-Signal on /*
+    (dist / "_headers").write_text(
+        "/*\n  Link: <https://profithelm.com/>; rel=\"canonical\"\n  Content-Signal: search=yes, ai-train=no\n",
+        encoding="utf-8",
+    )
+    assert v.check_http_link_canonical_gate(dist)["status"] == "FAIL"
+    with pytest.raises(ValueError):
+        assert_headers_no_html_link_canonical_and_has_content_signal((dist / "_headers").read_text(encoding="utf-8"))
+
+    (dist / "_headers").write_text("/*\n  X-Frame-Options: DENY\n", encoding="utf-8")
+    assert v.check_http_link_canonical_gate(dist)["status"] == "FAIL"
+    with pytest.raises(ValueError):
+        assert_headers_no_html_link_canonical_and_has_content_signal("/*\n  X-Frame-Options: DENY\n")
+
+    # Negative banned artifacts & raw catalog keys
+    (dist / "llms-full.txt").write_text("dump", encoding="utf-8")
+    (dist / "ai-benchmarks").mkdir(parents=True, exist_ok=True)
+    (dist / "ai-benchmarks" / "ref.md").write_text("dump", encoding="utf-8")
+    (dist / "catalog.json").write_text(
+        json.dumps({"tools": [{"slug": "calc-one", "formula": "x+1", "quick_answer": "42", "published_output": 42}]}),
+        encoding="utf-8",
+    )
+    bad_ai_gate = v.check_forbidden_ai_artifacts_and_catalog_gate(dist)
+    assert bad_ai_gate["status"] == "FAIL"
+    assert bad_ai_gate["violations_count"] >= 4
+    with pytest.raises(ValueError):
+        assert_no_forbidden_dist_manifest_artifacts(dist)
+    with pytest.raises(ValueError):
+        assert_catalog_json_no_raw_leaks(dist / "catalog.json")
+

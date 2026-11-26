@@ -602,7 +602,7 @@ def test_robots_txt_ai_crawler_taxonomy(tmp_path):
     dist = tmp_path / "dist"
     dist.mkdir()
 
-    # Valid robots.txt: training bot (GPTBot) disallowed, search bots allowed
+    # Valid robots.txt: training bots (GPTBot, ClaudeBot) disallowed, search bots allowed
     robots_valid = (
         "User-agent: *\n"
         "Allow: /\n"
@@ -616,9 +616,15 @@ def test_robots_txt_ai_crawler_taxonomy(tmp_path):
         "Allow: /\n\n"
         "User-agent: Bingbot\n"
         "Allow: /\n\n"
+        "User-agent: Applebot\n"
+        "Allow: /\n\n"
         "User-agent: PerplexityBot\n"
         "Allow: /\n\n"
-        "User-agent: ClaudeBot\n"
+        "User-agent: Perplexity-User\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-SearchBot\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-User\n"
         "Allow: /\n\n"
         "User-agent: OAI-SearchBot\n"
         "Allow: /\n\n"
@@ -626,9 +632,9 @@ def test_robots_txt_ai_crawler_taxonomy(tmp_path):
         "Allow: /\n\n"
         "User-agent: GPTBot\n"
         "Disallow: /\n\n"
+        "User-agent: ClaudeBot\n"
+        "Disallow: /\n\n"
         "Sitemap: https://example.com/sitemap.xml\n"
-        "Sitemap: https://example.com/sitemap-hubs.xml\n"
-        "Sitemap: https://example.com/sitemap-leaves.xml\n"
     )
     (dist / "robots.txt").write_text(robots_valid, encoding="utf-8")
 
@@ -650,9 +656,15 @@ def test_robots_txt_ai_crawler_taxonomy(tmp_path):
         "Allow: /\n\n"
         "User-agent: Bingbot\n"
         "Allow: /\n\n"
+        "User-agent: Applebot\n"
+        "Allow: /\n\n"
         "User-agent: PerplexityBot\n"
         "Allow: /\n\n"
-        "User-agent: ClaudeBot\n"
+        "User-agent: Perplexity-User\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-SearchBot\n"
+        "Allow: /\n\n"
+        "User-agent: Claude-User\n"
         "Allow: /\n\n"
         "User-agent: OAI-SearchBot\n"
         "Disallow: /\n\n"
@@ -660,9 +672,9 @@ def test_robots_txt_ai_crawler_taxonomy(tmp_path):
         "Allow: /\n\n"
         "User-agent: GPTBot\n"
         "Disallow: /\n\n"
+        "User-agent: ClaudeBot\n"
+        "Disallow: /\n\n"
         "Sitemap: https://example.com/sitemap.xml\n"
-        "Sitemap: https://example.com/sitemap-hubs.xml\n"
-        "Sitemap: https://example.com/sitemap-leaves.xml\n"
     )
     (dist / "robots.txt").write_text(robots_invalid, encoding="utf-8")
     res_inv = verifier.check_robots_txt_gate(dist)

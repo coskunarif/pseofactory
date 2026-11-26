@@ -406,4 +406,54 @@ def test_inspector_ignores_stale_prior_day_429_quota_events_and_synthesizes_gsc_
     assert "https://gainhelm.com/tools/soc-2-audit-cost-calculator/" in prompts[0]
 
 
+def test_lastmod_uniformity_080_threshold_elevates_status_to_warn(tmp_path):
+    """
+    Verifies Requirement 5:
+      1. audit_crawl_staleness_and_sitemap_health tightens lastmod uniformity
+         threshold to 0.80 on non-new sites (>= 10 URLs), flagging 8/10 uniform URLs.
+      2. lastmod_uniform_build_timestamp_flagged elevates status to 'WARN' (fail-visible).
+      3. Mixed dates (< 0.80 uniformity) pass cleanly with status == 'PASS'.
+    """
+    base_dir = tmp_path / "profithelm"
+    dist_dir = base_dir / "dist"
+    agy_dir = base_dir / ".agy"
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    agy_dir.mkdir(parents=True, exist_ok=True)
+
+    # 8 out of 10 URLs share identical build timestamp (0.80 >= 0.80)
+    urls_80 = []
+    for i in range(8):
+        urls_80.append(f"<url><loc>https://profithelm.com/tools/t-{i}/</loc><lastmod>2026-11-20</lastmod></url>")
+    urls_80.append("<url><loc>https://profithelm.com/tools/t-8/</loc><lastmod>2026-10-15</lastmod></url>")
+    urls_80.append("<url><loc>https://profithelm.com/tools/t-9/</loc><lastmod>2026-10-02</lastmod></url>")
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(urls_80)
+        + "</urlset>",
+        encoding="utf-8",
+    )
+
+    inspector = DailyIndexingInspector(tenant_id="profithelm", base_dir=base_dir, agy_dir=agy_dir)
+    res_warn = inspector.audit_crawl_staleness_and_sitemap_health(dist_dir=dist_dir)
+    assert res_warn["sitemap_health"]["lastmod_uniformity_ratio"] == 0.8
+    assert res_warn["sitemap_health"]["lastmod_uniform_build_timestamp_flagged"] is True
+    assert res_warn["status"] == "WARN"
+
+    # Mixed distinct dates (max ratio 0.40 < 0.80) -> PASS
+    urls_mixed = [
+        f"<url><loc>https://profithelm.com/tools/t-{i}/</loc><lastmod>2026-10-{10 + (i % 5):02d}</lastmod></url>"
+        for i in range(10)
+    ]
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        + "".join(urls_mixed)
+        + "</urlset>",
+        encoding="utf-8",
+    )
+    res_ok = inspector.audit_crawl_staleness_and_sitemap_health(dist_dir=dist_dir)
+    assert res_ok["sitemap_health"]["lastmod_uniform_build_timestamp_flagged"] is False
+    assert res_ok["status"] == "PASS"
+
+
+
 

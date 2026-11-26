@@ -213,15 +213,14 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "ltv_bounty_equivalent_usd": 575.00,
     },
     "suretybonds_direct": {
-        "partnership_model": "HYBRID_CPA_REVSHARE",
-        "cpa_bounty_usd": 175.00,
-        "cpl_lead_bounty_usd": 6.50,
-        "recurring_revshare_pct": 30.0,
-        "recurring_horizon_months": 12,
-        "hybrid_stage_bounties_usd": {"free_trial_lead_usd": 6.50, "paid_contract_revshare_pct": 30.0},
-        "usage_referral_basis": "",
+        "partnership_model": "FLAT_SPONSORSHIP",
+        "cpa_bounty_usd": 0.0,
+        "cpl_lead_bounty_usd": 0.0,
+        "recurring_revshare_pct": 0.0,
+        "recurring_horizon_months": 0,
+        "usage_referral_basis": "Non-sale-contingent flat directory sponsorship / CPC placement",
         "click_to_conversion_rate": 0.052,
-        "ltv_bounty_equivalent_usd": 230.25,
+        "ltv_bounty_equivalent_usd": 0.0,
     },
     "lawdepot": {
         "partnership_model": "HYBRID_CPA_REVSHARE",
@@ -285,14 +284,14 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "ltv_bounty_equivalent_usd": 325.00,
     },
     "coalition_cyber_insurance": {
-        "partnership_model": "QUALIFIED_LEAD_CPL",
-        "cpa_bounty_usd": 250.00,
-        "cpl_lead_bounty_usd": 250.00,
+        "partnership_model": "FLAT_SPONSORSHIP",
+        "cpa_bounty_usd": 0.0,
+        "cpl_lead_bounty_usd": 0.0,
         "recurring_revshare_pct": 0.0,
         "recurring_horizon_months": 0,
-        "usage_referral_basis": "",
+        "usage_referral_basis": "Non-sale-contingent flat directory sponsorship / CPC placement",
         "click_to_conversion_rate": 0.075,
-        "ltv_bounty_equivalent_usd": 250.00,
+        "ltv_bounty_equivalent_usd": 0.0,
     },
     "cobalt_pentest": {
         "partnership_model": "CPA_BOUNTY",
@@ -305,14 +304,14 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "ltv_bounty_equivalent_usd": 275.00,
     },
     "thimble_contractor": {
-        "partnership_model": "CPA_BOUNTY",
-        "cpa_bounty_usd": 125.00,
+        "partnership_model": "CPC",
+        "cpa_bounty_usd": 0.0,
         "cpl_lead_bounty_usd": 0.0,
         "recurring_revshare_pct": 0.0,
         "recurring_horizon_months": 0,
-        "usage_referral_basis": "",
+        "usage_referral_basis": "Non-sale-contingent CPC / directory listing",
         "click_to_conversion_rate": 0.068,
-        "ltv_bounty_equivalent_usd": 125.00,
+        "ltv_bounty_equivalent_usd": 0.0,
     },
     "jobber_field_service": {
         "partnership_model": "RECURRING_SAAS_REVSHARE",
@@ -507,24 +506,24 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
         "ltv_bounty_equivalent_usd": 250.00,
     },
     "simply_business": {
-        "partnership_model": "QUALIFIED_LEAD_CPL",
-        "cpa_bounty_usd": 185.00,
-        "cpl_lead_bounty_usd": 185.00,
+        "partnership_model": "FLAT_SPONSORSHIP",
+        "cpa_bounty_usd": 0.0,
+        "cpl_lead_bounty_usd": 0.0,
         "recurring_revshare_pct": 0.0,
         "recurring_horizon_months": 0,
-        "usage_referral_basis": "",
+        "usage_referral_basis": "Non-sale-contingent flat directory sponsorship / CPC placement",
         "click_to_conversion_rate": 0.080,
-        "ltv_bounty_equivalent_usd": 185.00,
+        "ltv_bounty_equivalent_usd": 0.0,
     },
     "next_insurance_b2b": {
-        "partnership_model": "QUALIFIED_LEAD_CPL",
-        "cpa_bounty_usd": 160.00,
-        "cpl_lead_bounty_usd": 160.00,
+        "partnership_model": "DIRECTORY_METADATA",
+        "cpa_bounty_usd": 0.0,
+        "cpl_lead_bounty_usd": 0.0,
         "recurring_revshare_pct": 0.0,
         "recurring_horizon_months": 0,
-        "usage_referral_basis": "",
-        "click_to_conversion_rate": 0.082,
-        "ltv_bounty_equivalent_usd": 160.00,
+        "usage_referral_basis": "De minimis directory metadata only",
+        "click_to_conversion_rate": 0.0,
+        "ltv_bounty_equivalent_usd": 0.0,
     },
     "national_funding_med": {
         "partnership_model": "QUALIFIED_LEAD_CPL",
@@ -680,11 +679,394 @@ PARTNER_PARTNERSHIP_MODEL_SPECS: Dict[str, Dict[str, Any]] = {
 }
 
 
+NON_SALE_CONTINGENT_INSURANCE_MODELS: frozenset = frozenset({
+    "FLAT_SPONSORSHIP",
+    "CPC",
+    "DIRECTORY_METADATA",
+})
+
+PROHIBITED_UNLICENSED_INSURANCE_MODELS: frozenset = frozenset({
+    "HYBRID_CPA_REVSHARE",
+    "RECURRING_SAAS_REVSHARE",
+    "CPA_BOUNTY",
+    "QUALIFIED_LEAD_CPL",
+    "USAGE_API_REFERRAL",
+    "REVSHARE",
+    "PERCENTAGE_COMMISSION",
+    "BOUND_POLICY_BOUNTY",
+    "ISSUED_BOND_BOUNTY",
+})
+
+INSURANCE_SURETY_PARTNER_KEYS: frozenset = frozenset({
+    "suretybonds_direct",
+    "simply_business",
+    "thimble_contractor",
+    "next_insurance_b2b",
+    "coalition_cyber_insurance",
+})
+
+_SALE_CONTINGENT_INSURANCE_PHRASES: Tuple[str, ...] = (
+    "issued bond",
+    "bound policy",
+    "per bond",
+    "per policy",
+    "paid_contract_revshare",
+    "written premium",
+    "policy issuance",
+    "bond issuance",
+    "revshare",
+    "revenue share",
+    "of premium",
+    "of policy premium",
+)
+
+
+def is_insurance_surety_vertical(
+    property_id: str = "",
+    slug: str = "",
+    vertical_family: str = "",
+    partner_key: str = "",
+    category: str = "",
+    tenant_key: str = "",
+    offer_text: str = "",
+) -> bool:
+    """Returns True when the target vertical or partner falls under insurance/surety NAIC PLMA Sec. 13 scope."""
+    pk = str(partner_key or "").strip().lower()
+    if pk in INSURANCE_SURETY_PARTNER_KEYS:
+        return True
+    vf = str(vertical_family or "").strip().lower()
+    if vf in ("surety_bond_compliance", "workers_comp_labor_burden"):
+        return True
+    combined_meta = f"{property_id} {tenant_key} {slug} {vf} {pk} {category}".lower()
+    combined_all = f"{combined_meta} {offer_text}".lower()
+    if re.search(r"\bcoi\b", combined_all):
+        return True
+    if any(
+        tok in combined_all
+        for tok in (
+            "lienbond",
+            "surety",
+            "surety-bond",
+            "license-bond",
+            "miller-act",
+            "fidelity-bond",
+            "performance-bond",
+            "payment-bond",
+            "workers_comp",
+            "workers-comp",
+            "workers comp",
+            "contractor-insurance",
+            "commercial-insurance",
+            "cyber_insurance",
+            "cyber-insurance",
+            "cyber liability",
+            "general-liability",
+            "certificate-of-insurance",
+            "emr-workers-comp",
+            "erisa-fidelity",
+            "insurance",
+        )
+    ):
+        return True
+    if "bond" in combined_meta:
+        return True
+    if re.search(r"\bbond\b", str(offer_text or "").lower()):
+        return True
+    return False
+
+
+def is_producer_license_verified(
+    tenant_config: Optional[Dict[str, Any]] = None,
+    property_id: str = "",
+    repo_root: Optional[Any] = None,
+) -> bool:
+    """
+    Fail-closed producer license check: returns True ONLY when producer_license_verified=True
+    is explicitly configured in tenant_config or .pseofactory.json.
+    """
+    if isinstance(tenant_config, dict):
+        return tenant_config.get("producer_license_verified") is True
+    if repo_root is not None:
+        marker = Path(repo_root) / ".pseofactory.json"
+        if marker.is_file():
+            try:
+                data = json.loads(marker.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data.get("producer_license_verified") is True
+            except Exception:
+                return False
+    _ = property_id
+    return False
+
+
+def validate_insurance_surety_compensation_compliance(
+    offers_or_partners: Sequence[Any],
+    property_id: str = "",
+    slug: str = "",
+    vertical_family: str = "",
+    tenant_config: Optional[Dict[str, Any]] = None,
+    repo_root: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    NAIC PLMA Sec. 13 fail-closed regulatory gate for insurance/surety verticals.
+    Blocks HYBRID_CPA_REVSHARE, percentage/revshare, 'issued bond', or 'bound policy'
+    sale-contingent compensation models unless producer_license_verified=True is explicitly
+    set in tenant config. Allows only non-sale-contingent FLAT_SPONSORSHIP, CPC, or
+    de minimis DIRECTORY_METADATA when unlicensed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    licensed = is_producer_license_verified(
+        tenant_config=tenant_config,
+        property_id=property_id,
+        repo_root=repo_root,
+    )
+    issues: List[str] = []
+    checked = 0
+
+    def _safe_float(val: Any) -> float:
+        if val is None or isinstance(val, bool):
+            return 0.0
+        if isinstance(val, (int, float)):
+            return float(val)
+        cleaned = str(val).strip().replace("$", "").replace(",", "").replace("%", "")
+        if not cleaned:
+            return 0.0
+        try:
+            return float(cleaned)
+        except ValueError:
+            return 0.0
+
+    for item in offers_or_partners:
+        if isinstance(item, dict):
+            pk = str(item.get("partner_key") or item.get("key") or "").strip().lower()
+            p_model = str(item.get("partnership_model") or "").strip().upper()
+            category = str(item.get("category") or "").strip()
+            comm_est = str(item.get("commission_est") or "").strip()
+            bounty_est = str(item.get("bounty_est") or "").strip()
+            desc = str(item.get("description") or "").strip()
+            spec = item.get("partnership_model_spec") if isinstance(item.get("partnership_model_spec"), dict) else {}
+            item_slug = str(item.get("slug") or slug or "")
+            item_vf = str(item.get("vertical_family") or vertical_family or "")
+            item_tenant = str(item.get("tenant_key") or item.get("property_id") or property_id or "").strip().lower()
+            item_name_title = f"{item.get('name') or ''} {item.get('title') or ''}".strip()
+            usage_basis = " ".join(
+                str(x or "").strip()
+                for x in (
+                    item.get("usage_referral_basis"),
+                    spec.get("usage_referral_basis") if isinstance(spec, dict) else "",
+                )
+                if str(x or "").strip()
+            )
+            spec_comm = str(spec.get("commission_est") or "").strip() if isinstance(spec, dict) else ""
+            spec_bounty = str(spec.get("bounty_est") or "").strip() if isinstance(spec, dict) else ""
+            spec_desc = str(spec.get("description") or "").strip() if isinstance(spec, dict) else ""
+            top_rev = max(_safe_float(item.get("recurring_revshare_pct")), _safe_float(item.get("revshare_pct")))
+            top_cpa = _safe_float(item.get("cpa_bounty_usd"))
+            top_cpl = _safe_float(item.get("cpl_lead_bounty_usd"))
+            top_hybrid = item.get("hybrid_stage_bounties_usd")
+        else:
+            pk = str(getattr(item, "key", "") or "").strip().lower()
+            p_model = str(getattr(item, "partnership_model", "") or "").strip().upper()
+            category = str(getattr(item, "category", "") or "").strip()
+            comm_est = str(getattr(item, "commission_est", "") or "").strip()
+            bounty_est = str(getattr(item, "bounty_est", "") or "").strip()
+            desc = str(getattr(item, "description", "") or "").strip()
+            spec = PARTNER_PARTNERSHIP_MODEL_SPECS.get(pk, {})
+            item_slug = slug
+            item_vf = vertical_family
+            item_tenant = str(getattr(item, "tenant_key", "") or getattr(item, "property_id", "") or property_id or "").strip().lower()
+            item_name_title = f"{getattr(item, 'name', '') or ''} {getattr(item, 'title', '') or ''}".strip()
+            usage_basis = " ".join(
+                str(x or "").strip()
+                for x in (
+                    getattr(item, "usage_referral_basis", ""),
+                    spec.get("usage_referral_basis") if isinstance(spec, dict) else "",
+                )
+                if str(x or "").strip()
+            )
+            spec_comm = str(spec.get("commission_est") or "").strip() if isinstance(spec, dict) else ""
+            spec_bounty = str(spec.get("bounty_est") or "").strip() if isinstance(spec, dict) else ""
+            spec_desc = str(spec.get("description") or "").strip() if isinstance(spec, dict) else ""
+            top_rev = max(
+                _safe_float(getattr(item, "recurring_revshare_pct", 0.0)),
+                _safe_float(getattr(item, "revshare_pct", 0.0)),
+            )
+            top_cpa = _safe_float(getattr(item, "cpa_bounty_usd", 0.0))
+            top_cpl = _safe_float(getattr(item, "cpl_lead_bounty_usd", 0.0))
+            top_hybrid = getattr(item, "hybrid_stage_bounties_usd", None)
+
+        offer_text = f"{item_name_title} {comm_est} {spec_comm} {bounty_est} {spec_bounty} {desc} {spec_desc} {usage_basis}".strip()
+        own_scope_blob = f"{item_slug} {item_vf} {pk} {category} {offer_text}".lower()
+        if pk in ("jobber_field_service", "levelset_lien_filing") and not any(
+            tok in own_scope_blob
+            for tok in (
+                "surety",
+                "insurance",
+                "workers_comp",
+                "workers-comp",
+                "workers comp",
+                "issued bond",
+                "bound policy",
+                "per bond",
+                "per policy",
+            )
+        ) and not re.search(r"\b(?:bond|coi)\b", own_scope_blob):
+            continue
+
+        if not is_insurance_surety_vertical(
+            property_id=property_id,
+            slug=item_slug,
+            vertical_family=item_vf,
+            partner_key=pk,
+            category=category,
+            tenant_key=item_tenant,
+            offer_text=offer_text,
+        ):
+            continue
+
+        checked += 1
+        if licensed:
+            continue
+
+        spec_p_model = str(spec.get("partnership_model") or "").strip().upper() if isinstance(spec, dict) else ""
+        for pm_val in (p_model, spec_p_model):
+            if pm_val and pm_val not in NON_SALE_CONTINGENT_INSURANCE_MODELS:
+                issues.append(
+                    f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): prohibited unlicensed insurance/surety "
+                    f"compensation model '{pm_val}'; require producer_license_verified=True or non-sale-contingent FLAT_SPONSORSHIP/CPC"
+                )
+
+        spec_rev = (
+            max(_safe_float(spec.get("recurring_revshare_pct")), _safe_float(spec.get("revshare_pct")))
+            if isinstance(spec, dict)
+            else 0.0
+        )
+        rev_pct = max(top_rev, spec_rev)
+        spec_hybrid = spec.get("hybrid_stage_bounties_usd") if isinstance(spec, dict) else None
+        hybrid_dicts = [hd for hd in (top_hybrid, spec_hybrid) if isinstance(hd, dict)]
+        if any(bool(hd) or any(_safe_float(v) > 0.0 for v in hd.values()) for hd in hybrid_dicts):
+            issues.append(
+                f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): hybrid_stage_bounties_usd compensation "
+                f"blocked without producer_license_verified=True"
+            )
+        hybrid_keys_text = " ".join(
+            str(k).lower().replace("_", " ")
+            for hd in hybrid_dicts
+            for k in hd
+        )
+        if rev_pct > 0.0 or any(
+            any("revshare" in str(k).lower() or "pct" in str(k).lower() or "percent" in str(k).lower() for k in hd)
+            for hd in hybrid_dicts
+        ):
+            issues.append(
+                f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): percentage/revshare compensation blocked without producer_license_verified=True"
+            )
+
+        spec_cpa = _safe_float(spec.get("cpa_bounty_usd")) if isinstance(spec, dict) else 0.0
+        spec_cpl = _safe_float(spec.get("cpl_lead_bounty_usd")) if isinstance(spec, dict) else 0.0
+        cpa_val = max(top_cpa, spec_cpa)
+        cpl_val = max(top_cpl, spec_cpl)
+        if cpa_val > 0.0 or cpl_val > 0.0:
+            issues.append(
+                f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): sale/lead-contingent bounty (${max(cpa_val, cpl_val):.2f}) blocked without producer_license_verified=True"
+            )
+
+        text_blob = f"{comm_est} {spec_comm} {bounty_est} {spec_bounty} {desc} {spec_desc} {usage_basis} {hybrid_keys_text}".lower()
+        for phrase in _SALE_CONTINGENT_INSURANCE_PHRASES:
+            if phrase in text_blob:
+                issues.append(
+                    f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): sale-contingent compensation term '{phrase}' blocked without producer_license_verified=True"
+                )
+        if "%" in text_blob or re.search(r"\bpercent\b", text_blob):
+            issues.append(
+                f"NAIC PLMA Sec. 13 violation ({pk or 'offer'}): percentage compensation '{text_blob[:120].strip()}' blocked without producer_license_verified=True"
+            )
+
+    return {
+        "status": "PASS" if not issues else "FAIL",
+        "passed": len(issues) == 0,
+        "producer_license_verified": licensed,
+        "offers_checked": checked,
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
+def assert_insurance_surety_compensation_compliance(
+    offers_or_partners: Sequence[Any],
+    property_id: str = "",
+    slug: str = "",
+    vertical_family: str = "",
+    tenant_config: Optional[Dict[str, Any]] = None,
+    repo_root: Optional[Any] = None,
+    context: str = "",
+) -> bool:
+    """Raises ValueError when an unlicensed insurance/surety vertical uses sale-contingent compensation."""
+    res = validate_insurance_surety_compensation_compliance(
+        offers_or_partners=offers_or_partners,
+        property_id=property_id,
+        slug=slug,
+        vertical_family=vertical_family,
+        tenant_config=tenant_config,
+        repo_root=repo_root,
+    )
+    if not res["passed"]:
+        ctx = f" in {context}" if context else ""
+        raise ValueError(f"Insurance/surety regulatory gate failed{ctx}: {'; '.join(res['issues'])}")
+    return True
+
+
+def is_consumer_or_smb_finance_loan_vertical(
+    property_id: str = "",
+    slug: str = "",
+    vertical_family: str = "",
+    query: str = "",
+) -> bool:
+    """
+    Returns True for consumer and SMB finance, loan, credit, banking, treasury, or
+    working-capital verticals subject to CFPB Circular 2024-01 unbiased sorting rules.
+    """
+    prop = (property_id or "").strip().lower()
+    if prop == "prexvo":
+        return True
+    vf = (vertical_family or "").strip().lower()
+    if vf in (
+        "student_loan_refinancing",
+        "commercial_working_capital_factoring",
+        "treasury_cash_runway",
+        "section_179_equipment_capex",
+        "payment_processing_api_usage",
+        "saas_unit_economics_spend",
+        "construction_contractor_finance",
+    ):
+        return True
+    combined = f"{slug} {vf} {query}".lower()
+    return any(
+        tok in combined
+        for tok in (
+            "loan",
+            "refinanc",
+            "factoring",
+            "working-capital",
+            "credit",
+            "lender",
+            "financing",
+            "treasury",
+            "banking",
+            "mortgage",
+            "sba",
+            "apr",
+            "borrow",
+            "debt",
+        )
+    )
+
+
 def resolve_partnership_model_spec(partner_key: str, partner_obj: Optional[Any] = None) -> Dict[str, Any]:
     """
     Resolves the structured partnership model specification (RECURRING_SAAS_REVSHARE,
-    CPA_BOUNTY, QUALIFIED_LEAD_CPL, HYBRID_CPA_REVSHARE, or USAGE_API_REFERRAL) for any
-    partner key or AffiliatePartner instance.
+    CPA_BOUNTY, QUALIFIED_LEAD_CPL, HYBRID_CPA_REVSHARE, USAGE_API_REFERRAL,
+    FLAT_SPONSORSHIP, CPC, or DIRECTORY_METADATA) for any partner key or AffiliatePartner instance.
     Zero em-dashes. Zero en-dashes.
     """
     pk = str(partner_key or getattr(partner_obj, "key", "") or "").strip().lower()
@@ -693,10 +1075,30 @@ def resolve_partnership_model_spec(partner_key: str, partner_obj: Optional[Any] 
         spec["partner_key"] = pk
         return spec
 
+    explicit_model = str(getattr(partner_obj, "partnership_model", "") or "").strip().upper()
+    if explicit_model in NON_SALE_CONTINGENT_INSURANCE_MODELS:
+        return {
+            "partner_key": pk,
+            "partnership_model": explicit_model,
+            "cpa_bounty_usd": 0.0,
+            "cpl_lead_bounty_usd": 0.0,
+            "recurring_revshare_pct": 0.0,
+            "recurring_horizon_months": 0,
+            "usage_referral_basis": "Non-sale-contingent directory placement",
+            "click_to_conversion_rate": 0.05,
+            "ltv_bounty_equivalent_usd": 0.0,
+        }
+
     comm_raw = str(getattr(partner_obj, "commission_est", "") or "").lower()
     bounty_raw = str(getattr(partner_obj, "bounty_est", "") or "").lower()
     combined = f"{pk} {comm_raw} {bounty_raw}"
-    if "sqo" in combined or ("+" in combined and ("recurring" in combined or "onboarded" in combined or "trial" in combined)):
+    if "flat sponsorship" in combined or "flat_sponsorship" in combined:
+        model = "FLAT_SPONSORSHIP"
+        conv_rate = 0.05
+    elif "cpc" in combined or "cost per click" in combined:
+        model = "CPC"
+        conv_rate = 0.05
+    elif "sqo" in combined or ("+" in combined and ("recurring" in combined or "onboarded" in combined or "trial" in combined)):
         model = "HYBRID_CPA_REVSHARE"
         conv_rate = 0.045
     elif "recurring" in combined or "revshare" in combined:
@@ -715,13 +1117,13 @@ def resolve_partnership_model_spec(partner_key: str, partner_obj: Optional[Any] 
     return {
         "partner_key": pk,
         "partnership_model": model,
-        "cpa_bounty_usd": 120.0,
+        "cpa_bounty_usd": 0.0 if model in NON_SALE_CONTINGENT_INSURANCE_MODELS else 120.0,
         "cpl_lead_bounty_usd": 120.0 if model == "QUALIFIED_LEAD_CPL" else 0.0,
         "recurring_revshare_pct": 20.0 if model in ("RECURRING_SAAS_REVSHARE", "HYBRID_CPA_REVSHARE") else 0.0,
         "recurring_horizon_months": 12 if model in ("RECURRING_SAAS_REVSHARE", "HYBRID_CPA_REVSHARE") else 0,
         "usage_referral_basis": "Metered API or transaction volume" if model == "USAGE_API_REFERRAL" else "",
         "click_to_conversion_rate": conv_rate,
-        "ltv_bounty_equivalent_usd": 150.0,
+        "ltv_bounty_equivalent_usd": 0.0 if model in NON_SALE_CONTINGENT_INSURANCE_MODELS else 150.0,
     }
 
 
@@ -743,7 +1145,12 @@ def score_partnership_model_intent_fit(
     q_low = (query or "").strip().lower()
 
     mult = 1.0
-    if model == "HYBRID_CPA_REVSHARE":
+    if model in NON_SALE_CONTINGENT_INSURANCE_MODELS:
+        if vert in ("surety_bond_compliance", "workers_comp_labor_burden", "b2b_cyber_compliance", "construction_contractor_finance"):
+            mult = 1.30
+        else:
+            mult = 1.15
+    elif model == "HYBRID_CPA_REVSHARE":
         if vert in (
             "section_179_equipment_capex",
             "s_corp_payroll_reasonable_comp",
@@ -1817,14 +2224,14 @@ GAINHELM_AFFILIATES: Dict[str, AffiliatePartner] = {
         env_var="AFFILIATE_COALITION_CYBER_INSURANCE_URL",
         default_url="https://www.coalitioninc.com/cyber-insurance",
         badge="Active Cyber Risk & Breach Response",
-        commission_est="$200-$300/qualified quote",
-        bounty_est="$250",
+        commission_est="Flat sponsorship / CPC directory placement (pending approval)",
+        bounty_est="$0",
         network="Impact.com",
         description="Active cyber liability insurance combining continuous external attack surface monitoring with first-party HITECH/SEC breach response, forensics, and regulatory defense coverage.",
         target_tools=list(GAINHELM_MONETIZED_CALCULATOR_SLUGS),
         supported_params=["ph_tier"],
         cta_text="Model Active Cyber Liability Coverage with Coalition",
-        partnership_model="QUALIFIED_LEAD_CPL",
+        partnership_model="FLAT_SPONSORSHIP",
     ),
     "cobalt_pentest": AffiliatePartner(
         key="cobalt_pentest",
@@ -2945,14 +3352,14 @@ LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
         env_var="AFFILIATE_SIMPLY_BUSINESS_URL",
         default_url="https://www.simplybusiness.com/",
         badge="Instant Multi-Carrier Workers Comp & GL Quotes",
-        commission_est="$160-$210/qualified quote (pending approval)",
-        bounty_est="$185",
+        commission_est="Flat sponsorship / CPC directory placement (pending approval)",
+        bounty_est="$0",
         network="Impact.com",
         description="Compare instant multi-carrier workers compensation, general liability, and builder risk quotes across NCCI and state rating bureau trade class codes.",
         target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
         supported_params=["ph_tier"],
         cta_text="Compare Instant Workers Comp & Contractor Quotes at Simply Business",
-        partnership_model="QUALIFIED_LEAD_CPL",
+        partnership_model="FLAT_SPONSORSHIP",
     ),
     "suretybonds_direct": AffiliatePartner(
         key="suretybonds_direct",
@@ -2963,14 +3370,14 @@ LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
         env_var="AFFILIATE_SURETYBONDS_DIRECT_URL",
         default_url="https://www.suretybondsdirect.com/",
         badge="Nationwide State License, Bid & Performance Bonds",
-        commission_est="$150-$225/issued bond (pending approval)",
-        bounty_est="$175-$230",
+        commission_est="Flat sponsorship / CPC directory placement (pending approval)",
+        bounty_est="$0",
         network="In-House Direct",
-        description="Instant online underwriting for state contractor license bonds (CSLB, TX, FL), Federal Miller Act performance/payment bonds, and ERISA Section 412 fidelity bonds.",
+        description="Online directory overview for state contractor license bonds (CSLB, TX, FL), Federal Miller Act performance/payment bonds, and ERISA Section 412 fidelity bonds.",
         target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
         supported_params=["ph_tier"],
         cta_text="Get Your Instant State License or Performance Bond Quote at SuretyBondsDirect.com",
-        partnership_model="HYBRID_CPA_REVSHARE",
+        partnership_model="FLAT_SPONSORSHIP",
     ),
     "next_insurance_b2b": AffiliatePartner(
         key="next_insurance_b2b",
@@ -2988,7 +3395,7 @@ LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
         target_tools=[],
         supported_params=["ph_tier"],
         cta_text="Next Insurance Commercial Contractor Overview",
-        partnership_model="QUALIFIED_LEAD_CPL",
+        partnership_model="DIRECTORY_METADATA",
     ),
     "thimble_contractor": AffiliatePartner(
         key="thimble_contractor",
@@ -2999,14 +3406,14 @@ LIENBOND_AFFILIATES: Dict[str, AffiliatePartner] = {
         env_var="AFFILIATE_THIMBLE_CONTRACTOR_URL",
         default_url="https://www.thimble.com/",
         badge="Instant Job-Site COI & Subcontractor Coverage",
-        commission_est="$110-$145/bound policy (pending approval)",
-        bounty_est="$125",
+        commission_est="Flat sponsorship / CPC directory placement (pending approval)",
+        bounty_est="$0",
         network="Impact.com",
-        description="Same-day general liability and commercial contractor policies designed for subcontractors who need an immediate compliant Certificate of Insurance to step onto a job site.",
+        description="Directory listing for same-day general liability and commercial contractor policies designed for subcontractors who need a compliant Certificate of Insurance.",
         target_tools=list(LIENBOND_MONETIZED_CALCULATOR_SLUGS),
         supported_params=["ph_tier"],
         cta_text="Get an Instant Job-Site Certificate of Insurance via Thimble",
-        partnership_model="CPA_BOUNTY",
+        partnership_model="CPC",
     ),
     "jobber_field_service": AffiliatePartner(
         key="jobber_field_service",
@@ -3731,20 +4138,27 @@ def score_partner_yield(
     vault_status: Optional[str] = None,
     engagement_metrics: Optional[Dict[str, Any]] = None,
     slug: Optional[str] = None,
+    property_id: Optional[str] = None,
+    vertical_family: Optional[str] = None,
+    sponsored_placement_labeled: bool = False,
 ) -> float:
     """
     Scores expected yield of an affiliate partner weighted by operational status
     and optional empirical outbound CTA engagement / conversion yield telemetry.
-    When engagement_metrics is None, preserves exact baseline status-weighted bounty midpoint.
+    Per CFPB Circular 2024-01, on consumer/SMB finance & loan verticals without an
+    explicit 'Sponsored Placement' label, does NOT weight or sort by payout/bounty
+    and instead returns a deterministic objective status and product-fit score.
     Zero em-dashes. Zero en-dashes.
     """
     if isinstance(partner, dict):
         p_status = str(partner.get("status") or "")
         p_key = str(partner.get("key") or partner.get("partner_key") or "")
+        p_prop = str(property_id or partner.get("property_id") or "")
         midpoint = get_partner_bounty_midpoint(partner)
     else:
         p_status = str(getattr(partner, "status", "") or "")
         p_key = str(getattr(partner, "key", "") or "")
+        p_prop = str(property_id or getattr(partner, "property_id", "") or "")
         midpoint = parse_bounty_estimate(getattr(partner, "bounty_est", ""))["midpoint"]
 
     effective_status = (vault_status or p_status or "").strip().lower()
@@ -3758,6 +4172,29 @@ def score_partner_yield(
         weight = 0.15
     else:
         weight = 0.0
+
+    is_finance_loan = is_consumer_or_smb_finance_loan_vertical(
+        property_id=p_prop,
+        slug=str(slug or ""),
+        vertical_family=str(vertical_family or ""),
+    )
+    if is_finance_loan and not sponsored_placement_labeled:
+        # CFPB Circular 2024-01: objective status + product-fit only (zero bounty/payout weighting)
+        base_objective = round(weight * 100.0, 4)
+        if not engagement_metrics:
+            return base_objective
+        emp = _extract_partner_engagement_record(p_key, engagement_metrics, slug=slug)
+        if not isinstance(emp, dict):
+            return base_objective
+        outbound_clicks = int(float(emp.get("outbound_clicks", emp.get("affiliate_clicks", emp.get("clicks", 0))) or 0))
+        calc_interactions = int(float(emp.get("calculator_interactions", emp.get("interactions", emp.get("calculations", 0))) or 0))
+        views = int(float(emp.get("views_exposed", emp.get("page_views", emp.get("impressions", 0))) or 0))
+        cta_ctr = float(emp.get("cta_ctr", emp.get("conversion_rate", emp.get("ctr", 0.0))) or 0.0)
+        traffic_basis = max(1, views, calc_interactions, outbound_clicks)
+        if cta_ctr <= 0.0 and outbound_clicks > 0:
+            cta_ctr = outbound_clicks / float(traffic_basis)
+        return round(base_objective * (1.0 + min(0.5, cta_ctr * 5.0)), 4)
+
     base_score = round(midpoint * weight, 4)
 
     if not engagement_metrics:
@@ -4366,9 +4803,13 @@ def build_contextual_referral_card_html(
         f'data-mechanic="compliant_intent_monetization" data-property="{html_lib.escape(prop)}"{extra_attr} '
         f'data-partner="{html_lib.escape(p_key)}" data-company-brand="{html_lib.escape(brand_str)}" '
         f'data-partnership-model="{html_lib.escape(p_model)}" data-partner-models="{html_lib.escape(models_csv)}">\n'
+        f'      <div class="contextual-referral-header">\n'
+        f'        <span class="contextual-referral-badge affiliate-disclosure-badge">Sponsored Placement</span>\n'
+        f'      </div>\n'
+        f'      <p class="affiliate-disclosure contextual-referral-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 4px; margin-bottom: 8px;">'
+        f'{html_lib.escape(ftc_disc)}</p>\n'
         f'      <div class="contextual-referral-body">\n'
         f'        <div class="contextual-referral-copy">\n'
-        f'          <span class="contextual-referral-badge">Optional Partner Resource</span>\n'
         f'          <div class="contextual-referral-title">{html_lib.escape(partner_name)}</div>\n'
         f'          <p class="contextual-referral-desc">{html_lib.escape(partner_desc)}</p>\n'
         f'        </div>\n'
@@ -4379,8 +4820,6 @@ def build_contextual_referral_card_html(
         f'data-cta-slot="contextual_referral" class="btn-secondary partner-cta affiliate-cta-link touch-target">'
         f'{html_lib.escape(cta_text)}</a>\n'
         f'      </div>\n'
-        f'      <p class="affiliate-disclosure" style="font-size: 12px; color: var(--text-muted); margin-top: 8px; margin-bottom: 0;">'
-        f'{html_lib.escape(ftc_disc)}</p>\n'
         f'    </section>'
     )
 
@@ -4773,11 +5212,15 @@ def resolve_optimal_partner_for_slug(
     slug: str,
     vault_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
     engagement_metrics: Optional[Dict[str, Any]] = None,
+    sponsored_placement_labeled: bool = False,
 ) -> Optional[AffiliatePartner]:
     """
     Resolves the optimal affiliate partner for a property and calculator slug,
     enforcing domain boundaries and prioritizing highest-yielding live partners
     (incorporating empirical outbound partner engagement and conversion telemetry when present).
+    Per CFPB Circular 2024-01, on consumer/SMB finance & loan verticals without an
+    explicit 'Sponsored Placement' label, uses objective product-fit / slug relevance
+    rather than silent payout/bounty sorting.
     Suppresses commercial refinance partners on restricted Prexvo public-service pages.
     Zero em-dashes. Zero en-dashes.
     """
@@ -4802,6 +5245,16 @@ def resolve_optimal_partner_for_slug(
             if eff_status in ("live", "active_direct"):
                 live_candidates.append((p, eff_status))
         if live_candidates:
+            if not sponsored_placement_labeled:
+                # Objective product-fit: match slug/target_tools deterministically, never payout/bounty
+                ranked_live = sorted(
+                    enumerate(live_candidates),
+                    key=lambda idx_item: (
+                        0 if s in [t.lower() for t in (idx_item[1][0].target_tools or [])] else 1,
+                        idx_item[0],
+                    ),
+                )
+                return ranked_live[0][1][0]
             best = max(
                 live_candidates,
                 key=lambda item: score_partner_yield(
@@ -4809,10 +5262,12 @@ def resolve_optimal_partner_for_slug(
                     item[1],
                     engagement_metrics=engagement_metrics,
                     slug=s,
+                    property_id=prop,
+                    sponsored_placement_labeled=sponsored_placement_labeled,
                 ),
             )
             return best[0]
-        if engagement_metrics and candidates:
+        if engagement_metrics and candidates and sponsored_placement_labeled:
             best_pending = max(
                 candidates,
                 key=lambda p: score_partner_yield(
@@ -4820,6 +5275,8 @@ def resolve_optimal_partner_for_slug(
                     p.status,
                     engagement_metrics=engagement_metrics,
                     slug=s,
+                    property_id=prop,
+                    sponsored_placement_labeled=sponsored_placement_labeled,
                 ),
             )
             return best_pending
@@ -4973,6 +5430,13 @@ def resolve_optimal_partner_for_slug(
                 if not non_fallback_live:
                     return candidates[0]
                 live_candidates = non_fallback_live
+            if is_consumer_or_smb_finance_loan_vertical(property_id=prop, slug=s) and not sponsored_placement_labeled:
+                # CFPB Circular 2024-01: objective product-fit / candidate roster order (no silent bounty sort)
+                live_keys_set = {p.key for p, _ in live_candidates}
+                for cand_p in candidates:
+                    if cand_p.key in live_keys_set:
+                        return cand_p
+                return live_candidates[0][0]
             best = max(
                 live_candidates,
                 key=lambda item: score_partner_yield(
@@ -4980,11 +5444,13 @@ def resolve_optimal_partner_for_slug(
                     item[1],
                     engagement_metrics=engagement_metrics,
                     slug=s,
+                    property_id=prop,
+                    sponsored_placement_labeled=sponsored_placement_labeled,
                 ),
             )
             return best[0]
 
-        if engagement_metrics:
+        if engagement_metrics and not (is_consumer_or_smb_finance_loan_vertical(property_id=prop, slug=s) and not sponsored_placement_labeled):
             best_cand = max(
                 candidates,
                 key=lambda p: score_partner_yield(
@@ -4992,6 +5458,8 @@ def resolve_optimal_partner_for_slug(
                     p.status,
                     engagement_metrics=engagement_metrics,
                     slug=s,
+                    property_id=prop,
+                    sponsored_placement_labeled=sponsored_placement_labeled,
                 ),
             )
             return best_cand
@@ -8904,7 +9372,8 @@ def normalize_html_callout_message_match(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{safe_p_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{html_lib.escape(ctx_card["badge"])}</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored / Partner</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored Placement - {c_brand}</span>\n'
+                f'        <p class="affiliate-disclosure" style="font-size: 0.75rem; color: var(--text-secondary); margin: 0.25rem 0;">FTC 16 CFR Part 255 Disclosure: We may earn a referral commission if you click this partner link at no extra cost to you.</p>\n'
                 f'        <h3 class="affiliate-title">{html_lib.escape(ctx_card["name"])}</h3>\n'
                 f'        <p class="affiliate-desc">{html_lib.escape(ctx_card["description"])}</p>\n'
                 f'      </div>\n'
@@ -9900,6 +10369,7 @@ def select_conversion_slot_plan(
     vertical_family: str = "general_b2b_commercial_finance",
     gsc_metrics: Optional[Dict[str, Any]] = None,
     engagement_metrics: Optional[Dict[str, Any]] = None,
+    sponsored_placement_labeled: bool = False,
 ) -> Dict[str, Any]:
     """
     Deterministically selects which partner link and conversion slot
@@ -10003,20 +10473,66 @@ def select_conversion_slot_plan(
         roster_offers=ordered_offers,
     )
 
-    highest_yield_offer = max(
-        ordered_offers,
-        key=lambda x: (
-            float(x.get("estimated_revenue_yield_usd", 0.0) or 0.0),
-            float(x.get("empirical_erpm_usd", 0.0) or 0.0),
-            float(x.get("yield_score", 0.0) or 0.0),
-            float(x.get("expected_epc_usd", 0.0) or 0.0),
-        ),
+    is_finance_loan = is_consumer_or_smb_finance_loan_vertical(
+        property_id=prop,
+        slug=s_norm,
+        vertical_family=vertical_family,
+        query=gsc_query,
     )
-    highest_yield_pk = str(highest_yield_offer.get("partner_key") or "")
+    allow_payout_sort = (not is_finance_loan) or bool(sponsored_placement_labeled)
+
+    def _objective_engagement_score(off: Dict[str, Any]) -> Tuple[float, int, int]:
+        pk_o = str(off.get("partner_key") or "").strip().lower()
+        e_ctr = float(off.get("empirical_cta_ctr", off.get("cta_ctr", 0.0)) or 0.0)
+        e_clicks = int(off.get("outbound_clicks", 0) or 0)
+        if engagement_metrics and pk_o:
+            emp_o = _extract_partner_engagement_record(pk_o, engagement_metrics, slug=s_norm)
+            if isinstance(emp_o, dict):
+                e_clicks = max(e_clicks, int(float(emp_o.get("outbound_clicks", emp_o.get("affiliate_clicks", emp_o.get("clicks", 0))) or 0)))
+                e_ctr = max(e_ctr, float(emp_o.get("cta_ctr", emp_o.get("conversion_rate", emp_o.get("ctr", 0.0))) or 0.0))
+                if e_ctr <= 0.0 and e_clicks > 0:
+                    e_views = int(float(emp_o.get("views_exposed", emp_o.get("page_views", emp_o.get("impressions", 0))) or 0))
+                    e_ctr = e_clicks / float(max(1, e_views, e_clicks))
+        is_top_conv = 1 if (top_conv_pk and pk_o == top_conv_pk) else 0
+        return (e_ctr, e_clicks, is_top_conv)
+
+    highest_engagement_pk = ""
+    if not allow_payout_sort:
+        # CFPB Circular 2024-01: default to deterministic objective product-fit sorting when unlabeled
+        indexed_offers = list(enumerate(ordered_offers))
+        indexed_offers.sort(
+            key=lambda pair: (
+                -float(pair[1].get("intent_fit_multiplier", 1.0) or 1.0),
+                pair[0],
+            )
+        )
+        ordered_offers = [pair[1] for pair in indexed_offers]
+        highest_yield_offer = ordered_offers[0]
+        highest_yield_pk = str(highest_yield_offer.get("partner_key") or "")
+        engaged_offers = [o for o in ordered_offers if any(v > 0 for v in _objective_engagement_score(o))]
+        if engaged_offers:
+            highest_engagement_pk = str(max(engaged_offers, key=_objective_engagement_score).get("partner_key") or "")
+    else:
+        highest_yield_offer = max(
+            ordered_offers,
+            key=lambda x: (
+                float(x.get("estimated_revenue_yield_usd", 0.0) or 0.0),
+                float(x.get("empirical_erpm_usd", 0.0) or 0.0),
+                float(x.get("yield_score", 0.0) or 0.0),
+                float(x.get("expected_epc_usd", 0.0) or 0.0),
+            ),
+        )
+        highest_yield_pk = str(highest_yield_offer.get("partner_key") or "")
+
+    promote_pk_gsc = highest_yield_pk if allow_payout_sort else highest_engagement_pk
 
     gsc_repositioned = False
     gsc_opportunity_tier = "BASELINE_MULTI_SLOT"
-    reposition_reason = "Deterministic archetype and expected-yield baseline slot selection."
+    reposition_reason = (
+        "Deterministic objective product-fit slot selection (CFPB Circular 2024-01 compliant)."
+        if not allow_payout_sort
+        else "Deterministic archetype and expected-yield baseline slot selection."
+    )
 
     # 1. Query-intent specialized partner swap when GSC query signals a sharper offer match
     if query_matched_pk and query_matched_pk != initial_primary_key:
@@ -10027,10 +10543,10 @@ def select_conversion_slot_plan(
             f"Live GSC query '{gsc_query}' matched specialized offer '{query_matched_pk}', "
             f"promoting it ahead of '{initial_primary_key}'."
         )
-    # 2. High-impression CTR shortfall or striking-distance yield promotion
+    # 2. High-impression CTR shortfall or striking-distance yield/engagement promotion
     elif impressions >= 50 and ctr < 0.03:
-        if highest_yield_pk and highest_yield_pk != initial_primary_key:
-            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        if promote_pk_gsc and promote_pk_gsc != initial_primary_key:
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == promote_pk_gsc else 1))
         gsc_repositioned = True
         gsc_opportunity_tier = "HIGH_IMPRESSION_CTR_SHORTFALL"
         reposition_reason = (
@@ -10038,8 +10554,15 @@ def select_conversion_slot_plan(
             f"calculator_result_inline and comparison_table_cta slot promotion for '{ordered_offers[0]['partner_key']}'."
         )
     elif 4.0 <= position <= 20.0 and impressions >= 10:
-        if highest_yield_pk and highest_yield_pk != initial_primary_key and float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0)):
-            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        if (
+            promote_pk_gsc
+            and promote_pk_gsc != initial_primary_key
+            and (
+                not allow_payout_sort
+                or float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0))
+            )
+        ):
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == promote_pk_gsc else 1))
         gsc_repositioned = True
         gsc_opportunity_tier = "STRIKING_DISTANCE_PROMOTION"
         reposition_reason = (
@@ -10047,8 +10570,15 @@ def select_conversion_slot_plan(
             f"multi-slot inline result hook plus comparison table partner row for '{ordered_offers[0]['partner_key']}'."
         )
     elif mobile_impressions >= 5 and (mobile_ctr_gap >= 0.01 or device_focus in ("MOBILE_CTR_DEFICIT", "MOBILE_DOMINANT")):
-        if highest_yield_pk and highest_yield_pk != initial_primary_key and float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0)):
-            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_yield_pk else 1))
+        if (
+            promote_pk_gsc
+            and promote_pk_gsc != initial_primary_key
+            and (
+                not allow_payout_sort
+                or float(highest_yield_offer.get("yield_score", 0.0)) > float(ordered_offers[0].get("yield_score", 0.0))
+            )
+        ):
+            ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == promote_pk_gsc else 1))
         gsc_repositioned = True
         gsc_opportunity_tier = "MOBILE_CTR_DEFICIT_PROMOTION"
         reposition_reason = (
@@ -10062,7 +10592,7 @@ def select_conversion_slot_plan(
             f"Rich-result searchAppearance ({','.join(search_appearances)}) promoted structured "
             f"comparison_table_cta and inline conversion slots for '{ordered_offers[0]['partner_key']}'."
         )
-    elif highest_yield_pk and highest_yield_pk != initial_primary_key and (
+    elif allow_payout_sort and highest_yield_pk and highest_yield_pk != initial_primary_key and (
         float(highest_yield_offer.get("estimated_revenue_yield_usd", 0.0) or 0.0) > 0.0
         or float(highest_yield_offer.get("empirical_erpm_usd", 0.0) or 0.0) > 0.0
     ):
@@ -10073,13 +10603,21 @@ def select_conversion_slot_plan(
             f"Empirical outbound engagement promoted higher-yielding partner '{highest_yield_pk}' "
             f"over static default '{initial_primary_key}'."
         )
-    elif top_conv_pk and top_conv_pk != initial_primary_key and any(o.get("partner_key") == top_conv_pk for o in ordered_offers):
+    elif allow_payout_sort and top_conv_pk and top_conv_pk != initial_primary_key and any(o.get("partner_key") == top_conv_pk for o in ordered_offers):
         ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == top_conv_pk else 1))
         gsc_repositioned = True
         gsc_opportunity_tier = "EMPIRICAL_YIELD_SWAP"
         reposition_reason = (
             f"Closed-loop slug engagement promoted top-converting partner '{top_conv_pk}' "
             f"ahead of '{initial_primary_key}'."
+        )
+    elif (not allow_payout_sort) and highest_engagement_pk and highest_engagement_pk != initial_primary_key:
+        ordered_offers.sort(key=lambda x: (0 if x.get("partner_key") == highest_engagement_pk else 1))
+        gsc_repositioned = True
+        gsc_opportunity_tier = "EMPIRICAL_YIELD_SWAP"
+        reposition_reason = (
+            f"Objective outbound user engagement promoted higher-CTR partner '{highest_engagement_pk}' "
+            f"over static default '{initial_primary_key}'."
         )
 
     # Re-stamp tier_role after any GSC promotion/reordering
@@ -10252,6 +10790,8 @@ def select_conversion_slot_plan(
         "gsc_mobile_ctr_gap": mobile_ctr_gap,
         "gsc_device_focus": device_focus,
         "gsc_search_appearances": search_appearances,
+        "sponsored_placement_labeled": bool(sponsored_placement_labeled),
+        "offer_sort_basis": "sponsored_yield" if allow_payout_sort else "objective_product_fit",
     }
 
 
@@ -11230,9 +11770,14 @@ def reposition_affiliate_placements_from_gsc_signals(
                     + updated[gm_e2:]
                 )
 
-    # 2. Inject or update comparison_table_cta when active in slot_plan (skip on 3-step #workpaper-unlock-card pages)
+    # 2. Inject or update comparison_table_cta when active in slot_plan (skip on 3-step #workpaper-unlock-card pages
+    #    or when a consolidated .contextual-referral-card already carries comparison_table_cta)
     has_existing_table_cta = bool(_COMPARISON_TABLE_CTA_BAR_RE.search(updated))
-    if 'id="workpaper-unlock-card"' in updated:
+    has_consolidated_table_cta = (
+        'class="contextual-referral-card' in updated
+        and ('data-cta-slot="comparison_table_cta"' in updated or "data-cta-slot='comparison_table_cta'" in updated)
+    )
+    if 'id="workpaper-unlock-card"' in updated or has_consolidated_table_cta:
         if has_existing_table_cta:
             updated = _COMPARISON_TABLE_CTA_BAR_STRIP_RE.sub("", updated)
     elif ("comparison_table_cta" in slot_plan["active_slots"] or has_existing_table_cta) and table_offer:
@@ -11351,7 +11896,41 @@ def reposition_affiliate_placements_from_gsc_signals(
                 gsc_tier=gsc_tier,
             )
             if new_ref_card and ref_sec_re.search(updated):
-                updated = ref_sec_re.sub(lambda _m: new_ref_card, updated, count=1)
+                def _merge_ref_card(m_ref: re.Match[str]) -> str:
+                    old_sec = m_ref.group(0)
+                    extra_bodies: List[str] = []
+                    seen_extra: Set[str] = {target_pk}
+
+                    def _collect_body(blk: str) -> bool:
+                        pk_m = re.search(
+                            r'(?:\bdata-partner=["\']([^"\']+)["\']|\bhref=["\']/r/([a-z0-9_.-]+))',
+                            blk,
+                            flags=re.I,
+                        )
+                        pk_found = (pk_m.group(1) or pk_m.group(2) or "").strip().lower() if pk_m else ""
+                        if pk_found and pk_found not in seen_extra and pk_found in live_vault_keys:
+                            seen_extra.add(pk_found)
+                            extra_bodies.append(blk.strip())
+                        return False
+
+                    _strip_balanced_blocks_matching(
+                        old_sec,
+                        "div",
+                        r'<div\b[^>]*\bclass=["\'][^"\']*\bcontextual-referral-body\b[^"\']*["\'][^>]*>',
+                        predicate=_collect_body,
+                    )
+                    if not extra_bodies:
+                        return new_ref_card
+                    indented_extras = "\n".join(f"      {b}" for b in extra_bodies)
+                    return re.sub(
+                        r"</section>\s*$",
+                        f"\n{indented_extras}\n    </section>",
+                        new_ref_card,
+                        count=1,
+                        flags=re.I,
+                    )
+
+                updated = ref_sec_re.sub(_merge_ref_card, updated, count=1)
     elif matrix_cards and prop != "prexvo":
         def _render_roster_card(card_offer: Dict[str, Any], idx: int) -> str:
             c_pk = str(card_offer["partner_key"])
@@ -11371,7 +11950,8 @@ def reposition_affiliate_placements_from_gsc_signals(
                 f'\n    <div class="affiliate-card partner-card" data-partner="{c_pk}" data-company-brand="{c_brand}" data-partner-tier="{c_role}" data-partnership-model="{c_model}">\n'
                 f'      <div class="affiliate-info">\n'
                 f'        <span class="affiliate-badge">{c_badge} ({c_role.title()} Offer)</span>\n'
-                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored / {c_brand}</span>\n'
+                f'        <span class="affiliate-disclosure-badge" style="font-size: 0.75rem; color: var(--text-secondary); margin-left: 0.5rem; font-weight: 500;">Sponsored Placement - {c_brand}</span>\n'
+                f'        <p class="affiliate-disclosure" style="font-size: 0.75rem; color: var(--text-secondary); margin: 0.25rem 0;">FTC 16 CFR Part 255 Disclosure: We may earn a referral commission if you click this partner link at no extra cost to you.</p>\n'
                 f'        <h3 class="affiliate-title">{c_name}</h3>\n'
                 f'        <p class="affiliate-desc">{c_desc}</p>\n'
                 f'      </div>\n'

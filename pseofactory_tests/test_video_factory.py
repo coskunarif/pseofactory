@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -249,8 +250,16 @@ def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path
             }
         )
 
+        tenant_yt_token = repo_dir / ".agy" / "youtube_token.json"
+        tenant_yt_token.parent.mkdir(parents=True, exist_ok=True)
+        tenant_yt_token.write_text('{"token":"fake"}', encoding="utf-8")
+        tenant_yt_channel = f"UC_{prop}_channel"
+
         real_run = subprocess.run
-        with patch("pseofactory.video_factory.subprocess.run") as mock_subproc:
+        with (
+            patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
+            patch("pseofactory.video_factory.subprocess.run") as mock_subproc,
+        ):
 
             def _side_effect(cmd, *args, **kwargs):
                 if isinstance(cmd, list) and len(cmd) >= 3 and "upload" in cmd:
@@ -275,6 +284,8 @@ def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path
                 use_headless_browser=False,
                 use_neural_tts=False,
                 quota_governor=gov,
+                youtube_token_path=tenant_yt_token,
+                youtube_channel_id=tenant_yt_channel,
             )
 
         assert telemetry["status"] == "PASS"
@@ -308,19 +319,22 @@ def test_end_to_end_video_synthesis_and_idempotent_youtube_upload(tmp_path: Path
         assert yt_meta["upload_status"] == "UPLOADED"
 
         # Second run must hit idempotency ledger with 0 new uploads and 0 new quota units
-        telemetry_2 = run_autonomous_video_pipeline(
-            property_id=prop,
-            tools=tools_list,
-            dist_dir=dist_dir,
-            repo_root=repo_dir,
-            max_renders=1,
-            synthesize_missing=True,
-            live_upload=True,
-            privacy="unlisted",
-            use_headless_browser=False,
-            use_neural_tts=False,
-            quota_governor=gov,
-        )
+        with patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}):
+            telemetry_2 = run_autonomous_video_pipeline(
+                property_id=prop,
+                tools=tools_list,
+                dist_dir=dist_dir,
+                repo_root=repo_dir,
+                max_renders=1,
+                synthesize_missing=True,
+                live_upload=True,
+                privacy="unlisted",
+                use_headless_browser=False,
+                use_neural_tts=False,
+                quota_governor=gov,
+                youtube_token_path=tenant_yt_token,
+                youtube_channel_id=tenant_yt_channel,
+            )
         assert telemetry_2["uploaded_live_count"] == 0
         assert telemetry_2["idempotent_uploaded_count"] == 1
         assert telemetry_2["per_slug_dispatch_status"][slug] == "ALREADY_UPLOADED_IDEMPOTENT"
@@ -427,8 +441,13 @@ def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Pat
     real_run = subprocess.run
     info_calls = {"count": 0}
 
+    tenant_reconcile_token = tmp_path / "tenant_youtube_token.json"
+    tenant_reconcile_token.write_text('{"token":"fake"}', encoding="utf-8")
+    recorded_envs: list[dict] = []
+
     def _mock_subproc(cmd, *args, **kwargs):
         if isinstance(cmd, list) and "info" in cmd:
+            recorded_envs.append(dict(kwargs.get("env") or {}))
             info_calls["count"] += 1
             priv = "unlisted" if info_calls["count"] == 1 else "public"
             m = MagicMock()
@@ -448,6 +467,7 @@ def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Pat
             m.stderr = ""
             return m
         if isinstance(cmd, list) and "update" in cmd:
+            recorded_envs.append(dict(kwargs.get("env") or {}))
             m = MagicMock()
             m.returncode = 0
             m.stdout = json.dumps({"success": True, "video_id": "w-Kx_w7Yz7o", "privacy_status": "public"})
@@ -466,7 +486,10 @@ def test_broadcast_quality_verification_and_keyframe_contact_sheet(tmp_path: Pat
             refresh_thumbnail=False,
             upload_caption=False,
             quota_governor=gov,
+            token_path=tenant_reconcile_token,
         )
+    assert len(recorded_envs) >= 2
+    assert all(e.get("YOUTUBE_TOKEN_PATH") == str(tenant_reconcile_token) for e in recorded_envs)
     assert rec["quota_units_used"] == 50
     assert rec["reupload_cost_avoided_units"] == 1600
     assert rec["before_status"]["privacyStatus"] == "unlisted"
@@ -861,7 +884,14 @@ def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_pa
             "quota_units_used": 0,
         }
 
-    with patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_always_fail_upload):
+    tenant_yt_token = repo_dir / ".agy" / "youtube_token.json"
+    tenant_yt_token.parent.mkdir(parents=True, exist_ok=True)
+    tenant_yt_token.write_text('{"token":"fake"}', encoding="utf-8")
+
+    with (
+        patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
+        patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_always_fail_upload),
+    ):
         blackout_tel = run_autonomous_video_pipeline(
             property_id="lienbond",
             tools=tools_list,
@@ -871,6 +901,8 @@ def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_pa
             synthesize_missing=False,
             live_upload=True,
             quota_governor=gov,
+            youtube_token_path=tenant_yt_token,
+            youtube_channel_id="UC_lienbond_123",
         )
 
     assert blackout_tel["status"] == "UPLOAD_BLACKOUT"
@@ -895,7 +927,10 @@ def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_pa
             }
         return _always_fail_upload(**kwargs)
 
-    with patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_mixed_idempotent_and_error):
+    with (
+        patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
+        patch("pseofactory.video_factory.upload_tool_video_to_youtube", side_effect=_mixed_idempotent_and_error),
+    ):
         degraded_tel = run_autonomous_video_pipeline(
             property_id="lienbond",
             tools=tools_list[:2],
@@ -905,6 +940,8 @@ def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_pa
             synthesize_missing=False,
             live_upload=True,
             quota_governor=gov,
+            youtube_token_path=tenant_yt_token,
+            youtube_channel_id="UC_lienbond_123",
         )
 
     assert degraded_tel["status"] == "UPLOAD_DEGRADED"
@@ -932,6 +969,211 @@ def test_youtube_upload_errors_never_report_pass_and_flag_upload_blackout(tmp_pa
     assert dry_tel["status"] == "PASS"
     assert dry_tel["upload_blackout_detected"] is False
     assert dry_tel["upload_error_count"] == 0
+
+
+def test_youtube_emergency_stop_disabled_by_default_and_rejects_mindball_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Regression test for YouTube Emergency Stop:
+      1. DEFAULT_YOUTUBE_TOKEN_PATH must be None (never falls back to MindBall).
+      2. Automated TTS YouTube upload is disabled by default when
+         PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD != "1".
+      3. Passing shared MindBall/secrets/youtube_token.json is rejected even when
+         PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD=1.
+      4. Missing per-tenant youtube_token_path or youtube_channel_id fails closed.
+    """
+    vf_mod = _require_video_factory_module()
+    assert vf_mod.DEFAULT_YOUTUBE_TOKEN_PATH is None
+
+    monkeypatch.delenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", raising=False)
+    repo_dir = tmp_path / "profithelm"
+    dist_dir = repo_dir / "dist"
+    videos_dir = dist_dir / "videos"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    slug = "section-179-calculator"
+    (dist_dir / "tools" / slug).mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / slug / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>Section 179</title></head><body><main><h1>Section 179</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (videos_dir / f"{slug}.mp4").write_bytes(b"\x00" * 4096)
+    gov = vf_mod.YouTubeQuotaGovernor(
+        ledger_path=repo_dir / ".agy" / "yt_quota.json",
+        upload_log_path=repo_dir / ".agy" / "upload_log.json",
+    )
+
+    with patch("pseofactory.video_factory.subprocess.run") as subproc_mock:
+        res_default = vf_mod.upload_tool_video_to_youtube(
+            slug=slug,
+            property_id="profithelm",
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            live_upload=True,
+            quota_governor=gov,
+        )
+        assert res_default["status"] == "POLICY_DISABLED"
+        assert res_default["skipped"] is True
+        assert res_default["reason"] == "auto_tts_youtube_upload_disabled"
+        assert subproc_mock.call_count == 0
+
+        pipe_default = vf_mod.run_autonomous_video_pipeline(
+            property_id="profithelm",
+            tools=[{"slug": slug, "title": "Section 179 Calculator"}],
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            max_renders=0,
+            synthesize_missing=False,
+            live_upload=True,
+            quota_governor=gov,
+        )
+        assert pipe_default["status"] == "PASS"
+        assert pipe_default["uploaded_live_count"] == 0
+        assert pipe_default["stages"]["4_youtube_distribution"]["upload_skipped"] is True
+        assert pipe_default["stages"]["4_youtube_distribution"]["upload_skip_reason"] == "auto_tts_youtube_upload_disabled"
+        assert subproc_mock.call_count == 0
+
+        monkeypatch.setenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", "1")
+        res_shared = vf_mod.upload_tool_video_to_youtube(
+            slug=slug,
+            property_id="profithelm",
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            live_upload=True,
+            quota_governor=gov,
+            youtube_token_path="/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json",
+            youtube_channel_id="UC_test_123",
+        )
+        assert res_shared["status"] == "POLICY_DISABLED"
+        assert res_shared["skipped"] is True
+        assert res_shared["reason"] == "shared_youtube_token_forbidden"
+        assert subproc_mock.call_count == 0
+
+        res_missing_creds = vf_mod.upload_tool_video_to_youtube(
+            slug=slug,
+            property_id="profithelm",
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            live_upload=True,
+            quota_governor=gov,
+        )
+        assert res_missing_creds["status"] == "POLICY_DISABLED"
+        assert res_missing_creds["skipped"] is True
+        assert res_missing_creds["reason"] == "auto_tts_youtube_upload_disabled"
+        assert subproc_mock.call_count == 0
+
+
+def test_youtube_cli_requires_explicit_token_path_and_sets_subprocess_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Regression test for P1 #3:
+      1. token_path=None and MindBall/secrets/youtube_token.json fail closed without
+         invoking youtube_bin in check_youtube_cli_diagnostics, inspect_remote_youtube_video_status,
+         and reconcile_remote_youtube_video_quality_and_visibility.
+      2. Explicit per-tenant token_path passes YOUTUBE_TOKEN_PATH in subprocess.run env.
+    """
+    vf_mod = _require_video_factory_module()
+    fake_bin = tmp_path / "youtube"
+    fake_bin.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    fake_bin.chmod(0o755)
+    tenant_token = tmp_path / "tenant_youtube_token.json"
+    tenant_token.write_text('{"token":"tenant"}', encoding="utf-8")
+    mindball_token = "/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json"
+    gov = vf_mod.YouTubeQuotaGovernor(
+        ledger_path=tmp_path / "yt_quota.json",
+        upload_log_path=tmp_path / "upload_log.json",
+    )
+
+    with patch("pseofactory.video_factory.subprocess.run") as subproc_mock:
+        for bad_tok in (None, "", mindball_token):
+            diag = vf_mod.check_youtube_cli_diagnostics(youtube_bin=fake_bin, token_path=bad_tok)
+            assert diag["ready"] is False
+            assert diag["skipped"] is True
+
+            insp = vf_mod.inspect_remote_youtube_video_status(
+                "dQw4w9WgXcQ",
+                token_path=bad_tok,
+                youtube_bin=fake_bin,
+            )
+            assert insp["found"] is False
+            assert insp["skipped"] is True
+
+            rec = vf_mod.reconcile_remote_youtube_video_quality_and_visibility(
+                video_id="dQw4w9WgXcQ",
+                slug="section-179-calculator",
+                property_id="profithelm",
+                quota_governor=gov,
+                token_path=bad_tok,
+                youtube_bin=fake_bin,
+            )
+            assert rec["status"] == "POLICY_DISABLED"
+            assert rec["skipped"] is True
+
+        assert subproc_mock.call_count == 0
+
+    # When not in pytest mode and given explicit tenant token_path, YOUTUBE_TOKEN_PATH is set in env
+    seen_envs: list[dict] = []
+
+    def _fake_run(cmd, *args, **kwargs):
+        seen_envs.append(dict(kwargs.get("env") or {}))
+        m = MagicMock()
+        m.returncode = 0
+        if "status" in cmd:
+            m.stdout = json.dumps({"auth": {"authenticated": True, "is_expired": False, "tier": "oauth2_api"}})
+        elif "info" in cmd:
+            m.stdout = json.dumps({"video_id": "dQw4w9WgXcQ", "title": "Section 179", "privacy_status": "public"})
+        else:
+            m.stdout = json.dumps({"success": True, "video_id": "dQw4w9WgXcQ", "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})
+        m.stderr = ""
+        return m
+
+    repo_dir = tmp_path / "profithelm"
+    dist_dir = repo_dir / "dist"
+    (dist_dir / "videos").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "section-179-calculator").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "section-179-calculator" / "index.html").write_text(
+        "<!DOCTYPE html><html><head><title>Section 179</title></head><body><main><h1>Section 179</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "videos" / "section-179-calculator.mp4").write_bytes(b"\x00" * 4096)
+
+    with (
+        patch.dict(os.environ, {"PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD": "1"}),
+        patch("pseofactory.video_factory._in_pytest", return_value=False),
+        patch("pseofactory.video_factory._load_upload_idempotency_map", return_value={}),
+        patch("pseofactory.video_factory.probe_media_file", return_value={"valid": True, "size_bytes": 4096}),
+        patch("pseofactory.video_factory.subprocess.run", side_effect=_fake_run),
+    ):
+        diag_ok = vf_mod.check_youtube_cli_diagnostics(youtube_bin=fake_bin, token_path=tenant_token)
+        assert diag_ok["ready"] is True
+
+        insp_ok = vf_mod.inspect_remote_youtube_video_status(
+            "dQw4w9WgXcQ",
+            token_path=tenant_token,
+            youtube_bin=fake_bin,
+        )
+        assert insp_ok["found"] is True
+
+        up_ok = vf_mod.upload_tool_video_to_youtube(
+            slug="section-179-calculator",
+            property_id="profithelm",
+            dist_dir=dist_dir,
+            repo_root=repo_dir,
+            live_upload=True,
+            quota_governor=gov,
+            youtube_bin=fake_bin,
+            youtube_token_path=tenant_token,
+            youtube_channel_id="UC_tenant_channel",
+        )
+        assert up_ok["status"] == "UPLOADED"
+
+    assert len(seen_envs) == 3
+    assert all(e.get("YOUTUBE_TOKEN_PATH") == str(tenant_token) for e in seen_envs)
+
+
 
 
 

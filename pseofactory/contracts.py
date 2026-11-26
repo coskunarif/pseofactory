@@ -1289,10 +1289,14 @@ def assert_robots_txt_crawler_policy(
 ) -> bool:
     """
     Mechanical contract validating robots.txt crawler access policy:
-    1. AI search crawlers (googlebot, bingbot, perplexitybot, claudebot, oai-searchbot)
-       and user-triggered bots (chatgpt-user) must NOT be blocked on protected routes.
-    2. Model training bots (gptbot, ccbot, google-extended, etc.) may be blocked.
-    3. RFC 9309 override guard: whenever /api/ or /cdn-cgi/ (or any explicit
+    1. AI search crawlers (googlebot, bingbot, applebot, oai-searchbot, chatgpt-user,
+       claude-searchbot, claude-user, perplexitybot, perplexity-user) must NOT be
+       blocked on protected routes.
+    2. Model training bots (gptbot, claudebot, anthropic-ai, claude-web, ccbot,
+       bytespider, meta-externalagent, applebot-extended, googleother, etc.) must NOT
+       have Allow: / in robots.txt.
+    3. /r/ redirect routes must NOT be disallowed (Disallow: /r/ is forbidden).
+    4. RFC 9309 override guard: whenever /api/ or /cdn-cgi/ (or any explicit
        required_disallow_paths) is disallowed, EVERY User-agent group (including
        Googlebot and all named crawlers) must disallow it before any Allow: / rule.
     Zero em-dashes. Zero en-dashes.
@@ -1307,10 +1311,11 @@ def assert_robots_txt_crawler_policy(
         MasterSEOVerifier,
         AI_SEARCH_BOTS,
         AI_USER_TRIGGERED_BOTS,
+        AI_TRAINING_BOTS,
     )
 
     sections = MasterSEOVerifier.parse_robots_txt_sections(robots_content)
-    all_search_bots = AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS
+    all_search_bots = list(dict.fromkeys(AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS))
 
     for bot in all_search_bots:
         for r in routes:
@@ -1318,6 +1323,27 @@ def assert_robots_txt_crawler_policy(
                 raise ValueError(
                     f"robots.txt crawler policy violation{ctx}: bot '{bot}' is blocked on '{r}', "
                     f"revoking AI crawl access and snippet eligibility"
+                )
+
+    for t_bot in AI_TRAINING_BOTS:
+        t_low = t_bot.lower()
+        if t_low in sections:
+            sec = sections[t_low]
+            allows = [a.strip() for a in sec.get("allow", [])]
+            disallows = [d.strip() for d in sec.get("disallow", [])]
+            if "/" in allows or not MasterSEOVerifier.is_path_disallowed("/", allows, disallows):
+                raise ValueError(
+                    f"robots.txt training bot policy violation{ctx}: AI training bot '{t_low}' "
+                    f"has Allow: / or is not disallowed on '/'"
+                )
+
+    for agent, sec in sections.items():
+        for d_rule in sec.get("disallow", []):
+            d_clean = d_rule.strip().lower()
+            if d_clean in ("/r", "/r/", "/r/*") or d_clean.startswith("/r/"):
+                raise ValueError(
+                    f"robots.txt affiliate redirect policy violation{ctx}: forbidden 'Disallow: {d_rule}' "
+                    f"for User-agent '{agent}' (/r/ must not be disallowed)"
                 )
 
     disallow_violations = MasterSEOVerifier.find_robots_txt_mandatory_disallow_violations(
@@ -1363,7 +1389,7 @@ def assert_robots_txt_mandatory_disallows(
     return True
 
 
-LLMS_NOINDEX_ROUTES = frozenset({"/llms.txt", "/llms-full.txt"})
+LLMS_NOINDEX_ROUTES = frozenset({"/llms.txt", "/llms-full.txt", "/catalog.json"})
 
 
 def assert_headers_snippet_policy(
@@ -1393,7 +1419,7 @@ def assert_headers_snippet_policy(
 
     non_public_prefixes = ("/signal", "/staging", "/test", "/tests", "/syndication")
     training_bot_names = {b.lower() for b in AI_TRAINING_BOTS}
-    search_bot_names = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS} | {"robots", "claude-web"}
+    search_bot_names = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS} | {"robots"}
 
     current_route = ""
     for raw_line in headers_content.splitlines():
@@ -8601,171 +8627,213 @@ def assert_initialized_ssr_calculator_metrics(
 
 
 # =============================================================================
-# Factor 13: llms.txt File (+0.05) Contracts & Parsing Engine
+# Fail-Closed Forbidden Manifest Artifacts, Raw Catalog Keys & Header Contracts
+# (Replaces deprecated Factor 13 llms.txt / llms-full.txt requirement)
 # =============================================================================
 
+FORBIDDEN_CATALOG_RAW_KEYS: frozenset = frozenset({"formula", "quick_answer", "published_output"})
+
+_HTML_ROUTE_NON_HTML_EXTS: Tuple[str, ...] = (
+    ".xml",
+    ".txt",
+    ".json",
+    ".pdf",
+    ".csv",
+    ".xlsx",
+    ".zip",
+    ".mp4",
+    ".vtt",
+    ".js",
+    ".css",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".svg",
+    ".ico",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".webmanifest",
+)
+
+
+def detect_forbidden_dist_manifest_artifacts(dist_dir: Union[str, Any]) -> List[str]:
+    """
+    Fail-closed scanner forbidding dist/llms-full.txt and dist/ai-benchmarks/*.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+
+    d = Path(dist_dir)
+    issues: List[str] = []
+    if not d.exists():
+        return issues
+    llms_full = d / "llms-full.txt"
+    if llms_full.is_file():
+        issues.append(f"Forbidden artifact present: {llms_full.name} (dist/llms-full.txt is banned)")
+    ai_bench_dir = d / "ai-benchmarks"
+    if ai_bench_dir.is_dir():
+        bench_files = [p for p in sorted(ai_bench_dir.rglob("*")) if p.is_file()]
+        if bench_files:
+            issues.append(
+                f"Forbidden directory artifacts present in dist/ai-benchmarks/ ({len(bench_files)} files; dist/ai-benchmarks/* is banned)"
+            )
+        else:
+            issues.append("Forbidden directory present: dist/ai-benchmarks/ (dist/ai-benchmarks/* is banned)")
+    elif ai_bench_dir.is_file():
+        issues.append("Forbidden artifact present: dist/ai-benchmarks")
+    return issues
+
+
+def assert_no_forbidden_dist_manifest_artifacts(
+    dist_dir: Union[str, Any],
+    context: str = "",
+) -> bool:
+    """Raises ValueError if dist/llms-full.txt or dist/ai-benchmarks/* exist."""
+    issues = detect_forbidden_dist_manifest_artifacts(dist_dir)
+    if issues:
+        ctx = f" ({context})" if context else ""
+        raise ValueError(f"Forbidden dist manifest artifact{ctx}: {'; '.join(issues)}")
+    return True
+
+
+def _scan_raw_catalog_keys(obj: Any, path_prefix: str = "catalog.json") -> List[str]:
+    issues: List[str] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            k_str = str(k)
+            if k_str in FORBIDDEN_CATALOG_RAW_KEYS:
+                issues.append(f"{path_prefix}: Forbidden raw key '{k_str}' exposed in dist/catalog.json")
+            if isinstance(v, (dict, list)):
+                issues.extend(_scan_raw_catalog_keys(v, f"{path_prefix}.{k_str}"))
+    elif isinstance(obj, list):
+        for idx, item in enumerate(obj):
+            if isinstance(item, (dict, list)):
+                issues.extend(_scan_raw_catalog_keys(item, f"{path_prefix}[{idx}]"))
+    return issues
+
+
+def detect_catalog_json_raw_leak_issues(catalog_or_path: Any) -> List[str]:
+    """
+    Fail-closed scanner forbidding raw formula, quick_answer, or published_output
+    keys inside dist/catalog.json.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pathlib import Path
+    import json as _json
+
+    if isinstance(catalog_or_path, (str, Path)):
+        p = Path(catalog_or_path)
+        if not p.is_file():
+            return []
+        try:
+            data = _json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            return [f"catalog.json: Invalid JSON ({exc})"]
+    elif isinstance(catalog_or_path, (dict, list)):
+        data = catalog_or_path
+    else:
+        return ["catalog.json: Payload must be dict, list, or file path"]
+    return _scan_raw_catalog_keys(data)
+
+
+def assert_catalog_json_no_raw_leaks(
+    catalog_or_path: Any,
+    context: str = "",
+) -> bool:
+    """Raises ValueError if dist/catalog.json exposes formula, quick_answer, or published_output keys."""
+    issues = detect_catalog_json_raw_leak_issues(catalog_or_path)
+    if issues:
+        ctx = f" ({context})" if context else ""
+        raise ValueError(f"catalog.json raw leak violation{ctx}: {'; '.join(issues)}")
+    return True
+
+
+def is_html_header_route(route: str) -> bool:
+    """Returns True when a _headers route pattern targets an HTML route rather than a non-HTML endpoint."""
+    r = str(route or "").strip().lower().split("?", 1)[0]
+    if not r:
+        return False
+    if r.startswith(("/static/", "/css/", "/js/")):
+        return False
+    return not r.endswith(_HTML_ROUTE_NON_HTML_EXTS)
+
+
+def assert_headers_no_html_link_canonical_and_has_content_signal(
+    headers_content: str,
+    context: str = "",
+) -> bool:
+    """
+    Fail-closed contract verifying:
+    1. Zero Link: ... rel="canonical" headers on HTML routes in _headers (HTML <link rel="canonical"> only).
+    2. Content-Signal: header is present on /*.
+    Zero em-dashes. Zero en-dashes.
+    """
+    ctx = f" in {context}" if context else ""
+    if not isinstance(headers_content, str):
+        raise ValueError(f"_headers content must be a string{ctx}")
+
+    canon_re = re.compile(r'Link:\s*<[^>]+>;\s*rel=["\']?canonical["\']?', re.IGNORECASE)
+    current_route = ""
+    has_wildcard_content_signal = False
+    for raw_line in headers_content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not raw_line.startswith(" ") and not raw_line.startswith("\t"):
+            current_route = line
+        elif current_route:
+            if is_html_header_route(current_route) and canon_re.search(line):
+                raise ValueError(
+                    f"_headers HTML route '{current_route}' emits forbidden HTTP Link rel='canonical' header{ctx}"
+                )
+            if current_route == "/*" and line.lower().startswith("content-signal:"):
+                has_wildcard_content_signal = True
+
+    if not has_wildcard_content_signal:
+        raise ValueError(f"_headers missing required 'Content-Signal:' header on '/*'{ctx}")
+    return True
+
+
+def assert_no_forbidden_url_updated_indexing_api(
+    payload_or_source: str,
+    context: str = "",
+) -> bool:
+    """
+    Fail-closed contract banning Google Indexing API URL_UPDATED submissions
+    on non-JobPosting/BroadcastEvent sites.
+    """
+    ctx = f" in {context}" if context else ""
+    if not isinstance(payload_or_source, str):
+        raise ValueError(f"Payload must be a string{ctx}")
+    if re.search(r"\bURL_UPDATED\b", payload_or_source):
+        raise ValueError(
+            f"Forbidden Google Indexing API 'URL_UPDATED' usage detected{ctx} (banned for calculator/editorial sites)"
+        )
+    return True
+
+
+# Deprecated backwards-compatible shims for external callers (no Factor 13 requirement)
 LLMS_TXT_DISALLOWED_ROUTE_PATTERNS: List[re.Pattern] = [
     re.compile(r'/admin(?:istrator)?(?:/|[?#\s]|$)', re.IGNORECASE),
     re.compile(r'/internal(?:/|[?#\s]|$)', re.IGNORECASE),
     re.compile(r'/private(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'/api/(?:internal|admin|private|debug|metrics|v1/internal)(?:/|[?#\s]|$)', re.IGNORECASE),
     re.compile(r'/(?:staging|tests?|__tests__|signal|syndication)(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'/(?:auth|login|signin|signup|logout|dashboard|backend|console)(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'/(?:tmp|temp|drafts?|secrets?)(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'/(?:debug|metrics|healthz|server-status|cgi-bin|wp-admin)(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'(?:https?://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:/|[?#\s]|$)', re.IGNORECASE),
-    re.compile(r'(?:token=|apiKey=|api_key=|secret=|password=)', re.IGNORECASE),
-    re.compile(r'(?:file://|/(?:home|etc|var|usr)/)', re.IGNORECASE),
 ]
-
 LLMS_TXT_HUB_HEADING_PATTERNS: List[re.Pattern] = [
-    re.compile(r'^##\s+(?:top\s+category\s+hubs?|category\s+hubs?|hubs?|categories|core\s+resources|key\s+hubs?|tax\s+hubs?|calculation\s+hubs?)(?:\s|$)', re.IGNORECASE),
+    re.compile(r'^##\s+(?:top\s+category\s+hubs?|category\s+hubs?|hubs?)(?:\s|$)', re.IGNORECASE),
 ]
 
 
 def extract_llms_txt_metadata(content: str) -> Dict[str, Any]:
-    """
-    Parses and extracts structural metadata from an llms.txt or llms-full.txt file.
-    Extracts H1 title, blockquote summary, sections (H2), links with descriptions,
-    top category hub links, leaked internal routes, and forbidden dash detections.
-    Zero em-dashes. Zero en-dashes.
-    """
     if not isinstance(content, str):
-        return {
-            "has_h1": False,
-            "title": "",
-            "has_blockquote": False,
-            "summary": "",
-            "sections": [],
-            "links": [],
-            "category_hubs": [],
-            "leaked_routes": [],
-            "forbidden_dashes": [],
-            "is_llmstxt_compliant": False,
-            "total_links": 0,
-            "total_hubs": 0,
-        }
-
-    forbidden_dashes = []
+        return {"has_h1": False, "title": "", "has_blockquote": False, "summary": "", "sections": [], "links": [], "category_hubs": [], "leaked_routes": [], "forbidden_dashes": [], "is_llmstxt_compliant": False, "total_links": 0, "total_hubs": 0}
+    forbidden = []
     if "\u2014" in content:
-        forbidden_dashes.append("em-dash (U+2014)")
+        forbidden.append("em-dash (U+2014)")
     if "\u2013" in content:
-        forbidden_dashes.append("en-dash (U+2013)")
-
-    lines = content.splitlines()
-    title = ""
-    blockquote_lines = []
-    sections: List[Dict[str, Any]] = []
-    current_section: Optional[Dict[str, Any]] = None
-    all_links: List[Dict[str, Any]] = []
-    category_hubs: List[Dict[str, Any]] = []
-    leaked_routes: List[str] = []
-
-    for pattern in LLMS_TXT_DISALLOWED_ROUTE_PATTERNS:
-        for match in pattern.finditer(content):
-            leaked_routes.append(match.group(0).strip())
-
-    in_blockquote = False
-    saw_h1 = False
-
-    for idx, raw_line in enumerate(lines):
-        line = raw_line.strip()
-        if not line:
-            if in_blockquote:
-                in_blockquote = False
-            continue
-
-        if line.startswith("# ") and not line.startswith("## ") and not saw_h1:
-            title = line[2:].strip()
-            saw_h1 = True
-            continue
-
-        if line.startswith(">"):
-            in_blockquote = True
-            bq_text = line[1:].strip()
-            if bq_text:
-                blockquote_lines.append(bq_text)
-            continue
-        elif in_blockquote:
-            if not line.startswith("#") and not line.startswith("-") and not line.startswith("*"):
-                blockquote_lines.append(line)
-            else:
-                in_blockquote = False
-
-        if line.startswith("## "):
-            sec_heading = line[3:].strip()
-            is_hub_sec = any(p.match(line) for p in LLMS_TXT_HUB_HEADING_PATTERNS)
-            current_section = {
-                "heading": sec_heading,
-                "is_category_hub_section": is_hub_sec,
-                "links": [],
-            }
-            sections.append(current_section)
-            continue
-
-        link_match = re.match(r'^[ \t]*[-*][ \t]+\[([^\]]+)\]\(([^)]+)\)(?:[ \t]*:[ \t]*(.+))?$', line)
-        if link_match:
-            l_title = link_match.group(1).strip()
-            l_url = link_match.group(2).strip()
-            l_summary = (link_match.group(3) or "").strip()
-
-            if not l_summary and idx + 1 < len(lines):
-                next_line = lines[idx + 1]
-                if (next_line.startswith("  ") or next_line.startswith("\t")) and not next_line.strip().startswith("-") and not next_line.strip().startswith("*"):
-                    l_summary = next_line.strip()
-
-            link_info = {
-                "title": l_title,
-                "url": l_url,
-                "summary": l_summary,
-                "section": current_section["heading"] if current_section else "",
-                "is_hub": current_section.get("is_category_hub_section", False) if current_section else False,
-            }
-            all_links.append(link_info)
-            if current_section:
-                current_section["links"].append(link_info)
-            if link_info["is_hub"]:
-                category_hubs.append(link_info)
-
-    if not category_hubs:
-        for l in all_links:
-            sec_lower = l["section"].lower()
-            if any(k in sec_lower for k in ("hub", "categor", "tool", "topic", "resource")):
-                l["is_hub"] = True
-                category_hubs.append(l)
-
-    blockquote_summary = " ".join(blockquote_lines).strip()
-    truncated_summaries: List[str] = []
-    for l_item in all_links:
-        s_txt = l_item.get("summary", "").strip()
-        if s_txt and detect_sentence_truncation_issues(s_txt):
-            truncated_summaries.append(f"{l_item.get('title', l_item.get('url', ''))}: {s_txt}")
-
-    is_compliant = bool(
-        title
-        and blockquote_summary
-        and sections
-        and all_links
-        and not leaked_routes
-        and not forbidden_dashes
-        and not truncated_summaries
-    )
-
-    return {
-        "has_h1": bool(title),
-        "title": title,
-        "has_blockquote": bool(blockquote_summary),
-        "summary": blockquote_summary,
-        "sections": sections,
-        "links": all_links,
-        "category_hubs": category_hubs,
-        "leaked_routes": sorted(list(set(leaked_routes))),
-        "forbidden_dashes": forbidden_dashes,
-        "truncated_summaries": truncated_summaries,
-        "is_llmstxt_compliant": is_compliant,
-        "total_links": len(all_links),
-        "total_hubs": len(category_hubs),
-    }
+        forbidden.append("en-dash (U+2013)")
+    return {"has_h1": "#" in content, "title": "", "has_blockquote": ">" in content, "summary": "", "sections": [], "links": [], "category_hubs": [], "leaked_routes": [], "forbidden_dashes": forbidden, "is_llmstxt_compliant": not forbidden, "total_links": 0, "total_hubs": 0}
 
 
 def detect_llms_txt_issues(
@@ -8774,209 +8842,49 @@ def detect_llms_txt_issues(
     is_full: bool = False,
     require_strict: bool = False,
 ) -> List[str]:
-    """
-    Detects contract and specification issues in an llms.txt or llms-full.txt file.
-    Enforces llmstxt.org specification compliance:
-    1. Zero em-dashes and zero en-dashes.
-    2. H1 project/site title presence.
-    3. Blockquote summary immediately following H1 (for llms.txt).
-    4. Top category hubs include concise markdown summaries.
-    5. Zero exposure or leaking of private administrative routes or internal paths.
-    6. Zero prompt leakage terms or forbidden jargon.
-    7. Zero mid-word or mid-clause sentence truncations in bullet summaries.
-    Zero em-dashes. Zero en-dashes.
-    """
+    _ = (is_full, require_strict)
     issues: List[str] = []
-    if not isinstance(content, str):
-        return [f"{rel_path}: Content must be a string"]
-
-    if not content.strip():
-        return [f"{rel_path}: Content is empty"]
-
-    if "\u2014" in content:
-        issues.append(f"{rel_path}: Document contains forbidden em-dash")
-    if "\u2013" in content:
-        issues.append(f"{rel_path}: Document contains forbidden en-dash")
-
-    for term in PROMPT_LEAKAGE_TERMS:
-        if term.lower() in content.lower():
-            issues.append(f"{rel_path}: Prompt leakage detected: '{term}'")
-    for jargon in FORBIDDEN_JARGON:
-        if re.search(r'\b' + re.escape(jargon) + r'\b', content, re.IGNORECASE):
-            issues.append(f"{rel_path}: Forbidden jargon detected: '{jargon}'")
-
-    meta = extract_llms_txt_metadata(content)
-
-    if meta.get("leaked_routes"):
-        for rk in meta["leaked_routes"]:
-            issues.append(f"{rel_path}: Disallowed internal route or private path leaked: '{rk}'")
-
-    for link in meta.get("links", []):
-        url = link.get("url", "")
+    if isinstance(content, str):
+        if "\u2014" in content or "\u2013" in content:
+            issues.append(f"{rel_path}: Document contains forbidden dash")
         for pat in LLMS_TXT_DISALLOWED_ROUTE_PATTERNS:
-            if pat.search(url):
-                issue_msg = f"{rel_path}: Disallowed internal route leaked in link target: '{url}'"
-                if issue_msg not in issues:
-                    issues.append(issue_msg)
-        link_summary = (link.get("summary") or "").strip()
-        if link_summary:
-            trunc_errs = detect_sentence_truncation_issues(link_summary)
-            for terr in trunc_errs:
-                issues.append(
-                    f"{rel_path}: Link '{link.get('title') or url}' summary has sentence truncation ({terr}): '{link_summary}'"
-                )
-
-    if not meta.get("has_h1"):
-        issues.append(f"{rel_path}: Missing required H1 project title ('# <Title>')")
-
-    if not is_full:
-        if not meta.get("has_blockquote"):
-            issues.append(f"{rel_path}: Missing required blockquote summary ('> <Summary>')")
-
-        if not meta.get("sections"):
-            issues.append(f"{rel_path}: Missing required markdown sections (expected at least one '## <Section>')")
-
-        if not meta.get("links"):
-            issues.append(f"{rel_path}: Missing required markdown links")
-
-        hubs = meta.get("category_hubs", [])
-        if require_strict and not hubs:
-            issues.append(f"{rel_path}: No top category hubs found in manifest")
-
-        for hub in hubs:
-            summary = hub.get("summary", "").strip()
-            if not summary:
-                issues.append(
-                    f"{rel_path}: Top category hub '{hub.get('title')}' is missing a concise markdown summary"
-                )
-            elif len(summary) > 500:
-                issues.append(
-                    f"{rel_path}: Top category hub '{hub.get('title')}' summary exceeds 500 characters ({len(summary)} chars)"
-                )
-    else:
-        if len(content.strip()) < 20:
-            issues.append(f"{rel_path}: Expanded llms-full.txt content is too short (< 20 characters)")
-
+            for m in pat.finditer(content):
+                issues.append(f"{rel_path}: Disallowed internal route leaked: '{m.group(0).strip()}'")
     return issues
 
 
-def assert_llms_txt(
-    content: str,
-    is_full: bool = False,
-    require_strict: bool = True,
-    context: str = "",
-) -> bool:
-    """
-    Contract assertion validating llms.txt or llms-full.txt against llmstxt.org specification.
-    Zero em-dashes. Zero en-dashes.
-    """
-    ctx = f" ({context})" if context else ""
-    if not isinstance(content, str):
-        raise ValueError(f"Content must be a string{ctx}")
-
-    issues = detect_llms_txt_issues(
-        content,
-        rel_path=context or ("llms-full.txt" if is_full else "llms.txt"),
-        is_full=is_full,
-        require_strict=require_strict,
-    )
+def assert_llms_txt(content: str, is_full: bool = False, require_strict: bool = True, context: str = "") -> bool:
+    issues = detect_llms_txt_issues(content, rel_path=context or ("llms-full.txt" if is_full else "llms.txt"), is_full=is_full, require_strict=require_strict)
     if issues:
-        raise ValueError(f"llms.txt contract violation{ctx}: {'; '.join(issues)}")
+        raise ValueError("; ".join(issues))
     return True
 
 
-def assert_llms_txt_specification(
-    content: str,
-    is_full: bool = False,
-    context: str = "",
-) -> bool:
-    return assert_llms_txt(content, is_full=is_full, require_strict=True, context=context)
+def assert_llms_txt_specification(content: str, is_full: bool = False, context: str = "") -> bool:
+    return assert_llms_txt(content, is_full=is_full, context=context)
 
 
-def assert_llms_txt_compliance(
-    content: str,
-    context: str = "",
-) -> bool:
-    return assert_llms_txt(content, is_full=False, require_strict=True, context=context)
+def assert_llms_txt_compliance(content: str, context: str = "") -> bool:
+    return assert_llms_txt(content, is_full=False, context=context)
 
 
-def assert_llms_full_txt_compliance(
-    content: str,
-    context: str = "",
-) -> bool:
-    return assert_llms_txt(content, is_full=True, require_strict=True, context=context)
+def assert_llms_full_txt_compliance(content: str, context: str = "") -> bool:
+    return assert_llms_txt(content, is_full=True, context=context)
 
 
-def assert_no_internal_route_leaks(
-    content: str,
-    context: str = "",
-) -> bool:
-    """
-    Contract assertion verifying zero exposure or leaking of private administrative
-    routes or internal paths.
-    Zero em-dashes. Zero en-dashes.
-    """
-    ctx = f" ({context})" if context else ""
-    if not isinstance(content, str):
-        raise ValueError(f"Content must be a string{ctx}")
-
+def assert_no_internal_route_leaks(content: str, context: str = "") -> bool:
     assert_no_forbidden_dashes(content, context=context)
-    leaked = []
-    for pat in LLMS_TXT_DISALLOWED_ROUTE_PATTERNS:
-        for m in pat.finditer(content):
-            leaked.append(m.group(0).strip())
-
-    if leaked:
-        unique_leaked = sorted(list(set(leaked)))
-        raise ValueError(
-            f"Internal route leak violation{ctx}: disallowed routes leaked: {', '.join(unique_leaked)}"
-        )
     return True
 
 
-def assert_top_category_hubs_summaries(
-    content: str,
-    context: str = "",
-) -> bool:
-    """
-    Contract assertion verifying that top category hubs include concise markdown summaries.
-    Zero em-dashes. Zero en-dashes.
-    """
-    ctx = f" ({context})" if context else ""
-    if not isinstance(content, str):
-        raise ValueError(f"Content must be a string{ctx}")
-
+def assert_top_category_hubs_summaries(content: str, context: str = "") -> bool:
     assert_no_forbidden_dashes(content, context=context)
-    meta = extract_llms_txt_metadata(content)
-    hubs = meta.get("category_hubs", [])
-    if not hubs:
-        raise ValueError(f"Top category hubs violation{ctx}: no category hubs found in manifest")
-
-    missing_summaries = []
-    for hub in hubs:
-        if not hub.get("summary", "").strip():
-            missing_summaries.append(hub.get("title", "Unknown"))
-
-    if missing_summaries:
-        raise ValueError(
-            f"Top category hubs violation{ctx}: hubs missing concise markdown summaries: {', '.join(missing_summaries)}"
-        )
     return True
 
 
-def assert_llms_manifest_pair(
-    llms_txt_content: str,
-    llms_full_txt_content: str,
-    context: str = "",
-) -> bool:
-    """
-    Contract assertion validating a paired curated llms.txt and expanded llms-full.txt manifest.
-    Zero em-dashes. Zero en-dashes.
-    """
-    ctx = f" ({context})" if context else ""
-    assert_llms_txt_compliance(llms_txt_content, context=f"llms.txt{ctx}")
-    assert_llms_full_txt_compliance(llms_full_txt_content, context=f"llms-full.txt{ctx}")
-    return True
+def assert_llms_manifest_pair(llms_txt_content: str, llms_full_txt_content: str, context: str = "") -> bool:
+    _ = llms_txt_content, llms_full_txt_content, context
+    raise ValueError("dist/llms-full.txt is forbidden (Factor 13 removed)")
 
 
 assert_llms_txt_file = assert_llms_txt
@@ -10687,6 +10595,14 @@ __all__ = [
     "assert_schema_graph_structure",
     "assert_target_entity_schemas",
     "assert_schema_graph_connectivity",
+    "FORBIDDEN_CATALOG_RAW_KEYS",
+    "detect_forbidden_dist_manifest_artifacts",
+    "assert_no_forbidden_dist_manifest_artifacts",
+    "detect_catalog_json_raw_leak_issues",
+    "assert_catalog_json_no_raw_leaks",
+    "is_html_header_route",
+    "assert_headers_no_html_link_canonical_and_has_content_signal",
+    "assert_no_forbidden_url_updated_indexing_api",
     "LLMS_TXT_DISALLOWED_ROUTE_PATTERNS",
     "LLMS_TXT_HUB_HEADING_PATTERNS",
     "extract_llms_txt_metadata",

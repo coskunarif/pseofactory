@@ -1478,7 +1478,11 @@ def _audit_schema_and_fact_gates(
         else (f"tools/{slug}/index.html" if slug else "index.html")
     )
     try:
-        from pseofactory.contracts import detect_uncorroborated_statutory_claims
+        from pseofactory.contracts import (
+        detect_catalog_json_raw_leak_issues,
+        detect_forbidden_dist_manifest_artifacts,
+        detect_uncorroborated_statutory_claims,
+    )
         from pseofactory.tenant_facts import TenantFactStore, TruthReconciliationEngine
         from pseofactory.truth_gate import UnifiedTruthGate
 
@@ -2030,7 +2034,11 @@ def audit_syndication_asset_against_truth_store(
     Enforces Gates S1-S6 across canonical tools, YouTube, LinkedIn, Facebook, Ghost, and GitHub Gists.
     Deliberately rejects Reddit and classifies untested/missing channels as UNKNOWN.
     """
-    from pseofactory.contracts import detect_uncorroborated_statutory_claims
+    from pseofactory.contracts import (
+        detect_catalog_json_raw_leak_issues,
+        detect_forbidden_dist_manifest_artifacts,
+        detect_uncorroborated_statutory_claims,
+    )
     from pseofactory.tenant_facts import TenantFactStore
 
     if not isinstance(asset_pack, dict) or not asset_pack:
@@ -2516,13 +2524,16 @@ def audit_estate_accuracy(
       2. Nested spoke pages (dist/tools/*/*/index.html, e.g. state and vehicle spokes)
       3. Guides, comparison, directory, and institutional HTML pages (all dist/**/*.html)
       4. Embedded JSON-LD schema blocks (FAQPage, HowTo, Dataset, SoftwareApplication)
-      5. LLM discovery manifests (dist/llms.txt, dist/llms-full.txt)
-      6. AI benchmark artifacts (dist/ai-benchmarks/*.json, *.md)
-      7. Calculation manifests and catalogs (dist/manifests/*.json, dist/catalog.json)
-      8. Multi-channel syndication packs (syndication/**/*)
+      5. Curated LLM summary manifest (dist/llms.txt) when present (dist/llms-full.txt is forbidden)
+      6. Calculation manifests and catalogs (dist/manifests/*.json, dist/catalog.json with zero raw formula/quick_answer/published_output leaks; dist/ai-benchmarks/* is forbidden)
+      7. Multi-channel syndication packs (syndication/**/*)
     Zero post-render HTML mutation. Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.contracts import detect_uncorroborated_statutory_claims
+    from pseofactory.contracts import (
+        detect_catalog_json_raw_leak_issues,
+        detect_forbidden_dist_manifest_artifacts,
+        detect_uncorroborated_statutory_claims,
+    )
     from pseofactory.maintenance import LiveTruthAuditEngine
     from pseofactory.tenant_facts import TenantFactStore, resolve_canonical_property_id
     from pseofactory.truth_gate import UnifiedTruthGate
@@ -2678,14 +2689,26 @@ def audit_estate_accuracy(
             if is_top_tool or is_nested_spoke:
                 tools_passed += 1
 
-    # 2. Audit non-HTML surfaces: llms.txt, llms-full.txt, catalog.json, manifests/*.json, ai-benchmarks/*, syndication/*
+    # 2. Fail-closed check forbidding dist/llms-full.txt, dist/ai-benchmarks/*, and raw catalog.json keys
+    forbidden_art_issues = detect_forbidden_dist_manifest_artifacts(d)
+    if forbidden_art_issues:
+        non_html_failed += 1
+        violations_by_surface["__forbidden_artifacts__"] = forbidden_art_issues
+    if (d / "catalog.json").is_file():
+        cat_leak_issues = detect_catalog_json_raw_leak_issues(d / "catalog.json")
+        if cat_leak_issues:
+            non_html_failed += 1
+            violations_by_surface["catalog.json"] = cat_leak_issues
+            violations_by_tool["catalog.json"] = cat_leak_issues
+
+    # Audit non-HTML surfaces: llms.txt, catalog.json, manifests/*.json, syndication/*
     non_html_targets: List[Tuple[str, Path]] = []
-    for root_file in ("llms.txt", "llms-full.txt", "catalog.json", "feed.xml"):
+    for root_file in ("llms.txt", "catalog.json", "feed.xml"):
         cand = d / root_file
         if cand.is_file():
             non_html_targets.append((root_file, cand))
 
-    for sub_dir_name in ("ai-benchmarks", "manifests"):
+    for sub_dir_name in ("manifests",):
         s_dir = d / sub_dir_name
         if s_dir.is_dir():
             for f_path in sorted(s_dir.rglob("*")):

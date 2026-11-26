@@ -104,7 +104,7 @@ def test_prexvo_llms_manifest_sync_preserves_ymyl_refinance_disclaimer(tmp_path)
     (dist / "catalog.json").write_text("{}", encoding="utf-8")
     RetroReflectionEngine.sync_tenant_llms_manifests(dist, "prexvo", canonical_base="https://prexvo.com")
     assert "permanently forfeits" in (dist / "llms.txt").read_text(encoding="utf-8").lower()
-    assert "permanently forfeits" in (dist / "llms-full.txt").read_text(encoding="utf-8").lower()
+    assert not (dist / "llms-full.txt").exists()
     assert "permanently forfeits" in (dist / "catalog.json").read_text(encoding="utf-8").lower()
 
 

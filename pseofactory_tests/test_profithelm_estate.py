@@ -16,6 +16,7 @@ Validates:
 
 from __future__ import annotations
 
+import html as html_lib
 import json
 import re
 from pathlib import Path
@@ -203,11 +204,15 @@ def test_compile_estate_and_statutory_invariants(tmp_path: Path) -> None:
     assert "val-rd-credit" in rd_html
     assert "$49,000.00" in rd_html
 
-    # Verify llms.txt & llms-full.txt unescaped entities (R&D, zero R&amp;D)
-    for llms_name in ("llms.txt", "llms-full.txt"):
-        llms_text = (dist / llms_name).read_text(encoding="utf-8")
-        assert "&amp;" not in llms_text, f"Raw HTML entity found in {llms_name}"
-        assert "R&D Tax Credit Calculator" in llms_text
+    # Verify llms.txt & catalog.json unescaped entities (zero &amp;), feed.xml R&D unescape, and retired llms-full.txt purge
+    assert not (dist / "llms-full.txt").exists()
+    llms_text = (dist / "llms.txt").read_text(encoding="utf-8")
+    assert "&amp;" not in llms_text, "Raw HTML entity found in llms.txt"
+    catalog_text = (dist / "catalog.json").read_text(encoding="utf-8")
+    assert "&amp;" not in catalog_text, "Raw HTML entity found in catalog.json"
+    feed_text = (dist / "feed.xml").read_text(encoding="utf-8")
+    assert "&amp;amp;" not in feed_text
+    assert "R&D Tax Credit Calculator" in html_lib.unescape(feed_text)
 
     # Verify single SoftwareApplication JSON-LD invariant & 40-60 word quick-answers on every tool page
     for tool_dir in (dist / "tools").iterdir():

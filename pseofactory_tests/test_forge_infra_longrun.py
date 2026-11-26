@@ -269,12 +269,13 @@ def test_build_edge_headers_caps_active_rules_at_95_and_preserves_leaf_canonical
 ) -> None:
     """
     Verifies build_edge_headers and compact_edge_headers_to_cloudflare_cap cap active
-    non-comment rules at <= 95 (under Cloudflare Pages' 100-rule limit) while preserving
-    all leaf canonical links for MasterSEOVerifier.check_http_link_canonical_gate.
+    non-comment rules at <= 95 (under Cloudflare Pages' 100-rule limit), omit HTTP
+    Link canonical headers on HTML routes, and preserve overflow non-HTML canonical
+    links for MasterSEOVerifier.check_http_link_canonical_gate.
     """
-    routes = ["/", "/about/", "/privacy/", "/tools/", "/tools/section-179-calculator/"]
-    for i in range(150):
-        routes.append(f"/tools/section-179-calculator/vehicle-{i:03d}/")
+    html_routes = ["/", "/about/", "/privacy/", "/tools/", "/tools/section-179-calculator/"]
+    pdf_routes = [f"/workpapers/vehicle-{i:03d}.pdf" for i in range(150)]
+    routes = html_routes + pdf_routes
 
     headers_text = build_edge_headers(
         canonical_base="https://profithelm.com",
@@ -288,40 +289,44 @@ def test_build_edge_headers_caps_active_rules_at_95_and_preserves_leaf_canonical
     assert val["status"] == "PASS", f"Validation failed: {val['issues']}"
     assert val["active_rules_count"] <= EdgeConfigStandards.MAX_CLOUDFLARE_HEADERS_RULES
     assert val["cloudflare_rule_cap_compliant"] is True
-    assert "# [edge-middleware-canonical] /tools/section-179-calculator/vehicle-149/" in headers_text
+    assert "# [edge-middleware-canonical] /workpapers/vehicle-149.pdf" in headers_text
+    assert "/tools/section-179-calculator/" not in headers_text
 
-    # Verify MasterSEOVerifier.check_http_link_canonical_gate sees all 150 leaf routes
+    # Verify MasterSEOVerifier.check_http_link_canonical_gate sees active machine canonical links
+    required_eps = ["/feed.xml", "/llms.txt", "/sitemap.xml", "/catalog.json", "/media-kit.json", "/robots.txt"]
     verifier = MasterSEOVerifier(
         dist_dir=tmp_path,
         canonical_base="https://profithelm.com",
         domain="profithelm.com",
         brand_name="ProfitHelm",
         tools=[{"slug": "section-179-calculator", "title": "Section 179 Calculator"}],
-        required_endpoints=["/feed.xml", "/llms.txt", "/llms-full.txt", "/sitemap.xml", "/"],
+        required_endpoints=required_eps,
         leaf_route_checker=lambda _dist, found: [
             f"Missing {r}"
-            for r in routes
+            for r in required_eps
             if not any(fr == r for fr, _ in found)
         ],
     )
     gate_res = verifier.check_http_link_canonical_gate(tmp_path)
     assert gate_res["status"] == "PASS", f"Canonical gate failed: {gate_res['issues']}"
 
-    # Also test compact_edge_headers_to_cloudflare_cap on a raw 165-rule file
+    # Also test compact_edge_headers_to_cloudflare_cap on a raw 165-rule file (plus stale HTML canonical to strip)
     raw_lines = [
         "/static/css/*\n  Cache-Control: public, max-age=31536000, immutable\n",
-        "/*\n  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800\n",
+        "/*\n  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800\n  Content-Signal: ai-train=no, search=yes, ai-input=yes\n",
         "/404.html\n  Cache-Control: no-store\n",
         '/feed.xml\n  Link: <https://profithelm.com/feed.xml>; rel="canonical"\n  Content-Type: application/xml; charset=utf-8\n',
+        '/tools/section-1031-calculator/\n  Link: <https://profithelm.com/tools/section-1031-calculator/>; rel="canonical"\n',
     ]
     for i in range(160):
         raw_lines.append(
-            f'/tools/section-1031-calculator/state-{i:03d}/\n  Link: <https://profithelm.com/tools/section-1031-calculator/state-{i:03d}/>; rel="canonical"\n'
+            f'/workpapers/state-{i:03d}.pdf\n  Link: <https://profithelm.com/workpapers/state-{i:03d}.pdf>; rel="canonical"\n'
         )
     raw_lines.append(
         '/catalog.json\n  Content-Type: application/json; charset=utf-8\n  Link: <https://profithelm.com/catalog.json>; rel="canonical"\n'
     )
     compacted = compact_edge_headers_to_cloudflare_cap("\n".join(raw_lines))
+    assert "/tools/section-1031-calculator/" not in compacted
     compacted_file = tmp_path / "_headers_compacted"
     compacted_file.write_text(compacted, encoding="utf-8")
     compacted_val = validate_edge_headers_file(compacted_file, enforce_rule_cap=True)
@@ -332,14 +337,13 @@ def test_build_edge_headers_caps_active_rules_at_95_and_preserves_leaf_canonical
 def test_build_edge_routes_json_and_sync_tenant_edge_redirect_function(tmp_path: Path) -> None:
     """
     Verifies build_edge_routes_json and sync_tenant_edge_redirect_function emit dist/_routes.json
-    and inject canonical Link fallback into functions/_middleware.js.
+    and keep functions/_middleware.js free of HTML canonical Link injection.
     """
     routes_json_raw = build_edge_routes_json()
     routes_data = json.loads(routes_json_raw)
     assert routes_data["version"] == 1
-    assert routes_data["include"] == ["/*"]
-    for pattern in ("/static/*", "/videos/*", "/manifests/*", "/*.css", "/*.js", "/*.mp4", "/*.xml", "/*.json"):
-        assert pattern in routes_data["exclude"]
+    assert routes_data["include"] == ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"]
+    assert routes_data["exclude"] == []
 
     repo_dir = tmp_path / "profithelm-mock"
     (repo_dir / "functions" / "r").mkdir(parents=True)
@@ -353,9 +357,9 @@ def test_build_edge_routes_json_and_sync_tenant_edge_redirect_function(tmp_path:
     assert sync_res["status"] == "UPDATED"
     assert (repo_dir / "dist" / "_routes.json").is_file()
     mw_updated = (repo_dir / "functions" / "_middleware.js").read_text(encoding="utf-8")
-    assert 'rel="canonical"' in mw_updated
-    assert "https://profithelm.com${pathname}" in mw_updated
+    assert 'rel="canonical"' not in mw_updated
     assert 'if (hostname === "www.profithelm.com")' in mw_updated
+    assert "isNonApexDev" in mw_updated
     assert '"/tools/kalshi-prediction-market-arbitrage-strategy/": "/tools/prediction-market-odds/"' in mw_updated
     assert '"/tools/saas-burn-multiple-benchmarks-2026/": "/tools/saas-runway-calculator/"' in mw_updated
 

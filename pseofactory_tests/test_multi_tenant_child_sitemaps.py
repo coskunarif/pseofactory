@@ -229,7 +229,8 @@ def test_multi_tenant_child_sitemap_generation_isolation_and_caps(tmp_path: Path
             write_files=False,
         )
 
-    # Verify MasterSEOVerifier.check_sitemap_gate validates all child sitemaps and sitemap-index.xml
+    # Verify MasterSEOVerifier.check_sitemap_gate validates clean single sitemap.xml for <500 URLs
+    # and strips <changefreq> and <priority> tags.
     verifier_a = MasterSEOVerifier(
         dist_dir=tenant_a_dir,
         canonical_base="https://tenanta.com",
@@ -238,9 +239,10 @@ def test_multi_tenant_child_sitemap_generation_isolation_and_caps(tmp_path: Path
     )
     gate_a = verifier_a.check_sitemap_gate(tenant_a_dir)
     assert gate_a["status"] == "PASS"
-    assert "sitemap-index.xml" in gate_a["sitemaps_checked"]
-    assert "sitemap-products.xml" in gate_a["sitemaps_checked"]
-    assert "sitemap-articles-2026-09.xml" in gate_a["sitemaps_checked"]
+    assert "sitemap.xml" in gate_a["sitemaps_checked"]
+    master_xml_a = (tenant_a_dir / "sitemap.xml").read_text(encoding="utf-8")
+    assert "<changefreq>" not in master_xml_a
+    assert "<priority>" not in master_xml_a
 
     # Verify crawl-budget velocity cap (MAX_BATCH_SIZE = 2000) and TIER1_HUB_CAP (150)
     many_urls = (
@@ -712,3 +714,58 @@ def test_engine_drift_gate_and_no_hardcoded_tenant_routes(
     assert "sitemap.xml" in dep_names
     assert "sitemap-index.xml" in dep_names
     assert "sitemap-products.xml" in dep_names
+
+
+def test_clean_single_sitemap_under_500_and_substantive_hash() -> None:
+    """
+    Verifies Requirement 5:
+      1. govern_graduated_exposure returns the full clean URL set without artificial
+         50/200 throttling when total URLs < 500, while still throttling >= 500 URLs.
+      2. _render_urlset_xml omits <changefreq> and <priority>.
+      3. compute_url_substantive_hash hashes normalized <main> + dataset_payload JSON
+         deterministically while ignoring <head>/<footer>/whitespace outside <main>.
+    """
+    from pseofactory.drift import compute_url_substantive_hash
+    from pseofactory.indexer import SitemapGovernor, _render_urlset_xml
+
+    urls_under_500 = [f"https://example.com/tools/calc-{i}/" for i in range(120)]
+    res_under = SitemapGovernor.govern_graduated_exposure(urls_under_500, indexed_ratio=0.35)
+    assert len(res_under.allowed_urls) == 120
+    assert res_under.deferred_urls == []
+
+    urls_500_plus = [f"https://example.com/tools/calc-{i}/" for i in range(550)]
+    res_over = SitemapGovernor.govern_graduated_exposure(urls_500_plus, indexed_ratio=0.35)
+    assert len(res_over.allowed_urls) == 50
+    assert len(res_over.deferred_urls) == 500
+
+    xml_out = _render_urlset_xml(
+        [{"url": "https://example.com/", "changefreq": "daily", "priority": "1.0"}],
+        default_lastmod="2026-11-25",
+    )
+    assert "<loc>https://example.com/</loc>" in xml_out
+    assert "<lastmod>2026-11-25</lastmod>" in xml_out
+    assert "<changefreq>" not in xml_out
+    assert "<priority>" not in xml_out
+
+    html_a = (
+        "<html><head><title>Build 1</title><meta name='build' content='2026-11-01'></head>"
+        "<body><main>  <h1>Section 179</h1>\n<p>Cap $1,250,000.</p>  </main>"
+        "<footer>Built 2026-11-01</footer></body></html>"
+    )
+    html_b_same_main = (
+        "<html><head><title>Build 2</title><meta name='build' content='2026-11-25'></head>"
+        "<body><main><h1>Section 179</h1><p>Cap $1,250,000.</p></main>"
+        "<footer>Built 2026-11-25</footer></body></html>"
+    )
+    html_c_changed_main = (
+        "<html><head><title>Build 2</title></head>"
+        "<body><main><h1>Section 179</h1><p>Cap $1,290,000.</p></main></body></html>"
+    )
+    ds_1 = {"year": 2026, "limit": 1250000}
+    ds_1_reordered = {"limit": 1250000, "year": 2026}
+    ds_2 = {"year": 2027, "limit": 1290000}
+
+    assert compute_url_substantive_hash(html_a, ds_1) == compute_url_substantive_hash(html_b_same_main, ds_1_reordered)
+    assert compute_url_substantive_hash(html_a, ds_1) != compute_url_substantive_hash(html_c_changed_main, ds_1)
+    assert compute_url_substantive_hash(html_a, ds_1) != compute_url_substantive_hash(html_a, ds_2)
+

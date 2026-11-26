@@ -9559,7 +9559,6 @@ def create_stripe_checkout_session(
 
     form_params: Dict[str, str] = {
         "mode": "payment",
-        "payment_method_types[0]": "card",
         "client_reference_id": eff_lead_id,
         "success_url": offer["success_url"],
         "cancel_url": offer["cancel_url"],

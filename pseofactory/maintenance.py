@@ -6681,18 +6681,16 @@ def _has_lienbond_poisoned_meta(
 
 
 def _has_llms_headers_surface(dist_dir: Path, headers_content: str) -> bool:
-    """Returns True if dist_dir or _headers declares an llms.txt or llms-full.txt surface."""
+    """Returns True if dist_dir or _headers declares an llms.txt surface."""
     hdr = headers_content or ""
     return (
         (dist_dir / "llms.txt").is_file()
-        or (dist_dir / "llms-full.txt").is_file()
         or "/llms.txt" in hdr
-        or "/llms-full.txt" in hdr
     )
 
 
 def _headers_missing_llms_noindex(headers_content: str) -> bool:
-    """Returns True if /llms.txt or /llms-full.txt active blocks in _headers lack X-Robots-Tag: noindex."""
+    """Returns True if /llms.txt active block in _headers lacks X-Robots-Tag: noindex."""
     route_xrobots: Dict[str, List[str]] = {}
     current_route = ""
     for raw_line in (headers_content or "").splitlines():
@@ -6706,11 +6704,12 @@ def _headers_missing_llms_noindex(headers_content: str) -> bool:
             hk, hv = line.split(":", 1)
             if hk.strip().lower() == "x-robots-tag":
                 route_xrobots[current_route].append(hv.strip().lower())
-    for ep in ("/llms.txt", "/llms-full.txt"):
-        if ep not in route_xrobots:
-            return True
-        if not any("noindex" in val for val in route_xrobots[ep]):
-            return True
+    if "/llms.txt" not in route_xrobots:
+        return True
+    if not any("noindex" in val for val in route_xrobots["/llms.txt"]):
+        return True
+    if "/llms-full.txt" in route_xrobots and not any("noindex" in val for val in route_xrobots["/llms-full.txt"]):
+        return True
     return False
 
 
@@ -6719,7 +6718,7 @@ def _ensure_llms_noindex_in_headers(
     canonical_base: str,
     require_llms_blocks: bool = True,
 ) -> str:
-    """Ensures /llms.txt and /llms-full.txt blocks in _headers emit X-Robots-Tag: noindex."""
+    """Ensures /llms.txt and /catalog.json emit X-Robots-Tag: noindex, nofollow, /* sets Content-Signal, and retired blocks are purged."""
     base = (canonical_base or "").rstrip("/")
     lines = (headers_content or "").splitlines()
     out_lines: List[str] = []
@@ -6729,7 +6728,12 @@ def _ensure_llms_noindex_in_headers(
     while i < n:
         raw_line = lines[i]
         stripped = raw_line.strip()
-        if stripped in ("/llms.txt", "/llms-full.txt") and not raw_line[:1].isspace():
+        if stripped in ("/llms-full.txt", "/ai-benchmarks/*") and not raw_line[:1].isspace():
+            i += 1
+            while i < n and (lines[i][:1].isspace() and lines[i].strip()):
+                i += 1
+            continue
+        if stripped in ("/llms.txt", "/catalog.json") and not raw_line[:1].isspace():
             ep = stripped
             seen_eps.add(ep)
             out_lines.append(raw_line)
@@ -6743,28 +6747,46 @@ def _ensure_llms_noindex_in_headers(
                 bl_s = bl.strip()
                 if ":" in bl_s and bl_s.split(":", 1)[0].strip().lower() == "x-robots-tag":
                     has_x_robots = True
-                    out_lines.append("  X-Robots-Tag: noindex")
+                    out_lines.append("  X-Robots-Tag: noindex, nofollow")
                 else:
                     out_lines.append(bl)
             if not has_x_robots:
-                out_lines.append("  X-Robots-Tag: noindex")
+                out_lines.append("  X-Robots-Tag: noindex, nofollow")
+            continue
+        if stripped == "/*" and not raw_line[:1].isspace():
+            seen_eps.add("/*")
+            out_lines.append(raw_line)
+            i += 1
+            block_lines = []
+            while i < n and (lines[i][:1].isspace() and lines[i].strip()):
+                block_lines.append(lines[i])
+                i += 1
+            has_content_signal = False
+            for bl in block_lines:
+                bl_s = bl.strip()
+                if ":" in bl_s and bl_s.split(":", 1)[0].strip().lower() == "content-signal":
+                    has_content_signal = True
+                    out_lines.append("  Content-Signal: ai-train=no, search=yes, ai-input=yes")
+                else:
+                    out_lines.append(bl)
+            if not has_content_signal:
+                out_lines.append("  Content-Signal: ai-train=no, search=yes, ai-input=yes")
             continue
         out_lines.append(raw_line)
         i += 1
 
     result = "\n".join(out_lines)
-    if require_llms_blocks:
-        for ep in ("/llms.txt", "/llms-full.txt"):
-            if ep not in seen_eps:
-                block_txt = (
-                    f"\n{ep}\n"
-                    f'  Link: <{base}{ep}>; rel="canonical"\n'
-                    f"  Content-Type: text/plain; charset=utf-8\n"
-                    f"  ! Cache-Control\n"
-                    f"  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n"
-                    f"  X-Robots-Tag: noindex\n"
-                )
-                result = result.rstrip() + "\n" + block_txt
+    if require_llms_blocks and "/llms.txt" not in seen_eps:
+        ep = "/llms.txt"
+        block_txt = (
+            f"\n{ep}\n"
+            f'  Link: <{base}{ep}>; rel="canonical"\n'
+            f"  Content-Type: text/plain; charset=utf-8\n"
+            f"  ! Cache-Control\n"
+            f"  Cache-Control: public, max-age=0, s-maxage=60, must-revalidate\n"
+            f"  X-Robots-Tag: noindex, nofollow\n"
+        )
+        result = result.rstrip() + "\n" + block_txt
     return result.rstrip() + "\n" if result.strip() else result
 
 
@@ -14225,10 +14247,12 @@ class RetroReflectionEngine:
 
     @classmethod
     def _has_stale_llms_manifests(cls, dist_dir: Path, property_id: str) -> bool:
-        """Checks whether llms.txt or llms-full.txt in dist_dir contain truncated descriptions, generic filler, or missing routes."""
+        """Checks whether llms.txt exceeds cap/has leaks, or retired llms-full.txt/ai-benchmarks exist."""
         from pseofactory.contracts import detect_llms_txt_issues
         llms_path = dist_dir / "llms.txt"
         llms_full_path = dist_dir / "llms-full.txt"
+        if llms_full_path.is_file() or (dist_dir / "ai-benchmarks").is_dir():
+            return True
         tools_dir = dist_dir / "tools"
         if not tools_dir.is_dir():
             return False
@@ -14240,63 +14264,53 @@ class RetroReflectionEngine:
         if llms_path.is_file():
             try:
                 txt = llms_path.read_text(encoding="utf-8", errors="ignore")
+                link_count = len(re.findall(r"^- \[[^\]]+\]\([^)]+\)", txt, flags=re.MULTILINE))
                 if (
                     "\u2014" in txt
                     or "\u2013" in txt
+                    or link_count > 5
+                    or bool(re.search(r"\$[0-9][0-9,]*", txt))
                     or bool(re.search(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", txt))
                     or "Deterministic mathematical model and planning calculator for " in txt
                     or "..." in txt
                     or "ford-f-250-super-duty" in txt
                     or "139 Canonical Endpoints" in txt
-                    or "$19,125" in txt
-                    or "$161,000" in txt
-                    or "(1: 13.3%" in txt
-                    or "(100%: 15%" in txt
-                    or "refinance-break-even-calculator/): Calculate 2026 Student Loan Refinance Break-Even Calculator under 225%" in txt
-                    or "icr-repayment-calculator/): Calculate 2026 ICR Repayment Calculator under 225%" in txt
-                    or "ibr-hardship-cap-calculator/): Calculate 2026 IBR Hardship Cap & Partial Financial Hardship Calculator under 225%" in txt
                     or "Calculator Calculator" in txt
                     or bool(re.search(r"(?<![/-])\b(?:Pslf|Parent\s+Plus|Grad\s+Plus|Hipaa|Hitrust|Fedramp|3pao|C3pao|Cmmc|Tcja)\b(?![/-])", txt))
                     or bool(detect_llms_txt_issues(txt))
                 ):
                     return True
-                for r_slug in root_tool_slugs:
-                    if f"/tools/{r_slug}/" not in txt:
-                        return True
             except Exception:
                 return True
-        if llms_full_path.is_file():
-            try:
-                ftxt = llms_full_path.read_text(encoding="utf-8", errors="ignore")
-                if (
-                    "\u2014" in ftxt
-                    or "\u2013" in ftxt
-                    or bool(re.search(r"(?<![0-9%)\]])[ \t]+-[ \t]+(?![0-9$(])", ftxt))
-                    or "Princeton GEO Answer:" in ftxt
-                    or "Direct Statutory Answer:" not in ftxt
-                    or "Query Syntax:" not in ftxt
-                    or "$19,125" in ftxt
-                    or "$161,000" in ftxt
-                    or "(1: 13.3%" in ftxt
-                    or "(100%: 15%" in ftxt
-                    or "directly to your inbox" in ftxt
-                    or "Total acquisition price of" in ftxt
-                    or "TCJA Sunset: Federal marginal rates revert" in ftxt
-                ):
-                    return True
-                for r_slug in root_tool_slugs:
-                    if f"/tools/{r_slug}/" not in ftxt:
-                        return True
-            except Exception:
-                return True
-        if root_tool_slugs and (llms_path.is_file() or llms_full_path.is_file()):
+        if root_tool_slugs and llms_path.is_file():
             cat_f = dist_dir / "catalog.json"
             if not cat_f.is_file():
                 return True
             try:
                 ct = cat_f.read_text(encoding="utf-8", errors="ignore")
-                if "directly to your inbox" in ct or "Total acquisition price of" in ct or "sunset_standard_deduction" in ct:
+                if (
+                    "directly to your inbox" in ct
+                    or "Total acquisition price of" in ct
+                    or "sunset_standard_deduction" in ct
+                    or '"dateModified"' in ct
+                    or '"2026-10-31"' in ct
+                ):
                     return True
+                cat_obj = json.loads(ct)
+                if not isinstance(cat_obj, dict) or not isinstance(cat_obj.get("tools"), list):
+                    return True
+                if property_id.lower() == "prexvo" and "disclosure" not in cat_obj:
+                    return True
+                allowed_tool_keys = {"slug", "title", "url", "category", "updated_at"}
+                for ctool in cat_obj.get("tools") or []:
+                    if not isinstance(ctool, dict):
+                        return True
+                    if any(
+                        k in ctool for k in ("inputs", "formula", "published_output", "quick_answer", "query_syntax")
+                    ):
+                        return True
+                    if set(ctool.keys()) != allowed_tool_keys:
+                        return True
             except Exception:
                 return True
         return False
@@ -14464,33 +14478,20 @@ class RetroReflectionEngine:
                 if qa_txt and "permanently forfeits" not in qa_txt.lower():
                     qa_txt = f"{qa_txt} {refi_warn}".strip()
             manifest_obj = cls._resolve_manifest_for_page(raw_h, property_id=property_id, slug=td.name, dist_dir=dist_dir)
-            inputs_dict = manifest_obj.get("inputs") if isinstance(manifest_obj.get("inputs"), dict) else {}
-            if property_id.lower() == "prexvo":
-                q_syn = f"{canon}/tools/{td.name}/?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
-            elif inputs_dict:
-                q_params = "&".join(f"{k}={{{k}}}" for k in list(inputs_dict.keys())[:4])
-                q_syn = f"{canon}/tools/{td.name}/?{q_params}"
-            elif property_id.lower() == "gainhelm":
-                q_syn = f"{canon}/tools/{td.name}/?headcount={{headcount}}&extra_criteria={{extra_criteria}}"
-            else:
-                q_syn = f"{canon}/tools/{td.name}/?income={{income}}&status={{status}}"
-            bound_partners = list(
-                dict.fromkeys(
-                    m.group(1).lower()
-                    for m in re.finditer(r'href=["\']/r/([a-z0-9_]+)', raw_h, re.IGNORECASE)
-                )
-            )
+            dm_m = re.search(r'"dateModified"\s*:\s*"(\d{4}-\d{2}-\d{2})', raw_h)
+            page_upd = dm_m.group(1) if dm_m and dm_m.group(1) != "2026-10-31" else ""
+            cat_str = str(
+                manifest_obj.get("category")
+                or manifest_obj.get("cluster")
+                or property_id.lower()
+                or "calculator"
+            ).strip()
             tool_meta[td.name] = {
                 "title": h1_txt,
                 "description": desc_txt,
-                "quick_answer": qa_txt or desc_txt,
                 "url": f"{canon}/tools/{td.name}/",
-                "query_syntax": q_syn,
-                "statutory_authority": _clean_non_math_dashes(str(manifest_obj.get("statutory_authority") or "")),
-                "economic_dataset": _clean_non_math_dashes(str(manifest_obj.get("economic_dataset") or "")),
-                "published_output": manifest_obj.get("published_output", 0.0),
-                "inputs": inputs_dict,
-                "verified_partners": bound_partners,
+                "category": cat_str,
+                "updated_at": page_upd,
             }
 
         llms_path = dist_dir / "llms.txt"
@@ -14602,284 +14603,79 @@ class RetroReflectionEngine:
                 pass
 
         llms_full_path = dist_dir / "llms-full.txt"
-        if tool_meta:
-            try:
-                orig_full = llms_full_path.read_text(encoding="utf-8", errors="ignore") if llms_full_path.is_file() else ""
-                is_prexvo = property_id.lower() == "prexvo"
-                is_gainhelm = property_id.lower() == "gainhelm"
-                is_lienbond = property_id.lower() == "lienbond"
-                if is_prexvo:
-                    header_block = (
-                        "# Prexvo: Complete Machine Knowledge Base & Title IV Statutory Manifest\n"
-                        "Domain: prexvo.com\n"
-                        f"Base URL: {canon}\n"
-                        "Research Entity: Prexvo Statutory Research Group\n"
-                        "Legal Entity: Prexvo LLC\n"
-                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
-                    )
-                elif is_gainhelm:
-                    header_block = (
-                        "# GainHelm: Complete Machine Knowledge Base & Cyber Compliance Statutory Manifest\n"
-                        "Domain: gainhelm.com\n"
-                        f"Base URL: {canon}\n"
-                        "Research Entity: GainHelm Cyber Compliance & Audit Economics Research\n"
-                        "Legal Entity: GainHelm LLC\n"
-                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
-                    )
-                elif is_lienbond:
-                    header_block = (
-                        "# LienBond: Complete Machine Knowledge Base & Surety and Construction Statutory Manifest\n"
-                        "Domain: lienbond.com\n"
-                        f"Base URL: {canon}\n"
-                        "Research Entity: LienBond Statutory Surety & Construction Compliance Research\n"
-                        "Legal Entity: LienBond LLC\n"
-                        "Headquarters: 522 W Riverside Ave Ste N, Spokane, WA 99201\n"
-                    )
-                else:
-                    header_block = (
-                        "# ProfitHelm: Complete Machine Knowledge Base & Statutory Calculation Manifest\n"
-                        "Domain: profithelm.com\n"
-                        f"Base URL: {canon}\n"
-                        "Research Entity: ProfitHelm Quantitative Research\n"
-                        "Legal Entity: ProfitHelm LLC\n"
-                    )
+        if llms_full_path.is_file():
+            llms_full_path.unlink(missing_ok=True)
+            updated_files.append("llms-full.txt")
+        ai_bench_dir = dist_dir / "ai-benchmarks"
+        if ai_bench_dir.exists():
+            shutil.rmtree(ai_bench_dir, ignore_errors=True)
+        try:
+            from pseofactory.estate_common import cap_llms_txt_file
 
-                def _tool_sort_key(item: Tuple[str, Dict[str, str]]) -> Tuple[int, str]:
-                    k = item[0]
-                    if is_gainhelm:
-                        if k == "soc-2-audit-cost-calculator":
-                            return (0, k)
-                        if k == "cmmc-2-0-compliance-cost-calculator":
-                            return (1, k)
-                    elif is_lienbond:
-                        if k == "contractor-license-bond-cost-calculator-by-credit-score":
-                            return (0, k)
-                        if k == "performance-and-payment-bond-cost-calculator":
-                            return (1, k)
-                    elif not is_prexvo:
-                        if k == "irs-2027-tax-brackets":
-                            return (0, k)
-                        if k == "crypto-tax-calculator":
-                            return (1, k)
-                    return (2, k)
-
-                sections_out: List[str] = [header_block]
-                for idx, (s_key, m_info) in enumerate(sorted(tool_meta.items(), key=_tool_sort_key), start=1):
-                    sec_title = m_info["title"]
-                    if not is_prexvo and not is_gainhelm and not is_lienbond and s_key == "crypto-tax-calculator":
-                        sec_title = "Crypto Tax Liability & Capital Gains Calculator 2027"
-                    q_syn = m_info.get("query_syntax") or f"{m_info['url']}?agi={{agi}}&debt={{debt}}&family={{size}}&status={{status}}"
-                    stat_line = f"Statutory Authority: {m_info['statutory_authority']}\n" if m_info.get("statutory_authority") else ""
-                    if is_prexvo:
-                        sections_out.append(
-                            f"## {idx}. {sec_title}\n"
-                            f"Canonical URL: {m_info['url']}\n"
-                            f"Query Syntax: {q_syn}\n"
-                            f"{stat_line}"
-                            f"Summary: {m_info['description']}\n"
-                            f"Direct Statutory Answer: {m_info['quick_answer']}\n"
-                        )
-                    else:
-                        sections_out.append(
-                            f"## {idx}. {sec_title}\n"
-                            f"Canonical URL: {m_info['url']}\n"
-                            f"Query Syntax: {q_syn}\n"
-                            f"{stat_line}"
-                            f"Description: {m_info['description']}\n"
-                            f"Direct Statutory Answer: {m_info['quick_answer']}\n"
-                        )
-
-                if not is_prexvo and not is_gainhelm and not is_lienbond and spoke_lines:
-                    sections_out.append(
-                        "## State Income Tax, Commercial Vehicle Section 179, and Section 1031 Spoke Endpoints\n"
-                        + "\n".join(spoke_lines)
-                        + "\n"
-                    )
-
-                if is_prexvo:
-                    sections_out.append(
-                        "## Title IV Statutory Parameter Specifications & Formula Definitions\n"
-                        "- Repayment Assistance Plan (RAP): Enacted under P.L. 119-21 Section 82001 with tiered AGI percentages (1% to 10% of AGI; 6% tier equals $325.00/mo at $65,000 AGI), $10/mo minimum payment, $50/mo dependent reduction, 360-month forgiveness timeline, 100% unpaid interest subsidy, and up to $50/mo matching principal payment.\n"
-                        "- Income-Based Repayment (IBR): Discretionary income calculated at 150% of 2026 HHS Poverty Guidelines ($15,960 single, $23,940 shield under 91 FR 1797) and 34 CFR 685.221. Rate is 15% for pre-July 2014 borrowers (25-year forgiveness) and 10% for new borrowers (20-year forgiveness), capped at the 10-year standard payment amount.\n"
-                        "- Pay As You Earn (PAYE): Governed by 34 CFR 685.209. 150% poverty exemption, 10% discretionary income rate, 20-year forgiveness horizon, capped at 10-year standard repayment payment.\n"
-                        "- Income-Contingent Repayment (ICR): Governed by 34 CFR 685.209(b). Lesser of: 20% discretionary income over 100% poverty line, or 12-year income-adjusted payment formula. Sole direct IDR option for consolidated Parent PLUS loans.\n"
-                        "- Tiered Standard Repayment: Governed by 34 CFR 685.208. Fixed amortization terms based on total debt: $7,500-$9,999 (12 years), $10,000-$19,999 (15 years), $20,000-$39,999 (20 years), $40,000-$59,999 (25 years), $60,000+ (30 years).\n"
-                        "- PSLF Buyback (34 CFR 685.219(g)): Allows borrowers with 120 months of qualifying public service employment to buy back eligible months of deferment or forbearance at the lower historical IDR payment amount.\n"
-                    )
-                elif is_gainhelm:
-                    sections_out.append(
-                        "## Key Cyber Compliance & Audit Statutory Authorities\n"
-                        "- SOC 2 Type I & Type II: Governed by AICPA SSAE 18 (AT-C Section 205) and 2017 Trust Services Criteria (TSP Section 100).\n"
-                        "- CMMC 2.0 & NIST SP 800-171: Governed by 32 CFR Part 170, DFARS 252.204-7012 / 7019 / 7020 / 7021, and DoD SPRS scoring [-203 to +110] with 88-point conditional POA&M floor.\n"
-                        "- ISO/IEC 27001:2022: Governed by ISO/IEC 27006-1:2024 mandatory Stage 1 and Stage 2 auditor-day tables and 93 Annex A controls.\n"
-                        "- HIPAA & HITECH Civil Monetary Penalties: Governed by 45 CFR 160.404 and 42 U.S.C. 1320d-5 four-tier culpability schedules and 500-record media notification triggers.\n"
-                        "- FedRAMP & PCI DSS v4.0.1: Governed by 44 U.S.C. 3607 (NIST SP 800-53 Rev 5 3PAO baselines) and PCI DSS v4.0.1 Merchant Levels 1-4 QSA ROC standards.\n"
-                    )
-                elif is_lienbond:
-                    sections_out.append(
-                        "## Key Surety Bond, Workers' Compensation & Construction Statutory Authorities\n"
-                        "- Federal Miller Act & Public Works Bonding: Governed by 40 U.S.C. 3131-3134, FAR 28.102-1, and U.S. Treasury Department Circular 570.\n"
-                        "- SBA Surety Bond Guarantee Program: Governed by 15 U.S.C. 694a-694c and 13 CFR Part 115 (0.60% contractor guarantee fee).\n"
-                        "- NCCI Workers' Compensation & Ghost Policy Rules: Governed by NCCI Basic Manual Class Codes, Experience Modification Rate (Ex-Mod) formulas, and Rule 2-E subcontractor audit provisions.\n"
-                        "- Davis-Bacon Prevailing Wage & ERISA Section 412: Governed by 40 U.S.C. 3141-3148, 29 CFR Part 5 (Form WH-347), and 29 U.S.C. 1112.\n"
-                        "- FMCSA BMC-84 & State Mechanics Lien Statutes: Governed by 49 U.S.C. 13906 ($75,000 broker security), California Civil Code Sections 8200-8460, and Texas Property Code Chapter 53.\n"
-                    )
-                else:
-                    sections_out.append(
-                        "## Key Statutory Authorities\n"
-                        "- OBBBA (P.L. 119-21) & IRC Section 1(j): Federal marginal rates permanently anchored at 10%-37% with $16,100 Single / $32,200 MFJ standard deduction (Rev. Proc. 2025-32) and permanent 20% Section 199A QBI deduction.\n"
-                        "- Section 179: Maximum deduction cap $2,560,000 with $4,090,000 equipment phase-out under IRC Section 179 and IRC Section 168(k).\n"
-                        "- Section 1031: 45-day replacement identification and 180-day closing deadlines under 26 U.S.C. Section 1031.\n"
-                        "- GAAP ASC 205-40: Going-concern cash runway forecasting benchmarked to monthly net burn and liquid reserves.\n"
-                    )
-
-                try:
-                    from pseofactory.truth_pack import load_truth_pack
-
-                    _llms_tp = load_truth_pack(property_id, allow_expired=True)
-                    _current_full_txt = "\n".join(sections_out)
-                    _missing_disclosures: List[str] = []
-                    for _disc in getattr(_llms_tp, "disclosures", []) or []:
-                        _canon_txt = str(getattr(_disc, "canonical_text", "") or "").strip()
-                        if not _canon_txt:
-                            continue
-                        _req_pats = [str(p) for p in (getattr(_disc, "required_text_patterns", []) or []) if p]
-                        _matched_disc = any(
-                            re.search(pat, _current_full_txt, re.IGNORECASE)
-                            for pat in _req_pats
-                        )
-                        if not _matched_disc and _canon_txt not in _missing_disclosures:
-                            _missing_disclosures.append(_canon_txt)
-                    if _missing_disclosures:
-                        sections_out.append(
-                            "## Mandatory Regulatory Disclosures\n"
-                            + "\n".join(f"- {d_txt}" for d_txt in _missing_disclosures)
-                            + "\n"
-                        )
-                except Exception:
-                    pass
-
-                new_full = _clean_non_math_dashes("\n".join(sections_out))
-                if new_full != orig_full:
-                    llms_full_path.write_text(new_full, encoding="utf-8")
-                    updated_files.append("llms-full.txt")
-            except Exception:
-                pass
+            cap_llms_txt_file(dist_dir, property_id=property_id, canonical_base=canon)
+        except Exception:
+            pass
 
         if tool_meta and (
             llms_path.is_file()
-            or llms_full_path.is_file()
             or (dist_dir / "catalog.json").is_file()
         ):
             try:
-                is_prexvo_cat = property_id.lower() == "prexvo"
-                is_gainhelm_cat = property_id.lower() == "gainhelm"
-                is_lienbond_cat = property_id.lower() == "lienbond"
-                ordered_slugs = sorted(tool_meta.keys())
-                catalog_tools: List[Dict[str, Any]] = []
-                if is_prexvo_cat:
-                    default_comp_peers = [
-                        ("student-loan-repayment-calculator", "Title IV Student Loan Repayment Calculator"),
-                        ("rap-vs-ibr-calculator", "RAP vs IBR Repayment Comparison Calculator"),
-                        ("pslf-buyback-calculator", "PSLF Buyback Settlement Calculator"),
-                    ]
-                elif is_gainhelm_cat:
-                    default_comp_peers = [
-                        ("soc-2-audit-cost-calculator", "SOC 2 Audit Cost & GRC Automation Calculator"),
-                        ("cmmc-2-0-compliance-cost-calculator", "CMMC 2.0 Level 2 Compliance Cost Calculator"),
-                        ("nist-800-171-sprs-score-calculator", "NIST 800-171 DoD SPRS Score Calculator"),
-                    ]
-                elif is_lienbond_cat:
-                    default_comp_peers = [
-                        ("contractor-license-bond-cost-calculator-by-credit-score", "Contractor License Bond Cost Calculator"),
-                        ("performance-and-payment-bond-cost-calculator", "Performance & Payment Bond Cost Calculator"),
-                        ("workers-compensation-class-code-rate-calculator-by-state", "Workers' Comp Class Code Rate Calculator"),
-                    ]
-                else:
-                    default_comp_peers = [
-                        ("irs-2027-tax-brackets", "Federal Tax Bracket & Marginal Rate Calculator"),
-                        ("section-179-calculator", "Section 179 Equipment Depreciation Calculator"),
-                        ("section-1031-calculator", "Section 1031 Real Estate Exchange Calculator"),
-                    ]
-                for s_key in ordered_slugs:
+                from pseofactory.contracts import assert_no_forbidden_dashes
+                from pseofactory.estate_common import (
+                    _resolve_truthpack_modified_date,
+                    sanitize_public_catalog_tools,
+                )
+
+                resolved_pid = property_id.strip().lower()
+                resolved_domain = urllib.parse.urlparse(canon).hostname or f"{resolved_pid}.com"
+                fallback_date = _resolve_truthpack_modified_date(resolved_pid)
+                cat_path = dist_dir / "catalog.json"
+                existing_categories: Dict[str, str] = {}
+                existing_dates: Dict[str, str] = {}
+                if cat_path.is_file():
+                    try:
+                        prev_cat = json.loads(cat_path.read_text(encoding="utf-8", errors="ignore"))
+                        for prev_t in (prev_cat.get("tools") or []) if isinstance(prev_cat, dict) else []:
+                            if isinstance(prev_t, dict) and prev_t.get("slug"):
+                                ps = str(prev_t["slug"]).strip()
+                                if prev_t.get("category"):
+                                    existing_categories[ps] = str(prev_t["category"]).strip()
+                                prev_upd = str(prev_t.get("updated_at") or "").strip()
+                                if prev_upd and prev_upd != "2026-10-31":
+                                    existing_dates[ps] = prev_upd
+                    except Exception:
+                        pass
+
+                raw_catalog_tools: List[Dict[str, Any]] = []
+                for s_key in sorted(tool_meta.keys()):
                     m_info = tool_meta[s_key]
-                    comp_tools = [
-                        {
-                            "slug": sib_k,
-                            "title": tool_meta[sib_k]["title"],
-                            "url": tool_meta[sib_k]["url"],
-                        }
-                        for sib_k in ordered_slugs
-                        if sib_k != s_key
-                    ][:2]
-                    if len(comp_tools) < 2:
-                        for p_s, p_lbl in default_comp_peers:
-                            if p_s != s_key and (dist_dir / "tools" / p_s / "index.html").is_file() and all(c["slug"] != p_s for c in comp_tools):
-                                comp_tools.append(
-                                    {
-                                        "slug": p_s,
-                                        "title": p_lbl,
-                                        "url": f"{canon}/tools/{p_s}/",
-                                    }
-                                )
-                            if len(comp_tools) >= 2:
-                                break
-                    if not comp_tools:
-                        for p_s, p_lbl in default_comp_peers:
-                            if p_s != s_key and all(c["slug"] != p_s for c in comp_tools):
-                                comp_tools.append(
-                                    {
-                                        "slug": p_s,
-                                        "title": p_lbl,
-                                        "url": f"{canon}/tools/{p_s}/",
-                                    }
-                                )
-                            if len(comp_tools) >= 2:
-                                break
-                    catalog_tools.append(
+                    raw_catalog_tools.append(
                         {
                             "slug": s_key,
-                            "url": m_info["url"],
                             "title": m_info["title"],
-                            "description": m_info["description"],
-                            "quick_answer": m_info["quick_answer"],
-                            "statutory_authority": m_info.get("statutory_authority", ""),
-                            "economic_dataset": m_info.get("economic_dataset", ""),
-                            "published_output": m_info.get("published_output", 0.0),
-                            "inputs": m_info.get("inputs", {}),
-                            "query_syntax": m_info.get("query_syntax", ""),
-                            "inLanguage": "en-US",
-                            "dateModified": "2026-10-31",
-                            "offers": {
-                                "@type": "Offer",
-                                "price": "0",
-                                "priceCurrency": "USD",
-                                "availability": "https://schema.org/InStock",
-                            },
-                            "complementary_tools": comp_tools,
-                            "verified_partners": m_info.get("verified_partners", []),
+                            "url": m_info["url"],
+                            "category": m_info.get("category") or existing_categories.get(s_key) or resolved_pid or "calculator",
+                            "updated_at": m_info.get("updated_at") or existing_dates.get(s_key) or fallback_date,
                         }
                     )
-                catalog_payload = {
-                    "schema_version": "2026.10.27",
-                    "property_id": (
-                        "prexvo"
-                        if is_prexvo_cat
-                        else ("gainhelm" if is_gainhelm_cat else ("lienbond" if is_lienbond_cat else "profithelm"))
-                    ),
-                    "domain": (
-                        "prexvo.com"
-                        if is_prexvo_cat
-                        else ("gainhelm.com" if is_gainhelm_cat else ("lienbond.com" if is_lienbond_cat else "profithelm.com"))
-                    ),
-                    "canonical_url": canon,
-                    "inLanguage": "en-US",
-                    "dateModified": "2026-10-31",
-                    "tools_count": len(catalog_tools),
-                    "tools": catalog_tools,
+                lightweight_tools = sanitize_public_catalog_tools(
+                    raw_catalog_tools,
+                    default_category=resolved_pid or "calculator",
+                    default_updated_at=fallback_date,
+                    property_id=resolved_pid,
+                )
+                catalog_payload: Dict[str, Any] = {
+                    "property_id": resolved_pid,
+                    "domain": resolved_domain,
+                    "tools": lightweight_tools,
                 }
-                cat_path = dist_dir / "catalog.json"
+                if resolved_pid == "prexvo":
+                    catalog_payload["disclosure"] = (
+                        "Refinancing federal student loans into a private loan permanently forfeits federal protections."
+                    )
                 new_cat_txt = json.dumps(catalog_payload, indent=2) + "\n"
+                assert_no_forbidden_dashes(new_cat_txt, context=f"{resolved_pid or 'tenant'} catalog.json")
                 old_cat_txt = cat_path.read_text(encoding="utf-8") if cat_path.is_file() else ""
                 if new_cat_txt != old_cat_txt:
                     cat_path.write_text(new_cat_txt, encoding="utf-8")
@@ -15304,11 +15100,12 @@ class RetroReflectionEngine:
                 new_hdr = orig_hdr
                 for ep_json in ("/catalog.json", "/media-kit.json"):
                     if f"\n{ep_json}\n" not in f"\n{new_hdr}\n":
+                        x_robots_val = "noindex, nofollow" if ep_json == "/catalog.json" else "index, follow"
                         block_hdr = (
                             f"\n{ep_json}\n"
                             f"  Content-Type: application/json; charset=utf-8\n"
                             f"  Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800\n"
-                            f"  X-Robots-Tag: index, follow\n"
+                            f"  X-Robots-Tag: {x_robots_val}\n"
                             f'  Link: <{canon}{ep_json}>; rel="canonical"\n'
                         )
                         new_hdr = new_hdr.rstrip() + "\n" + block_hdr
@@ -15548,8 +15345,6 @@ class RetroReflectionEngine:
                                 f"  <url>\n"
                                 f"    <loc>{loc_u}</loc>\n"
                                 f"    <lastmod>{today_iso}</lastmod>\n"
-                                f"    <changefreq>daily</changefreq>\n"
-                                f"    <priority>0.9</priority>\n"
                                 f"  </url>"
                             )
                     if appended_blocks:
@@ -18515,29 +18310,10 @@ def _sync_dist_ai_benchmarks_and_compile_porcelain(
     )
     if pid in ("profithelm", "prexvo", "gainhelm", "lienbond") and is_full_estate_root:
         try:
-            from pseofactory.distributor import generate_ai_benchmark_nodes
-
-            bench_res = generate_ai_benchmark_nodes(tenant=pid)
-            bench_files = bench_res.get("files") if isinstance(bench_res, dict) else None
-            if isinstance(bench_files, dict) and bench_files:
-                dist_bench_dir = d / "ai-benchmarks"
-                dist_bench_dir.mkdir(parents=True, exist_ok=True)
-                expected_names = set(bench_files.keys())
-                for existing_f in list(dist_bench_dir.iterdir()):
-                    if existing_f.is_file() and existing_f.name not in expected_names:
-                        existing_f.unlink(missing_ok=True)
-                for fname, fcontent in bench_files.items():
-                    target_f = dist_bench_dir / fname
-                    text_val = str(fcontent)
-                    if not target_f.is_file() or target_f.read_text(encoding="utf-8", errors="ignore") != text_val:
-                        _atomic_write_text(target_f, text_val, encoding="utf-8")
-                synd_bench_dir = r_root / "syndication" / "ai_benchmarks"
-                if synd_bench_dir.is_dir():
-                    for fname, fcontent in bench_files.items():
-                        target_sf = synd_bench_dir / fname
-                        text_val = str(fcontent)
-                        if not target_sf.is_file() or target_sf.read_text(encoding="utf-8", errors="ignore") != text_val:
-                            _atomic_write_text(target_sf, text_val, encoding="utf-8")
+            dist_bench_dir = d / "ai-benchmarks"
+            if dist_bench_dir.exists():
+                shutil.rmtree(dist_bench_dir, ignore_errors=True)
+            (d / "llms-full.txt").unlink(missing_ok=True)
         except Exception:
             pass
 

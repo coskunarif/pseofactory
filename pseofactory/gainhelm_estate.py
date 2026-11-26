@@ -3120,7 +3120,15 @@ def compile_gainhelm_estate_impl(
             if sib.get("slug") and sib["slug"] != slug
         ][:2]
         compiled_pages.append({"slug": slug, "title": tool["title"], "html_path": str(leaf_dir / "index.html"), "published_output": manifest_doc["published_output"]})
-        catalog_tools.append({"slug": slug, "title": tool["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": manifest_doc["statutory_authority"], "economic_dataset": manifest_doc["economic_dataset"], "formula": manifest_doc["formula"], "published_output": manifest_doc["published_output"], "complementary_tools": comp_tools})
+        catalog_tools.append(
+            {
+                "slug": slug,
+                "title": tool["title"],
+                "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/",
+                "category": str(tool.get("category") or "cyber_compliance"),
+                **({"updated_at": tool["updated_date"]} if tool.get("updated_date") else {}),
+            }
+        )
 
     gsc_meta_val, indexnow_stem = _resolve_gainhelm_public_meta()
     for vs in void_specs:
@@ -3147,7 +3155,15 @@ def compile_gainhelm_estate_impl(
             if sib.get("slug") and sib["slug"] != slug
         ][:2]
         compiled_pages.append({"slug": slug, "title": res["title"], "html_path": str(leaf_dir / "index.html"), "published_output": res["published_output"]})
-        catalog_tools.append({"slug": slug, "title": res["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": spec_in.get("statutory_authority", ""), "economic_dataset": spec_in.get("economic_dataset", ""), "formula": spec_in.get("formula", ""), "published_output": res["published_output"], "complementary_tools": void_comp_tools})
+        catalog_tools.append(
+            {
+                "slug": slug,
+                "title": res["title"],
+                "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/",
+                "category": str(spec_in.get("category") or "cyber_compliance"),
+                **({"updated_at": spec_in["updated_date"]} if spec_in.get("updated_date") else {}),
+            }
+        )
 
     (tools_dir / "index.html").write_text(_build_tools_directory_html(all_tools, css_text), encoding="utf-8")
     (dist / "methodology" / "index.html").write_text(_build_methodology_html(css_text), encoding="utf-8")
@@ -3164,20 +3180,19 @@ def compile_gainhelm_estate_impl(
         (f"{GAINHELM_CANONICAL_BASE}/terms/", "0.5", "monthly"),
         (f"{GAINHELM_CANONICAL_BASE}/contact/", "0.7", "monthly"),
     ]
-    gh_ai_bots = ["*", "Googlebot", "Bingbot", "PerplexityBot", "ClaudeBot", "GPTBot", "ChatGPT-User", "OAI-SearchBot", "CCBot", "anthropic-ai", "Cohere-ai", "Applebot", "Applebot-Extended", "Meta-ExternalAgent"]
     write_sitemaps_and_robots(
         dist=dist,
         canonical_base=GAINHELM_CANONICAL_BASE,
         hub_specs=hub_specs,
         leaf_tools=all_tools,
-        ai_bots=gh_ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
-        allow_paths=["/", "/tools/"],
-        include_changefreq_and_priority=True,
+        ai_bots=None,
+        disallow_paths=["/api/", "/cdn-cgi/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        allow_paths=["/"],
+        include_changefreq_and_priority=False,
     )
 
     header_routes = ["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"] + [f"/tools/{s}/" for s in all_slugs]
-    feed_items = [{"title": t["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{t['slug']}/", "description": t["description"]} for t in all_tools]
+    feed_items = [{"title": t["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{t['slug']}/", "description": t["description"], **({"updated_date": t["updated_date"]} if t.get("updated_date") else {})} for t in all_tools]
     write_machine_endpoints_and_headers(
         dist=dist,
         property_id="gainhelm",
@@ -3190,7 +3205,7 @@ def compile_gainhelm_estate_impl(
         catalog_tools=catalog_tools,
         media_kit_payload={"property_id": "gainhelm", "brand_name": GAINHELM_SITE_NAME, "domain": GAINHELM_DOMAIN, "vertical": "enterprise_cyber_compliance_grc_audit", "deliverable_skus": ["gh_soc2_cmmc_audit_workpapers", "gh_hipaa_iso27001_governance_kit", "gh_instant_compliance_worksheet_19"]},
         header_routes=header_routes,
-        machine_endpoints=["/feed.xml", "/llms.txt", "/llms-full.txt", "/sitemap.xml", "/sitemap-hubs.xml", "/sitemap-leaves.xml"],
+        machine_endpoints=["/feed.xml", "/llms.txt", "/sitemap.xml"],
         static_patterns=["/static/*", "/css/*"],
         redirects_content=_GAINHELM_REDIRECTS,
     )

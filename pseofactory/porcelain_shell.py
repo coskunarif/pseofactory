@@ -5189,26 +5189,220 @@ def _rewrite_local_js_version_tags(
     )
 
 
+_AFFILIATE_PARTNER_SECTION_RE = re.compile(
+    r'<section\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-card|affiliates?-section|refinance-partner-section|partners?-section)\b[^"\']*["\'][^>]*>',
+    re.IGNORECASE,
+)
+_AFFILIATE_PARTNER_DIV_RE = re.compile(
+    r'<div\b[^>]*class=["\'][^"\']*\b(?:calc-inline-cta|comparison-table-cta-bar|contextual-referral-card)\b[^"\']*["\'][^>]*>',
+    re.IGNORECASE,
+)
+_AFFILIATE_PARTNER_CARD_DIV_RE = re.compile(
+    r'<div\b[^>]*class=["\'][^"\']*\b(?:affiliate-card|partner-card)\b[^"\']*["\'][^>]*>',
+    re.IGNORECASE,
+)
+_WORKPAPER_UNLOCK_OPEN_RE = re.compile(
+    r'<(section|div)\b[^>]*id=["\']workpaper-unlock-card["\'][^>]*>',
+    re.IGNORECASE,
+)
+_CALC_RESULTS_OPEN_RE = re.compile(
+    r'<div\b[^>]*(?:\bid=["\']calc-results["\']|\bclass=["\'][^"\']*\b(?:calc-results|calc-results-column|result-box)\b[^"\']*["\'])[^>]*>',
+    re.IGNORECASE,
+)
+
+
+def _consolidate_calculator_partner_blocks(
+    partner_blocks: Sequence[str],
+    profile: Dict[str, Any],
+) -> str:
+    """
+    Merges one or more affiliate partner blocks or /r/ links on a calculator leaf into
+    at most ONE consolidated post-calc .contextual-referral-card block with the
+    'Sponsored Placement' label and plain-language FTC 16 CFR Part 255 disclosure
+    rendered immediately above the first <a href="/r/..."> link.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not partner_blocks:
+        return ""
+
+    anchor_re = re.compile(
+        r'<a\b([^>]*\bhref=["\'](/r/[^"\']+)["\'][^>]*)>([\s\S]*?)</a>',
+        re.IGNORECASE,
+    )
+    items: List[Dict[str, str]] = []
+    seen_keys: Set[str] = set()
+    open_attrs: Dict[str, str] = {}
+
+    for blk in partner_blocks:
+        open_m = re.match(r'^<(?:section|div)\b([^>]*)>', blk.strip(), re.IGNORECASE)
+        if open_m:
+            for am in re.finditer(r'\b(data-[a-z0-9_-]+)\s*=\s*(["\'])(.*?)\2', open_m.group(1), re.IGNORECASE):
+                k_attr = am.group(1).lower()
+                if k_attr not in open_attrs and am.group(3).strip():
+                    open_attrs[k_attr] = am.group(3).strip()
+
+        # Split into individual partner cards (or consolidated .contextual-referral-body rows)
+        # so multi-partner blocks remain 100% idempotent across Pass 1 -> Pass 2.
+        _contextual_body_div_re = re.compile(
+            r'<div\b[^>]*class=["\'][^"\']*\bcontextual-referral-body\b[^"\']*["\'][^>]*>',
+            re.IGNORECASE,
+        )
+        sub_cards: List[str] = []
+        for split_pat in (_AFFILIATE_PARTNER_CARD_DIV_RE, _contextual_body_div_re):
+            scan_src = blk
+            while True:
+                cm = split_pat.search(scan_src)
+                if not cm:
+                    break
+                c_blk, scan_src = _extract_balanced_element(scan_src, cm, "div")
+                sub_cards.append(c_blk)
+            if sub_cards:
+                break
+        if not sub_cards:
+            sub_cards = [blk]
+
+        for card_html in sub_cards:
+            for a_m in anchor_re.finditer(card_html):
+                a_attrs = a_m.group(1)
+                a_href = a_m.group(2).strip()
+                a_inner = a_m.group(3).strip()
+                r_key_m = re.match(r'^/r/([a-z0-9_.-]+)', a_href, re.IGNORECASE)
+                r_key = r_key_m.group(1).lower() if r_key_m else a_href.lower()
+                if r_key in seen_keys:
+                    continue
+                seen_keys.add(r_key)
+
+                # Extract title & description if present in the same card
+                title_m = re.search(
+                    r'<(?:div|h3|h4)\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-title|affiliate-title|partner-title)\b[^"\']*["\'][^>]*>([\s\S]*?)</(?:div|h3|h4)>',
+                    card_html,
+                    re.IGNORECASE,
+                )
+                if not title_m:
+                    title_m = re.search(r'<h[234]\b[^>]*>([\s\S]*?)</h[234]>', card_html, re.IGNORECASE)
+                desc_m = re.search(
+                    r'<p\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-desc|affiliate-desc)\b[^"\']*["\'][^>]*>([\s\S]*?)</p>',
+                    card_html,
+                    re.IGNORECASE,
+                )
+                if not desc_m:
+                    for pm in re.finditer(r'<p\b([^>]*)>([\s\S]*?)</p>', card_html, re.IGNORECASE):
+                        p_cls = pm.group(1).lower()
+                        if "disclosure" in p_cls:
+                            continue
+                        p_txt = re.sub(r'<[^>]+>', ' ', pm.group(2)).strip()
+                        if p_txt and "16 cfr" not in p_txt.lower():
+                            desc_m = pm
+                            break
+
+                title_txt = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
+                title_txt = html_lib.unescape(title_txt) if title_txt else ""
+                if not title_txt:
+                    brand_m = re.search(r'\bdata-company-brand=["\']([^"\']+)["\']', a_attrs, re.IGNORECASE)
+                    title_txt = html_lib.unescape(brand_m.group(1).strip()) if brand_m else r_key.replace("_", " ").title()
+                if desc_m:
+                    desc_raw = desc_m.group(2) if desc_m.lastindex and desc_m.lastindex >= 2 else desc_m.group(1)
+                    desc_txt = html_lib.unescape(re.sub(r'<[^>]+>', ' ', desc_raw).strip())
+                else:
+                    desc_txt = "Optional commercial partner resource matched to this calculation."
+
+                # Preserve existing data-* and href attributes on <a>, normalize button classes
+                clean_a_attrs = a_attrs
+                if 'rel=' not in clean_a_attrs.lower():
+                    clean_a_attrs += ' rel="noopener sponsored nofollow"'
+                if 'target=' not in clean_a_attrs.lower():
+                    clean_a_attrs += ' target="_blank"'
+                items.append(
+                    {
+                        "key": r_key,
+                        "title": re.sub(r'\s+', ' ', title_txt),
+                        "desc": re.sub(r'\s+', ' ', desc_txt),
+                        "anchor_html": f"<a{clean_a_attrs}>{a_inner}</a>",
+                    }
+                )
+
+    if not items:
+        return ""
+
+    prop_id = str(profile.get("property_id") or "profithelm").strip().lower()
+    brand_name = str(profile.get("brand_name") or prop_id.title()).strip()
+    ftc_plain = (
+        f"FTC 16 CFR Part 255 Disclosure: {brand_name} may earn an affiliate or referral "
+        "commission if you click a partner link below and engage a provider, at no extra cost to you. "
+        "Partner compensation never alters deterministic statutory formulas or calculator outputs."
+    )
+    open_attrs.setdefault("data-mechanic", "compliant_intent_monetization")
+    open_attrs.setdefault("data-property", prop_id)
+    open_attrs.setdefault("data-partner", items[0]["key"])
+    attr_str = " ".join(f'{k}="{html_lib.escape(v)}"' for k, v in open_attrs.items())
+
+    rows_html: List[str] = []
+    for it in items:
+        rows_html.append(
+            '        <div class="contextual-referral-body">\n'
+            '          <div class="contextual-referral-copy">\n'
+            f'            <div class="contextual-referral-title">{html_lib.escape(it["title"])}</div>\n'
+            f'            <p class="contextual-referral-desc">{html_lib.escape(it["desc"])}</p>\n'
+            '          </div>\n'
+            f'          {it["anchor_html"]}\n'
+            '        </div>'
+        )
+
+    return (
+        f'      <section class="contextual-referral-card card pseo-card" {attr_str}>\n'
+        '        <div class="contextual-referral-header">\n'
+        '          <span class="contextual-referral-badge affiliate-disclosure-badge">Sponsored Placement</span>\n'
+        '        </div>\n'
+        f'        <p class="affiliate-disclosure contextual-referral-disclosure">{html_lib.escape(ftc_plain)}</p>\n'
+        + "\n".join(rows_html)
+        + "\n      </section>"
+    )
+
+
+def _is_restricted_public_service_leaf(
+    work: str,
+    rel_path: str,
+    profile: Dict[str, Any],
+    body_attrs: str = "",
+) -> bool:
+    """Checks body/inner markers and Prexvo public-service slugs deterministically."""
+    rel_low = str(rel_path or "").strip().lstrip("/").lower()
+    prop_id = str(profile.get("property_id") or "").strip().lower()
+    is_restricted_slug = False
+    if prop_id == "prexvo" and rel_low:
+        slug_cand = re.sub(r"(?:^|/)index\.html$", "", rel_low)
+        if slug_cand.startswith("tools/"):
+            slug_cand = slug_cand[len("tools/") :]
+        if slug_cand:
+            from pseofactory.affiliates import is_restricted_public_service_slug
+
+            is_restricted_slug = is_restricted_public_service_slug(slug_cand)
+    return bool(
+        'data-restricted-public-service="true"' in work
+        or 'data-commercial-offers="none"' in work
+        or 'data-restricted-public-service="true"' in body_attrs
+        or 'data-commercial-offers="none"' in body_attrs
+        or is_restricted_slug
+        or any(tok in rel_low for tok in ("pslf-", "save-plan", "save-to-rap", "buyback"))
+    )
+
+
 def _enforce_calculator_leaf_slot_order(
     inner_html: str,
     rel_path: str,
     profile: Dict[str, Any],
+    body_attrs: str = "",
 ) -> str:
     """
-    Enforces the locked 6-slot calculator_leaf order inside div.container:
-    1. <nav class="breadcrumbs" aria-label="Breadcrumb">
-    2. <section class="hero-section tool-hero card"> (<h1> + <aside class="quick-answer">)
-    3. Single canonical <div class="compliance-strip ftc-disclosure-banner">
-    4. Calculator Workbench
-    5. Partner / Commercial Handoff & /api/lead-capture
-    6. Methodology, Scenario <table>s, Datasets & FAQ .cards
+    Enforces the locked calculator_leaf order inside div.container:
+    1. <nav class="breadcrumbs" aria-label="Breadcrumb"> + <section class="hero-section tool-hero card"> (<h1> + <aside class="quick-answer">) + single canonical compliance strip
+    2. Interactive <form> + Inline #calc-results (never embedding workpaper-unlock-card or contextual-referral-card inside <form>)
+    3. Post-calculation #workpaper-unlock-card
+    4. At most ONE consolidated post-calc affiliate partner block with 'Sponsored Placement' + FTC 16 CFR 255 disclosure immediately above the first <a href="/r/...">
+    5. Methodology, Scenario <table>s, Datasets & FAQ .cards
     """
     work = inner_html
-    is_restricted = bool(
-        'data-restricted-public-service="true"' in work
-        or 'data-commercial-offers="none"' in work
-        or any(tok in rel_path.lower() for tok in ("pslf-", "save-plan", "save-to-rap", "buyback"))
-    )
+    is_restricted = _is_restricted_public_service_leaf(work, rel_path, profile, body_attrs=body_attrs)
 
     # Strip all duplicate legacy YMYL / FTC disclaimer blocks anywhere in the leaf body
     work = _strip_legacy_disclaimer_clutter(work, _LEGACY_CLUTTER_CLASSES)
@@ -5283,6 +5477,59 @@ def _enforce_calculator_leaf_slot_order(
     )
 
     body_rest = work.strip()
+
+    # 3. Extract #workpaper-unlock-card from anywhere (including inside <form> or calc_block)
+    unlock_block = ""
+    while True:
+        um = _WORKPAPER_UNLOCK_OPEN_RE.search(body_rest)
+        if not um:
+            break
+        u_raw, body_rest = _extract_balanced_element(body_rest, um, um.group(1))
+        if not unlock_block and not is_restricted:
+            unlock_block = u_raw.strip()
+
+    # 4. Extract ALL affiliate partner containers and stray /r/ cards from anywhere
+    _affiliate_partner_aside_re = re.compile(
+        r'<aside\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-card|affiliates?-section|affiliate-card|partner-card|calc-inline-cta)\b[^"\']*["\'][^>]*>',
+        re.IGNORECASE,
+    )
+    extracted_partner_blocks: List[str] = []
+    for pat, tag_n in (
+        (_AFFILIATE_PARTNER_SECTION_RE, "section"),
+        (_AFFILIATE_PARTNER_DIV_RE, "div"),
+        (_affiliate_partner_aside_re, "aside"),
+    ):
+        while True:
+            pm = pat.search(body_rest)
+            if not pm:
+                break
+            p_raw, body_rest = _extract_balanced_element(body_rest, pm, tag_n)
+            if not is_restricted:
+                extracted_partner_blocks.append(p_raw)
+
+    # Catch any remaining standalone .affiliate-card / .partner-card or bare /r/ links
+    while True:
+        cm = _AFFILIATE_PARTNER_CARD_DIV_RE.search(body_rest)
+        if not cm:
+            break
+        c_raw, body_rest = _extract_balanced_element(body_rest, cm, "div")
+        if not is_restricted and re.search(r'href=["\']/r/', c_raw, re.IGNORECASE):
+            extracted_partner_blocks.append(c_raw)
+
+    stray_r_re = re.compile(r'<a\b[^>]*\bhref=["\']/r/[^"\']+["\'][^>]*>[\s\S]*?</a>', re.IGNORECASE)
+    if stray_r_re.search(body_rest):
+        if not is_restricted:
+            for s_m in stray_r_re.finditer(body_rest):
+                extracted_partner_blocks.append(s_m.group(0))
+        body_rest = stray_r_re.sub("", body_rest)
+
+    partner_block = (
+        ""
+        if is_restricted
+        else _consolidate_calculator_partner_blocks(extracted_partner_blocks, profile)
+    )
+
+    # 5. Extract Interactive <form> + Inline #calc-results container (slot 2)
     calc_m = re.search(
         r'<(section|div)\b[^>]*class=["\'][^"\']*\b(?:interactive-calculator-container|calculation-container|calc-card)\b[^"\']*["\'][^>]*>',
         body_rest,
@@ -5290,27 +5537,52 @@ def _enforce_calculator_leaf_slot_order(
     )
     if calc_m:
         calc_block, after_calc = _extract_balanced_element(body_rest, calc_m, calc_m.group(1))
-        unlock_m = re.match(
-            r'^\s*<section\b[^>]*id=["\']workpaper-unlock-card["\'][^>]*>',
-            after_calc,
-            flags=re.IGNORECASE,
+        # Ensure any #calc-results outside calc_block stays in slot 2 before #workpaper-unlock-card
+        extra_results: List[str] = []
+        if not re.search(r'id=["\']calc-results["\']|\bcalc-results\b', calc_block, re.IGNORECASE):
+            while True:
+                rm = _CALC_RESULTS_OPEN_RE.search(after_calc)
+                if not rm:
+                    break
+                r_raw, after_calc = _extract_balanced_element(after_calc, rm, "div")
+                extra_results.append(r_raw.strip())
+        calc_parts = [calc_block.strip()] + extra_results
+        ordered_body = "\n".join(
+            p
+            for p in (
+                "\n".join(calc_parts).strip(),
+                unlock_block,
+                partner_block,
+                after_calc.strip(),
+            )
+            if p
         )
-        if unlock_m:
-            unlock_block, after_unlock = _extract_balanced_element(after_calc, unlock_m, "section")
+    else:
+        form_m = re.search(r'<form\b[^>]*>[\s\S]*?</form>', body_rest, flags=re.IGNORECASE)
+        if form_m:
+            form_html = form_m.group(0).strip()
+            after_form = (body_rest[: form_m.start()] + body_rest[form_m.end() :]).strip()
+            res_parts: List[str] = []
+            while True:
+                rm = _CALC_RESULTS_OPEN_RE.search(after_form)
+                if not rm:
+                    break
+                r_raw, after_form = _extract_balanced_element(after_form, rm, "div")
+                res_parts.append(r_raw.strip())
+            calc_combined = "\n".join([form_html] + res_parts).strip()
             ordered_body = "\n".join(
-                p for p in (calc_block.strip(), unlock_block.strip(), compliance_html, after_unlock.strip()) if p
+                p for p in (calc_combined, unlock_block, partner_block, after_form.strip()) if p
             )
         else:
             ordered_body = "\n".join(
-                p for p in (calc_block.strip(), compliance_html, after_calc.strip()) if p
+                p for p in (body_rest.strip(), unlock_block, partner_block) if p
             )
-    else:
-        ordered_body = "\n".join(p for p in (body_rest, compliance_html) if p)
 
     return "\n".join(
         [
             f"      {breadcrumb_html.strip()}",
             hero_section_html,
+            compliance_html,
             ordered_body,
         ]
     )
@@ -5322,6 +5594,7 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
     profile: Dict[str, Any],
     blueprint: str,
     existing_hubs: Optional[Set[str]] = None,
+    body_attrs: str = "",
 ) -> str:
     """
     Enforces deterministic Porcelain slot order for comparison_leaf (/vs/*) and editorial_guide (/guides/*)
@@ -5329,11 +5602,7 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
     """
     work = inner_html
     rel_low = str(rel_path or "").strip().lstrip("/").lower()
-    is_restricted = bool(
-        'data-restricted-public-service="true"' in work
-        or 'data-commercial-offers="none"' in work
-        or any(tok in rel_low for tok in ("pslf-", "save-plan", "save-to-rap", "buyback"))
-    )
+    is_restricted = _is_restricted_public_service_leaf(work, rel_path, profile, body_attrs=body_attrs)
 
     work = _strip_legacy_disclaimer_clutter(work, _LEGACY_CLUTTER_CLASSES)
 
@@ -5582,7 +5851,7 @@ def normalize_html_to_porcelain_shell(
     )
 
     if blueprint == "calculator_leaf":
-        inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile)
+        inner_main = _enforce_calculator_leaf_slot_order(inner_main, rel_path, profile, body_attrs=body_attrs)
     elif blueprint in ("comparison_leaf", "editorial_guide"):
         inner_main = _enforce_editorial_or_comparison_leaf_slot_order(
             inner_main,
@@ -5590,6 +5859,7 @@ def normalize_html_to_porcelain_shell(
             profile,
             blueprint,
             existing_hubs=existing_hubs,
+            body_attrs=body_attrs,
         )
     elif blueprint == "error_404":
         # Guarantee zero YMYL/FTC banners on 404.html
@@ -6625,40 +6895,49 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
     mutated: List[str] = []
 
     lastmod_str = "2026-11-13"
-    for sm_probe in ("sitemap.xml", "sitemap-hubs.xml"):
-        p_probe = dist_dir / sm_probe
-        if p_probe.is_file():
-            lmods = re.findall(r"<lastmod>\s*(\d{4}-\d{2}-\d{2})\s*</lastmod>", p_probe.read_text(encoding="utf-8", errors="ignore"))
-            if lmods:
-                lastmod_str = max(lmods)
-                break
+    sm_main_path = dist_dir / "sitemap.xml"
+    sm_main_urls = 0
+    if sm_main_path.is_file():
+        sm_main_txt = sm_main_path.read_text(encoding="utf-8", errors="ignore")
+        sm_main_urls = len(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sm_main_txt))
+        lmods = re.findall(r"<lastmod>\s*(\d{4}-\d{2}-\d{2})\s*</lastmod>", sm_main_txt)
+        if lmods:
+            lastmod_str = max(lmods)
 
-    # Sync sitemap-hubs.xml and sitemap.xml
-    for sm_name, include_all_gov in (("sitemap-hubs.xml", True), ("sitemap.xml", True)):
+    # Sync sitemap.xml (and sitemap-hubs.xml only when >= 500 URLs exist) without <changefreq>/<priority>
+    sm_targets: List[str] = ["sitemap.xml"]
+    if sm_main_urls >= 500:
+        sm_targets.append("sitemap-hubs.xml")
+    for sm_name in sm_targets:
         sm_path = dist_dir / sm_name
         if not sm_path.is_file():
             continue
         raw_xml = sm_path.read_text(encoding="utf-8")
         if "<sitemapindex" in raw_xml:
             continue
-        existing_locs = set(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", raw_xml))
+        cleaned_xml = re.sub(
+            r"\s*<(?:changefreq|priority)\b[^>]*>[\s\S]*?</(?:changefreq|priority)>\s*\n?",
+            "\n",
+            raw_xml,
+            flags=re.IGNORECASE,
+        )
+        existing_locs = set(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", cleaned_xml))
         missing_entries: List[str] = []
         for g_url in gov_urls:
-            if include_all_gov and g_url not in existing_locs:
+            if g_url not in existing_locs:
                 missing_entries.append(
                     f"  <url>\n"
                     f"    <loc>{saxutils.escape(g_url)}</loc>\n"
                     f"    <lastmod>{lastmod_str}</lastmod>\n"
-                    f"    <changefreq>weekly</changefreq>\n"
-                    f"    <priority>0.8</priority>\n"
                     f"  </url>"
                 )
-        if missing_entries and "</urlset>" in raw_xml:
-            updated_xml = raw_xml.replace("</urlset>", "\n".join(missing_entries) + "\n</urlset>")
-            ET.fromstring(updated_xml)
-            if updated_xml != raw_xml:
-                sm_path.write_text(updated_xml, encoding="utf-8")
-                mutated.append(sm_name)
+        updated_xml = cleaned_xml
+        if missing_entries and "</urlset>" in updated_xml:
+            updated_xml = updated_xml.replace("</urlset>", "\n".join(missing_entries) + "\n</urlset>")
+        ET.fromstring(updated_xml)
+        if updated_xml != raw_xml:
+            sm_path.write_text(updated_xml, encoding="utf-8")
+            mutated.append(sm_name)
 
     # Sync dist/_headers so all 6 governance routes + crawler/feed endpoints + /* security headers are canonical
     # while deterministically keeping active Cloudflare _headers rules <= 95.
@@ -6774,6 +7053,28 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 elif replace_x_robots and req_key == "x-robots-tag" and hdr_list[existing_idx] != req:
                     hdr_list[existing_idx] = req
                     hdrs_changed = True
+                elif req_key == "content-signal" and hdr_list[existing_idx] != req:
+                    hdr_list[existing_idx] = req
+                    hdrs_changed = True
+
+        # Remove forbidden endpoints and strip HTTP Link rel="canonical" headers from HTML routes only
+        _forbidden_hdr_routes = {"/llms-full.txt", "/ai-benchmarks/*"}
+        if any(b[0] in _forbidden_hdr_routes for b in deduped_blocks):
+            deduped_blocks = [b for b in deduped_blocks if b[0] not in _forbidden_hdr_routes]
+            block_index = {b[0]: idx for idx, b in enumerate(deduped_blocks)}
+            hdrs_changed = True
+
+        from pseofactory.contracts import is_html_header_route
+
+        _canonical_hdr_re = re.compile(r"^Link:\s*<[^>]+>;\s*rel=[\"']?canonical[\"']?", re.IGNORECASE)
+        for blk in deduped_blocks:
+            if not is_html_header_route(blk[0]):
+                continue
+            orig_hdrs = blk[1]
+            cleaned_hdrs = [h for h in orig_hdrs if not _canonical_hdr_re.match(h.strip())]
+            if len(cleaned_hdrs) != len(orig_hdrs):
+                blk[1] = cleaned_hdrs
+                hdrs_changed = True
 
         detach_cc = "! Cache-Control"
         fresh_cc = "Cache-Control: public, max-age=0, s-maxage=60, must-revalidate"
@@ -6781,15 +7082,17 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
             ("/robots.txt", "text/plain; charset=utf-8"),
             ("/feed.xml", "application/xml; charset=utf-8"),
             ("/llms.txt", "text/plain; charset=utf-8"),
-            ("/llms-full.txt", "text/plain; charset=utf-8"),
             ("/sitemap.xml", "application/xml; charset=utf-8"),
-            ("/sitemap-hubs.xml", "application/xml; charset=utf-8"),
-            ("/sitemap-leaves.xml", "application/xml; charset=utf-8"),
         ):
-            req_ep_hdrs = [f'Link: <{base}{ep}>; rel="canonical"', f"Content-Type: {ct_val}", detach_cc, fresh_cc]
-            is_llms_ep = ep in ("/llms.txt", "/llms-full.txt")
+            req_ep_hdrs = [
+                f'Link: <{base}{ep}>; rel="canonical"',
+                f"Content-Type: {ct_val}",
+                detach_cc,
+                fresh_cc,
+            ]
+            is_llms_ep = ep == "/llms.txt"
             if is_llms_ep:
-                req_ep_hdrs.append("X-Robots-Tag: noindex")
+                req_ep_hdrs.append("X-Robots-Tag: noindex, nofollow")
             _ensure_block(
                 ep,
                 req_ep_hdrs,
@@ -6804,11 +7107,12 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 "Content-Type: application/json; charset=utf-8",
                 detach_cc,
                 "Cache-Control: public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+                "X-Robots-Tag: noindex, nofollow",
             ],
             replace_cc=True,
             force_active=True,
+            replace_x_robots=True,
         )
-        _ensure_block("/ai-benchmarks/*", [detach_cc, fresh_cc], replace_cc=True, force_active=True)
         _ensure_block(
             "/static/js/*",
             [detach_cc, "Cache-Control: public, max-age=31536000, immutable"],
@@ -6822,19 +7126,19 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 _ensure_block(
                     route,
                     [
-                        f'Link: <{base}{route}>; rel="canonical"',
                         "Cache-Control: public, max-age=0, s-maxage=86400, stale-while-revalidate=604800",
                     ],
                 )
 
-        if "/*" in block_index:
-            _ensure_block(
-                "/*",
-                [
-                    "X-Content-Type-Options: nosniff",
-                    "Strict-Transport-Security: max-age=31536000; includeSubDomains",
-                ],
-            )
+        _ensure_block(
+            "/*",
+            [
+                "X-Content-Type-Options: nosniff",
+                "Strict-Transport-Security: max-age=31536000; includeSubDomains",
+                "Content-Signal: ai-train=no, search=yes, ai-input=yes",
+            ],
+            force_active=True,
+        )
 
         active_idx = [idx for idx, b in enumerate(deduped_blocks) if not b[2]]
         if hdrs_changed or len(active_idx) > 95:
@@ -6842,19 +7146,15 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
                 rp = deduped_blocks[idx_val][0]
                 if rp == "/*":
                     return (0, idx_val)
-                if "*" in rp and rp != "/ai-benchmarks/*":
+                if "*" in rp:
                     return (1, idx_val)
                 if rp.startswith(("/css/", "/js/", "/static/")):
                     return (1, idx_val)
                 if rp in (
                     "/robots.txt",
-                    "/ai-benchmarks/*",
                     "/feed.xml",
                     "/llms.txt",
-                    "/llms-full.txt",
                     "/sitemap.xml",
-                    "/sitemap-hubs.xml",
-                    "/sitemap-leaves.xml",
                     "/catalog.json",
                     "/media-kit.json",
                     "/ai-plugin.json",
@@ -6912,13 +7212,25 @@ def _sync_sitemaps_headers_and_redirects(dist_dir: Path, profile: Dict[str, Any]
         leaked_meta.unlink(missing_ok=True)
         mutated.append(".pseofactory.json")
 
-    # Ensure robots.txt blocks crawler execution of /api/, /cdn-cgi/, and /r/ for EVERY User-agent group
+    # Ensure robots.txt blocks crawler execution of /api/ and /cdn-cgi/ (never Disallow: /r/)
     robots_path = dist_dir / "robots.txt"
     if robots_path.is_file():
         from pseofactory.estate_common import ensure_robots_txt_mandatory_disallows
 
         orig_rob = robots_path.read_text(encoding="utf-8", errors="ignore")
-        new_rob = ensure_robots_txt_mandatory_disallows(orig_rob)
+        rob_no_r = "\n".join(
+            ln for ln in orig_rob.splitlines()
+            if not re.match(r"^\s*disallow\s*:\s*/r(?:/|\*|\s|$)", ln, flags=re.IGNORECASE)
+        )
+        if orig_rob.endswith("\n") and not rob_no_r.endswith("\n"):
+            rob_no_r += "\n"
+        try:
+            new_rob = ensure_robots_txt_mandatory_disallows(
+                rob_no_r,
+                mandatory_disallows=("/api/", "/cdn-cgi/"),
+            )
+        except TypeError:
+            new_rob = ensure_robots_txt_mandatory_disallows(rob_no_r)
         if new_rob != orig_rob:
             robots_path.write_text(new_rob, encoding="utf-8")
             mutated.append("robots.txt")
@@ -8799,11 +9111,7 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         new_req_block = (
             "    required_endpoints=[\n"
             '        "/feed.xml",\n'
-            '        "/llms.txt",\n'
-            '        "/llms-full.txt",\n'
             '        "/sitemap.xml",\n'
-            '        "/sitemap-hubs.xml",\n'
-            '        "/sitemap-leaves.xml",\n'
             '        "/",\n'
             '        "/tools/",\n'
             '        "/about/",\n'

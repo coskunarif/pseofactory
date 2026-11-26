@@ -960,3 +960,39 @@ def test_statutory_tamper_auto_reconciliation_and_fail_closed(tmp_path):
     assert any("Gate 5 (Formula Parity)" in v for v in res.violations)
 
 
+def test_audit_estate_accuracy_rejects_llms_full_ai_benchmarks_and_raw_catalog_keys(tmp_path: Path):
+    """
+    Verify audit_estate_accuracy fails closed when dist/llms-full.txt, dist/ai-benchmarks/*,
+    or raw formula/quick_answer/published_output keys in dist/catalog.json exist.
+    """
+    from pseofactory.audit import audit_estate_accuracy
+
+    dist = tmp_path / "dist"
+    dist.mkdir(parents=True, exist_ok=True)
+    (dist / "index.html").write_text(
+        "<!doctype html><html><head><title>ProfitHelm</title></head>"
+        "<body><main><h1>ProfitHelm Hub</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist / "llms-full.txt").write_text("Full zero-click dump", encoding="utf-8")
+    (dist / "ai-benchmarks").mkdir(parents=True, exist_ok=True)
+    (dist / "ai-benchmarks" / "bench.json").write_text('{"raw": 1}', encoding="utf-8")
+    (dist / "catalog.json").write_text(
+        '{"tools": [{"slug": "s179", "formula": "x*2", "quick_answer": "yes", "published_output": 100}]}',
+        encoding="utf-8",
+    )
+
+    acc = audit_estate_accuracy(dist, "profithelm", strict=False)
+    assert acc["status"] == "FAIL"
+    by_surface = acc.get("violations_by_surface") or {}
+    joined = " | ".join(
+        str(msg)
+        for msgs in by_surface.values()
+        for msg in (msgs if isinstance(msgs, list) else [msgs])
+    )
+    assert "llms-full.txt" in joined
+    assert "ai-benchmarks" in joined
+    assert "catalog.json" in joined
+
+
+

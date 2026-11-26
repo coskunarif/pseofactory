@@ -1627,6 +1627,99 @@ def _build_compiler_faq_entities(
     return faq_entities
 
 
+def _normalize_iso_datetime_with_tz(raw_val: Any) -> Optional[str]:
+    """Normalizes a date or timestamp string to ISO 8601 with explicit UTC timezone."""
+    txt = str(raw_val or "").strip()
+    if not txt:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$", txt):
+        return txt
+    m_day = re.match(r"^(\d{4}-\d{2}-\d{2})", txt)
+    if m_day:
+        return f"{m_day.group(1)}T00:00:00+00:00"
+    return None
+
+
+def _resolve_iso_dates_with_tz(
+    property_id: str,
+    candidate_spec: Optional[Dict[str, Any]] = None,
+    manifest_source: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """
+    Resolves (datePublished, dateModified) as ISO 8601 strings WITH timezone
+    from asset/TruthPack data_modified_date and statute_effective_date, falling
+    back to a deterministic content-hash manifest date (never hardcoded stale literals).
+    """
+    spec = candidate_spec or {}
+    man = manifest_source or {}
+
+    raw_mod = (
+        spec.get("data_modified_date")
+        or man.get("data_modified_date")
+        or spec.get("updated_date")
+        or spec.get("updated_at")
+        or man.get("updated_date")
+        or spec.get("dateModified")
+        or man.get("dateModified")
+    )
+    raw_pub = (
+        spec.get("statute_effective_date")
+        or man.get("statute_effective_date")
+        or spec.get("published_date")
+        or man.get("published_date")
+        or spec.get("datePublished")
+        or man.get("datePublished")
+    )
+
+    tp_mod: Optional[str] = None
+    tp_pub: Optional[str] = None
+    pid = str(property_id or "").strip().lower()
+    if pid:
+        try:
+            from pseofactory.truth_pack import load_truth_pack
+
+            tp = load_truth_pack(pid, allow_expired=True)
+            tp_mod = str(getattr(tp, "data_modified_date", "") or "").strip() or None
+            tp_pub = str(getattr(tp, "statute_effective_date", "") or "").strip() or None
+            entries = list((getattr(tp, "entries", {}) or {}).values())
+            if not tp_mod and entries:
+                ver_dates = [
+                    str(getattr(e, "verified_at", "") or "").strip()
+                    for e in entries
+                    if str(getattr(e, "verified_at", "") or "").strip()
+                ]
+                if ver_dates:
+                    tp_mod = max(ver_dates)
+            if not tp_pub and entries:
+                eff_years = [
+                    int(getattr(e, "effective_year", 0))
+                    for e in entries
+                    if getattr(e, "effective_year", None)
+                ]
+                if eff_years:
+                    tp_pub = f"{min(eff_years)}-01-01"
+                elif tp_mod:
+                    tp_pub = tp_mod
+        except Exception:
+            pass
+
+    mod_iso = _normalize_iso_datetime_with_tz(raw_mod) or _normalize_iso_datetime_with_tz(tp_mod)
+    pub_iso = _normalize_iso_datetime_with_tz(raw_pub) or _normalize_iso_datetime_with_tz(tp_pub)
+
+    if not mod_iso or not pub_iso:
+        seed_obj = {"property_id": pid, "slug": spec.get("slug") or man.get("slug") or "", "title": spec.get("title") or ""}
+        digest = hashlib.sha256(json.dumps(seed_obj, sort_keys=True).encode("utf-8")).hexdigest()
+        now_utc = datetime.now(timezone.utc)
+        day_offset = int(digest[:4], 16) % 28 + 1
+        fallback_day = f"{now_utc.year:04d}-{now_utc.month:02d}-{day_offset:02d}T00:00:00+00:00"
+        if not mod_iso:
+            mod_iso = now_utc.strftime("%Y-%m-%dT00:00:00+00:00")
+        if not pub_iso:
+            pub_iso = fallback_day
+
+    return pub_iso, mod_iso
+
+
 def _build_compiled_json_ld_graph(
     canonical_base: str,
     slug: str,
@@ -1639,6 +1732,8 @@ def _build_compiled_json_ld_graph(
     faq_entities: List[Dict[str, Any]],
     is_gainhelm: bool = False,
     is_lienbond: bool = False,
+    date_published: Optional[str] = None,
+    date_modified: Optional[str] = None,
 ) -> str:
     """Builds the unified Schema.org @graph JSON-LD string for compiled programmatic pages."""
     brand_org_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
@@ -1667,6 +1762,9 @@ def _build_compiled_json_ld_graph(
     from pseofactory.tenant_facts import get_tenant_contract
 
     _prop_for_schema = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    _resolved_pub, _resolved_mod = _resolve_iso_dates_with_tz(_prop_for_schema)
+    _eff_date_published = _normalize_iso_datetime_with_tz(date_published) or _resolved_pub
+    _eff_date_modified = _normalize_iso_datetime_with_tz(date_modified) or _resolved_mod
     _schema_contract = get_tenant_contract(_prop_for_schema)
     _editorial_email = (
         "compliance@lienbond.com"
@@ -1715,8 +1813,8 @@ def _build_compiled_json_ld_graph(
                 "inLanguage": "en-US",
                 "isPartOf": {"@id": f"{canonical_base}/#website"},
                 "about": {"@id": f"{canonical_base}/tools/{slug}/#app"},
-                "datePublished": "2026-01-15",
-                "dateModified": "2026-10-31",
+                "datePublished": _eff_date_published,
+                "dateModified": _eff_date_modified,
                 "speakable": {
                     "@type": "SpeakableSpecification",
                     "cssSelector": [".quick-answer", "h1"],
@@ -1731,7 +1829,7 @@ def _build_compiled_json_ld_graph(
                 "operatingSystem": "All",
                 "url": f"{canonical_base}/tools/{slug}/",
                 "inLanguage": "en-US",
-                "dateModified": "2026-10-31",
+                "dateModified": _eff_date_modified,
                 "author": {
                     "@type": "Organization",
                     "@id": f"{canonical_base}/#organization",
@@ -2790,6 +2888,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     default_takeaway_html = meta_bundle["default_takeaway_html"]
     compliance_disclosure_inline_html = meta_bundle["compliance_disclosure_inline_html"]
 
+    _comp_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    _comp_pub_iso, _comp_mod_iso = _resolve_iso_dates_with_tz(_comp_prop, candidate_spec=candidate_spec, manifest_source=manifest_source)
     json_ld_graph_str = _build_compiled_json_ld_graph(
         canonical_base=canonical_base,
         slug=slug,
@@ -2802,6 +2902,8 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         faq_entities=faq_entities,
         is_gainhelm=is_gainhelm,
         is_lienbond=is_lienbond,
+        date_published=_comp_pub_iso,
+        date_modified=_comp_mod_iso,
     )
 
     from pseofactory.affiliate_intent import (
@@ -3323,7 +3425,7 @@ def _build_lienbond_support_page_html(
     collection_items: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Renders a support/hub page (tools/index, methodology/index, disclaimers/index, 404) with full SEO/GEO parity."""
-    current_utc_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    lb_date_published, lb_date_modified = _resolve_iso_dates_with_tz("lienbond")
     graph_nodes: List[Dict[str, Any]] = [
         {
             "@type": "Organization",
@@ -3356,8 +3458,8 @@ def _build_lienbond_support_page_html(
             "description": meta_desc,
             "inLanguage": "en-US",
             "isPartOf": {"@id": "https://lienbond.com/#website"},
-            "datePublished": "2026-01-15",
-            "dateModified": current_utc_date,
+            "datePublished": lb_date_published,
+            "dateModified": lb_date_modified,
             "speakable": {
                 "@type": "SpeakableSpecification",
                 "cssSelector": [".quick-answer", "h1"],
@@ -3394,8 +3496,8 @@ def _build_lienbond_support_page_html(
                     "url": canonical_url,
                     "description": meta_desc,
                     "inLanguage": "en-US",
-                    "datePublished": "2026-01-15",
-                    "dateModified": current_utc_date,
+                    "datePublished": lb_date_published,
+                    "dateModified": lb_date_modified,
                     "mainEntity": {
                         "@type": "ItemList",
                         "@id": f"{canonical_url}#itemlist",
@@ -3596,8 +3698,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
     - Factor-7 manifests under `dist/manifests/<slug>.json`
     - Hub & governance pages (`dist/index.html`, `dist/tools/index.html`, `dist/disclaimers/index.html`,
       `dist/methodology/index.html`, `dist/404.html`)
-    - Sitemaps (`dist/sitemap.xml`, `dist/sitemap-hubs.xml`, `dist/sitemap-leaves.xml`), `dist/robots.txt`,
-      `dist/llms.txt`, `dist/llms-full.txt`, `dist/catalog.json`, `dist/media-kit.json`, `dist/_headers`, `dist/_redirects`,
+    - Sitemaps (`dist/sitemap.xml`), `dist/robots.txt`,
+      `dist/llms.txt`, `dist/catalog.json`, `dist/media-kit.json`, `dist/_headers`, `dist/_redirects`,
       `dist/feed.xml`, and IndexNow key file `dist/4e1df81051618d8a982aa278ff55052f.txt`
     - Cloudflare Pages Functions (`functions/r/[partner].js`, `functions/api/telemetry.js`,
       `functions/api/lead-capture.js`, `functions/api/checkout.js`, `functions/api/lead-fulfillment.js`)
@@ -3609,6 +3711,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         finalize_estate_build,
         load_and_enrich_deployed_voids,
         prepare_estate_dirs,
+        write_llms_files,
         write_machine_endpoints_and_headers,
         write_sitemaps_and_robots,
         write_tenant_edge_functions,
@@ -3703,11 +3806,8 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
                 "slug": slug,
                 "title": res["title"],
                 "url": f"https://lienbond.com/tools/{slug}/",
-                "manifest_url": f"https://lienbond.com/manifests/{slug}.json",
-                "statutory_authority": spec["statutory_authority"],
-                "economic_dataset": spec["economic_dataset"],
-                "formula": spec["formula"],
-                "published_output": res["published_output"],
+                "category": str(spec.get("category") or "surety_and_liens"),
+                **({"updated_at": spec["updated_date"]} if spec.get("updated_date") else {}),
             }
         )
 
@@ -4353,37 +4453,13 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         ("https://lienbond.com/methodology/", "0.9", "weekly"),
         ("https://lienbond.com/disclaimers/", "0.9", "weekly"),
     ]
-    lb_ai_bots = [
-        "*",
-        "Googlebot",
-        "Bingbot",
-        "GPTBot",
-        "OAI-SearchBot",
-        "ChatGPT-User",
-        "ClaudeBot",
-        "Claude-Web",
-        "Claude-SearchBot",
-        "PerplexityBot",
-        "Perplexity-User",
-        "Google-Extended",
-        "GoogleOther",
-        "Applebot-Extended",
-        "Amazonbot",
-        "FacebookBot",
-        "Meta-ExternalAgent",
-        "CCBot",
-        "YouBot",
-        "DuckAssistBot",
-        "cohere-ai",
-        "Bytespider",
-    ]
     write_sitemaps_and_robots(
         dist=dist,
         canonical_base="https://lienbond.com",
         hub_specs=lb_hub_specs,
         leaf_tools=compiled_pages,
-        ai_bots=lb_ai_bots,
-        disallow_paths=["/api/", "/cdn-cgi/", "/private/", "/r/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
+        ai_bots=None,
+        disallow_paths=["/api/", "/cdn-cgi/", "/private/", "/signal/", "/syndication/", "/staging/", "/test/", "/tests/"],
         allow_paths=["/"],
         include_changefreq_and_priority=False,
         validate_governor=False,
@@ -4394,7 +4470,7 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         {
             "title": p["title"],
             "url": f"https://lienbond.com/tools/{p['slug']}/",
-            "description": f"{p['sample_calculation']}.",
+            "description": f"Deterministic statutory calculation scope for {p['title']} grounded in {p['statutory_authority']}.",
         }
         for p in compiled_pages
     ]
@@ -4417,7 +4493,23 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
         },
         header_routes=["/", "/tools/", "/about/", "/methodology/", "/privacy/", "/terms/", "/disclaimers/", "/contact/"]
         + [f'/tools/{p["slug"]}/' for p in compiled_pages],
+        machine_endpoints=["/feed.xml", "/llms.txt", "/sitemap.xml"],
         redirects_content=build_lienbond_canonical_redirects_content(dist),
+    )
+    write_llms_files(
+        dist=dist,
+        property_id="lienbond",
+        domain="lienbond.com",
+        canonical_base="https://lienbond.com",
+        header_title="LienBond - Construction Surety, Workers Comp & Mechanics Lien Engine",
+        header_tagline="Deterministic construction surety bond, NCCI workers compensation, 50-state mechanics lien, and Davis-Bacon WH-347 modeling.",
+        author="LienBond Statutory Surety & Construction Compliance Research",
+        legal_name="LienBond LLC",
+        headquarters="522 W Riverside Ave Ste N, Spokane, WA 99201",
+        query_syntax_params="",
+        statutory_notes="",
+        all_tools=[{"slug": p["slug"], "title": p["title"], "description": f"Deterministic calculation scope for {p['title']}."} for p in compiled_pages],
+        quick_answers={},
     )
 
     pseo_meta = {

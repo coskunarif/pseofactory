@@ -83,9 +83,65 @@ DEFAULT_YOUTUBE_CLI_BIN: Path = Path("/home/ubuntuadmin/.local/bin/youtube")
 DEFAULT_YOUTUBE_UPLOAD_LOG: Path = Path(
     "/home/ubuntuadmin/projects/arif-cli/social/youtube-toolkit/data/upload_log.json"
 )
-DEFAULT_YOUTUBE_TOKEN_PATH: Path = Path(
+FORBIDDEN_SHARED_YOUTUBE_TOKEN_PATH: Path = Path(
     "/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json"
 )
+DEFAULT_YOUTUBE_TOKEN_PATH: Optional[Path] = None
+YOUTUBE_UPLOAD_OPT_IN_ENV: str = "PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD"
+
+
+def _is_forbidden_shared_youtube_token(token_path: Optional[Union[str, Path]]) -> bool:
+    """Returns True if token_path references the forbidden shared personal MindBall token."""
+    if token_path is None:
+        return False
+    raw = str(token_path).strip()
+    if not raw:
+        return False
+    norm_raw = raw.replace("\\", "/").lower()
+    if "mindball/secrets/youtube_token.json" in norm_raw:
+        return True
+    try:
+        return Path(raw).expanduser().resolve() == FORBIDDEN_SHARED_YOUTUBE_TOKEN_PATH.resolve()
+    except OSError:
+        return False
+
+
+def _validate_explicit_youtube_token_path(
+    token_path: Optional[Union[str, Path]],
+) -> Tuple[Optional[Path], Optional[str]]:
+    """
+    Fail-closed validation for per-tenant YouTube OAuth token paths.
+    Never permits None/empty or the shared MindBall token path.
+    """
+    if _is_forbidden_shared_youtube_token(token_path):
+        return None, "shared_youtube_token_forbidden"
+    if token_path is None or not str(token_path).strip():
+        return None, "missing_youtube_token_path"
+    return Path(token_path), None
+
+
+def _evaluate_youtube_upload_policy(
+    live_upload: bool,
+    youtube_token_path: Optional[Union[str, Path]] = None,
+    youtube_channel_id: Optional[str] = None,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Fail-closed policy gate for automated YouTube uploads:
+    1. Never allow the shared/personal MindBall token path.
+    2. Require explicit opt-in PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD=1.
+    3. Require explicit per-tenant youtube_token_path and youtube_channel_id.
+    """
+    if _is_forbidden_shared_youtube_token(youtube_token_path):
+        return False, "shared_youtube_token_forbidden"
+    if not live_upload:
+        return False, None
+    if os.getenv(YOUTUBE_UPLOAD_OPT_IN_ENV, "").strip() != "1":
+        return False, "auto_tts_youtube_upload_disabled"
+    tok_str = str(youtube_token_path).strip() if youtube_token_path is not None else ""
+    chan_str = str(youtube_channel_id or "").strip()
+    if not tok_str or not chan_str:
+        return False, "auto_tts_youtube_upload_disabled"
+    return True, None
 
 from pseofactory.tenant_facts import (
     TENANT_FLAGSHIP_ANCHOR_SLUGS as FLAGSHIP_ANCHOR_SLUGS,
@@ -2985,10 +3041,22 @@ def synthesize_tool_video_asset(
 
 def check_youtube_cli_diagnostics(
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
+    token_path: Optional[Union[str, Path]] = DEFAULT_YOUTUBE_TOKEN_PATH,
 ) -> Dict[str, Any]:
     """
     Runs a non-mutating diagnostic on the `youtube` CLI binary and OAuth2 token readiness.
     """
+    eff_token_path, token_err = _validate_explicit_youtube_token_path(token_path)
+    if token_err is not None or eff_token_path is None:
+        return {
+            "ready": False,
+            "binary_path": str(youtube_bin),
+            "authenticated": False,
+            "skipped": True,
+            "reason": token_err or "missing_youtube_token_path",
+            "error": token_err or "missing_youtube_token_path",
+        }
+
     bin_path = Path(youtube_bin)
     if not bin_path.is_file():
         resolved = shutil.which("youtube")
@@ -3019,6 +3087,7 @@ def check_youtube_cli_diagnostics(
             text=True,
             timeout=15,
             check=False,
+            env={**os.environ, "YOUTUBE_TOKEN_PATH": str(eff_token_path)},
         )
         if proc.returncode == 0 and proc.stdout.strip():
             data = json.loads(proc.stdout)
@@ -3052,7 +3121,7 @@ def check_youtube_cli_diagnostics(
 
 def inspect_remote_youtube_video_status(
     video_id: str,
-    token_path: Path = DEFAULT_YOUTUBE_TOKEN_PATH,
+    token_path: Optional[Path] = DEFAULT_YOUTUBE_TOKEN_PATH,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
 ) -> Dict[str, Any]:
     """
@@ -3063,12 +3132,25 @@ def inspect_remote_youtube_video_status(
     vid = str(video_id).strip()
     url = f"https://www.youtube.com/watch?v={vid}"
 
-    if token_path.is_file() and not _in_pytest():
+    eff_token_path, token_err = _validate_explicit_youtube_token_path(token_path)
+    if token_err is not None or eff_token_path is None:
+        return {
+            "found": False,
+            "video_id": vid,
+            "video_url": url,
+            "uploadStatus": "unknown",
+            "privacyStatus": "unknown",
+            "public_accessible": False,
+            "skipped": True,
+            "reason": token_err or "missing_youtube_token_path",
+        }
+
+    if eff_token_path.is_file() and not _in_pytest():
         try:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
 
-            creds = Credentials.from_authorized_user_file(str(token_path))
+            creds = Credentials.from_authorized_user_file(str(eff_token_path))
             service = build("youtube", "v3", credentials=creds)
             resp = (
                 service.videos()
@@ -3126,6 +3208,7 @@ def inspect_remote_youtube_video_status(
         text=True,
         timeout=20,
         check=False,
+        env={**os.environ, "YOUTUBE_TOKEN_PATH": str(eff_token_path)},
     )
     if proc.returncode == 0 and proc.stdout.strip():
         try:
@@ -3179,7 +3262,7 @@ def reconcile_remote_youtube_video_quality_and_visibility(
     upload_caption: bool = True,
     post_pinned_comment: bool = False,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
-    token_path: Path = DEFAULT_YOUTUBE_TOKEN_PATH,
+    token_path: Optional[Path] = DEFAULT_YOUTUBE_TOKEN_PATH,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
 ) -> Dict[str, Any]:
     """
@@ -3195,8 +3278,20 @@ def reconcile_remote_youtube_video_quality_and_visibility(
     gov = quota_governor or YouTubeQuotaGovernor()
     vid = str(video_id).strip()
 
+    eff_token_path, token_err = _validate_explicit_youtube_token_path(token_path)
+    if token_err is not None or eff_token_path is None:
+        return {
+            "video_id": vid,
+            "slug": slug,
+            "property_id": prop,
+            "status": "POLICY_DISABLED",
+            "skipped": True,
+            "reason": token_err or "missing_youtube_token_path",
+            "actions_taken": [],
+            "quota_units_used": 0,
+        }
     before = inspect_remote_youtube_video_status(
-        vid, token_path=token_path, youtube_bin=youtube_bin
+        vid, token_path=eff_token_path, youtube_bin=youtube_bin
     )
     script_bundle = extract_and_verify_three_sentence_script(slug, property_id=prop)
     yt_pack = script_bundle["youtube_pack"]
@@ -3234,7 +3329,14 @@ def reconcile_remote_youtube_video_quality_and_visibility(
             ]
             if tags_list:
                 upd_cmd.extend(["--tags", ",".join(tags_list)])
-            proc = subprocess.run(upd_cmd, capture_output=True, text=True, timeout=60, check=False)
+            proc = subprocess.run(
+                upd_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+                env={**os.environ, "YOUTUBE_TOKEN_PATH": str(eff_token_path)},
+            )
             if proc.returncode == 0:
                 quota_spent += YOUTUBE_VIDEO_UPDATE_COST_UNITS
                 actions_taken.append(f"videos.update(privacy={desired_privacy}, cost=50)")
@@ -3244,7 +3346,8 @@ def reconcile_remote_youtube_video_quality_and_visibility(
         refresh_thumbnail
         and thumbnail_path
         and thumbnail_path.is_file()
-        and token_path.is_file()
+        and eff_token_path is not None
+        and eff_token_path.is_file()
         and not _in_pytest()
     ):
         budget = gov.get_budget_status()
@@ -3255,7 +3358,7 @@ def reconcile_remote_youtube_video_quality_and_visibility(
                 from googleapiclient.discovery import build
                 from googleapiclient.http import MediaFileUpload
 
-                creds = Credentials.from_authorized_user_file(str(token_path))
+                creds = Credentials.from_authorized_user_file(str(eff_token_path))
                 service = build("youtube", "v3", credentials=creds)
                 media = MediaFileUpload(str(thumbnail_path), mimetype="image/png", resumable=False)
                 service.thumbnails().set(videoId=vid, media_body=media).execute()
@@ -3270,7 +3373,8 @@ def reconcile_remote_youtube_video_quality_and_visibility(
         and vtt_path
         and vtt_path.is_file()
         and not before.get("has_captions")
-        and token_path.is_file()
+        and eff_token_path is not None
+        and eff_token_path.is_file()
         and not _in_pytest()
     ):
         budget = gov.get_budget_status()
@@ -3280,7 +3384,7 @@ def reconcile_remote_youtube_video_quality_and_visibility(
                 from googleapiclient.discovery import build
                 from googleapiclient.http import MediaFileUpload
 
-                creds = Credentials.from_authorized_user_file(str(token_path))
+                creds = Credentials.from_authorized_user_file(str(eff_token_path))
                 service = build("youtube", "v3", credentials=creds)
                 media = MediaFileUpload(str(vtt_path), mimetype="text/vtt", resumable=False)
                 service.captions().insert(
@@ -3319,7 +3423,14 @@ def reconcile_remote_youtube_video_quality_and_visibility(
                 "--text",
                 pinned_comment_text,
             ]
-            c_proc = subprocess.run(c_cmd, capture_output=True, text=True, timeout=45, check=False)
+            c_proc = subprocess.run(
+                c_cmd,
+                capture_output=True,
+                text=True,
+                timeout=45,
+                check=False,
+                env={**os.environ, "YOUTUBE_TOKEN_PATH": str(eff_token_path)},
+            )
             if c_proc.returncode == 0:
                 try:
                     c_out = json.loads((c_proc.stdout or "").strip() or "{}")
@@ -3339,7 +3450,7 @@ def reconcile_remote_youtube_video_quality_and_visibility(
         )
 
     after = inspect_remote_youtube_video_status(
-        vid, token_path=token_path, youtube_bin=youtube_bin
+        vid, token_path=eff_token_path, youtube_bin=youtube_bin
     )
     return {
         "video_id": vid,
@@ -3367,9 +3478,13 @@ def upload_tool_video_to_youtube(
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
     upload_caption: bool = True,
     post_pinned_comment: bool = True,
+    youtube_token_path: Optional[Union[str, Path]] = None,
+    youtube_channel_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes an idempotent, quota-governed `youtube upload --engine api` dispatch for a rendered tool video.
+    - Enforces YouTube Emergency Stop: requires PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD=1 plus explicit
+      per-tenant youtube_token_path and youtube_channel_id, and rejects shared MindBall token.
     - Deduplicates against `.agy/youtube_upload_ledger.json` and `youtube-toolkit/data/upload_log.json`.
     - When an already-uploaded video has mismatched privacy (e.g. `unlisted` vs `public`) or missing captions/comments
       during live runs, reconciles it in-place rather than re-uploading (1,650 units).
@@ -3383,6 +3498,21 @@ def upload_tool_video_to_youtube(
     mp4_path = videos_dir / f"{slug}.mp4"
     vtt_path = videos_dir / f"{slug}.vtt"
     thumb_path = videos_dir / f"{slug}-thumb.png"
+
+    policy_allowed, policy_reason = _evaluate_youtube_upload_policy(
+        live_upload=live_upload,
+        youtube_token_path=youtube_token_path,
+        youtube_channel_id=youtube_channel_id,
+    )
+    if policy_reason == "shared_youtube_token_forbidden":
+        return {
+            "status": "POLICY_DISABLED",
+            "skipped": True,
+            "reason": policy_reason,
+            "slug": slug,
+            "property_id": prop,
+            "quota_units_used": 0,
+        }
 
     gov = quota_governor or YouTubeQuotaGovernor()
     uploaded_map = _load_upload_idempotency_map(eff_repo, prop, upload_log_path=gov.upload_log_path)
@@ -3400,6 +3530,7 @@ def upload_tool_video_to_youtube(
         reconcile_info = None
         if (
             live_upload
+            and policy_allowed
             and not _in_pytest()
             and privacy == "public"
             and needs_reconcile
@@ -3417,6 +3548,7 @@ def upload_tool_video_to_youtube(
                 upload_caption=upload_caption,
                 post_pinned_comment=post_pinned_comment,
                 quota_governor=gov,
+                token_path=Path(youtube_token_path) if youtube_token_path else None,
                 youtube_bin=youtube_bin,
             )
             before_st = reconcile_info.get("before_status") or {}
@@ -3445,6 +3577,17 @@ def upload_tool_video_to_youtube(
             "quota_units_used": 0,
             "idempotent_hit": True,
             "reconciled_in_place": reconcile_info,
+        }
+
+    if live_upload and not policy_allowed:
+        return {
+            "status": "POLICY_DISABLED",
+            "skipped": True,
+            "reason": policy_reason or "auto_tts_youtube_upload_disabled",
+            "slug": slug,
+            "property_id": prop,
+            "video_file": str(mp4_path),
+            "quota_units_used": 0,
         }
 
     probe = probe_media_file(mp4_path)
@@ -3513,6 +3656,17 @@ def upload_tool_video_to_youtube(
             "quota_units_used": 0,
         }
 
+    eff_token_path, token_err = _validate_explicit_youtube_token_path(youtube_token_path)
+    if token_err is not None or eff_token_path is None:
+        return {
+            "status": "POLICY_DISABLED",
+            "skipped": True,
+            "reason": token_err or "missing_youtube_token_path",
+            "slug": slug,
+            "property_id": prop,
+            "quota_units_used": 0,
+        }
+
     cmd = [
         str(youtube_bin),
         "--json",
@@ -3539,7 +3693,14 @@ def upload_tool_video_to_youtube(
     if post_pinned_comment and pinned_comment and not _in_pytest():
         cmd.extend(["--comment", pinned_comment])
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300, check=False)
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+        env={**os.environ, "YOUTUBE_TOKEN_PATH": str(eff_token_path)},
+    )
     raw_out = (proc.stdout or "").strip()
     parsed: Dict[str, Any] = {}
     if raw_out:
@@ -3597,6 +3758,7 @@ def upload_tool_video_to_youtube(
         "video_id": video_id,
         "video_url": video_url,
         "privacy": privacy,
+        "youtube_channel_id": str(youtube_channel_id or "").strip(),
         "file_path": str(mp4_path),
         "size_bytes": probe["size_bytes"],
         "quota_units_used": quota_used,
@@ -3658,6 +3820,8 @@ def run_autonomous_video_pipeline(
     use_neural_tts: bool = True,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
+    youtube_token_path: Optional[Union[str, Path]] = None,
+    youtube_channel_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Executes the 5-stage autonomous video synthesis and YouTube distribution pipeline
@@ -3698,7 +3862,16 @@ def run_autonomous_video_pipeline(
             base_tools = [{"slug": target_slug, "title": target_slug.replace("-", " ").title()}]
 
     # Stage 1: CLI & Quota Preflight
-    cli_diag = check_youtube_cli_diagnostics(youtube_bin=youtube_bin)
+    policy_allowed, policy_reason = _evaluate_youtube_upload_policy(
+        live_upload=live_upload,
+        youtube_token_path=youtube_token_path,
+        youtube_channel_id=youtube_channel_id,
+    )
+    eff_live_upload = bool(live_upload and policy_allowed)
+    cli_diag = check_youtube_cli_diagnostics(
+        youtube_bin=youtube_bin,
+        token_path=youtube_token_path,
+    )
     initial_budget = gov.get_budget_status(
         include_thumbnail=True,
         include_caption=True,
@@ -3706,9 +3879,11 @@ def run_autonomous_video_pipeline(
         property_id=prop,
     )
     stage_1 = {
-        "status": "PASS" if (cli_diag.get("ready") or not live_upload) else "DEGRADED_AUTH",
+        "status": "PASS" if (cli_diag.get("ready") or not eff_live_upload) else "DEGRADED_AUTH",
         "cli_diagnostics": cli_diag,
         "initial_quota_budget": initial_budget.to_dict(),
+        "upload_policy_allowed": policy_allowed,
+        "upload_skip_reason": policy_reason,
     }
 
     # Stage 2: Page-Value Eligibility & 3-Sentence Precision Gate
@@ -3830,6 +4005,8 @@ def run_autonomous_video_pipeline(
             live_upload=live_upload,
             quota_governor=gov,
             youtube_bin=youtube_bin,
+            youtube_token_path=youtube_token_path,
+            youtube_channel_id=youtube_channel_id,
         )
         upload_results[elig.slug] = up_res
         u_status = up_res.get("status")
@@ -3859,16 +4036,20 @@ def run_autonomous_video_pipeline(
         and total_uploaded_verified == 0
     )
     if upload_error_count > 0:
-        stage_4_status = "UPLOAD_BLACKOUT" if (live_upload and total_uploaded_verified == 0) else "PARTIAL_ERROR"
+        stage_4_status = "UPLOAD_BLACKOUT" if (eff_live_upload and total_uploaded_verified == 0) else "PARTIAL_ERROR"
     elif quota_starvation_detected:
         stage_4_status = "QUOTA_STARVED"
-    elif live_upload and quota_deferred_count > 0:
+    elif eff_live_upload and quota_deferred_count > 0:
         stage_4_status = "PARTIAL_QUOTA_DEFERRED"
+    elif live_upload and not policy_allowed:
+        stage_4_status = "POLICY_DISABLED"
     else:
         stage_4_status = "PASS"
     stage_4 = {
         "status": stage_4_status,
-        "live_upload_enabled": live_upload,
+        "live_upload_enabled": eff_live_upload,
+        "upload_skipped": bool(live_upload and not policy_allowed),
+        "upload_skip_reason": policy_reason,
         "attempted_uploads": attempted_uploads,
         "uploaded_live_count": uploaded_live_count,
         "idempotent_hits_count": idempotent_hits_count,
@@ -3955,6 +4136,7 @@ def run_autonomous_video_pipeline(
             "QUOTA_DEFERRED_STAGED",
             "RENDERED_STAGED",
             "DEFERRED_RENDER_CAP",
+            "POLICY_DISABLED",
             "UPLOAD_ERROR",
             "FAILED_INVALID_VIDEO_ASSET",
         ):

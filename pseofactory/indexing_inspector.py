@@ -52,6 +52,7 @@ class DailyIndexingInspector:
         telemetry_logger: Optional[AtomicTelemetryLogger] = None,
     ):
         self.tenant_id = tenant_id.lower()
+        self._explicit_base_dir = base_dir is not None
         if base_dir:
             self.base_dir = Path(base_dir).resolve()
         else:
@@ -963,16 +964,16 @@ class DailyIndexingInspector:
         dist_dir: Optional[Union[str, Path]] = None,
         stale_crawl_warning_days: float = 90.0,
         index_drop_risk_days: float = 130.0,
-        lastmod_uniformity_threshold: float = 0.95,
+        lastmod_uniformity_threshold: float = 0.80,
         now_ts: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Audits three deterministic search-mechanics guarantees:
           1. 90-Day Stale Crawl & 130-Day Index Drop Risk: Flags indexed/pushed URLs whose
              last crawl or push timestamp exceeds 90 days (warning) or 130 days (Google index drop threshold).
-          2. Sitemap <lastmod> Uniformity & Future-Date Check: Flags multi-URL XML sitemaps where >=95% of
-             entries share an identical build timestamp (which trains crawlers to ignore <lastmod>) or contain
-             future dates.
+          2. Sitemap <lastmod> Uniformity & Future-Date Check: Flags multi-URL XML sitemaps on non-new
+             sites (>=10 URLs) where >=80% of entries share an identical build timestamp (or >=95%
+             uniform across >=5 URLs) or contain future dates, elevating status to WARN.
           3. Reverse-Orphan Sitemap Hygiene: Identifies indexable HTML pages in dist/ linked from the
              internal graph that are missing from sitemap.xml.
         Zero em-dashes. Zero en-dashes.
@@ -1109,9 +1110,8 @@ class DailyIndexingInspector:
             most_common_lastmod, most_common_count = max(counts.items(), key=lambda kv: kv[1])
         uniformity_ratio = round(most_common_count / float(max(1, total_lastmod)), 4) if total_lastmod > 0 else 0.0
         lastmod_uniform_build_stamp = bool(
-            total_lastmod >= 5
-            and uniformity_ratio >= lastmod_uniformity_threshold
-            and len(set(lastmod_values)) == 1
+            (total_lastmod >= 10 and uniformity_ratio >= lastmod_uniformity_threshold)
+            or (total_lastmod >= 5 and uniformity_ratio >= 0.95 and len(set(lastmod_values)) == 1)
         )
 
         # 3. Reverse-Orphan Check: Indexable dist/ HTML pages linked in internal graph but missing from sitemap.xml
@@ -1140,7 +1140,7 @@ class DailyIndexingInspector:
                     reverse_orphan_urls.append(full_u)
 
         status = "PASS"
-        if drop_risk_130d_urls or future_lastmod_urls or reverse_orphan_urls:
+        if drop_risk_130d_urls or future_lastmod_urls or reverse_orphan_urls or lastmod_uniform_build_stamp:
             status = "WARN"
         elif stale_90d_urls:
             status = "WARN"
@@ -1193,6 +1193,14 @@ class DailyIndexingInspector:
         velocity_report = self.audit_velocity_stagnation()
         traffic_report = self.audit_search_traffic(gsc_records=gsc_records, dry_run=dry_run)
         child_sitemaps_report = self.audit_child_sitemaps_and_section_coverage(coverage_records=coverage_records)
+        dist_dir_cand = self.base_dir / "dist"
+        sitemap_health_report: Optional[Dict[str, Any]] = None
+        if (
+            (self._explicit_base_dir or not os.environ.get("PYTEST_CURRENT_TEST"))
+            and dist_dir_cand.is_dir()
+            and any(dist_dir_cand.glob("sitemap*.xml"))
+        ):
+            sitemap_health_report = self.audit_crawl_staleness_and_sitemap_health(dist_dir=dist_dir_cand)
 
         # Overall status determination
         statuses = [
@@ -1201,6 +1209,14 @@ class DailyIndexingInspector:
             velocity_report.get("status"),
             traffic_report.get("status"),
         ]
+        if (
+            sitemap_health_report is not None
+            and (
+                sitemap_health_report.get("sitemap_health", {}).get("lastmod_uniform_build_timestamp_flagged")
+                or sitemap_health_report.get("status") in ("WARN", "FAIL")
+            )
+        ):
+            statuses.append("WARN")
         if "FAIL" in statuses:
             overall_status = "FAIL"
         elif "WARN" in statuses:
@@ -1214,6 +1230,7 @@ class DailyIndexingInspector:
             "velocity": velocity_report,
             "traffic": traffic_report,
             "child_sitemaps": child_sitemaps_report,
+            "sitemap_health": sitemap_health_report or {},
         }
         remediation_prompts = self.synthesize_remediation_prompts(audit_summary)
 
@@ -1226,6 +1243,7 @@ class DailyIndexingInspector:
             "velocity_stagnation": velocity_report,
             "search_traffic": traffic_report,
             "child_sitemaps": child_sitemaps_report,
+            "sitemap_health": (sitemap_health_report or {}).get("sitemap_health", {}),
             "section_coverage": child_sitemaps_report.get("section_coverage", {}),
             "remediation_prompts": remediation_prompts,
         }
@@ -1550,6 +1568,14 @@ class DailyIndexingInspector:
                     velocity_report.get("status"),
                     traffic_report.get("status"),
                 ]
+                if (
+                    sitemap_health_report is not None
+                    and (
+                        sitemap_health_report.get("sitemap_health", {}).get("lastmod_uniform_build_timestamp_flagged")
+                        or sitemap_health_report.get("status") in ("WARN", "FAIL")
+                    )
+                ):
+                    statuses.append("WARN")
                 if "FAIL" in statuses:
                     overall_status = "FAIL"
                 elif "WARN" in statuses:

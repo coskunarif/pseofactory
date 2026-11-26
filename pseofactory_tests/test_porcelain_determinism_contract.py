@@ -610,3 +610,125 @@ def test_calc_panel_title_desktop_h2_hierarchy_and_h3_ordering(tmp_path: Path) -
                 f"Unexpected heading hierarchy violations: {finding.get('hierarchy_violations')}"
             )
 
+
+def test_calculator_leaf_strict_slot_order_partner_consolidation_and_no_http_canonical(tmp_path: Path):
+    """
+    Verify Batch 1C:
+    1. Calculator leaf strict slot order: Hero/Quick-Answer -> <form> + #calc-results ->
+       workpaper-unlock-card -> <= 1 consolidated post-calc partner card with 'Sponsored Placement'
+       + FTC 16 CFR 255 disclosure immediately above first <a href="/r/..."> -> methodology/tables/FAQ.
+    2. Never embeds workpaper-unlock-card or contextual-referral-card inside <form>.
+    3. Merges multiple /r/ partner cards on calculator leaves into 1 partner card.
+    4. Strips HTTP Link: rel="canonical" from _headers (keeping Content-Signal: on /*), strips
+       <changefreq>/<priority> and /sitemap-hubs.xml for <500 URLs, and removes Disallow: /r/.
+    5. MasterSEOVerifier.check_ftc_and_post_calc_slot_order_gate() passes clean normalized output
+       and fails closed on out-of-order / unlabeled / multi-partner / embedded-in-form regressions.
+    """
+    prof = get_porcelain_tenant_profile("profithelm")
+    dirty_calc = (
+        "<!DOCTYPE html><html lang='en'><head>"
+        "<title>S-Corp Reasonable Compensation Calculator | ProfitHelm</title>"
+        "<meta name='description' content='Deterministic S-Corp salary model.'>"
+        "<link rel='canonical' href='https://profithelm.com/tools/s-corp-salary/'>"
+        "</head><body><main>"
+        "<section class='hero-section'><h1>S-Corp Salary Calculator</h1></section>"
+        "<section class='methodology'><h2>Methodology</h2><p>IRS Rev. Rul. 74-44 dataset.</p></section>"
+        "<form id='calc-form'>"
+        "<label for='net_inc'>Net Income</label><input id='net_inc' type='number' value='200000'>"
+        "<button id='calculate-btn' type='submit'>Calculate</button>"
+        "<div id='workpaper-unlock-card' class='workpaper-unlock-card'>"
+        "<h3>Download CPA Audit Workpaper</h3><button type='button'>Unlock PDF</button></div>"
+        "<aside class='contextual-referral-card' data-partner='gusto'>"
+        "<h4>Payroll Filing</h4><a href='/r/gusto' rel='nofollow sponsored'>Open Gusto</a>"
+        "</aside>"
+        "</form>"
+        "<div id='calc-results' class='result-box'><p>Suggested salary: $92,000</p></div>"
+        "<div class='affiliate-card' data-partner='collective'>"
+        "<h4>S-Corp Formation</h4><a href='/r/collective' rel='nofollow sponsored'>Explore Collective</a>"
+        "</div>"
+        "</main></body></html>"
+    )
+    normalized, _ = normalize_html_to_porcelain_shell(dirty_calc, "tools/s-corp-salary/index.html", prof)
+
+    hero_pos = normalized.find("hero-section")
+    form_pos = normalized.find("<form")
+    form_end = normalized.find("</form>", form_pos)
+    results_pos = normalized.find("calc-results")
+    unlock_pos = normalized.find("workpaper-unlock-card")
+    sponsored_pos = normalized.find("Sponsored Placement")
+    ftc_pos = normalized.find("FTC 16 CFR Part 255 Disclosure")
+    first_r_pos = normalized.find("/r/")
+    meth_pos = normalized.find("<h2>Methodology</h2>")
+
+    assert min(hero_pos, form_pos, form_end, results_pos, unlock_pos, sponsored_pos, ftc_pos, first_r_pos, meth_pos) >= 0
+    assert hero_pos < form_pos < form_end < results_pos < unlock_pos < sponsored_pos < ftc_pos < first_r_pos < meth_pos
+    assert ftc_pos < first_r_pos
+    # Neither workpaper-unlock-card nor contextual-referral-card may sit inside <form>...</form>
+    form_slice = normalized[form_pos:form_end]
+    assert "workpaper-unlock-card" not in form_slice
+    assert "contextual-referral-card" not in form_slice
+    # All /r/ cards consolidated into 1 partner container
+    assert normalized.count("contextual-referral-card") == 1
+    assert "affiliate-card" not in normalized
+    assert "/r/gusto" in normalized and "/r/collective" in normalized
+
+    # Estate-level sync & fail-closed verifier check
+    dist_dir = tmp_path / "dist"
+    (dist_dir / "tools" / "s-corp-salary").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>ProfitHelm</title>"
+        "<meta name='description' content='Hub.'></head><body><main><h1>ProfitHelm</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><title>Tools | ProfitHelm</title>"
+        "<meta name='description' content='Tools.'></head><body><main><h1>Tools</h1></main></body></html>",
+        encoding="utf-8",
+    )
+    (dist_dir / "tools" / "s-corp-salary" / "index.html").write_text(dirty_calc, encoding="utf-8")
+    (dist_dir / "_headers").write_text(
+        "/tools/*\n  Link: <https://profithelm.com/tools/>; rel=\"canonical\"\n\n/*\n  X-Frame-Options: DENY\n",
+        encoding="utf-8",
+    )
+    (dist_dir / "robots.txt").write_text(
+        "User-agent: *\nAllow: /\nDisallow: /r/\nDisallow: /api/\n",
+        encoding="utf-8",
+    )
+    (dist_dir / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url><loc>https://profithelm.com/</loc><changefreq>weekly</changefreq><priority>1.0</priority></url>\n"
+        "</urlset>\n",
+        encoding="utf-8",
+    )
+
+    from pseofactory.contracts import assert_headers_no_html_link_canonical_and_has_content_signal
+
+    compile_tenant_porcelain_estate(dist_dir, "profithelm")
+    hdr_txt = (dist_dir / "_headers").read_text(encoding="utf-8")
+    assert 'Link: <https://profithelm.com/tools/>; rel="canonical"' not in hdr_txt
+    assert assert_headers_no_html_link_canonical_and_has_content_signal(hdr_txt) is True
+    assert "Content-Signal: ai-train=no, search=yes, ai-input=yes" in hdr_txt
+    rob_txt = (dist_dir / "robots.txt").read_text(encoding="utf-8")
+    assert "Disallow: /r/" not in rob_txt
+    sm_txt = (dist_dir / "sitemap.xml").read_text(encoding="utf-8")
+    assert "<changefreq>" not in sm_txt and "<priority>" not in sm_txt
+    assert not (dist_dir / "sitemap-hubs.xml").exists()
+
+    verifier = MasterSEOVerifier(dist_dir=dist_dir, domain="profithelm.com", allow_mutations=False)
+    slot_rep = verifier.check_ftc_and_post_calc_slot_order_gate(dist_dir)
+    assert slot_rep["status"] == "PASS", slot_rep["issues"]
+    canon_rep = verifier.check_http_link_canonical_gate(dist_dir)
+    assert canon_rep["status"] == "PASS", canon_rep["issues"]
+    sm_rep = verifier.check_sitemap_gate(dist_dir)
+    assert sm_rep["status"] == "PASS", sm_rep["issues"]
+
+    # Negative regression: inject unlabeled /r/ link before disclosure + pre-calc unlock inside form
+    bad_dist = tmp_path / "bad_dist"
+    (bad_dist / "tools" / "bad-calc").mkdir(parents=True, exist_ok=True)
+    (bad_dist / "tools" / "bad-calc" / "index.html").write_text(dirty_calc, encoding="utf-8")
+    bad_rep = verifier.check_ftc_and_post_calc_slot_order_gate(bad_dist)
+    assert bad_rep["status"] == "FAIL"
+    assert bad_rep["violations_count"] >= 2
+
+

@@ -17,8 +17,9 @@ import shutil
 import xml.etree.ElementTree as ET
 import xml.sax.saxutils as saxutils
 from datetime import datetime, timezone
+from email.utils import format_datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Sequence, Set, Tuple
 
 from pseofactory.contracts import assert_no_forbidden_dashes, normalize_statutory_acronym_casing
 
@@ -260,7 +261,36 @@ def load_and_enrich_deployed_voids(
     return enriched_voids
 
 
-MANDATORY_ROBOTS_DISALLOW_PATHS: Tuple[str, ...] = ("/api/", "/cdn-cgi/", "/r/")
+MANDATORY_ROBOTS_DISALLOW_PATHS: Tuple[str, ...] = ("/api/", "/cdn-cgi/")
+
+LIVE_SEARCH_ALLOW_BOTS: Tuple[str, ...] = (
+    "Googlebot",
+    "Bingbot",
+    "Applebot",
+    "OAI-SearchBot",
+    "ChatGPT-User",
+    "Claude-SearchBot",
+    "Claude-User",
+    "PerplexityBot",
+    "Perplexity-User",
+)
+
+TRAINING_DISALLOW_BOTS: Tuple[str, ...] = (
+    "GPTBot",
+    "ClaudeBot",
+    "anthropic-ai",
+    "Claude-Web",
+    "CCBot",
+    "Bytespider",
+    "Meta-ExternalAgent",
+    "Applebot-Extended",
+    "GoogleOther",
+    "__usage_ai-training",
+)
+
+GOOGLE_EXTENDED_BOT: str = "Google-Extended"
+GOOGLE_EXTENDED_DISALLOW_PATHS: Tuple[str, ...] = ("/workpapers/", "/datasets/")
+_SITEMAP_SINGLE_FILE_THRESHOLD: int = 500
 
 
 def _parse_robots_directive(raw_line: str) -> Tuple[str, str]:
@@ -278,9 +308,8 @@ def ensure_robots_txt_mandatory_disallows(
 ) -> str:
     """
     Ensures every User-agent group in robots.txt (including User-agent: * and every
-    named crawler such as Googlebot, Bingbot, PerplexityBot, ClaudeBot, GPTBot,
-    OAI-SearchBot, etc.) explicitly disallows every mandatory path before any Allow
-    directive in that group.
+    named crawler) explicitly disallows every mandatory path (/api/ and /cdn-cgi/)
+    before any Allow directive in that group, while removing legacy Disallow: /r/ rules.
 
     Per RFC 9309, a named User-agent group completely overrides User-agent: * instead
     of inheriting wildcard disallows. Placing mandatory Disallow directives ahead of
@@ -353,6 +382,8 @@ def ensure_robots_txt_mandatory_disallows(
             bk, bv = _parse_robots_directive(bl)
             if bk == "disallow" and bv.lower() in seen_mandatory:
                 continue
+            if bk == "disallow" and bv.lower() in ("/r/", "/r") and bv.lower() not in seen_mandatory:
+                continue
             remaining_body.append(bl)
 
         out_lines.extend(header_lines)
@@ -372,20 +403,139 @@ def ensure_robots_txt_mandatory_disallows(
     return result
 
 
+def build_split_robots_txt(
+    canonical_base: str,
+    disallow_paths: Sequence[str] = ("/signal/", "/syndication/", "/staging/", "/test/", "/tests/"),
+    allow_paths: Sequence[str] = ("/", "/tools/"),
+    extra_bots: Optional[Sequence[str]] = None,
+    sitemap_paths: Sequence[str] = ("/sitemap.xml",),
+) -> str:
+    """
+    Builds split AI/search governance robots.txt:
+    - User-agent: * and LIVE_SEARCH_ALLOW_BOTS -> Allow: / + standard Disallow (/api/, /cdn-cgi/, /signal/, etc.)
+    - Google-Extended -> Disallow: /workpapers/, Disallow: /datasets/, Allow: / + standard Disallow
+    - TRAINING_DISALLOW_BOTS -> Disallow: / (plus mandatory /api/, /cdn-cgi/, no Allow: /)
+    Never emits Disallow: /r/.
+    """
+    base = canonical_base.rstrip("/")
+    training_lower = {b.lower() for b in TRAINING_DISALLOW_BOTS}
+    live_lower = {b.lower() for b in LIVE_SEARCH_ALLOW_BOTS}
+
+    standard_disallows: List[str] = []
+    seen_disallows: Set[str] = set()
+    for p in list(MANDATORY_ROBOTS_DISALLOW_PATHS) + ["/signal/"] + list(disallow_paths):
+        p_clean = str(p or "").strip()
+        if not p_clean or p_clean.lower() in ("/r/", "/r"):
+            continue
+        if p_clean.lower() not in seen_disallows:
+            seen_disallows.add(p_clean.lower())
+            standard_disallows.append(p_clean)
+
+    effective_allows: List[str] = []
+    seen_allows: Set[str] = set()
+    base_allows = ["/"] + (["/tools/"] if "/tools/" not in seen_disallows else [])
+    for p in base_allows + list(allow_paths):
+        p_clean = str(p or "").strip()
+        if p_clean and p_clean.lower() not in seen_allows:
+            seen_allows.add(p_clean.lower())
+            effective_allows.append(p_clean)
+
+    bot_blocks: List[str] = []
+
+    def _emit_allow_block(agent: str, extra_disallows: Sequence[str] = ()) -> None:
+        lines = [f"User-agent: {agent}"]
+        block_disallows = list(standard_disallows)
+        seen_bd = {d.lower() for d in block_disallows}
+        for ed in extra_disallows:
+            ed_clean = str(ed or "").strip()
+            if ed_clean and ed_clean.lower() not in seen_bd:
+                seen_bd.add(ed_clean.lower())
+                block_disallows.append(ed_clean)
+        for d_path in block_disallows:
+            lines.append(f"Disallow: {d_path}")
+        for a_path in effective_allows:
+            lines.append(f"Allow: {a_path}")
+        bot_blocks.append("\n".join(lines) + "\n")
+
+    def _emit_training_disallow_block(agent: str) -> None:
+        lines = [f"User-agent: {agent}"]
+        for m_path in MANDATORY_ROBOTS_DISALLOW_PATHS:
+            lines.append(f"Disallow: {m_path}")
+        lines.append("Disallow: /")
+        bot_blocks.append("\n".join(lines) + "\n")
+
+    emitted_agents: Set[str] = set()
+    _emit_allow_block("*")
+    emitted_agents.add("*")
+
+    # Emit more-specific disallow/extended tokens (e.g., Applebot-Extended, Google-Extended)
+    # before shorter search tokens (e.g., Applebot) so both RFC 9309 longest-match and
+    # first-match parsers (urllib.robotparser) resolve Applebot-Extended to Disallow: /.
+    for bot in TRAINING_DISALLOW_BOTS:
+        if bot.lower() not in emitted_agents:
+            emitted_agents.add(bot.lower())
+            _emit_training_disallow_block(bot)
+
+    if GOOGLE_EXTENDED_BOT.lower() not in emitted_agents:
+        emitted_agents.add(GOOGLE_EXTENDED_BOT.lower())
+        _emit_allow_block(GOOGLE_EXTENDED_BOT, extra_disallows=GOOGLE_EXTENDED_DISALLOW_PATHS)
+
+    for bot in LIVE_SEARCH_ALLOW_BOTS:
+        if bot.lower() not in emitted_agents:
+            emitted_agents.add(bot.lower())
+            _emit_allow_block(bot)
+
+    for raw_bot in extra_bots or ():
+        b_clean = str(raw_bot or "").strip()
+        if not b_clean or b_clean.lower() in emitted_agents:
+            continue
+        emitted_agents.add(b_clean.lower())
+        if b_clean.lower() in training_lower:
+            _emit_training_disallow_block(b_clean)
+        elif b_clean.lower() == GOOGLE_EXTENDED_BOT.lower():
+            _emit_allow_block(b_clean, extra_disallows=GOOGLE_EXTENDED_DISALLOW_PATHS)
+        elif b_clean.lower() in live_lower:
+            _emit_allow_block(b_clean)
+        else:
+            _emit_allow_block(b_clean)
+
+    sitemap_lines: List[str] = []
+    seen_sm: Set[str] = set()
+    for sm in sitemap_paths:
+        sm_clean = str(sm or "").strip()
+        if not sm_clean:
+            continue
+        sm_path = sm_clean if sm_clean.startswith("/") else f"/{sm_clean}"
+        if sm_path.lower() not in seen_sm:
+            seen_sm.add(sm_path.lower())
+            sitemap_lines.append(f"Sitemap: {base}{sm_path}")
+    if not sitemap_lines:
+        sitemap_lines.append(f"Sitemap: {base}/sitemap.xml")
+
+    robots_txt = "\n".join(bot_blocks) + "\n" + "\n".join(sitemap_lines) + "\n"
+    robots_txt = ensure_robots_txt_mandatory_disallows(robots_txt)
+    assert_no_forbidden_dashes(robots_txt, context="robots.txt")
+    return robots_txt
+
+
 def write_sitemaps_and_robots(
     dist: Path,
     canonical_base: str,
     hub_specs: Sequence[Tuple[str, str, str]],
     leaf_tools: Sequence[Dict[str, Any]],
-    ai_bots: Sequence[str],
-    disallow_paths: Sequence[str],
-    allow_paths: Sequence[str] = ("/",),
-    include_changefreq_and_priority: bool = True,
+    ai_bots: Optional[Sequence[str]] = None,
+    disallow_paths: Sequence[str] = ("/signal/", "/syndication/", "/staging/", "/test/", "/tests/"),
+    allow_paths: Sequence[str] = ("/", "/tools/"),
+    include_changefreq_and_priority: bool = False,
     validate_governor: bool = True,
 ) -> None:
-    """Writes sitemap.xml, sitemap-hubs.xml, sitemap-leaves.xml, and robots.txt."""
+    """
+    Writes clean sitemap.xml (plus split hub/leaf sitemaps only when >=500 URLs, deleting
+    stale split files for <500 URLs) and split governance robots.txt.
+    Never emits <changefreq>, <priority>, or synthetic hub <lastmod> stamps.
+    """
+    _ = include_changefreq_and_priority  # Stripped globally per sitemap hygiene policy
     base = canonical_base.rstrip("/")
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     hub_urls = [u for u, _, _ in hub_specs]
     leaf_urls = [f"{base}/tools/{t['slug']}/" for t in leaf_tools]
@@ -405,33 +555,21 @@ def write_sitemaps_and_robots(
         except Exception:
             pass
 
-    def _entry_xml(url: str, lastmod: str, freq: Optional[str] = None, prio: Optional[str] = None) -> str:
+    def _entry_xml(url: str, lastmod: Optional[str] = None) -> str:
         loc_esc = saxutils.escape(url)
-        if not include_changefreq_and_priority:
-            return f"  <url><loc>{loc_esc}</loc><lastmod>{lastmod}</lastmod></url>"
-        parts = [
-            "  <url>",
-            f"    <loc>{loc_esc}</loc>",
-            f"    <lastmod>{lastmod}</lastmod>",
-        ]
-        if freq:
-            parts.append(f"    <changefreq>{freq}</changefreq>")
-        if prio:
-            parts.append(f"    <priority>{prio}</priority>")
-        parts.append("  </url>")
-        return "\n".join(parts)
+        if lastmod:
+            return f"  <url><loc>{loc_esc}</loc><lastmod>{saxutils.escape(lastmod[:10])}</lastmod></url>"
+        return f"  <url><loc>{loc_esc}</loc></url>"
 
     hub_entries = [
-        _entry_xml(url, today_str, freq, prio)
-        for url, prio, freq in hub_specs[:150]
+        _entry_xml(url, lastmod=None)
+        for url, _prio, _freq in hub_specs[:150]
         if url in allowed_hubs
     ]
     leaf_entries = [
         _entry_xml(
             f"{base}/tools/{t['slug']}/",
-            str(t.get("updated_date") or today_str)[:10],
-            "weekly",
-            "0.8",
+            lastmod=str(t.get("updated_date") or t.get("updated_at") or "").strip()[:10] or None,
         )
         for t in leaf_tools
     ]
@@ -446,53 +584,181 @@ def write_sitemaps_and_robots(
         )
 
     sitemap_xml = _wrap_urlset(hub_entries + leaf_entries)
-    sitemap_hubs_xml = _wrap_urlset(hub_entries)
-    sitemap_leaves_xml = _wrap_urlset(leaf_entries)
-
-    for xml_doc in (sitemap_xml, sitemap_hubs_xml, sitemap_leaves_xml):
-        ET.fromstring(xml_doc)
-
+    ET.fromstring(sitemap_xml)
     (dist / "sitemap.xml").write_text(sitemap_xml, encoding="utf-8")
-    (dist / "sitemap-hubs.xml").write_text(sitemap_hubs_xml, encoding="utf-8")
-    (dist / "sitemap-leaves.xml").write_text(sitemap_leaves_xml, encoding="utf-8")
 
-    effective_bots: List[str] = []
-    seen_bots: Set[str] = set()
-    for bot in ai_bots:
-        b_clean = str(bot or "").strip()
-        if b_clean and b_clean.lower() not in seen_bots:
-            seen_bots.add(b_clean.lower())
-            effective_bots.append(b_clean)
-    if "*" not in seen_bots:
-        effective_bots.insert(0, "*")
+    sitemap_paths: List[str] = ["/sitemap.xml"]
+    if len(all_urls) >= _SITEMAP_SINGLE_FILE_THRESHOLD:
+        sitemap_hubs_xml = _wrap_urlset(hub_entries)
+        sitemap_leaves_xml = _wrap_urlset(leaf_entries)
+        ET.fromstring(sitemap_hubs_xml)
+        ET.fromstring(sitemap_leaves_xml)
+        (dist / "sitemap-hubs.xml").write_text(sitemap_hubs_xml, encoding="utf-8")
+        (dist / "sitemap-leaves.xml").write_text(sitemap_leaves_xml, encoding="utf-8")
+        sitemap_paths.extend(["/sitemap-hubs.xml", "/sitemap-leaves.xml"])
+    else:
+        for stale_sm in ("sitemap-hubs.xml", "sitemap-leaves.xml"):
+            (dist / stale_sm).unlink(missing_ok=True)
 
-    effective_disallows: List[str] = []
-    seen_disallows: Set[str] = set()
-    for p in list(MANDATORY_ROBOTS_DISALLOW_PATHS) + list(disallow_paths):
-        p_clean = str(p or "").strip()
-        if p_clean and p_clean.lower() not in seen_disallows:
-            seen_disallows.add(p_clean.lower())
-            effective_disallows.append(p_clean)
-
-    disallow_lines = "\n".join(f"Disallow: {p}" for p in effective_disallows)
-    allow_lines = "\n".join(f"Allow: {p}" for p in allow_paths if str(p or "").strip())
-    bot_blocks: List[str] = []
-    for bot in effective_bots:
-        block_lines = [f"User-agent: {bot}"]
-        if disallow_lines:
-            block_lines.append(disallow_lines)
-        if allow_lines:
-            block_lines.append(allow_lines)
-        bot_blocks.append("\n".join(block_lines) + "\n")
-    sitemap_footer = (
-        f"Sitemap: {base}/sitemap.xml\n"
-        f"Sitemap: {base}/sitemap-hubs.xml\n"
-        f"Sitemap: {base}/sitemap-leaves.xml\n"
+    robots_txt = build_split_robots_txt(
+        canonical_base=base,
+        disallow_paths=disallow_paths,
+        allow_paths=allow_paths,
+        extra_bots=ai_bots,
+        sitemap_paths=sitemap_paths,
     )
-    robots_txt = "\n".join(bot_blocks) + "\n" + sitemap_footer
-    robots_txt = ensure_robots_txt_mandatory_disallows(robots_txt)
-    assert_no_forbidden_dashes(robots_txt, context="robots.txt")
     (dist / "robots.txt").write_text(robots_txt, encoding="utf-8")
+
+
+_CATALOG_ALLOWED_KEYS: Tuple[str, ...] = ("slug", "title", "url", "category", "updated_at")
+_CATALOG_DISALLOWED_KEYS: FrozenSet[str] = frozenset({
+    "inputs",
+    "formula",
+    "published_output",
+    "quick_answer",
+    "query_syntax",
+    "sample_calculation",
+})
+
+
+def _resolve_truthpack_modified_date(property_id: Optional[str]) -> str:
+    """Resolves verified_at / data_modified_date ISO date from TruthPack, or today's UTC date."""
+    pid = str(property_id or "").strip().lower()
+    if pid:
+        try:
+            from pseofactory.truth_pack import load_truth_pack
+
+            tp = load_truth_pack(pid, allow_expired=True)
+            explicit_mod = str(getattr(tp, "data_modified_date", "") or "").strip()
+            if explicit_mod:
+                return explicit_mod[:10]
+            dates = [
+                str(getattr(ent, "verified_at", "") or "").strip()[:10]
+                for ent in (getattr(tp, "entries", {}) or {}).values()
+                if str(getattr(ent, "verified_at", "") or "").strip()
+            ]
+            if dates:
+                return max(dates)
+        except Exception:
+            pass
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _normalize_iso_date_str(raw_date: Any, fallback_date: str) -> str:
+    txt = str(raw_date or "").strip()
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", txt)
+    if m:
+        return m.group(1)
+    m_fb = re.match(r"^(\d{4}-\d{2}-\d{2})", str(fallback_date or ""))
+    return m_fb.group(1) if m_fb else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _format_rfc822_pub_date(raw_date: Any, fallback_date: str) -> str:
+    iso_day = _normalize_iso_date_str(raw_date, fallback_date)
+    try:
+        dt = datetime.strptime(iso_day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except Exception:
+        dt = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return format_datetime(dt, usegmt=True)
+
+
+def build_feed_scope_teaser(title: str, description: str, max_len: int = 220) -> str:
+    """
+    Produces a clean 1-sentence non-answer scope teaser for feed.xml (never sample_calculation,
+    dollar outputs, or calculation results).
+    """
+    clean_title = str(title or "Interactive Calculator").replace("\u2014", "-").replace("\u2013", "-").strip()
+    raw = str(description or "").replace("\u2014", "-").replace("\u2013", "-").strip()
+    raw = re.sub(r"\s+", " ", raw)
+
+    # Reject calculation dumps / dollar-output answers / yields clauses
+    is_calc_dump = (
+        not raw
+        or "$" in raw
+        or bool(re.search(r"\b(?:yields|produces|equals|saves|totals|generates)\b", raw, re.IGNORECASE))
+    )
+    if is_calc_dump:
+        return f"Interactive modeling scope and statutory parameter inputs for {clean_title}."
+
+    # Keep strictly 1 sentence
+    sent_m = re.match(r"^(.+?[.!?])(?:\s+|$)", raw)
+    sentence = sent_m.group(1).strip() if sent_m else raw
+    if not sentence.endswith((".", "!", "?")):
+        sentence = sentence.rstrip(",;:") + "."
+    if len(sentence) > max_len:
+        sentence = sentence[: max_len - 1].rsplit(" ", 1)[0].rstrip(".,;:") + "."
+    return sentence
+
+
+def sanitize_public_catalog_tools(
+    catalog_tools: Sequence[Dict[str, Any]],
+    default_category: str = "calculator",
+    default_updated_at: Optional[str] = None,
+    property_id: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """
+    Sanitizes public catalog.json tool entries by stripping inputs, formula,
+    published_output, quick_answer, and query_syntax and retaining only lightweight
+    slug, title, url, category, updated_at fields.
+    """
+    fallback_date = default_updated_at or _resolve_truthpack_modified_date(property_id)
+    cleaned: List[Dict[str, str]] = []
+    for raw_tool in catalog_tools:
+        if not isinstance(raw_tool, dict):
+            continue
+        slug = str(raw_tool.get("slug") or "").strip()
+        if not slug:
+            continue
+        title = str(raw_tool.get("title") or slug.replace("-", " ").title()).replace("\u2014", "-").replace("\u2013", "-").strip()
+        url = str(raw_tool.get("url") or "").strip()
+        cat_raw = str(raw_tool.get("category") or raw_tool.get("cluster") or default_category or "calculator").strip()
+        upd_raw = raw_tool.get("updated_at") or raw_tool.get("updated_date") or raw_tool.get("dateModified")
+        updated_at = _normalize_iso_date_str(upd_raw, fallback_date)
+        cleaned.append(
+            {
+                "slug": slug,
+                "title": title,
+                "url": url,
+                "category": cat_raw,
+                "updated_at": updated_at,
+            }
+        )
+    return cleaned
+
+
+def sanitize_public_catalog_file(dist: Path, property_id: Optional[str] = None) -> None:
+    """In-place sanitizer guaranteeing dist/catalog.json exposes only lightweight metadata."""
+    cat_path = dist / "catalog.json"
+    if not cat_path.is_file():
+        return
+    try:
+        raw_obj = json.loads(cat_path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return
+    if not isinstance(raw_obj, dict):
+        return
+    pid = str(raw_obj.get("property_id") or property_id or "").strip().lower()
+    raw_tools = raw_obj.get("tools")
+    if isinstance(raw_tools, list):
+        clean_tools = sanitize_public_catalog_tools(
+            raw_tools,
+            default_category=pid or "calculator",
+            property_id=pid or property_id,
+        )
+    else:
+        clean_tools = []
+    out_obj: Dict[str, Any] = {
+        "property_id": raw_obj.get("property_id") or pid,
+        "domain": raw_obj.get("domain") or "",
+        "tools": clean_tools,
+    }
+    if pid == "prexvo":
+        out_obj["disclosure"] = (
+            "Refinancing federal student loans into a private loan permanently forfeits federal protections."
+        )
+    doc = json.dumps(out_obj, indent=2) + "\n"
+    assert_no_forbidden_dashes(doc, context=f"{pid or 'tenant'} catalog.json")
+    cat_path.write_text(doc, encoding="utf-8")
 
 
 def write_machine_endpoints_and_headers(
@@ -511,17 +777,26 @@ def write_machine_endpoints_and_headers(
     static_patterns: Optional[Sequence[str]] = None,
     redirects_content: Optional[str] = None,
 ) -> None:
-    """Writes feed.xml, IndexNow key, catalog.json, media-kit.json, _headers, _redirects, and ai-benchmarks."""
-    from pseofactory.distributor import generate_ai_benchmark_nodes
-    from pseofactory.edge import build_edge_headers
+    """Writes feed.xml, IndexNow key, lightweight catalog.json, media-kit.json, _routes.json, _headers, and _redirects."""
+    from pseofactory.edge import build_edge_headers, build_edge_routes_json, ensure_gone_rules_in_redirects
 
     base = canonical_base.rstrip("/")
+    fallback_date = _resolve_truthpack_modified_date(property_id)
+    channel_pub_date = _format_rfc822_pub_date(fallback_date, fallback_date)
+    eff_feed_desc = str(feed_description or "").replace("\u2014", "-").replace("\u2013", "-").strip()
+    if str(property_id or "").strip().lower() == "prexvo" and "permanently forfeits" not in eff_feed_desc.lower():
+        eff_feed_desc = (
+            f"{eff_feed_desc.rstrip('. ')}. Refinancing federal student loans into a private loan "
+            "permanently forfeits federal protections."
+        )
+
     rss_rows = "\n".join(
         f"    <item>\n"
         f"      <title>{saxutils.escape(str(item.get('title') or ''))}</title>\n"
         f"      <link>{saxutils.escape(str(item.get('url') or ''))}</link>\n"
         f"      <guid>{saxutils.escape(str(item.get('url') or ''))}</guid>\n"
-        f"      <description>{saxutils.escape(str(item.get('description') or ''))}</description>\n"
+        f"      <pubDate>{_format_rfc822_pub_date(item.get('pub_date') or item.get('updated_at') or item.get('updated_date'), fallback_date)}</pubDate>\n"
+        f"      <description>{saxutils.escape(build_feed_scope_teaser(str(item.get('title') or ''), str(item.get('description') or '')))}</description>\n"
         f"    </item>"
         for item in feed_items
     )
@@ -531,8 +806,9 @@ def write_machine_endpoints_and_headers(
         "  <channel>\n"
         f"    <title>{saxutils.escape(feed_title)}</title>\n"
         f"    <link>{base}/</link>\n"
-        f"    <description>{saxutils.escape(feed_description)}</description>\n"
+        f"    <description>{saxutils.escape(eff_feed_desc)}</description>\n"
         "    <language>en-US</language>\n"
+        f"    <pubDate>{channel_pub_date}</pubDate>\n"
         f'    <atom:link href="{base}/feed.xml" rel="self" type="application/rss+xml"/>\n'
         f"{rss_rows}\n"
         "  </channel>\n"
@@ -543,10 +819,22 @@ def write_machine_endpoints_and_headers(
 
     (dist / f"{indexnow_key}.txt").write_text(f"{indexnow_key}\n", encoding="utf-8")
 
-    catalog_doc = json.dumps(
-        {"property_id": property_id, "domain": domain, "tools": list(catalog_tools)},
-        indent=2,
+    lightweight_tools = sanitize_public_catalog_tools(
+        catalog_tools,
+        default_category=str(property_id or "calculator").strip().lower(),
+        default_updated_at=fallback_date,
+        property_id=property_id,
     )
+    catalog_payload: Dict[str, Any] = {
+        "property_id": property_id,
+        "domain": domain,
+        "tools": lightweight_tools,
+    }
+    if str(property_id or "").strip().lower() == "prexvo":
+        catalog_payload["disclosure"] = (
+            "Refinancing federal student loans into a private loan permanently forfeits federal protections."
+        )
+    catalog_doc = json.dumps(catalog_payload, indent=2) + "\n"
     assert_no_forbidden_dashes(catalog_doc, context=f"{property_id} catalog.json")
     (dist / "catalog.json").write_text(catalog_doc, encoding="utf-8")
 
@@ -556,21 +844,33 @@ def write_machine_endpoints_and_headers(
 
     edge_kwargs: Dict[str, Any] = {"routes": list(header_routes)}
     if machine_endpoints is not None:
-        edge_kwargs["machine_endpoints"] = list(machine_endpoints)
+        filtered_eps = []
+        for ep in machine_endpoints:
+            ep_norm = ep if ep.startswith("/") else f"/{ep}"
+            if ep_norm == "/llms-full.txt":
+                continue
+            if ep_norm in ("/sitemap-hubs.xml", "/sitemap-leaves.xml") and not (dist / ep_norm.lstrip("/")).is_file():
+                continue
+            filtered_eps.append(ep)
+        edge_kwargs["machine_endpoints"] = filtered_eps
     if static_patterns is not None:
         edge_kwargs["static_patterns"] = list(static_patterns)
     (dist / "_headers").write_text(build_edge_headers(base, **edge_kwargs), encoding="utf-8")
+    (dist / "_routes.json").write_text(build_edge_routes_json(), encoding="utf-8")
 
-    if redirects_content is not None:
-        (dist / "_redirects").write_text(redirects_content, encoding="utf-8")
-    elif not (dist / "_redirects").exists():
-        (dist / "_redirects").write_text("", encoding="utf-8")
+    base_redirects = (
+        redirects_content
+        if redirects_content is not None
+        else ((dist / "_redirects").read_text(encoding="utf-8", errors="ignore") if (dist / "_redirects").is_file() else "")
+    )
+    final_redirects = ensure_gone_rules_in_redirects(base_redirects)
+    (dist / "_redirects").write_text(final_redirects, encoding="utf-8")
 
+    # Purge zero-click leaking machine dumps
+    (dist / "llms-full.txt").unlink(missing_ok=True)
     ai_benchmarks_dir = dist / "ai-benchmarks"
-    ai_benchmarks_dir.mkdir(parents=True, exist_ok=True)
-    ai_res = generate_ai_benchmark_nodes(tenant=property_id)
-    for fname, fcontent in (ai_res.get("files") or {}).items():
-        (ai_benchmarks_dir / fname).write_text(fcontent, encoding="utf-8")
+    if ai_benchmarks_dir.exists():
+        shutil.rmtree(ai_benchmarks_dir, ignore_errors=True)
 
 
 def build_edge_checkout_wrapper_js(query_flag: str) -> str:
@@ -1538,6 +1838,26 @@ def finalize_estate_build(
     if dist_functions.exists():
         shutil.rmtree(dist_functions, ignore_errors=True)
 
+    # Enforce post-compile purge of zero-click dumps, lightweight catalog.json, capped llms.txt, and 410 redirects
+    (dist / "llms-full.txt").unlink(missing_ok=True)
+    dist_ai_bench = dist / "ai-benchmarks"
+    if dist_ai_bench.exists():
+        shutil.rmtree(dist_ai_bench, ignore_errors=True)
+    sanitize_public_catalog_file(dist, property_id=property_id)
+    cap_llms_txt_file(dist, property_id=property_id, canonical_base=canonical_base)
+    from pseofactory.edge import build_edge_routes_json, ensure_gone_rules_in_redirects
+
+    routes_p = dist / "_routes.json"
+    expected_routes = build_edge_routes_json()
+    if not routes_p.is_file() or routes_p.read_text(encoding="utf-8", errors="ignore") != expected_routes:
+        routes_p.write_text(expected_routes, encoding="utf-8")
+    redirects_p = dist / "_redirects"
+    if redirects_p.is_file():
+        cur_red = redirects_p.read_text(encoding="utf-8", errors="ignore")
+        new_red = ensure_gone_rules_in_redirects(cur_red)
+        if new_red != cur_red:
+            redirects_p.write_text(new_red, encoding="utf-8")
+
     if os.environ.get("PSEO_IN_REFLECT") != "1":
         try:
             from pseofactory.drift import (
@@ -1601,6 +1921,11 @@ def finalize_estate_build(
             )
         except Exception:
             pass
+
+    # Re-enforce dump purge after write_substrate_lock/record_asset_ledger in case drift.py regenerated ai-benchmarks
+    (dist / "llms-full.txt").unlink(missing_ok=True)
+    if (dist / "ai-benchmarks").exists():
+        shutil.rmtree(dist / "ai-benchmarks", ignore_errors=True)
 
     is_strict_truth_gate = (
         strict_truth_gate is True
@@ -2436,6 +2761,102 @@ def build_tools_directory_html(
     return render_base_fn(title, meta_description, canonical_url, body, jsonld_schemas=schemas)
 
 
+def _strip_llms_monetary_and_formula_leaks(text: str) -> str:
+    """Strips dollar figures and formula expressions so llms.txt never leaks pre-computed outputs."""
+    clean = str(text or "").replace("\u2014", "-").replace("\u2013", "-").strip()
+    clean = re.sub(r"\$[0-9][0-9,]*(?:\.[0-9]+)?", "statutory benchmark", clean)
+    clean = re.sub(r"\s+", " ", clean).strip()
+    return clean
+
+
+def cap_llms_txt_content(
+    raw_llms: str,
+    property_id: str,
+    canonical_base: str,
+    max_hub_links: int = 5,
+) -> str:
+    """
+    Caps an existing llms.txt document to <= max_hub_links (default 5) top hub links
+    with zero dollar outputs, zero formulas, and zero pre-computed answers.
+    """
+    base = canonical_base.rstrip("/")
+    pid = str(property_id or "").strip().lower()
+    lines = str(raw_llms or "").replace("\u2014", "-").replace("\u2013", "-").splitlines()
+    title_line = next((ln.strip() for ln in lines if ln.strip().startswith("# ")), f"# {pid.title() or 'Site'}")
+    tagline_line = next((ln.strip() for ln in lines if ln.strip().startswith("> ")), "")
+    if tagline_line:
+        tagline_line = "> " + _strip_llms_monetary_and_formula_leaks(tagline_line[2:])
+
+    link_rx = re.compile(r"^- \[([^\]]+)\]\(([^)]+)\)(?::\s*(.*))?$")
+    hub_candidates: List[Tuple[str, str, str]] = []
+    seen_urls: Set[str] = set()
+    for ln in lines:
+        m = link_rx.match(ln.strip())
+        if not m:
+            continue
+        lbl, url, desc = m.group(1).strip(), m.group(2).strip(), (m.group(3) or "").strip()
+        if url in seen_urls:
+            continue
+        # Prefer top-level hub links and top flagship non-spoke tool hubs
+        if "/tools/" in url:
+            tail = url.split("/tools/", 1)[1].strip("/")
+            if "/" in tail:
+                continue
+        seen_urls.add(url)
+        hub_candidates.append((lbl, url, build_feed_scope_teaser(lbl, _strip_llms_monetary_and_formula_leaks(desc))))
+
+    # Ensure core hubs exist and total links <= max_hub_links
+    core_hubs: List[Tuple[str, str, str]] = [
+        ("Calculators Directory", f"{base}/tools/", f"Interactive calculator directory on {base}."),
+    ]
+    tool_hubs = [c for c in hub_candidates if "/tools/" in c[1] and c[1].rstrip("/") != f"{base}/tools"]
+    doc_hubs = [
+        ("Statutory Calculation Methodology", f"{base}/methodology/", "Primary statutory authorities and dataset sources."),
+        ("Regulatory Notices and Disclaimers", f"{base}/disclaimers/", "Regulatory disclosures and methodology scope."),
+    ]
+    selected: List[Tuple[str, str, str]] = []
+    used_u: Set[str] = set()
+    # Reserve up to 2 slots for doc hubs and 1 for directory, leaving 2 for top flagship tools (total 5)
+    for item in core_hubs + tool_hubs[: max(0, max_hub_links - 3)] + doc_hubs:
+        if len(selected) >= max_hub_links:
+            break
+        if item[1] not in used_u:
+            used_u.add(item[1])
+            selected.append(item)
+
+    bullet_lines = [f"- [{lbl}]({url}): {desc}" for lbl, url, desc in selected]
+    out_parts = [title_line]
+    if tagline_line:
+        out_parts.extend(["", tagline_line])
+    out_parts.extend(["", "## Top Hub Links", *bullet_lines])
+    if pid == "prexvo":
+        out_parts.extend([
+            "",
+            "## Regulatory Notice",
+            "Refinancing federal student loans into a private loan permanently forfeits federal protections.",
+        ])
+    elif pid == "profithelm":
+        out_parts.extend([
+            "",
+            "## Statutory Disclosure",
+            "Circular 230 Notice: Published calculators provide educational modeling only and do not constitute formal tax or legal advice.",
+        ])
+    result = "\n".join(out_parts).rstrip() + "\n"
+    assert_no_forbidden_dashes(result, context=f"{property_id} llms.txt")
+    return result
+
+
+def cap_llms_txt_file(dist: Path, property_id: str, canonical_base: str, max_hub_links: int = 5) -> None:
+    """Caps dist/llms.txt in place to <= max_hub_links top hub links."""
+    llms_path = dist / "llms.txt"
+    if not llms_path.is_file():
+        return
+    raw = llms_path.read_text(encoding="utf-8", errors="ignore")
+    capped = cap_llms_txt_content(raw, property_id=property_id, canonical_base=canonical_base, max_hub_links=max_hub_links)
+    if capped != raw:
+        llms_path.write_text(capped, encoding="utf-8")
+
+
 def write_llms_files(
     dist: Path,
     property_id: str,
@@ -2451,46 +2872,36 @@ def write_llms_files(
     all_tools: Sequence[Dict[str, Any]],
     quick_answers: Dict[str, str],
 ) -> None:
-    """Writes llms.txt and llms-full.txt with zero forbidden dashes."""
+    """
+    Writes lightweight dist/llms.txt capped at <= 5 top hub links (no pre-computed answers,
+    no dollar outputs, no formulas) and actively purges dist/llms-full.txt and dist/ai-benchmarks/.
+    """
+    _ = (domain, author, legal_name, headquarters, query_syntax_params, statutory_notes, quick_answers)
     base = canonical_base.rstrip("/")
-    tools_lines = "\n".join(f"- [{t['title']}]({base}/tools/{t['slug']}/): {t['description']}" for t in all_tools)
-    llms_txt = f"""# {header_title}
-
-> {header_tagline}
-
-## Available Calculators
-{tools_lines}
-
-## Documentation
-- [Statutory Calculation Methodology]({base}/methodology/)
-- [Regulatory Notices and Disclaimers]({base}/disclaimers/)
-"""
-    assert_no_forbidden_dashes(llms_txt, context=f"{property_id} llms.txt")
+    clean_tagline = _strip_llms_monetary_and_formula_leaks(header_tagline)
+    non_spoke_tools = [t for t in all_tools if "/" not in str(t.get("slug") or "").strip("/")]
+    top_tools = non_spoke_tools[:2]
+    tools_lines = "\n".join(
+        f"- [{t['title']}]({base}/tools/{t['slug']}/): {build_feed_scope_teaser(str(t.get('title') or ''), _strip_llms_monetary_and_formula_leaks(str(t.get('description') or '')))}"
+        for t in top_tools
+    )
+    seed_txt = (
+        f"# {header_title}\n\n"
+        f"> {clean_tagline}\n\n"
+        "## Top Hub Links\n"
+        f"- [Calculators Directory]({base}/tools/): Interactive calculator directory on {base}.\n"
+        f"{tools_lines}\n"
+        f"- [Statutory Calculation Methodology]({base}/methodology/): Primary statutory authorities and dataset sources.\n"
+        f"- [Regulatory Notices and Disclaimers]({base}/disclaimers/): Regulatory disclosures and methodology scope.\n"
+    )
+    llms_txt = cap_llms_txt_content(seed_txt, property_id=property_id, canonical_base=base, max_hub_links=5)
     (dist / "llms.txt").write_text(llms_txt, encoding="utf-8")
 
-    sections = []
-    for idx, t in enumerate(all_tools, 1):
-        slug = t["slug"]
-        qa = (quick_answers.get(slug) or t.get("quick_answer") or t["description"]).replace("\u2014", "-").replace("\u2013", "-").strip()
-        sections.append(
-            f"## {idx}. {t['title']}\n"
-            f"Canonical URL: {base}/tools/{slug}/\n"
-            f"Query Syntax: {base}/tools/{slug}/{query_syntax_params}\n"
-            f"Summary: {t['description']}\n"
-            f"Princeton GEO Answer: {qa}\n"
-        )
-    llms_full = f"""# {header_title}: Complete Machine Knowledge Base & Statutory Manifest
-Domain: {domain}
-Base URL: {base}
-Research Entity: {author}
-Legal Entity: {legal_name}
-Headquarters: {headquarters}
-
-{chr(10).join(sections)}
-{statutory_notes}
-"""
-    assert_no_forbidden_dashes(llms_full, context=f"{property_id} llms-full.txt")
-    (dist / "llms-full.txt").write_text(llms_full, encoding="utf-8")
+    # Purge zero-click machine dumps
+    (dist / "llms-full.txt").unlink(missing_ok=True)
+    ai_bench = dist / "ai-benchmarks"
+    if ai_bench.exists():
+        shutil.rmtree(ai_bench, ignore_errors=True)
 
 
 def build_thin_estate_builder_source(pkg_name: str) -> str:

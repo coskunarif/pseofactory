@@ -18,6 +18,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
+from pseofactory.gsc_remediation import (
+    CRO_MEASUREMENT_LOCK_DAYS,
+    INDEXING_VALIDATE_FIX_DAYS,
+    evaluate_core_page_canary,
+    evaluate_indexing_validation_poll,
+)
 from pseofactory.indexing.milestones import (
     EVENT_SEARCH_INDEXED,
     EVENT_SITEMAP_DISPATCHED,
@@ -2844,6 +2850,23 @@ class IndexingFeedbackLoop:
             if eff_unindexed is not None
             else self.audit_unindexed_pages(live=live)
         )
+        core_page_canary = evaluate_core_page_canary(raw_unindexed)
+        if core_page_canary.get("status") == "P0_CORE_CANARY_ALERT" and not dry_run:
+            try:
+                self.telemetry_logger.log_event(
+                    TelemetryEvent(
+                        event_type="P0_CORE_CANARY_ALERT",
+                        tenant_id=self.property_id,
+                        error_type="CorePageCanaryUnindexed",
+                        error_message=(
+                            "Core hub canary alert on "
+                            + ", ".join(p["path"] for p in core_page_canary.get("failing_core_pages", []))
+                        ),
+                        action_taken="ESCALATED",
+                    )
+                )
+            except Exception:
+                pass
 
         impression_gap_audit = self.audit_impression_monetization_and_distribution_gaps(
             query_records=query_records if query_records is not None else ([] if eff_unindexed is not None else None),
@@ -3142,6 +3165,9 @@ class IndexingFeedbackLoop:
                 "eligible_urls": list(preflight_report.push_eligible_urls),
             },
             "push_summary": push_summary,
+            "core_page_canary": core_page_canary,
+            "indexing_validate_fix_days": INDEXING_VALIDATE_FIX_DAYS,
+            "cro_measurement_lock_days": CRO_MEASUREMENT_LOCK_DAYS,
             "milestone_events_count": len(self.milestone_tracker.event_log),
             "rollover_queue_pending": len(self.indexer.load_gsc_rollover_queue()),
         }

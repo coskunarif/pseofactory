@@ -79,6 +79,9 @@ from pseofactory.contracts import (
     assert_machine_readable_schema,
     assert_schema_org_jsonld,
     assert_valid_structured_data,
+    detect_forbidden_dist_manifest_artifacts,
+    detect_catalog_json_raw_leak_issues,
+    is_html_header_route,
     extract_llms_txt_metadata,
     detect_llms_txt_issues,
     assert_llms_txt,
@@ -123,18 +126,28 @@ class SEOVerificationError(Exception):
 # =============================================================================
 
 # Canonical 3-Tier AI Crawler Taxonomy
-AI_SEARCH_BOTS = ["googlebot", "bingbot", "perplexitybot", "claudebot", "oai-searchbot"]
-AI_USER_TRIGGERED_BOTS = ["chatgpt-user"]
+AI_SEARCH_BOTS = [
+    "googlebot",
+    "bingbot",
+    "applebot",
+    "oai-searchbot",
+    "chatgpt-user",
+    "claude-searchbot",
+    "claude-user",
+    "perplexitybot",
+    "perplexity-user",
+]
+AI_USER_TRIGGERED_BOTS = ["chatgpt-user", "claude-user", "perplexity-user"]
 AI_TRAINING_BOTS = [
     "gptbot",
-    "google-extended",
-    "applebot",
-    "applebot-extended",
-    "meta-externalagent",
-    "ccbot",
+    "claudebot",
     "anthropic-ai",
-    "cohere-ai",
+    "claude-web",
+    "ccbot",
     "bytespider",
+    "meta-externalagent",
+    "applebot-extended",
+    "googleother",
 ]
 
 ZYPPY_2026_FACTORS_SPEC = [
@@ -400,28 +413,6 @@ ZYPPY_2026_AI_FACTORS_SPEC = ZyppyAIFactorsSpecList([
             "schema_markup_graphs",
         ],
     },
-    {
-        "factor": "llms.txt File",
-        "name": "llms.txt File",
-        "weight": 0.05,
-        "positive_weight": 0.05,
-        "negative_weight": -0.05,
-        "code": "llms_txt",
-        "description": "Curated machine-readable llms.txt and llms-full.txt files conforming to llmstxt.org specification with concise markdown summaries linking top category hubs without leaking internal routes.",
-        "aliases": [
-            "llms.txt File",
-            "llms.txt",
-            "llms_txt_file",
-            "llms_txt",
-            "llms_full_txt",
-            "llmstxt",
-            "llms_txt_manifest",
-            "curated_llms_txt",
-            "Factor 13",
-            "Factor 13: llms.txt File",
-            "Factor 13: llms.txt",
-        ],
-    },
 ])
 
 
@@ -480,7 +471,7 @@ def is_ai_search_crawler(bot_name: str) -> bool:
     search_bots = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS}
     if bot_clean in search_bots:
         return True
-    if bot_clean in ("claude-web", "searchbot"):
+    if bot_clean == "searchbot":
         return True
     return False
 
@@ -608,7 +599,7 @@ class SinglePassSEODocumentParser(HTMLParser):
         "input", "link", "meta", "param", "source", "track", "wbr",
     })
     _SEARCH_CRAWLERS = frozenset(
-        {"robots", "claude-web"}
+        {"robots"}
         | {b.lower() for b in AI_SEARCH_BOTS}
         | {b.lower() for b in AI_USER_TRIGGERED_BOTS}
     )
@@ -2057,6 +2048,108 @@ def _fork_eval_seo_gate(gate_info: Tuple[str, str, bool]) -> Tuple[str, Dict[str
     return res_key, fn(arg)
 
 
+def _audit_html_ftc_and_post_calc_slot_order(
+    raw_html: str,
+    rel: str,
+    is_calculator_leaf: bool = False,
+) -> List[str]:
+    """
+    Fail-closed byte-offset gate verifying:
+    1. On every HTML page containing /r/, disclosure_pos < first_r_link_pos (and inside the
+       enclosing partner container, plain-language FTC 16 CFR 255 disclosure + 'Sponsored Placement'
+       appear before the first <a href="/r/...">).
+    2. On every calculator leaf with calc-results and workpaper-unlock-card,
+       calc_results_pos < workpaper_unlock_pos, and neither workpaper-unlock-card nor
+       contextual-referral-card is embedded inside <form>.
+    3. <= 1 distinct affiliate partner container block per calculator leaf.
+    Zero em-dashes. Zero en-dashes.
+    """
+    issues: List[str] = []
+    if not raw_html:
+        return issues
+
+    # Mask <script> and <style> contents with spaces to preserve exact byte offsets
+    masked_html = re.sub(
+        r"<(script|style)\b[^>]*>[\s\S]*?</\1>",
+        lambda m: " " * len(m.group(0)),
+        raw_html,
+        flags=re.IGNORECASE,
+    )
+
+    first_r_m = re.search(r'<a\b[^>]*\bhref=["\']/r/[^"\']*["\']', masked_html, flags=re.IGNORECASE)
+    if first_r_m:
+        first_r_link_pos = first_r_m.start()
+        disc_re = re.compile(
+            r'(?:16\s*cfr\s*(?:part\s*)?255|class=["\'][^"\']*\baffiliate-disclosure\b[^"\']*["\']|'
+            r'we may earn[^<]{0,140}(?:commission|referral|compensation))',
+            re.IGNORECASE,
+        )
+        disc_matches = list(disc_re.finditer(masked_html))
+        if not disc_matches or disc_matches[0].start() >= first_r_link_pos:
+            issues.append(
+                f"{rel}: FTC 16 CFR 255 disclosure missing or placed after first /r/ link "
+                f"(disclosure_pos={disc_matches[0].start() if disc_matches else -1}, first_r_link_pos={first_r_link_pos})"
+            )
+
+        # Check local enclosing partner container immediately preceding first_r_link_pos
+        container_open_re = re.compile(
+            r'<(?:section|div)\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-card|affiliates?-section|refinance-partner-section|partners?-section|calc-inline-cta|affiliate-card|partner-card)\b[^"\']*["\'][^>]*>',
+            re.IGNORECASE,
+        )
+        enclosing_starts = [m.start() for m in container_open_re.finditer(masked_html, 0, first_r_link_pos)]
+        if enclosing_starts:
+            local_slice = masked_html[enclosing_starts[-1] : first_r_link_pos]
+            if not disc_re.search(local_slice):
+                issues.append(
+                    f"{rel}: FTC 16 CFR 255 disclosure must appear inside partner block before first <a href='/r/...'>"
+                )
+            if is_calculator_leaf and "sponsored placement" not in local_slice.lower():
+                issues.append(
+                    f"{rel}: Partner block missing 'Sponsored Placement' label above first <a href='/r/...'>"
+                )
+        elif is_calculator_leaf:
+            preceding_slice = masked_html[max(0, first_r_link_pos - 1200) : first_r_link_pos]
+            if "sponsored placement" not in preceding_slice.lower():
+                issues.append(
+                    f"{rel}: Calculator leaf /r/ link missing 'Sponsored Placement' label above first <a href='/r/...'>"
+                )
+
+    if is_calculator_leaf:
+        calc_res_m = re.search(
+            r'(?:\bid=["\']calc-results["\']|\bclass=["\'][^"\']*\b(?:calc-results|calc-results-column|result-box)\b)',
+            masked_html,
+            flags=re.IGNORECASE,
+        )
+        unlock_m = re.search(r'\bid=["\']workpaper-unlock-card["\']', masked_html, flags=re.IGNORECASE)
+        if calc_res_m and unlock_m:
+            if calc_res_m.start() >= unlock_m.start():
+                issues.append(
+                    f"{rel}: workpaper-unlock-card precedes calc-results "
+                    f"(calc_results_pos={calc_res_m.start()}, workpaper_unlock_pos={unlock_m.start()})"
+                )
+
+        # Never embed workpaper-unlock-card or contextual-referral-card inside <form>
+        for fm in re.finditer(r"<form\b[^>]*>([\s\S]*?)</form>", masked_html, flags=re.IGNORECASE):
+            f_body = fm.group(1)
+            if re.search(r'\bid=["\']workpaper-unlock-card["\']', f_body, flags=re.IGNORECASE):
+                issues.append(f"{rel}: workpaper-unlock-card must not be embedded inside <form>")
+            if re.search(r'\bclass=["\'][^"\']*\bcontextual-referral-card\b', f_body, flags=re.IGNORECASE):
+                issues.append(f"{rel}: contextual-referral-card must not be embedded inside <form>")
+
+        # <= 1 distinct affiliate partner container block per calculator leaf
+        partner_containers = re.findall(
+            r'<(?:section|div)\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-card|affiliates?-section|refinance-partner-section|partners?-section|calc-inline-cta|comparison-table-cta-bar)\b[^"\']*["\'][^>]*>',
+            masked_html,
+            flags=re.IGNORECASE,
+        )
+        if len(partner_containers) > 1:
+            issues.append(
+                f"{rel}: expected <= 1 distinct affiliate partner container block per calculator leaf, got {len(partner_containers)}"
+            )
+
+    return issues
+
+
 class MasterSEOVerifier:
     """
     Parametric Master SEO & GEO Audit Checklist Verification Engine.
@@ -2144,11 +2237,7 @@ class MasterSEOVerifier:
         else:
             self.required_endpoints = [
                 "/feed.xml",
-                "/llms.txt",
-                "/llms-full.txt",
                 "/sitemap.xml",
-                "/sitemap-hubs.xml",
-                "/sitemap-leaves.xml",
                 "/",
                 "/tools/",
                 "/about/",
@@ -2470,9 +2559,12 @@ class MasterSEOVerifier:
             issues.append(f"Missing sitemap.xml at {sitemap}")
         else:
             sitemap_files = [sitemap]
-            for extra_path in sorted(target.glob("sitemap-*.xml")):
-                if extra_path.is_file() and extra_path not in sitemap_files:
-                    sitemap_files.append(extra_path)
+            raw_main = sitemap.read_text(encoding="utf-8", errors="ignore")
+            main_locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", raw_main)
+            if len(main_locs) >= 500 or "<sitemapindex" in raw_main:
+                for extra_path in sorted(target.glob("sitemap-*.xml")):
+                    if extra_path.is_file() and extra_path not in sitemap_files:
+                        sitemap_files.append(extra_path)
 
             domain_prefix = f"https://{self.domain}" if self.domain else ""
             forbidden_sitemap_segments = ("/signal/", "/test/", "/tests/", "/staging/", "/sandbox/", "/syndication/")
@@ -2484,6 +2576,10 @@ class MasterSEOVerifier:
                     raw_xml = sm_path.read_text(encoding="utf-8")
                     if "\u2014" in raw_xml or "\u2013" in raw_xml:
                         issues.append(f"Forbidden em-dash or en-dash detected in {sm_name}")
+                    if re.search(r"<changefreq\b", raw_xml, re.IGNORECASE):
+                        issues.append(f"Forbidden <changefreq> tag detected in {sm_name}")
+                    if re.search(r"<priority\b", raw_xml, re.IGNORECASE):
+                        issues.append(f"Forbidden <priority> tag detected in {sm_name}")
                     tree = ET.fromstring(raw_xml)
                     root = tree
                     ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
@@ -2688,7 +2784,9 @@ class MasterSEOVerifier:
         )
 
         rules: Dict[str, List[str]] = {}
+        active_rules: Dict[str, List[str]] = {}
         current_route = None
+        current_active = False
         for line in content.splitlines():
             line_stripped = line.strip()
             if not line_stripped:
@@ -2696,6 +2794,7 @@ class MasterSEOVerifier:
             if line_stripped.startswith("# [edge-middleware-canonical] "):
                 current_route = line_stripped.split("# [edge-middleware-canonical]", 1)[1].strip()
                 rules.setdefault(current_route, [])
+                current_active = False
                 continue
             if line_stripped.startswith("#") and current_route and "Link:" in line_stripped:
                 rules[current_route].append(line_stripped.lstrip("#").strip())
@@ -2705,38 +2804,32 @@ class MasterSEOVerifier:
             if not line.startswith(" ") and not line.startswith("\t"):
                 current_route = line_stripped
                 rules[current_route] = []
+                active_rules[current_route] = []
+                current_active = True
             elif current_route:
                 rules[current_route].append(line_stripped)
+                if current_active:
+                    active_rules.setdefault(current_route, []).append(line_stripped)
 
         found_canonical_links = []
-        for route, headers in rules.items():
+        for route, headers in active_rules.items():
             for h in headers:
                 m = canonical_link_pattern.search(h)
                 if m:
                     found_canonical_links.append((route, m.group(1)))
+                    if is_html_header_route(route):
+                        issues.append(
+                            f"Forbidden HTTP Link rel='canonical' header on HTML route '{route}' in dist/_headers (HTML <link rel='canonical'> only)"
+                        )
 
-        if not found_canonical_links:
-            issues.append("Zero RFC 5988 canonical Link headers found in dist/_headers")
+        wildcard_headers = active_rules.get("/*", [])
+        has_content_signal = any(h.strip().lower().startswith("content-signal:") for h in wildcard_headers)
+        if "/*" not in active_rules or not has_content_signal:
+            issues.append("Missing required 'Content-Signal:' header on '/*' in dist/_headers")
 
-        for ep in self.required_endpoints:
-            if ep.endswith("/") and ep != "/":
-                ep_rel = ep.strip("/")
-                ep_file = target / ep_rel / "index.html"
-                ep_direct = target / f"{ep_rel}.html"
-                if not ep_file.is_file() and not ep_direct.is_file():
-                    continue
-            matching = [url for r, url in found_canonical_links if r == ep]
-            if not matching:
-                issues.append(f"Missing RFC 5988 canonical Link header for machine endpoint {ep}")
-            else:
-                target_url = matching[0]
-                if not target_url.startswith("https://"):
-                    issues.append(f"Invalid canonical URL scheme in Link header for {ep}: '{target_url}'")
-                if ep.endswith(".xml") or ep.endswith(".txt"):
-                    if not target_url.endswith(ep):
-                        issues.append(f"Canonical URL path mismatch in Link header for {ep}: '{target_url}'")
-
-        if self.leaf_route_checker:
+        if self.leaf_route_checker and (
+            getattr(self.leaf_route_checker, "__name__", "") not in self._ALLOWLISTED_LEAF_ROUTE_FNS
+        ):
             issues.extend(self.leaf_route_checker(target, found_canonical_links))
 
         for r, url in found_canonical_links:
@@ -2935,10 +3028,16 @@ class MasterSEOVerifier:
             content_lower = content.lower()
             if "sitemap.xml" not in content_lower:
                 issues.append("robots.txt missing Sitemap directive")
-            if "sitemap-hubs.xml" not in content_lower:
-                issues.append("robots.txt missing sitemap-hubs.xml directive")
-            if "sitemap-leaves.xml" not in content_lower:
-                issues.append("robots.txt missing sitemap-leaves.xml directive")
+            sm_path = target / "sitemap.xml"
+            sm_url_count = 0
+            if sm_path.is_file():
+                sm_raw = sm_path.read_text(encoding="utf-8", errors="ignore")
+                sm_url_count = len(re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", sm_raw))
+            if sm_url_count >= 500:
+                if "sitemap-hubs.xml" not in content_lower:
+                    issues.append("robots.txt missing sitemap-hubs.xml directive for >= 500 URL domain")
+                if "sitemap-leaves.xml" not in content_lower:
+                    issues.append("robots.txt missing sitemap-leaves.xml directive for >= 500 URL domain")
             if "allow: /" not in content_lower:
                 issues.append("robots.txt missing 'Allow: /' directive")
             if "disallow: /signal/" not in content_lower:
@@ -2948,32 +3047,40 @@ class MasterSEOVerifier:
             sections = self.parse_robots_txt_sections(content)
 
             # AI Search and User-Triggered bots must NOT be disallowed on root / or /tools/
-            for bot in AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS:
+            for bot in dict.fromkeys(AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS):
                 if self.is_bot_blocked(bot, "/", sections):
                     issues.append(f"robots.txt disallows AI search/user bot '{bot}' on root '/'")
                 if self.is_bot_blocked(bot, "/tools/", sections):
                     issues.append(f"robots.txt disallows AI search/user bot '{bot}' on '/tools/'")
 
-            # RFC 9309 named-bot override guard for /api/, /cdn-cgi/, and /r/
+            # AI Training bots must NOT have Allow: / in robots.txt
+            for t_bot in AI_TRAINING_BOTS:
+                t_low = t_bot.lower()
+                if t_low in sections:
+                    sec = sections[t_low]
+                    allows = [a.strip() for a in sec.get("allow", [])]
+                    disallows = [d.strip() for d in sec.get("disallow", [])]
+                    if "/" in allows or not self.is_path_disallowed("/", allows, disallows):
+                        issues.append(f"robots.txt grants 'Allow: /' or fails to disallow AI training bot '{t_low}' on '/'")
+
+            # /r/ redirect routes must NOT be disallowed in robots.txt
+            for agent, sec in sections.items():
+                for d_rule in sec.get("disallow", []):
+                    d_clean = d_rule.strip().lower()
+                    if d_clean in ("/r", "/r/", "/r/*") or d_clean.startswith("/r/"):
+                        issues.append(
+                            f"robots.txt forbids 'Disallow: {d_rule}' for User-agent '{agent}' (/r/ must remain crawlable)"
+                        )
+
+            # RFC 9309 named-bot override guard for /api/ and /cdn-cgi/ (never /r/)
             has_api_surface = (target / "functions" / "api").is_dir() or (
                 self.repo_root is not None and (Path(self.repo_root) / "functions" / "api").is_dir()
             )
             issues.extend(
                 self.find_robots_txt_mandatory_disallow_violations(
                     content,
+                    mandatory_disallows=("/api/", "/cdn-cgi/"),
                     require_present=has_api_surface,
-                )
-            )
-            has_edge_redirects = (
-                (target / "functions" / "r").is_dir()
-                or (target.parent / "functions" / "r").is_dir()
-                or (self.repo_root is not None and (Path(self.repo_root) / "functions" / "r").is_dir())
-            )
-            issues.extend(
-                self.find_robots_txt_mandatory_disallow_violations(
-                    content,
-                    mandatory_disallows=("/r/",),
-                    require_present=has_edge_redirects,
                 )
             )
             if self.strict_robots:
@@ -2983,12 +3090,8 @@ class MasterSEOVerifier:
                     if (target / dis.strip("/")).is_dir() and f"disallow: {dis}" not in content_lower:
                         issues.append(f"robots.txt missing 'Disallow: {dis}'")
 
-                for bot in AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS:
+                for bot in dict.fromkeys(AI_SEARCH_BOTS + AI_USER_TRIGGERED_BOTS):
                     if bot not in sections:
-                        if bot == "claudebot" and "claude-web" in sections:
-                            continue
-                        if bot == "claude-web" and "claudebot" in sections:
-                            continue
                         issues.append(f"robots.txt missing User-agent directive for AI crawler {bot}")
 
         return {
@@ -3668,9 +3771,9 @@ class MasterSEOVerifier:
             if headers_file.is_file():
                 current_route = ""
                 non_public_prefixes = ("/signal", "/staging", "/test", "/tests", "/syndication")
-                llms_noindex_routes = {"/llms.txt", "/llms-full.txt"}
+                llms_noindex_routes = {"/llms.txt", "/llms-full.txt", "/catalog.json"}
                 training_bot_names = {b.lower() for b in AI_TRAINING_BOTS}
-                search_bot_names = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS} | {"robots", "claude-web"}
+                search_bot_names = {b.lower() for b in AI_SEARCH_BOTS} | {b.lower() for b in AI_USER_TRIGGERED_BOTS} | {"robots"}
 
                 for raw_line in headers_file.read_text(encoding="utf-8", errors="ignore").splitlines():
                     line = raw_line.strip()
@@ -4571,72 +4674,81 @@ class MasterSEOVerifier:
     verify_jsonld_structured_data = verify_structured_data
     verify_schema_graphs = verify_structured_data
 
-    # Factor 13: llms.txt File (+0.05)
+    # Fail-Closed Forbidden AI Artifacts (llms-full.txt / ai-benchmarks/*) & Raw Catalog Key Gate
+    def check_forbidden_ai_artifacts_and_catalog_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fail-closed gate replacing deprecated Factor 13:
+        1. Forbids dist/llms-full.txt.
+        2. Forbids dist/ai-benchmarks/*.
+        3. Forbids raw 'formula', 'quick_answer', and 'published_output' keys in dist/catalog.json.
+        Zero em-dashes. Zero en-dashes.
+        """
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues: List[str] = []
+        if target.exists():
+            issues.extend(detect_forbidden_dist_manifest_artifacts(target))
+            cat_path = target / "catalog.json"
+            if cat_path.is_file():
+                issues.extend(detect_catalog_json_raw_leak_issues(cat_path))
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_forbidden_ai_artifacts_and_catalog_gate",
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    # Fail-Closed FTC 16 CFR 255 Byte-Offset & Calculator Post-Calc Slot-Order Gate
+    def check_ftc_and_post_calc_slot_order_gate(
+        self,
+        dist_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fail-closed byte-offset gate on HTML pages in dist/:
+        1. On every HTML page containing /r/, assert disclosure_pos < first_r_link_pos.
+        2. On every calculator leaf with calc-results and workpaper-unlock-card,
+           assert calc_results_pos < workpaper_unlock_pos and neither is inside <form>.
+        3. Assert <= 1 distinct affiliate partner container block per calculator leaf.
+        Zero em-dashes. Zero en-dashes.
+        """
+        target = Path(dist_dir) if dist_dir else self.dist_dir
+        issues: List[str] = []
+        pages_checked = 0
+        if target.exists():
+            for p in self._iter_html_files(target):
+                rel = p.relative_to(target).as_posix()
+                if rel.startswith(".") or "syndication/" in rel:
+                    continue
+                pages_checked += 1
+                raw_html = self._read_cached_html(p)
+                is_calc = (
+                    (rel.startswith("tools/") and rel != "tools/index.html" and rel.endswith("/index.html") and "<form" in raw_html.lower())
+                    or 'data-blueprint="calculator_leaf"' in raw_html
+                )
+                issues.extend(_audit_html_ftc_and_post_calc_slot_order(raw_html, rel, is_calculator_leaf=is_calc))
+        return {
+            "status": "PASS" if not issues else "FAIL",
+            "gate": "check_ftc_and_post_calc_slot_order_gate",
+            "pages_checked": pages_checked,
+            "violations_count": len(issues),
+            "issues": issues,
+        }
+
+    # Deprecated Factor 13 aliases retained for external import compatibility
     def check_llms_txt_gate(
         self,
         dist_dir: Optional[Path] = None,
         require_strict: bool = False,
     ) -> Dict[str, Any]:
-        """
-        Mechanical verification gate for Factor 13: llms.txt File (+0.05).
-        Verifies curated llms.txt and expanded llms-full.txt files conforming to
-        the llmstxt.org specification with concise markdown summaries linking top category hubs
-        without leaking private administrative routes or internal paths, and zero forbidden dashes.
-        Zero em-dashes. Zero en-dashes.
-        """
-        target = Path(dist_dir) if dist_dir else self.dist_dir
-        issues: List[str] = []
-        llms_txt_path = target / "llms.txt"
-        llms_full_txt_path = target / "llms-full.txt"
-        manifests_checked = 0
-        hubs_verified = 0
-
-        has_llms = target.exists() and llms_txt_path.is_file()
-        has_full = target.exists() and llms_full_txt_path.is_file()
-
-        if require_strict:
-            if not has_llms:
-                issues.append(f"Missing llms.txt manifest at {llms_txt_path}")
-            if not has_full:
-                issues.append(f"Missing llms-full.txt manifest at {llms_full_txt_path}")
-
-        if has_llms:
-            manifests_checked += 1
-            raw_llms = llms_txt_path.read_text(encoding="utf-8", errors="ignore")
-            res_llms = verify_llms_txt_content(
-                raw_llms,
-                rel_path="llms.txt",
-                is_full=False,
-                require_strict=require_strict,
-            )
-            if res_llms["issues"]:
-                issues.extend(res_llms["issues"])
-            hubs_verified += res_llms.get("hubs_verified", 0)
-
-        if has_full:
-            manifests_checked += 1
-            raw_full = llms_full_txt_path.read_text(encoding="utf-8", errors="ignore")
-            res_full = verify_llms_txt_content(
-                raw_full,
-                rel_path="llms-full.txt",
-                is_full=True,
-                require_strict=require_strict,
-            )
-            if res_full["issues"]:
-                issues.extend(res_full["issues"])
-
-        if (has_llms and not has_full) or (has_full and not has_llms):
-            missing_name = "llms-full.txt" if has_llms else "llms.txt"
-            issues.append(f"Incomplete manifest pair: found only one of llms.txt / llms-full.txt; missing {missing_name}")
-
-        return {
-            "status": "PASS" if not issues else "FAIL",
-            "gate": "check_llms_txt_gate",
-            "manifests_checked": manifests_checked,
-            "hubs_verified": hubs_verified,
-            "violations_count": len(issues),
-            "issues": issues,
-        }
+        """Deprecated Factor 13 alias: delegates to check_forbidden_ai_artifacts_and_catalog_gate."""
+        _ = require_strict
+        res = self.check_forbidden_ai_artifacts_and_catalog_gate(dist_dir=dist_dir)
+        res["gate"] = "check_llms_txt_gate"
+        res["manifests_checked"] = 0
+        res["hubs_verified"] = 0
+        return res
 
     check_llms_txt_file_gate = check_llms_txt_gate
     check_llms_full_txt_gate = check_llms_txt_gate
@@ -5152,15 +5264,13 @@ class MasterSEOVerifier:
         manifests_dir = target / "manifests"
         manifest_files = list(manifests_dir.glob("*.json")) if manifests_dir.is_dir() else []
         sitemap_xml = target / "sitemap.xml"
-        sitemap_hubs_xml = target / "sitemap-hubs.xml"
-        sitemap_leaves_xml = target / "sitemap-leaves.xml"
         feed_xml = target / "feed.xml"
-        llms_txt = target / "llms.txt"
-        llms_full_txt = target / "llms-full.txt"
         robots_txt = target / "robots.txt"
+        llms_txt = target / "llms.txt"
+        catalog_json = target / "catalog.json"
 
         endpoints_scanned = len(manifest_files)
-        for ep in [sitemap_xml, sitemap_hubs_xml, sitemap_leaves_xml, feed_xml, llms_txt, llms_full_txt, robots_txt]:
+        for ep in [sitemap_xml, feed_xml, robots_txt, llms_txt, catalog_json]:
             if ep.is_file():
                 endpoints_scanned += 1
 
@@ -5269,8 +5379,14 @@ class MasterSEOVerifier:
                 if p.parent != target / "tools" and p.parent.parent == target / "tools":
                     if len(parser.internal_links) < 3:
                         gaps_3.append(f"{rel}: Insufficient internal links ({len(parser.internal_links)} < 3)")
-            if not sitemap_xml.is_file() or not sitemap_hubs_xml.is_file() or not sitemap_leaves_xml.is_file():
-                gaps_3.append("Missing one or more required sitemaps (sitemap.xml, sitemap-hubs.xml, sitemap-leaves.xml)")
+            if not sitemap_xml.is_file():
+                gaps_3.append("Missing required sitemap.xml")
+            else:
+                sm_raw_txt = sitemap_xml.read_text(encoding="utf-8", errors="ignore")
+                if re.search(r"<changefreq\b", sm_raw_txt, re.IGNORECASE):
+                    gaps_3.append("sitemap.xml contains forbidden <changefreq> tag")
+                if re.search(r"<priority\b", sm_raw_txt, re.IGNORECASE):
+                    gaps_3.append("sitemap.xml contains forbidden <priority> tag")
             if not feed_xml.is_file():
                 gaps_3.append("Missing syndication feed.xml")
 
@@ -5864,7 +5980,8 @@ class MasterSEOVerifier:
                 ("g_extractable_structure", "check_extractable_content_structure_gate", False),
                 ("g_answer_prominence", "check_answer_prominence_gate", False),
                 ("g_structured_data", "check_structured_data_gate", False),
-                ("g_llms_txt", "check_llms_txt_gate", False),
+                ("g_forbidden_ai_artifacts_and_catalog", "check_forbidden_ai_artifacts_and_catalog_gate", False),
+                ("g_ftc_post_calc_slot_order", "check_ftc_and_post_calc_slot_order_gate", False),
                 ("g_tool_utility", "check_tool_utility_gate", False),
                 ("g_free_web_app_schema", "check_free_web_application_schema_gate", False),
                 ("g_operational_shield", "check_operational_shield_gate", False),
@@ -5948,7 +6065,9 @@ class MasterSEOVerifier:
             g_extractable_structure = gate_results["g_extractable_structure"]
             g_answer_prominence = gate_results["g_answer_prominence"]
             g_structured_data = gate_results["g_structured_data"]
-            g_llms_txt = gate_results["g_llms_txt"]
+            g_forbidden_ai_artifacts_and_catalog = gate_results["g_forbidden_ai_artifacts_and_catalog"]
+            g_ftc_post_calc_slot_order = gate_results["g_ftc_post_calc_slot_order"]
+            g_llms_txt = g_forbidden_ai_artifacts_and_catalog
             g_tool_utility = gate_results["g_tool_utility"]
             g_free_web_app_schema = gate_results["g_free_web_app_schema"]
             g_operational_shield = gate_results["g_operational_shield"]
@@ -6041,6 +6160,8 @@ class MasterSEOVerifier:
             "check_schema_graphs_gate": g_structured_data,
             "check_target_entity_schemas_gate": g_structured_data,
             "check_machine_readable_schemas_gate": g_structured_data,
+            "check_forbidden_ai_artifacts_and_catalog_gate": g_forbidden_ai_artifacts_and_catalog,
+            "check_ftc_and_post_calc_slot_order_gate": g_ftc_post_calc_slot_order,
             "check_llms_txt_gate": g_llms_txt,
             "check_llms_txt_file_gate": g_llms_txt,
             "check_llms_full_txt_gate": g_llms_txt,
@@ -6105,7 +6226,8 @@ class MasterSEOVerifier:
             "check_source_publisher_reputation_gate",
             "check_extractable_content_structure_gate",
             "check_answer_prominence_gate",
-            "check_llms_txt_gate",
+            "check_forbidden_ai_artifacts_and_catalog_gate",
+            "check_ftc_and_post_calc_slot_order_gate",
             "check_tool_utility_gate",
             "check_free_web_application_schema_gate",
             "check_operational_shield_gate",
@@ -6309,6 +6431,8 @@ verify_structured_data = _default_verifier.verify_structured_data
 verify_schema_org_structured_data = _default_verifier.verify_schema_org_structured_data
 verify_jsonld_structured_data = _default_verifier.verify_jsonld_structured_data
 verify_schema_graphs = _default_verifier.verify_schema_graphs
+check_forbidden_ai_artifacts_and_catalog_gate = _default_verifier.check_forbidden_ai_artifacts_and_catalog_gate
+check_ftc_and_post_calc_slot_order_gate = _default_verifier.check_ftc_and_post_calc_slot_order_gate
 check_llms_txt_gate = _default_verifier.check_llms_txt_gate
 check_llms_txt_file_gate = _default_verifier.check_llms_txt_file_gate
 check_llms_full_txt_gate = _default_verifier.check_llms_full_txt_gate
@@ -9905,6 +10029,8 @@ def audit_aeo_geo_three_plane_readiness(
     mk_file = d_path / "media-kit.json"
     catalog_tools_verified = 0
 
+    issues.extend(detect_forbidden_dist_manifest_artifacts(d_path))
+
     if not cat_file.is_file():
         issues.append("Plane 2: Missing dist/catalog.json machine-readable catalog feed")
     else:
@@ -9913,6 +10039,7 @@ def audit_aeo_geo_three_plane_readiness(
             if "\u2014" in raw_cat or "\u2013" in raw_cat:
                 issues.append("Plane 2 (catalog.json): Contains forbidden em-dash or en-dash")
             cat_data = json.loads(raw_cat)
+            issues.extend(detect_catalog_json_raw_leak_issues(cat_data))
             cat_tools = cat_data.get("tools", []) if isinstance(cat_data, dict) else []
             if len(cat_tools) != len(root_tool_slugs):
                 issues.append(
@@ -9923,43 +10050,24 @@ def audit_aeo_geo_three_plane_readiness(
                     continue
                 req_fields = (
                     "slug",
-                    "url",
                     "title",
-                    "description",
-                    "quick_answer",
-                    "statutory_authority",
-                    "query_syntax",
-                    "inLanguage",
-                    "dateModified",
-                    "offers",
-                    "complementary_tools",
+                    "url",
+                    "category",
+                    "updated_at",
                 )
                 missing_f = [f for f in req_fields if not t_entry.get(f)]
+                forbidden_f = [
+                    k for k in ("inputs", "formula", "published_output", "quick_answer", "query_syntax")
+                    if k in t_entry
+                ]
                 if missing_f:
                     issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): Missing fields {missing_f}")
-                elif "?" not in str(t_entry.get("query_syntax", "")):
-                    issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): query_syntax missing parameterized query string")
-                elif (
-                    "directly to your inbox" in str(t_entry.get("quick_answer", "")).lower()
-                    or "total acquisition price of" in str(t_entry.get("quick_answer", "")).lower()
-                    or len(str(t_entry.get("quick_answer", "")).split()) < 10
-                ):
-                    issues.append(
-                        f"Plane 2 (catalog.json:{t_entry.get('slug')}): quick_answer leaked form/footer text or too short"
-                    )
+                elif forbidden_f:
+                    issues.append(f"Plane 2 (catalog.json:{t_entry.get('slug')}): Forbidden raw fields {forbidden_f}")
                 else:
                     catalog_tools_verified += 1
         except Exception as exc:
             issues.append(f"Plane 2 (catalog.json): Invalid JSON ({exc})")
-
-    if not llms_file.is_file():
-        issues.append("Plane 2: Missing dist/llms.txt")
-    if not llms_full_file.is_file():
-        issues.append("Plane 2: Missing dist/llms-full.txt")
-    else:
-        raw_lf = llms_full_file.read_text(encoding="utf-8", errors="ignore")
-        if "Query Syntax:" not in raw_lf or "Direct Statutory Answer:" not in raw_lf:
-            issues.append("Plane 2 (llms-full.txt): Missing Query Syntax or Direct Statutory Answer lines")
 
     if mk_file.is_file():
         try:
@@ -10715,7 +10823,7 @@ def audit_free_tool_seo_and_instant_ux_readiness(
                 issues.extend(schema_issues[:2])
                 zero_signup_instant_ux_issues.extend(schema_issues[:2])
 
-    for manifest_name in ("llms.txt", "llms-full.txt", "catalog.json", "feed.xml"):
+    for manifest_name in ("llms.txt", "catalog.json", "feed.xml"):
         mf = d_path / manifest_name
         if not mf.is_file():
             continue
@@ -11668,6 +11776,14 @@ def verify_estate_monetization_and_funnel_hygiene(
         for rc_body in ref_cards:
             if not re.search(r'href=["\']/r/[a-z0-9_.-]+', rc_body, re.I):
                 issues.append(f"{rel}: empty .contextual-referral-card placeholder without live /r/ link")
+
+        issues.extend(
+            _audit_html_ftc_and_post_calc_slot_order(
+                content,
+                rel,
+                is_calculator_leaf=bool(is_tool_leaf and ("<form" in content_lower or 'data-blueprint="calculator_leaf"' in content)),
+            )
+        )
 
     return {
         "status": "PASS" if not issues else "FAIL",

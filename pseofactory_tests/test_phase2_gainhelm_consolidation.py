@@ -243,7 +243,8 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     assert eh_doc.get("synced_substrate_hash") == lock_doc["synced_substrate_hash"]
 
     ledger_doc = json.loads((tmp_repo / ".agy" / "asset_ledger.json").read_text(encoding="utf-8"))
-    assert any(k.endswith(".md") for k in ledger_doc.get("assets", {})), "Missing .md assets in asset_ledger.json"
+    assert any(k.endswith(".html") for k in ledger_doc.get("assets", {})), "Missing .html assets in asset_ledger.json"
+    assert not any("ai-benchmarks" in k for k in ledger_doc.get("assets", {})), "Retired ai-benchmarks leaked into asset_ledger.json"
 
     host_adp = _HostSubAdapter(
         property_id="gainhelm",
@@ -259,8 +260,10 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     assert not (dist_dir / "functions").exists()
     assert (dist_dir / "404.html").is_file()
     assert (dist_dir / "c5430f81d11340a6bda3162725e24a03.txt").is_file()
-    for fname in ("sitemap.xml", "sitemap-hubs.xml", "sitemap-leaves.xml", "robots.txt", "_headers", "_redirects", "feed.xml", "llms.txt", "llms-full.txt", "catalog.json", "media-kit.json"):
+    for fname in ("sitemap.xml", "robots.txt", "_headers", "_redirects", "feed.xml", "llms.txt", "catalog.json", "media-kit.json"):
         assert (dist_dir / fname).is_file(), f"Missing dist/{fname}"
+    for retired_fname in ("sitemap-hubs.xml", "sitemap-leaves.xml", "llms-full.txt", "ai-benchmarks"):
+        assert not (dist_dir / retired_fname).exists(), f"Retired artifact dist/{retired_fname} must not exist"
 
     # All 22 sitemap URLs (including /partners/) resolve cleanly to built HTML files
     sitemap_urls = re.findall(r"<loc>(.*?)</loc>", (dist_dir / "sitemap.xml").read_text(encoding="utf-8"))

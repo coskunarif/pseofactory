@@ -20,3 +20,4 @@ run_manifest.json
 syndication/
 .indexing_intent_wal.jsonl
 .wrangler/
+reports/

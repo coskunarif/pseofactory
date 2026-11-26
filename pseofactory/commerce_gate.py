@@ -1898,6 +1898,102 @@ def _check_pricing_and_sku_parity(
     }
 
 
+def audit_insurance_surety_regulatory_compliance(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    dist_dir: Optional[Union[str, Path]] = None,
+    tenant_config: Optional[Dict[str, Any]] = None,
+    offers_override: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Fail-closed NAIC PLMA Sec. 13 regulatory gate in commerce_gate.py.
+    Rejects HYBRID_CPA_REVSHARE, percentage/revshare, 'issued bond', or 'bound policy'
+    sale-contingent compensation models on insurance/surety verticals unless
+    producer_license_verified=True is explicitly set in tenant config.
+    Allows only non-sale-contingent FLAT_SPONSORSHIP, CPC, or de minimis directory
+    metadata when unlicensed.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        INSURANCE_SURETY_PARTNER_KEYS,
+        NON_SALE_CONTINGENT_INSURANCE_MODELS,
+        get_affiliates_for_property,
+        is_insurance_surety_vertical,
+        is_producer_license_verified,
+        validate_insurance_surety_compensation_compliance,
+    )
+
+    prop = _normalize_property_id(property_id)
+    eff_repo = Path(repo_root).resolve() if repo_root else None
+    eff_cfg = tenant_config if isinstance(tenant_config, dict) else _read_pseofactory_marker(eff_repo)
+    licensed = is_producer_license_verified(
+        tenant_config=eff_cfg if eff_cfg else None,
+        property_id=prop,
+        repo_root=eff_repo,
+    )
+
+    if offers_override is not None:
+        partners_to_check = list(offers_override)
+    else:
+        try:
+            partners_to_check = list(get_affiliates_for_property(prop).values())
+        except ValueError:
+            partners_to_check = []
+    reg_res = validate_insurance_surety_compensation_compliance(
+        offers_or_partners=partners_to_check,
+        property_id=prop,
+        tenant_config=eff_cfg if eff_cfg else None,
+        repo_root=eff_repo,
+    )
+    issues = list(reg_res.get("issues") or [])
+
+    if not licensed and dist_dir is not None:
+        dist_path = Path(dist_dir)
+        if dist_path.is_dir():
+            partner_blk_re = re.compile(
+                r'<(section|div|aside)\b[^>]*class=["\'][^"\']*\b(?:contextual-referral-card|affiliates?-section|affiliate-card|partner-card|calc-inline-cta)\b[^"\']*["\'][^>]*>[\s\S]*?</\1>',
+                re.IGNORECASE,
+            )
+            for html_p in sorted(dist_path.glob("**/*.html")):
+                rel = html_p.relative_to(dist_path).as_posix()
+                try:
+                    raw_html = html_p.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    continue
+                is_ins_page = is_insurance_surety_vertical(property_id=prop, slug=rel)
+                for blk_m in partner_blk_re.finditer(raw_html):
+                    blk = blk_m.group(0)
+                    pk_m = re.search(r'\bdata-partner=["\']([^"\']+)["\']', blk, re.IGNORECASE)
+                    pk = pk_m.group(1).strip().lower() if pk_m else ""
+                    if not is_ins_page and pk not in INSURANCE_SURETY_PARTNER_KEYS:
+                        continue
+                    for mod_m in re.finditer(r'\bdata-partnership-model=["\']([A-Z0-9_]+)["\']', blk, re.IGNORECASE):
+                        mod_val = mod_m.group(1).strip().upper()
+                        if mod_val not in NON_SALE_CONTINGENT_INSURANCE_MODELS:
+                            issues.append(
+                                f"{rel}: NAIC PLMA Sec. 13 violation in rendered partner block ({pk or 'unknown'}): "
+                                f"prohibited unlicensed model '{mod_val}'"
+                            )
+                    blk_low = blk.lower()
+                    for phrase in ("issued bond", "bound policy", "per bond", "per policy", "revshare"):
+                        if phrase in blk_low:
+                            issues.append(
+                                f"{rel}: NAIC PLMA Sec. 13 violation in rendered partner block: "
+                                f"sale-contingent term '{phrase}' blocked without producer_license_verified=True"
+                            )
+
+    passed = len(issues) == 0
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "property_id": prop,
+        "producer_license_verified": licensed,
+        "offers_checked": reg_res.get("offers_checked", 0),
+        "violations_count": len(issues),
+        "issues": issues,
+    }
+
+
 def audit_tenant_commerce_fail_closed(
     repo_root: Union[str, Path],
     property_id: str,
@@ -1906,8 +2002,9 @@ def audit_tenant_commerce_fail_closed(
     timeout: float = 15.0,
 ) -> CommerceGateReport:
     """
-    Combines static dist/ deliverable leak scan + pricing/SKU parity + local Node.js v22
-    edge replay (+ optional live endpoint probe) into a structured fail-closed CommerceGateReport.
+    Combines static dist/ deliverable leak scan + pricing/SKU parity + NAIC PLMA Sec. 13
+    regulatory compliance + local Node.js v22 edge replay (+ optional live endpoint probe)
+    into a structured fail-closed CommerceGateReport.
     """
     prop = _normalize_property_id(property_id)
     repo_path = Path(repo_root).resolve()
@@ -1916,6 +2013,11 @@ def audit_tenant_commerce_fail_closed(
     matrix = resolve_tenant_commerce_matrix(prop, repo_root=repo_path, dist_dir=eff_dist)
     static_res = audit_static_dist_deliverable_leaks(eff_dist, prop)
     parity_res = _check_pricing_and_sku_parity(repo_path, prop, matrix)
+    regulatory_res = audit_insurance_surety_regulatory_compliance(
+        prop,
+        repo_root=repo_path,
+        dist_dir=eff_dist,
+    )
     replay_res = verify_local_edge_commerce_replay(repo_path, prop, dist_dir=eff_dist)
     live_res: Optional[Dict[str, Any]] = None
     if live_base_url:
@@ -1931,6 +2033,7 @@ def audit_tenant_commerce_fail_closed(
     for label, sub in (
         ("static_leak", static_res),
         ("pricing_parity", parity_res),
+        ("regulatory_compliance", regulatory_res),
         ("edge_replay", replay_res),
     ):
         for msg in sub.get("violations") or sub.get("issues") or []:
@@ -1942,6 +2045,7 @@ def audit_tenant_commerce_fail_closed(
     passed = (
         bool(static_res.get("passed"))
         and bool(parity_res.get("passed"))
+        and bool(regulatory_res.get("passed"))
         and bool(replay_res.get("passed"))
         and (True if live_res is None else bool(live_res.get("passed")))
     )
@@ -1962,6 +2066,7 @@ def audit_tenant_commerce_fail_closed(
 __all__ = [
     "CommerceGateReport",
     "FORBIDDEN_DIST_DELIVERABLE_TOKENS",
+    "audit_insurance_surety_regulatory_compliance",
     "audit_static_dist_deliverable_leaks",
     "audit_tenant_commerce_fail_closed",
     "probe_live_commerce_endpoints",

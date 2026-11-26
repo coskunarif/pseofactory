@@ -335,7 +335,7 @@ def test_porcelain_headers_detach_cache_control_and_governance_email_off(tmp_pat
     )
     _sync_sitemaps_headers_and_redirects(dist, profile)
     first_pass = (dist / "_headers").read_text(encoding="utf-8")
-    for ep in ("/sitemap.xml", "/sitemap-hubs.xml", "/sitemap-leaves.xml", "/feed.xml", "/llms.txt", "/llms-full.txt", "/catalog.json", "/ai-benchmarks/*", "/static/js/*"):
+    for ep in ("/sitemap.xml", "/feed.xml", "/llms.txt", "/catalog.json", "/static/js/*"):
         block_m = re.search(rf"^{re.escape(ep)}\n((?:  .*\n)+)", first_pass, flags=re.M)
         assert block_m, f"Missing _headers block for {ep}"
         lines = [l.strip() for l in block_m.group(1).splitlines()]
@@ -343,6 +343,8 @@ def test_porcelain_headers_detach_cache_control_and_governance_email_off(tmp_pat
         cc_i = next(i for i, l in enumerate(lines) if l.startswith("Cache-Control:"))
         assert detach_i < cc_i, f"! Cache-Control must precede Cache-Control for {ep}"
         assert lines.count("! Cache-Control") == 1
+    assert "/llms-full.txt" not in first_pass
+    assert "/ai-benchmarks/*" not in first_pass
 
     # Idempotency on second pass
     _sync_sitemaps_headers_and_redirects(dist, profile)

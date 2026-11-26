@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from pseofactory.affiliates import is_restricted_public_service_slug
-from pseofactory.contracts import assert_no_forbidden_dashes
+from pseofactory.contracts import assert_catalog_json_no_raw_leaks, assert_no_forbidden_dashes
 from pseofactory.prexvo_estate import (
     CALCULATION_MANIFESTS,
     REPAYMENT_CALCULATOR_SPEC,
@@ -141,7 +141,9 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
     assert (dist_dir / "index.html").is_file()
     assert (dist_dir / "tools" / "index.html").is_file()
     assert (dist_dir / "llms.txt").is_file()
-    assert (dist_dir / "llms-full.txt").is_file()
+    assert (dist_dir / "catalog.json").is_file()
+    assert not (dist_dir / "llms-full.txt").exists()
+    assert not (dist_dir / "ai-benchmarks").exists()
 
     pack = load_truth_pack("prexvo")
     quick_price = int(round(float(pack.pricing_tiers["quick"]["price_usd"])))
@@ -206,13 +208,14 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
         ]
         assert len(app_nodes) == 1
 
-    # Verify llms.txt & llms-full.txt cleanliness
+    # Verify llms.txt & sanitized catalog.json cleanliness
     llms_txt = (dist_dir / "llms.txt").read_text(encoding="utf-8")
-    llms_full = (dist_dir / "llms-full.txt").read_text(encoding="utf-8")
+    catalog_raw = (dist_dir / "catalog.json").read_text(encoding="utf-8")
     assert_no_forbidden_dashes(llms_txt, context="llms.txt")
-    assert_no_forbidden_dashes(llms_full, context="llms-full.txt")
+    assert_no_forbidden_dashes(catalog_raw, context="catalog.json")
+    assert_catalog_json_no_raw_leaks(dist_dir / "catalog.json", context="prexvo")
 
-    for surface_name, text in (("llms.txt", llms_txt), ("llms-full.txt", llms_full)):
+    for surface_name, text in (("llms.txt", llms_txt), ("catalog.json", catalog_raw)):
         assert not re.search(r"\b([A-Za-z]{2,})\s+\1\b", text, re.IGNORECASE), f"Duplicate word in {surface_name}"
         assert not re.search(r"\bCalculate\s+(?:How\s+Do\s+You|How\s+To|What\s+Is)\b", text, re.IGNORECASE), (
             f"Query stub in {surface_name}"
@@ -220,13 +223,11 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
         assert "15,650" not in text and "15650" not in text
         assert "16,120" not in text and "16120" not in text
         assert "120 to 240 certified monthly payments" not in text.lower()
-        assert "15,960" in text or "15960" in text
 
-    assert "permanently forfeits" in llms_full.lower()
-    assert "360 qualifying monthly payments" in llms_full
+    assert "permanently forfeits" in catalog_raw.lower()
 
     # Run UnifiedTruthGate across every compiled HTML page (including live Node.js parity)
-    # and machine endpoints (llms.txt, llms-full.txt, ai-benchmarks).
+    # and machine endpoints (llms.txt, catalog.json).
     run_js = shutil.which("node") is not None
     gate = UnifiedTruthGate()
 
@@ -243,14 +244,14 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
             f"{[v.to_dict() for v in rep_html.violations]}"
         )
 
-    rep_llms_full = gate.audit_non_html_file(
-        dist_dir / "llms-full.txt",
+    rep_catalog = gate.audit_non_html_file(
+        dist_dir / "catalog.json",
         property_id="prexvo",
         dist_dir=dist_dir,
         as_of=date(2026, 11, 24),
     )
-    assert rep_llms_full.passed is True, (
-        f"UnifiedTruthGate failed on llms-full.txt: {[v.to_dict() for v in rep_llms_full.violations]}"
+    assert rep_catalog.passed is True, (
+        f"UnifiedTruthGate failed on catalog.json: {[v.to_dict() for v in rep_catalog.violations]}"
     )
 
     rep_llms = gate.audit_non_html_file(
