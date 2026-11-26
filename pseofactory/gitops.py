@@ -3384,17 +3384,24 @@ class LiveEdgeVerifier:
             "X-Pseofactory-Test": "1",
         }
         partner_cohort = self.resolve_tenant_partner_probe_cohort(property_id, dist_dir=dist_dir)
-        slot_sku = {
-            "prexvo": "px_verified_partner_slot",
-            "gainhelm": "gh_verified_partner_slot",
-            "lienbond": "lb_verified_partner_slot",
-        }.get(property_id, "ph_verified_partner_slot")
-        foreign_domains = {
-            "prexvo": ("profithelm.com", "gainhelm.com", "lienbond.com"),
-            "gainhelm": ("profithelm.com", "prexvo.com", "lienbond.com"),
-            "lienbond": ("profithelm.com", "prexvo.com", "gainhelm.com"),
-            "profithelm": ("prexvo.com", "gainhelm.com", "lienbond.com"),
-        }.get(property_id, ())
+        from pseofactory.commerce_gate import resolve_tenant_commerce_matrix
+
+        eff_repo_root = (
+            Path(dist_dir).parent
+            if dist_dir is not None and Path(dist_dir).name == "dist"
+            else None
+        )
+        commerce_matrix = resolve_tenant_commerce_matrix(
+            property_id,
+            repo_root=eff_repo_root,
+            dist_dir=dist_dir,
+        )
+        tiers_map = commerce_matrix["tiers"]
+        slot_sku = tiers_map["partner_slot"]["sku"]
+        slot_price_usd = float(tiers_map["partner_slot"]["price_usd"])
+        own_domain = str(commerce_matrix["own_domain"] or f"{property_id}.com").lower()
+        foreign_domains = tuple(commerce_matrix["foreign_domains"])
+        valid_tool_slug = str(commerce_matrix["valid_tool_slug"] or "general-calculator")
 
         routes: Dict[str, Dict[str, Any]] = {}
         issues: List[str] = []
@@ -3486,24 +3493,61 @@ class LiveEdgeVerifier:
         if not r1_ok:
             issues.append(f"GET /api/lead-capture failed (HTTP {c1}, property_id={j1.get('property_id') if isinstance(j1, dict) else None})")
 
-        # 2. GET /api/lead-capture?playbook=1
-        c2, b2, j2, l2 = _req_json("/api/lead-capture?playbook=1", "GET", None, (200,))
+        # 2. GET /api/lead-capture?playbook=1 (must NOT leak paid CSV/schedules; csv/datapack must return 402)
+        c2, b2, j2, l2 = _req_json(
+            f"/api/lead-capture?playbook=1&tool_slug={urllib.parse.quote(valid_tool_slug)}",
+            "GET",
+            None,
+            (200,),
+        )
+        pb_leaks: List[str] = []
+        if isinstance(j2, dict):
+            if j2.get("csv_content"):
+                pb_leaks.append("csv_content")
+            for leak_k in ("period_schedule", "sensitivity_matrix", "statutory_trend_timeseries"):
+                if isinstance(j2.get(leak_k), list) and len(j2.get(leak_k) or []) > 0:
+                    pb_leaks.append(leak_k)
+            dp2 = j2.get("statutory_data_pack")
+            if isinstance(dp2, dict):
+                if dp2.get("csv_content"):
+                    pb_leaks.append("statutory_data_pack.csv_content")
+                for leak_k in ("period_schedule", "sensitivity_matrix", "statutory_trend_timeseries"):
+                    if isinstance(dp2.get(leak_k), list) and len(dp2.get(leak_k) or []) > 0:
+                        pb_leaks.append(f"statutory_data_pack.{leak_k}")
         r2_ok = (
             c2 == 200
             and isinstance(j2, dict)
             and j2.get("status") == "playbook_ready"
             and j2.get("property_id") == property_id
-            and isinstance(j2.get("reconciliation_schedule"), list)
-            and len(j2.get("reconciliation_schedule") or []) >= 3
+            and len(pb_leaks) == 0
             and not _has_foreign_domain(b2)
         )
         routes["GET /api/lead-capture?playbook=1"] = {
             "status": "PASS" if r2_ok else "FAIL",
             "status_code": c2,
             "latency_ms": l2,
+            "leaks": pb_leaks,
         }
         if not r2_ok:
-            issues.append(f"GET /api/lead-capture?playbook=1 failed (HTTP {c2})")
+            issues.append(f"GET /api/lead-capture?playbook=1 failed (HTTP {c2}, leaks={pb_leaks})")
+
+        for fmt_name in ("csv", "datapack"):
+            cf_code, _, _, cf_lat = _req_json(
+                f"/api/lead-capture?playbook=1&tool_slug={urllib.parse.quote(valid_tool_slug)}&format={fmt_name}",
+                "GET",
+                None,
+                (402,),
+            )
+            cf_ok = cf_code == 402
+            routes[f"GET /api/lead-capture?playbook=1&format={fmt_name}"] = {
+                "status": "PASS" if cf_ok else "FAIL",
+                "status_code": cf_code,
+                "latency_ms": cf_lat,
+            }
+            if not cf_ok:
+                issues.append(
+                    f"GET /api/lead-capture?playbook=1&format={fmt_name} expected HTTP 402, got HTTP {cf_code}"
+                )
 
         # 3. GET /api/lead-capture?checkout=1&format=json (live Stripe session verification, no KV write)
         c3, b3, j3, l3 = _req_json(
@@ -3525,6 +3569,7 @@ class LiveEdgeVerifier:
             and j3.get("property_id") == property_id
             and (
                 not merchant_email
+                or merchant_email.endswith(f"@{own_domain}")
                 or merchant_email.endswith(f"@{property_id}.com")
                 or merchant_email.lower() == canonical_operator_mailbox
             )
@@ -3544,7 +3589,7 @@ class LiveEdgeVerifier:
 
         # 3b. GET /api/lead-capture?checkout=1&sku=<slot_sku>&format=json ($299 Partner Slot SKU verification)
         c3b, b3b, j3b, l3b = _req_json(
-            f"/api/lead-capture?checkout=1&sku={slot_sku}&format=json",
+            f"/api/lead-capture?checkout=1&sku={urllib.parse.quote(slot_sku)}&format=json",
             "GET",
             None,
             (200,),
@@ -3555,7 +3600,7 @@ class LiveEdgeVerifier:
             and isinstance(j3b, dict)
             and j3b.get("status") == "checkout_session_ready"
             and j3b.get("offer_sku") == slot_sku
-            and float(j3b.get("offer_price_usd") or 0) == 299.0
+            and float(j3b.get("offer_price_usd") or 0) == slot_price_usd
             and bool(j3b.get("checkout_url"))
         )
         routes[f"GET /api/lead-capture?checkout=1&sku={slot_sku}&format=json"] = {
@@ -3612,7 +3657,7 @@ class LiveEdgeVerifier:
             and isinstance(j4b, dict)
             and j4b.get("status") == "partner_registered"
             and j4b.get("offer_sku") == slot_sku
-            and float(j4b.get("offer_price_usd") or 0) == 299.0
+            and float(j4b.get("offer_price_usd") or 0) == slot_price_usd
         )
         routes["POST /api/lead-capture (partner_registration)"] = {
             "status": "PASS" if r4b_ok else "FAIL",
@@ -3623,7 +3668,7 @@ class LiveEdgeVerifier:
         if not r4b_ok:
             issues.append(f"POST /api/lead-capture partner_registration probe failed (HTTP {c4b})")
 
-        # 5. GET /api/checkout?format=json
+        # 5. GET /api/checkout?format=json (default + ALL 3 tiers + unknown SKU 400 + /partners/ success_url)
         c5, b5, j5, l5 = _req_json(
             "/api/checkout?format=json",
             "GET",
@@ -3645,6 +3690,101 @@ class LiveEdgeVerifier:
         }
         if not r5_ok:
             issues.append(f"GET /api/checkout?format=json failed (HTTP {c5})")
+
+        for tier_name in ("quick", "full", "partner_slot"):
+            t_spec = tiers_map[tier_name]
+            t_sku = t_spec["sku"]
+            t_usd = float(t_spec["price_usd"])
+            t_slug = t_spec["tool_slug"]
+            tc, tb, tj, tl = _req_json(
+                f"/api/checkout?format=json&sku={urllib.parse.quote(t_sku)}&tool_slug={urllib.parse.quote(t_slug)}",
+                "GET",
+                None,
+                (200,),
+                synthetic_header=False,
+            )
+            t_succ = str((tj or {}).get("success_url") or "") if isinstance(tj, dict) else ""
+            t_succ_path = urllib.parse.urlsplit(t_succ).path if t_succ else ""
+            partner_route_ok = True
+            if tier_name == "partner_slot":
+                partner_route_ok = (
+                    t_succ_path in ("/partners/", "/partners", "/partners/index.html")
+                    and "/tools/partners" not in t_succ_path
+                )
+                if partner_route_ok and t_succ:
+                    succ_probe_path = t_succ_path
+                    if urllib.parse.urlsplit(t_succ).query:
+                        succ_probe_path += "?" + urllib.parse.urlsplit(t_succ).query.replace(
+                            "{CHECKOUT_SESSION_ID}", "cs_live_probe_check"
+                        )
+                    ps_code, _, _, _ = _req_json(succ_probe_path, "GET", None, (200,), synthetic_header=False)
+                    if ps_code != 200:
+                        partner_route_ok = False
+                        issues.append(
+                            f"partner_slot success_url '{t_succ_path}' returned HTTP {ps_code} (expected 200)"
+                        )
+                elif not partner_route_ok:
+                    issues.append(
+                        f"partner_slot success_url '{t_succ}' must resolve to /partners/ (got '{t_succ_path}')"
+                    )
+            t_ok = (
+                tc == 200
+                and isinstance(tj, dict)
+                and tj.get("status") == "checkout_session_ready"
+                and tj.get("property_id") == property_id
+                and tj.get("offer_sku") == t_sku
+                and abs(float(tj.get("offer_price_usd") or 0) - t_usd) < 0.01
+                and not _has_foreign_domain(tb)
+                and partner_route_ok
+            )
+            routes[f"GET /api/checkout?sku={t_sku}"] = {
+                "status": "PASS" if t_ok else "FAIL",
+                "status_code": tc,
+                "latency_ms": tl,
+                "offer_sku": tj.get("offer_sku") if isinstance(tj, dict) else None,
+                "offer_price_usd": tj.get("offer_price_usd") if isinstance(tj, dict) else None,
+                "success_url_path": t_succ_path,
+            }
+            if not t_ok:
+                issues.append(
+                    f"GET /api/checkout?format=json&sku={t_sku} failed "
+                    f"(HTTP {tc}, got sku={tj.get('offer_sku') if isinstance(tj, dict) else None}, "
+                    f"price={tj.get('offer_price_usd') if isinstance(tj, dict) else None}, expected={t_usd})"
+                )
+
+        # 5b. Unknown SKU fail-closed HTTP 400
+        bad_c, _, _, bad_l = _req_json(
+            "/api/checkout?format=json&sku=invalid_unknown_sku_probe",
+            "GET",
+            None,
+            (400,),
+            synthetic_header=False,
+        )
+        bad_ok = bad_c == 400
+        routes["GET /api/checkout?sku=invalid_unknown_sku_probe"] = {
+            "status": "PASS" if bad_ok else "FAIL",
+            "status_code": bad_c,
+            "latency_ms": bad_l,
+        }
+        if not bad_ok:
+            issues.append(f"GET /api/checkout unknown SKU expected HTTP 400, got HTTP {bad_c}")
+
+        # 5c. Unsigned POST /api/stripe-webhook -> HTTP 400 (secret configured)
+        wh_c, _, _, wh_l = _req_json(
+            "/api/stripe-webhook",
+            "POST",
+            {"id": "evt_unsigned_probe", "type": "checkout.session.completed"},
+            (400,),
+            synthetic_header=False,
+        )
+        wh_ok = wh_c == 400
+        routes["POST /api/stripe-webhook (unsigned)"] = {
+            "status": "PASS" if wh_ok else "FAIL",
+            "status_code": wh_c,
+            "latency_ms": wh_l,
+        }
+        if not wh_ok:
+            issues.append(f"Unsigned POST /api/stripe-webhook expected HTTP 400, got HTTP {wh_c}")
 
         # 6. GET /api/lead-fulfillment (HTTP 402 payment_required gate)
         c6, b6, j6, l6 = _req_json("/api/lead-fulfillment", "GET", None, (402,))

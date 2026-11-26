@@ -328,7 +328,7 @@ console.log(JSON.stringify({{
     assert len(out["emailCalls"]) == 1, f"Expected exactly 1 email, got {len(out['emailCalls'])}: {out['emailCalls']}"
     sent = out["emailCalls"][0]
     assert sent["to"] == f"buyer@{tenant}-customer.io"
-    assert "fulfill=1" in sent["html"]
+    assert "/api/lead-fulfillment" in sent["html"]
     assert f"lead_id=lead_{tenant}_w2_001" in sent["html"]
     assert "session_id=cs_live_WAVE2_PAID_1" in sent["html"]
     assert_no_forbidden_dashes(sent["html"], context=f"paid_fulfillment_email_{tenant}")

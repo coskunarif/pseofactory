@@ -387,7 +387,7 @@ globalThis.fetch = async (url, init) => {{
       ? "ph_instant_statutory_worksheet_19"
       : (sid === {json.dumps(px_quick_sid)}
         ? "px_instant_repayment_worksheet_19"
-        : (sid === {json.dumps(px_sess_id)} ? "px_repayment_audit_datapack" : "ph_commercial_capital_audit_toolkit"));
+        : (sid === {json.dumps(px_sess_id)} ? "px_refi_amortization_decision_audit" : "ph_commercial_capital_audit_toolkit"));
     const prop = (sid === {json.dumps(px_sess_id)} || sid === {json.dumps(px_quick_sid)}) ? "prexvo" : "profithelm";
     return new Response(JSON.stringify({{
       id: sid,
@@ -549,13 +549,19 @@ const phQuickEscalatedDpRes = await phLc.onRequestGet({{
 }});
 const pxQuickEscalatedFullRes = await pxLc.onRequestGet({{
   request: new Request(
-    "https://prexvo.com/api/lead-capture?fulfill=1&format=html&sku=px_repayment_audit_datapack&tool_slug=student-loan-repayment-calculator&amount=55000&session_id={px_quick_sid}"
+    "https://prexvo.com/api/lead-capture?fulfill=1&format=html&sku=px_refi_amortization_decision_audit&tool_slug=student-loan-repayment-calculator&amount=55000&session_id={px_quick_sid}"
   ),
   env: pxEnv,
 }});
 const pxQuickEscalatedDpRes = await pxLc.onRequestGet({{
   request: new Request(
     "https://prexvo.com/api/lead-capture?fulfill=1&format=datapack&tool_slug=student-loan-repayment-calculator&amount=55000&session_id={px_quick_sid}"
+  ),
+  env: pxEnv,
+}});
+const pxInvalidSkuCheckoutRes = await pxLc.onRequestGet({{
+  request: new Request(
+    "https://prexvo.com/api/lead-capture?checkout=1&format=json&sku=px_nonexistent_bad_sku&tool_slug=student-loan-repayment-calculator"
   ),
   env: pxEnv,
 }});
@@ -593,6 +599,7 @@ console.log(JSON.stringify({{
   phQuickEscalatedDpStatus: phQuickEscalatedDpRes.status,
   pxQuickEscalatedFullStatus: pxQuickEscalatedFullRes.status,
   pxQuickEscalatedDpStatus: pxQuickEscalatedDpRes.status,
+  pxInvalidSkuCheckoutStatus: pxInvalidSkuCheckoutRes.status,
   fullHtmlHasSid: fullHtml.includes("session_id={sess_id_1}"),
   fullHtmlEscapedXss: !fullHtml.includes("<script>alert(3)</script>") && !fullHtml.includes("<script>alert(1)</script>"),
   quickLen: quickHtml.length,
@@ -622,6 +629,7 @@ console.log(JSON.stringify({{
     assert out["phQuickEscalatedDpStatus"] == 402
     assert out["pxQuickEscalatedFullStatus"] == 402
     assert out["pxQuickEscalatedDpStatus"] == 402
+    assert out["pxInvalidSkuCheckoutStatus"] == 400
     assert out["fullHtmlHasSid"] is True
     assert out["fullHtmlEscapedXss"] is True
     assert out["fullLen"] > out["quickLen"]
@@ -950,8 +958,8 @@ def test_gate_26b_cross_tenant_consumer_sku_in_vault_does_not_inherit_business_r
 
     real_vault = json.loads((REPO_ROOT / "pseofactory" / "monetization_vault.json").read_text(encoding="utf-8"))
     cross_vault = json.loads(json.dumps(real_vault))
-    cross_vault["master_networks"]["stripe"]["digital_products"]["acm_quick_worksheet"] = {
-        "sku": "acm_quick_worksheet",
+    cross_vault["master_networks"]["stripe"]["digital_products"]["acme_solar_quick_worksheet"] = {
+        "sku": "acme_solar_quick_worksheet",
         "property_id": "acme_solar",
         "audience_tier": "consumer",
         "tier_kind": "quick",
@@ -1046,27 +1054,37 @@ const resObj = vm.runInContext(`(() => {{
     qCents: q.price_cents,
     fCents: f.price_cents,
     pCents: p.price_cents,
+    previewMode: preview.preview_mode,
+    previewPaidUnlockRequired: preview.paid_unlock_required,
+    previewSummaryRowsIsArray: Array.isArray(preview.preview_summary_rows),
+    previewSummaryRowsLen: Array.isArray(preview.preview_summary_rows) ? preview.preview_summary_rows.length : 0,
+    previewHasPaidLeaks: Boolean(preview.statutory_execution_artifacts || preview.csv_content || preview.reconciliation_schedule || preview.period_schedule || preview.sensitivity_matrix),
+    paidPreviewMode: paid.preview_mode,
     reconLen: paid.reconciliation_schedule.length,
     sensLen: paid.sensitivity_matrix.length,
     perLen: paid.period_schedule.length,
     trendLen: paid.statutory_trend_timeseries.length,
     execLen: paid.statutory_execution_artifacts.length,
-    previewLockBody: preview.statutory_execution_artifacts[0].statutory_clause_body,
   }};
 }})()`, ctx);
 console.log(JSON.stringify(resObj));
 """
-            res = subprocess.run(["node", "-e", run_js], capture_output=True, text=True, check=True)
+            res = subprocess.run(["node", "--input-type=module", "-e", run_js], capture_output=True, text=True, check=True)
             out = json.loads(res.stdout.strip().splitlines()[-1])
             assert out["qCents"] == exp_q * 100
             assert out["fCents"] == exp_f * 100
             assert out["pCents"] == 29900
+            assert out["previewMode"] is True
+            assert out["previewPaidUnlockRequired"] is True
+            assert out["previewSummaryRowsIsArray"] is True
+            assert out["previewSummaryRowsLen"] >= 1
+            assert out["previewHasPaidLeaks"] is False
+            assert out["paidPreviewMode"] is False
             assert out["reconLen"] == 4
             assert out["sensLen"] == 5
             assert out["perLen"] == 6
             assert out["trendLen"] == 3
             assert out["execLen"] == 3
-            assert f"(${exp_f})" in out["previewLockBody"]
 
     # Check all 4 canonical tenants still compile cleanly in node --check
     if has_node:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -144,19 +145,83 @@ def normalize_audience_tier(raw_tier: Optional[str], default: str = DEFAULT_AUDI
     return default if default in VALID_AUDIENCE_TIERS else DEFAULT_AUDIENCE_TIER
 
 
-def _read_audience_tier_from_marker(repo_root: Union[str, Path]) -> Optional[str]:
-    """Reads optional audience_tier override from <repo_root>/.pseofactory.json."""
+def sanitize_property_sku_prefix(property_id: str) -> str:
+    """
+    Returns the canonical SKU prefix for a property.
+    Legacy 4 tenants keep their short prefixes (ph, px, gh, lb) for Stripe
+    reporting continuity; 5th+ tenants use the full sanitized property_id
+    ([a-z0-9_]+) so 50+ sites never collide on 3-letter prefixes.
+    """
+    prop_clean = str(property_id or "").strip().lower()
+    if prop_clean in TENANT_SKU_PREFIX:
+        return TENANT_SKU_PREFIX[prop_clean]
+    sanitized = re.sub(r"[^a-z0-9_]+", "_", prop_clean).strip("_")
+    return sanitized or "tenant"
+
+
+def _read_marker_json(repo_root: Union[str, Path]) -> Dict[str, Any]:
+    """Reads and parses <repo_root>/.pseofactory.json if present."""
     try:
         marker = Path(repo_root) / ".pseofactory.json"
         if not marker.is_file():
-            return None
+            return {}
         data = json.loads(marker.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            raw = str(data.get("audience_tier") or "").strip().lower()
-            if raw in VALID_AUDIENCE_TIERS:
-                return raw
+        return data if isinstance(data, dict) else {}
     except Exception:
-        return None
+        return {}
+
+
+def _resolve_tenant_marker_data(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """Resolves .pseofactory.json metadata for any tenant from repo_root, contracts, or active workspace."""
+    prop_clean = str(property_id or "").strip().lower()
+    if repo_root:
+        data = _read_marker_json(repo_root)
+        if data:
+            return data
+
+    try:
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            SPAWNED_TENANT_DECLARATIONS,
+        )
+
+        contract = (
+            CANONICAL_TENANT_DECLARATIONS.get(prop_clean)
+            or SPAWNED_TENANT_DECLARATIONS.get(prop_clean)
+        )
+        if contract is not None and getattr(contract, "repo_root", ""):
+            data = _read_marker_json(contract.repo_root)
+            if data:
+                return data
+    except Exception:
+        pass
+
+    if prop_clean:
+        try:
+            from pseofactory.impact_planner import discover_active_tenants
+
+            ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+            for pid, t_repo in discover_active_tenants(ws_root):
+                if pid == prop_clean:
+                    data = _read_marker_json(t_repo)
+                    if data:
+                        return data
+                    break
+        except Exception:
+            pass
+    return {}
+
+
+def _read_audience_tier_from_marker(repo_root: Union[str, Path]) -> Optional[str]:
+    """Reads optional audience_tier override from <repo_root>/.pseofactory.json."""
+    data = _read_marker_json(repo_root)
+    if data:
+        raw = str(data.get("audience_tier") or "").strip().lower()
+        if raw in VALID_AUDIENCE_TIERS:
+            return raw
     return None
 
 
@@ -172,10 +237,10 @@ def get_audience_tier(
     3. Built-in default map (prexvo -> consumer; all business and future tenants -> business).
     """
     prop_clean = str(property_id or "").strip().lower()
-    if repo_root:
-        marker_tier = _read_audience_tier_from_marker(repo_root)
-        if marker_tier:
-            return marker_tier
+    marker_data = _resolve_tenant_marker_data(prop_clean, repo_root=repo_root)
+    raw_marker_tier = str(marker_data.get("audience_tier") or "").strip().lower()
+    if raw_marker_tier in VALID_AUDIENCE_TIERS:
+        return raw_marker_tier
 
     try:
         from pseofactory.tenant_facts import (
@@ -188,29 +253,11 @@ def get_audience_tier(
             or SPAWNED_TENANT_DECLARATIONS.get(prop_clean)
         )
         if contract is not None:
-            if getattr(contract, "repo_root", ""):
-                marker_tier = _read_audience_tier_from_marker(contract.repo_root)
-                if marker_tier:
-                    return marker_tier
             c_tier = str(getattr(contract, "audience_tier", "") or "").strip().lower()
             if c_tier in VALID_AUDIENCE_TIERS:
                 return c_tier
     except Exception:
         pass
-
-    if prop_clean and prop_clean not in TENANT_DEFAULT_AUDIENCE_TIER:
-        try:
-            from pseofactory.impact_planner import discover_active_tenants
-
-            ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
-            for pid, t_repo in discover_active_tenants(ws_root):
-                if pid == prop_clean:
-                    marker_tier = _read_audience_tier_from_marker(t_repo)
-                    if marker_tier:
-                        return marker_tier
-                    break
-        except Exception:
-            pass
 
     return TENANT_DEFAULT_AUDIENCE_TIER.get(prop_clean, DEFAULT_AUDIENCE_TIER)
 
@@ -226,13 +273,12 @@ def get_valid_prices_for_tenant(
     repo_root: Optional[Union[str, Path]] = None,
 ) -> Set[float]:
     """Returns the canonical set of valid USD prices for a tenant ({0.0, quick, full, partner_slot})."""
-    tier = get_audience_tier(property_id, repo_root=repo_root)
-    tp = TIER_PRICING[tier]
+    catalog = get_tenant_edge_pricing_catalog(property_id, repo_root=repo_root)
     return {
         0.0,
-        float(tp["quick"]["price_usd"]),
-        float(tp["full"]["price_usd"]),
-        float(tp["partner_slot"]["price_usd"]),
+        float(catalog["quick_price_usd"]),
+        float(catalog["full_price_usd"]),
+        float(catalog["partner_price_usd"]),
     }
 
 
@@ -735,8 +781,60 @@ def _select_full_sku_for_slug(property_id: str, slug: str = "", vertical: str = 
             return "ph_commercial_capital_audit_toolkit"
         return "ph_statutory_tax_audit_workpapers"
 
-    prefix = TENANT_SKU_PREFIX.get(prop_clean, prop_clean[:3] or "pf")
+    prefix = sanitize_property_sku_prefix(prop_clean)
     return f"{prefix}_full_workpaper_pack"
+
+
+def _apply_pricing_overrides(
+    entry: Dict[str, Any],
+    overrides: Dict[str, Any],
+    brand_name: str,
+) -> Dict[str, Any]:
+    """Applies optional .pseofactory.json pricing_overrides to a resolved offer dict."""
+    if not isinstance(overrides, dict) or not overrides:
+        return entry
+    tk = str(entry.get("tier_kind") or "full")
+    sku = str(entry.get("sku") or "")
+    merged = dict(entry)
+
+    flat_usd_keys = [f"{tk}_price_usd"]
+    flat_cents_keys = [f"{tk}_price_cents"]
+    if tk == "partner_slot":
+        flat_usd_keys.append("partner_price_usd")
+        flat_cents_keys.append("partner_price_cents")
+    for k in flat_usd_keys:
+        if k in overrides and overrides[k] is not None:
+            usd = float(overrides[k])
+            merged["price_usd"] = usd
+            merged["price_cents"] = int(round(usd * 100))
+    for k in flat_cents_keys:
+        if k in overrides and overrides[k] is not None:
+            cents = int(overrides[k])
+            merged["price_cents"] = cents
+            merged["price_usd"] = round(cents / 100.0, 2)
+
+    for key in (tk, sku):
+        val = overrides.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            usd = float(val)
+            merged["price_usd"] = usd
+            merged["price_cents"] = int(round(usd * 100))
+        elif isinstance(val, dict):
+            if "price_usd" in val and val["price_usd"] is not None:
+                usd = float(val["price_usd"])
+                merged["price_usd"] = usd
+                merged["price_cents"] = int(round(usd * 100))
+            if "price_cents" in val and val["price_cents"] is not None:
+                cents = int(val["price_cents"])
+                merged["price_cents"] = cents
+                merged["price_usd"] = round(cents / 100.0, 2)
+            for str_k in ("title", "description", "statutory_authority"):
+                if isinstance(val.get(str_k), str) and val[str_k].strip():
+                    assert_no_forbidden_dashes(val[str_k].strip(), context=f"pricing_override.{sku}.{str_k}")
+                    merged[str_k] = val[str_k].strip()
+
+    merged["stripe_price_data"] = build_stripe_price_data(merged, brand_name=brand_name)
+    return merged
 
 
 def _synthesize_dynamic_tenant_offer(
@@ -745,11 +843,17 @@ def _synthesize_dynamic_tenant_offer(
     audience_tier: str,
     slug: str = "",
     vertical: str = "",
+    brand_name: str = "",
 ) -> Dict[str, Any]:
     """Synthesizes a canonical offer for any future tenant (50+ site ready) not in OFFER_CATALOG."""
     prop_clean = str(property_id or "tenant").strip().lower()
-    brand = TENANT_BRAND_NAMES.get(prop_clean, prop_clean.replace("-", " ").replace("_", " ").title())
-    prefix = TENANT_SKU_PREFIX.get(prop_clean, prop_clean[:3] or "pf")
+    brand = (
+        str(brand_name or "").strip()
+        or TENANT_BRAND_NAMES.get(prop_clean)
+        or prop_clean.replace("-", " ").replace("_", " ").title()
+    )
+    assert_no_forbidden_dashes(brand, context=f"pricing.{prop_clean}.brand")
+    prefix = sanitize_property_sku_prefix(prop_clean)
     tk = tier_kind if tier_kind in ("quick", "full", "partner_slot") else "full"
     price_meta = TIER_PRICING[audience_tier][tk]
 
@@ -812,6 +916,142 @@ def _synthesize_dynamic_tenant_offer(
     return entry
 
 
+def _materialize_legacy_catalog_offer(
+    sku_id: str,
+    aud_tier: str,
+    overrides: Dict[str, Any],
+    brand_name: str,
+) -> Dict[str, Any]:
+    """Materializes a canonical OFFER_CATALOG entry with live tier pricing and optional overrides."""
+    base = dict(OFFER_CATALOG[sku_id])
+    eff_tk = str(base["tier_kind"])
+    price_meta = TIER_PRICING[aud_tier][eff_tk]
+    base["audience_tier"] = aud_tier
+    base["price_usd"] = float(price_meta["price_usd"])
+    base["price_cents"] = int(price_meta["price_cents"])
+    base["currency"] = str(price_meta["currency"])
+    base["billing_mode"] = str(price_meta["billing_mode"])
+    base["offer_sku"] = base["sku"]
+    base["deliverables"] = list(base["deliverables"])
+    base["trend_timeseries_ids"] = list(base.get("trend_timeseries_ids") or [])
+    base["stripe_price_data"] = build_stripe_price_data(base, brand_name=brand_name)
+    return _apply_pricing_overrides(base, overrides=overrides, brand_name=brand_name)
+
+
+def get_tenant_edge_pricing_catalog(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    audience_tier: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Returns the complete deterministic pricing catalog for ANY tenant (4 legacy + 50+ sites),
+    reading .pseofactory.json audience_tier and optional explicit pricing_overrides.
+    """
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    marker_data = _resolve_tenant_marker_data(prop_clean, repo_root=repo_root)
+    raw_marker_tier = str(marker_data.get("audience_tier") or "").strip().lower()
+    if audience_tier:
+        aud_tier = normalize_audience_tier(audience_tier)
+    elif raw_marker_tier in VALID_AUDIENCE_TIERS:
+        aud_tier = raw_marker_tier
+    else:
+        aud_tier = get_audience_tier(prop_clean, repo_root=repo_root)
+
+    brand = (
+        TENANT_BRAND_NAMES.get(prop_clean)
+        or str(marker_data.get("brand_name") or "").strip()
+        or prop_clean.replace("-", " ").replace("_", " ").title()
+    )
+    overrides = marker_data.get("pricing_overrides")
+    overrides_dict = overrides if isinstance(overrides, dict) else {}
+
+    offers: Dict[str, Dict[str, Any]] = {}
+    matched = [sku for sku, item in OFFER_CATALOG.items() if item["property_id"] == prop_clean]
+    if matched:
+        for sku_id in matched:
+            offers[sku_id] = _materialize_legacy_catalog_offer(
+                sku_id=sku_id,
+                aud_tier=aud_tier,
+                overrides=overrides_dict,
+                brand_name=brand,
+            )
+        quick_sku = QUICK_SKU_BY_PROPERTY[prop_clean]
+        default_full_sku = _select_full_sku_for_slug(prop_clean)
+        partner_slot_sku = PARTNER_SLOT_SKU_BY_PROPERTY[prop_clean]
+    else:
+        for tk in ("quick", "full", "partner_slot"):
+            item = _synthesize_dynamic_tenant_offer(
+                property_id=prop_clean,
+                tier_kind=tk,
+                audience_tier=aud_tier,
+                brand_name=brand,
+            )
+            item = _apply_pricing_overrides(item, overrides=overrides_dict, brand_name=brand)
+            offers[item["sku"]] = item
+        prefix = sanitize_property_sku_prefix(prop_clean)
+        quick_sku = f"{prefix}_quick_worksheet"
+        default_full_sku = f"{prefix}_full_workpaper_pack"
+        partner_slot_sku = f"{prefix}_verified_partner_slot"
+
+    aliases: Dict[str, str] = {
+        alias_k: canon_k
+        for alias_k, canon_k in SKU_ALIASES.items()
+        if canon_k in offers
+    }
+
+    return {
+        "property_id": prop_clean,
+        "audience_tier": aud_tier,
+        "quick_price_usd": float(offers[quick_sku]["price_usd"]),
+        "full_price_usd": float(offers[default_full_sku]["price_usd"]),
+        "partner_price_usd": float(offers[partner_slot_sku]["price_usd"]),
+        "quick_sku": quick_sku,
+        "default_full_sku": default_full_sku,
+        "partner_slot_sku": partner_slot_sku,
+        "offers": offers,
+        "aliases": aliases,
+    }
+
+
+def validate_tenant_sku(
+    property_id: str,
+    sku: str,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Tuple[bool, Optional[Dict[str, Any]], str]:
+    """
+    Strictly validates that `sku` belongs to `property_id` (supporting property-local aliases).
+    Returns (True, offer_dict, "ok") or (False, None, "cross_tenant_sku" | "unknown_sku").
+    """
+    prop_clean = str(property_id or "").strip().lower()
+    raw_sku = str(sku or "").strip().lower()
+    if not raw_sku:
+        return (False, None, "unknown_sku")
+
+    edge_cat = get_tenant_edge_pricing_catalog(prop_clean, repo_root=repo_root)
+    if raw_sku in edge_cat["offers"]:
+        return (True, dict(edge_cat["offers"][raw_sku]), "ok")
+    if raw_sku in edge_cat["aliases"]:
+        canon_sku = edge_cat["aliases"][raw_sku]
+        if canon_sku in edge_cat["offers"]:
+            return (True, dict(edge_cat["offers"][canon_sku]), "ok")
+
+    norm_sku = normalize_sku(raw_sku)
+    if norm_sku in OFFER_CATALOG and OFFER_CATALOG[norm_sku]["property_id"] != prop_clean:
+        return (False, None, "cross_tenant_sku")
+    for other_prop, other_prefix in TENANT_SKU_PREFIX.items():
+        if other_prop != prop_clean and norm_sku.startswith(f"{other_prefix}_"):
+            return (False, None, "cross_tenant_sku")
+
+    own_prefix = sanitize_property_sku_prefix(prop_clean)
+    for suffix in ("_quick_worksheet", "_full_workpaper_pack", "_verified_partner_slot"):
+        if norm_sku.endswith(suffix):
+            other_pfx = norm_sku[: -len(suffix)]
+            if other_pfx and other_pfx != own_prefix:
+                return (False, None, "cross_tenant_sku")
+
+    return (False, None, "unknown_sku")
+
+
 def resolve_offer_pricing(
     property_id: str,
     tier_kind: str = "full",
@@ -820,86 +1060,63 @@ def resolve_offer_pricing(
     sku: str = "",
     repo_root: Optional[Union[str, Path]] = None,
     audience_tier: Optional[str] = None,
+    explicit_sku: str = "",
+    strict_sku: bool = True,
 ) -> Dict[str, Any]:
     """
     Single pricing resolver for any property, tier_kind ('quick' | 'full' | 'partner_slot'),
     calculator slug, vertical, or explicit SKU.
-    Always computes price_usd, price_cents, currency='usd', deliverables, and stripe_price_data
-    from canonical TIER_PRICING and the tenant's resolved audience_tier.
+    When an explicit SKU is provided, strictly verifies ownership by `property_id`
+    (raising ValueError on cross-tenant or unknown SKUs when strict_sku=True).
     """
     prop_clean = str(property_id or "profithelm").strip().lower()
-    norm_sku = normalize_sku(sku)
+    raw_sku_arg = str(explicit_sku or sku or "").strip()
 
-    # If an explicit canonical SKU is provided and exists in OFFER_CATALOG, infer its property/tier_kind.
-    if norm_sku and norm_sku in OFFER_CATALOG:
-        base = dict(OFFER_CATALOG[norm_sku])
-        eff_prop = str(base["property_id"])
-        aud_tier = (
-            normalize_audience_tier(audience_tier)
-            if audience_tier
-            else get_audience_tier(eff_prop, repo_root=repo_root)
+    if raw_sku_arg:
+        is_valid, validated_offer, reason = validate_tenant_sku(
+            prop_clean,
+            raw_sku_arg,
+            repo_root=repo_root,
         )
-        eff_tk = str(base["tier_kind"])
-        price_meta = TIER_PRICING[aud_tier][eff_tk]
-        base["audience_tier"] = aud_tier
-        base["price_usd"] = float(price_meta["price_usd"])
-        base["price_cents"] = int(price_meta["price_cents"])
-        base["currency"] = str(price_meta["currency"])
-        base["billing_mode"] = str(price_meta["billing_mode"])
-        base["offer_sku"] = base["sku"]
-        base["deliverables"] = list(base["deliverables"])
-        base["trend_timeseries_ids"] = list(base.get("trend_timeseries_ids") or [])
-        base["stripe_price_data"] = build_stripe_price_data(
-            base,
-            brand_name=TENANT_BRAND_NAMES.get(eff_prop, eff_prop.capitalize()),
-        )
-        return base
+        if is_valid and validated_offer is not None:
+            if audience_tier is not None:
+                edge_cat = get_tenant_edge_pricing_catalog(
+                    prop_clean,
+                    repo_root=repo_root,
+                    audience_tier=audience_tier,
+                )
+                return dict(edge_cat["offers"][str(validated_offer["sku"])])
+            return dict(validated_offer)
+        if strict_sku:
+            raise ValueError(
+                f"Invalid SKU '{raw_sku_arg}' for property '{prop_clean}': {reason}"
+            )
 
-    aud_tier = (
-        normalize_audience_tier(audience_tier)
-        if audience_tier
-        else get_audience_tier(prop_clean, repo_root=repo_root)
+    edge_cat = get_tenant_edge_pricing_catalog(
+        prop_clean,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
     )
-    eff_tk = (
-        classify_sku_tier_kind(norm_sku)
-        if norm_sku
-        else (str(tier_kind or "full").strip().lower())
-    )
+    eff_tk = str(tier_kind or "full").strip().lower()
     if eff_tk not in ("quick", "full", "partner_slot"):
         eff_tk = "full"
 
-    if eff_tk == "quick" and prop_clean in QUICK_SKU_BY_PROPERTY:
-        target_sku = QUICK_SKU_BY_PROPERTY[prop_clean]
-    elif eff_tk == "partner_slot" and prop_clean in PARTNER_SLOT_SKU_BY_PROPERTY:
-        target_sku = PARTNER_SLOT_SKU_BY_PROPERTY[prop_clean]
-    elif eff_tk == "full" and prop_clean in TENANT_SKU_PREFIX:
+    if eff_tk == "quick":
+        target_sku = str(edge_cat["quick_sku"])
+    elif eff_tk == "partner_slot":
+        target_sku = str(edge_cat["partner_slot_sku"])
+    elif prop_clean in TENANT_SKU_PREFIX:
         target_sku = _select_full_sku_for_slug(prop_clean, slug=slug, vertical=vertical)
     else:
-        return _synthesize_dynamic_tenant_offer(
-            property_id=prop_clean,
-            tier_kind=eff_tk,
-            audience_tier=aud_tier,
-            slug=slug,
-            vertical=vertical,
-        )
+        target_sku = str(edge_cat["default_full_sku"])
 
-    if target_sku in OFFER_CATALOG:
-        return resolve_offer_pricing(
-            property_id=prop_clean,
-            tier_kind=eff_tk,
-            slug=slug,
-            vertical=vertical,
-            sku=target_sku,
-            repo_root=repo_root,
-            audience_tier=audience_tier,
-        )
-    return _synthesize_dynamic_tenant_offer(
-        property_id=prop_clean,
-        tier_kind=eff_tk,
-        audience_tier=aud_tier,
-        slug=slug,
-        vertical=vertical,
-    )
+    resolved = dict(edge_cat["offers"][target_sku])
+    if prop_clean not in TENANT_SKU_PREFIX:
+        if slug:
+            resolved["default_slug"] = str(slug).strip().lower() or resolved["default_slug"]
+        if vertical:
+            resolved["vertical"] = str(vertical).strip()
+    return resolved
 
 
 def get_tenant_catalog(
@@ -908,21 +1125,12 @@ def get_tenant_catalog(
     audience_tier: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Returns all canonical SKUs for a property keyed by SKU, with live resolved pricing."""
-    prop_clean = str(property_id or "profithelm").strip().lower()
-    matched = [sku for sku, item in OFFER_CATALOG.items() if item["property_id"] == prop_clean]
-    if not matched:
-        return {
-            item["sku"]: item
-            for item in (
-                resolve_offer_pricing(prop_clean, tier_kind="quick", repo_root=repo_root, audience_tier=audience_tier),
-                resolve_offer_pricing(prop_clean, tier_kind="full", repo_root=repo_root, audience_tier=audience_tier),
-                resolve_offer_pricing(prop_clean, tier_kind="partner_slot", repo_root=repo_root, audience_tier=audience_tier),
-            )
-        }
-    return {
-        sku: resolve_offer_pricing(prop_clean, sku=sku, repo_root=repo_root, audience_tier=audience_tier)
-        for sku in matched
-    }
+    edge_cat = get_tenant_edge_pricing_catalog(
+        property_id,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    return {sku: dict(item) for sku, item in edge_cat["offers"].items()}
 
 
 def get_all_digital_products() -> Dict[str, Dict[str, Any]]:
@@ -994,11 +1202,14 @@ __all__ = [
     "OFFER_CATALOG",
     "normalize_sku",
     "normalize_audience_tier",
+    "sanitize_property_sku_prefix",
     "get_audience_tier",
     "get_tier_pricing",
     "get_valid_prices_for_tenant",
     "classify_sku_tier_kind",
     "build_stripe_price_data",
+    "get_tenant_edge_pricing_catalog",
+    "validate_tenant_sku",
     "resolve_offer_pricing",
     "get_tenant_catalog",
     "get_all_digital_products",

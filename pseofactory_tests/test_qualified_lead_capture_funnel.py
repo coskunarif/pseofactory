@@ -1262,9 +1262,18 @@ console.log(JSON.stringify({{
         assert out["pbData"]["playbook_url"].startswith("/api/lead-capture?playbook=1")
         assert out["pbData"]["fulfillment_url"].startswith("/api/lead-capture?fulfill=1")
         assert out["pbData"]["csv_fulfillment_url"].endswith("&format=csv")
-        assert len(out["pbData"]["reconciliation_schedule"]) >= 4
+        assert out["pbData"]["preview_mode"] is True
+        assert out["pbData"]["paid_unlock_required"] is True
+        assert len(out["pbData"]["preview_summary_rows"]) >= 1
+        assert not out["pbData"].get("reconciliation_schedule")
+        assert not out["pbData"].get("csv_content")
         assert out["playJsonData"]["ok"] is True
         assert out["playJsonData"]["status"] == "playbook_ready"
+        assert out["playJsonData"]["preview_mode"] is True
+        assert out["playJsonData"]["paid_unlock_required"] is True
+        assert len(out["playJsonData"]["preview_summary_rows"]) >= 1
+        assert not out["playJsonData"].get("reconciliation_schedule")
+        assert not out["playJsonData"].get("csv_content")
         assert out["fulfillHtmlStatus"] == 200
         assert "text/html" in out["fulfillHtmlType"]
         assert out["fulfillHtmlHasTable"] is True
@@ -1594,6 +1603,7 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
     4. UnifiedBrowserAuditor verifies all internal links, #fragment targets, _redirects, and
        all /r/<partner> + /api/* destinations end-to-end.
     """
+    import json
     import urllib.error
     import urllib.request
     from pseofactory.browser_verifier import UnifiedBrowserAuditor
@@ -1696,16 +1706,20 @@ def test_ui_ux_e2e_repro_gate(tmp_path):
     compiled_gh = compiled_gh.replace("</main>", gh_switcher_snippet + "</main>", 1)
     compiled_gh, _ = normalize_html_visual_primitives(compiled_gh, theme="porcelain")
 
-    gh_tool_dir = dist_dir / "tools" / "soc-2-audit-cost-calculator"
+    gh_repo_dir = tmp_path / "gainhelm"
+    gh_dist_dir = gh_repo_dir / "dist"
+    gh_dist_dir.mkdir(parents=True, exist_ok=True)
+    gh_marker = json.dumps({"property_id": "gainhelm", "domain": "gainhelm.com"})
+    (gh_repo_dir / ".pseofactory.json").write_text(gh_marker, encoding="utf-8")
+    (gh_dist_dir / ".pseofactory.json").write_text(gh_marker, encoding="utf-8")
+
+    gh_tool_dir = gh_dist_dir / "tools" / "soc-2-audit-cost-calculator"
     gh_tool_dir.mkdir(parents=True, exist_ok=True)
     (gh_tool_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
-    sec1031_dir = dist_dir / "tools" / "section-1031-calculator"
-    sec1031_dir.mkdir(parents=True, exist_ok=True)
-    (sec1031_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
-    (dist_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
+    (gh_dist_dir / "index.html").write_text(compiled_gh, encoding="utf-8")
 
-    with EphemeralDistServer(dist_dir) as server:
-        gh_auditor = UnifiedBrowserAuditor(dist_dir=dist_dir)
+    with EphemeralDistServer(gh_dist_dir) as server:
+        gh_auditor = UnifiedBrowserAuditor(dist_dir=gh_dist_dir)
         rep = gh_auditor.audit_interactive_surface(server.base_url, "/tools/soc-2-audit-cost-calculator/")
         assert rep["passed"] is True, f"Interactive surface audit failed: {rep}"
         assert "focus_and_keyboard_navigation" in rep, "audit_interactive_surface must include focus_and_keyboard_navigation check"
@@ -1893,9 +1907,9 @@ def test_edge_stripe_checkout_unlocked_email_kv_preservation_and_rich_playbook_e
         assert "customer_email=" not in bodies[0], f"Anonymous checkout locked customer_email: {bodies[0]}"
         # Body 1 (from POST) and Body 2 (from GET checkout=1&lead_id=...) -> must pass leadbuyer@acmecorp.io
         assert "customer_email=leadbuyer%40acmecorp.io" in bodies[2], f"Stored KV lead email was overwritten on checkout=1: {bodies[2]}"
-        # Paid fulfillment email must include session_id & direct fulfill=1 CSV/JSON links
+        # Paid fulfillment email must include /api/lead-fulfillment, session_id & direct CSV/JSON links
         email_html = out["capturedEmailHtml"]
-        assert "fulfill=1" in email_html, f"Paid email missing fulfill=1 link: {email_html}"
+        assert "/api/lead-fulfillment" in email_html, f"Paid email missing /api/lead-fulfillment link: {email_html}"
         assert "session_id=cs_live_PAID_ANON" in email_html, f"Paid email missing session_id: {email_html}"
         assert "format=csv" in email_html, f"Paid email missing CSV schedule link: {email_html}"
         assert "format=datapack" in email_html, f"Paid email missing JSON datapack link: {email_html}"
@@ -1973,7 +1987,11 @@ def test_profithelm_tax_bracket_cro_direct_lead_isolation_and_above_fold_ux(tmp_
     assert payload["tool_slug"] == "irs-2027-tax-brackets-new-york"
     assert payload["state"] == "NY"
     assert payload["custom_parameter_ledger"]["inputs"] == {}
-    line_codes = [r["line_code"] for r in payload["reconciliation_schedule"]]
+    assert payload["preview_mode"] is True
+    assert payload["paid_unlock_required"] is True
+    assert not payload.get("reconciliation_schedule")
+    assert not payload.get("csv_content")
+    line_codes = [r["line_code"] for r in payload["preview_summary_rows"]]
     assert any(code in line_codes for code in ("1040-L11", "1040-L16", "STATE-PTET"))
     assert len(line_codes) >= 2
 

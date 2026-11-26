@@ -28,7 +28,7 @@ from dataclasses import dataclass, asdict, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set, Tuple, Union
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from pseofactory.lead_classification import (
     classify_lead_email,
@@ -42,6 +42,7 @@ from pseofactory.pricing import (
     get_all_digital_products,
     get_audience_tier,
     get_tenant_catalog,
+    get_tenant_edge_pricing_catalog,
     get_tier_pricing,
     normalize_sku,
     resolve_offer_pricing,
@@ -1371,24 +1372,11 @@ class PartnerTrackingEngine:
             2,
         )
 
-        tenant_sellable_skus_map = {
-            pid: [
-                sku
-                for sku, item in get_tenant_catalog(pid).items()
-                if item.get("tier_kind") != "partner_slot"
-            ]
-            for pid in ("profithelm", "prexvo", "gainhelm", "lienbond")
-        }
-        prop_skus = list(
-            tenant_sellable_skus_map.get(
-                prop_clean,
-                [
-                    sku
-                    for sku, item in get_tenant_catalog(prop_clean).items()
-                    if item.get("tier_kind") != "partner_slot"
-                ],
-            )
-        )
+        prop_skus = [
+            sku
+            for sku, item in get_tenant_catalog(prop_clean).items()
+            if item.get("tier_kind") != "partner_slot"
+        ]
         has_skus = len(prop_skus) > 0
         prod_score = (
             round(40.0 + readiness_score * 0.6, 1)
@@ -3669,7 +3657,7 @@ class PartnerTrackingEngine:
            empirical proof of consented demand.
         """
         import hashlib
-        from urllib.parse import urlencode
+        from urllib.parse import quote, urlencode
         from pseofactory.affiliates import (
             is_restricted_public_service_slug,
             normalize_gainhelm_partner_key,
@@ -6117,13 +6105,6 @@ def resolve_lead_monetization_offer(
     sku_clean = normalize_sku(sku or offer_sku or "")
     eff_lead_id = (lead_id or f"lead_{prop_clean}_preview").strip()
 
-    domain_by_prop = {
-        "profithelm": "https://profithelm.com",
-        "prexvo": "https://prexvo.com",
-        "gainhelm": "https://gainhelm.com",
-        "lienbond": "https://lienbond.com",
-    }
-
     priced = resolve_offer_pricing(
         property_id=prop_clean,
         tier_kind=classify_sku_tier_kind(sku_clean) if sku_clean else "full",
@@ -6132,7 +6113,8 @@ def resolve_lead_monetization_offer(
         sku=sku_clean,
     )
     prop_clean = str(priced["property_id"])
-    canonical_domain = domain_by_prop.get(prop_clean, f"https://{prop_clean}.com")
+    active_bases = _discover_active_tenant_bases(extra_ids=(prop_clean,))
+    canonical_domain = active_bases.get(prop_clean, f"https://{prop_clean}.com")
 
     if prop_clean == "prexvo" and is_restricted_public_service_slug(slug_clean, slug_clean):
         raise ValueError(
@@ -6212,7 +6194,15 @@ def resolve_lead_monetization_offer(
             if slug_clean not in ("index", "general")
             else (default_sku_slug if sku_clean else "")
         )
-    tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
+    is_partner_slot = (
+        tier_kind == "partner_slot"
+        or offer_sku.endswith("_verified_partner_slot")
+        or slug_clean == "partners"
+    )
+    if is_partner_slot:
+        tool_path = "/partners/"
+    else:
+        tool_path = f"/tools/{eff_slug_for_path}/" if eff_slug_for_path else "/"
 
     stripe_price_data = build_stripe_price_data(
         {
@@ -6272,6 +6262,21 @@ def resolve_lead_monetization_offer(
             or "soc2_grc_automation"
         )
 
+    if is_partner_slot:
+        lead_q = quote(eff_lead_id, safe="")
+        sku_q = quote(offer_sku, safe="")
+        success_url = (
+            f"{canonical_domain}/partners/?checkout_status=success&checkout_fulfilled=1"
+            f"&lead_id={lead_q}&sku={sku_q}&tier=partner_slot&session_id={{CHECKOUT_SESSION_ID}}"
+        )
+        cancel_url = (
+            f"{canonical_domain}/partners/?checkout_status=cancelled"
+            f"&lead_id={lead_q}&sku={sku_q}&tier=partner_slot"
+        )
+    else:
+        success_url = f"{canonical_domain}{tool_path}?checkout_status=success&lead_id={eff_lead_id}&sku={offer_sku}"
+        cancel_url = f"{canonical_domain}{tool_path}?checkout_status=cancelled&lead_id={eff_lead_id}&sku={offer_sku}"
+
     return {
         "property_id": prop_clean,
         "tool_slug": slug_clean,
@@ -6303,8 +6308,8 @@ def resolve_lead_monetization_offer(
         "live_datapack_endpoint": f"{canonical_domain}{datapack_url}",
         "checkout_session_id": f"cs_edge_{eff_lead_id}",
         "checkout_mode": "edge_checkout_rail",
-        "success_url": f"{canonical_domain}{tool_path}?checkout_status=success&lead_id={eff_lead_id}&sku={offer_sku}",
-        "cancel_url": f"{canonical_domain}{tool_path}?checkout_status=cancelled&lead_id={eff_lead_id}&sku={offer_sku}",
+        "success_url": success_url,
+        "cancel_url": cancel_url,
     }
 
 
@@ -6314,9 +6319,18 @@ def _resolve_statutory_metadata_from_truth_pack(
     offer: Dict[str, Any],
 ) -> Tuple[str, str, str, str]:
     """Reads regulator, controlling statute, effective year, and dataset dynamically from load_truth_pack(prop_clean)."""
-    from pseofactory.truth_pack import load_truth_pack
+    from pseofactory.truth_pack import TruthPackMissingError, load_truth_pack
 
-    tp = load_truth_pack(prop_clean)
+    try:
+        tp = load_truth_pack(prop_clean)
+    except (FileNotFoundError, TruthPackMissingError):
+        brand = prop_clean.replace("-", " ").replace("_", " ").title()
+        return (
+            f"{brand} Statutory Authority",
+            str(offer.get("statutory_authority") or "").strip(),
+            "2026",
+            "FRED 10-Year Treasury (DGS10) and BLS CPI-U Series",
+        )
     matching = [
         entry
         for entry in tp.entries.values()
@@ -6411,13 +6425,8 @@ def resolve_post_calculation_upgrade_spec(
     eff_stat = str(statutory_authority or offer["statutory_authority"]).strip()
     eff_econ = str(economic_dataset or default_econ_ds).strip()
 
-    quick_sku_map = {
-        "prexvo": "px_instant_repayment_worksheet_19",
-        "gainhelm": "gh_instant_compliance_worksheet_19",
-        "lienbond": "lb_instant_lien_bond_worksheet_19",
-        "profithelm": "ph_instant_statutory_worksheet_19",
-    }
-    quick_sku = quick_sku_map.get(prop_clean, "ph_instant_statutory_worksheet_19")
+    edge_catalog = get_tenant_edge_pricing_catalog(prop_clean)
+    quick_sku = str(edge_catalog["quick_sku"])
     quick_offer = resolve_lead_monetization_offer(
         property_id=prop_clean,
         tool_slug=slug_clean,
@@ -6771,6 +6780,7 @@ _CANONICAL_STATUTORY_TIMESERIES_FALLBACK: List[Dict[str, Any]] = [
 
 
 _WORKPAPER_TREND_SERIES_CACHE: Dict[str, List[Dict[str, Any]]] = {}
+_WORKPAPER_TREND_SERIES_LOCK = threading.Lock()
 
 
 _GAINHELM_WORKPAPER_SERIES_ALIAS: Dict[str, str] = {
@@ -6830,26 +6840,31 @@ def _resolve_trend_statutory_timeseries_for_workpaper(
         raw_series = [dict(x, points=dict(x["points"])) for x in cached_base]
     else:
         raw_series = []
-        try:
-            from pseofactory.trends.db import TrendHistoryDB
-            with TrendHistoryDB() as db:
-                mat = db.compile_statutory_economic_matrix(prop_clean, slug_clean.replace("-", " "))
-            for s in mat.get("series") or []:
-                if isinstance(s, dict) and s.get("series_id") and isinstance(s.get("points"), dict):
-                    raw_series.append({
-                        "series_id": str(s["series_id"]),
-                        "property_id": str(s.get("property_id") or prop_clean),
-                        "statutory_citation": str(s.get("statutory_citation") or ""),
-                        "metric_key": str(s.get("metric_key") or ""),
-                        "metric_label": str(s.get("metric_label") or s["series_id"]),
-                        "unit": str(s.get("unit") or "USD"),
-                        "source_agency": str(s.get("source_agency") or "FEDERAL"),
-                        "points": {str(k): float(v) for k, v in s["points"].items()},
-                    })
-            if raw_series:
-                _WORKPAPER_TREND_SERIES_CACHE[prop_clean] = [dict(x, points=dict(x["points"])) for x in raw_series]
-        except Exception:
-            raw_series = []
+        with _WORKPAPER_TREND_SERIES_LOCK:
+            cached_base = _WORKPAPER_TREND_SERIES_CACHE.get(prop_clean)
+            if cached_base is not None:
+                raw_series = [dict(x, points=dict(x["points"])) for x in cached_base]
+            else:
+                try:
+                    from pseofactory.trends.db import TrendHistoryDB
+                    with TrendHistoryDB() as db:
+                        mat = db.compile_statutory_economic_matrix(prop_clean, slug_clean.replace("-", " "))
+                    for s in mat.get("series") or []:
+                        if isinstance(s, dict) and s.get("series_id") and isinstance(s.get("points"), dict):
+                            raw_series.append({
+                                "series_id": str(s["series_id"]),
+                                "property_id": str(s.get("property_id") or prop_clean),
+                                "statutory_citation": str(s.get("statutory_citation") or ""),
+                                "metric_key": str(s.get("metric_key") or ""),
+                                "metric_label": str(s.get("metric_label") or s["series_id"]),
+                                "unit": str(s.get("unit") or "USD"),
+                                "source_agency": str(s.get("source_agency") or "FEDERAL"),
+                                "points": {str(k): float(v) for k, v in s["points"].items()},
+                            })
+                    if raw_series:
+                        _WORKPAPER_TREND_SERIES_CACHE[prop_clean] = [dict(x, points=dict(x["points"])) for x in raw_series]
+                except Exception:
+                    raw_series = []
 
     series_list: List[Dict[str, Any]] = []
     seen_families: set = set()
@@ -8129,6 +8144,60 @@ def settle_post_calculation_datapack_upgrade(
     }
 
 
+def _build_seeded_monitoring_leads(property_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Returns deterministic baseline monitoring leads with prices and net settlement
+    derived dynamically from pricing.resolve_offer_pricing (zero stale hardcoded prices).
+    """
+    raw_specs: List[Dict[str, Any]] = [
+        {"lead_id": "lead_profithelm_e603b297f23f", "property_id": "profithelm", "tool_slug": "invoice-factoring-vs-business-line-of-credit-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k"},
+        {"lead_id": "lead_profithelm_ccb296a0ff9d", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_1031_boot_replacement_workpapers", "calculated_amount": 450000.0, "state": "CA", "capital_band": "250k_500k"},
+        {"lead_id": "lead_profithelm_8dc843cd7b47", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "calculated_amount": 160000.0, "state": "FL", "capital_band": "100k_250k"},
+        {"lead_id": "lead_prexvo_82d2dae30312", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k"},
+        {"lead_id": "lead_profithelm_1792695503769_sj164pul", "property_id": "profithelm", "tool_slug": "invoice-factoring-cost-apr-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1792716643158_0vp0m0yu", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1792695504170_2t9t89i3", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1792716644511_vls5qvqz", "property_id": "prexvo", "tool_slug": "student-loan-repayment-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1792740357523_pzxjhfmj", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1792748808305_8rmtc162", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "calculated_amount": 325000.0, "state": "WA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1792748811678_9o58u1j7", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1792740363042_i39m8z5h", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1792748809986_j829140y", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 165000.0, "state": "NY", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1793079948238_f1w0x208", "property_id": "profithelm", "tool_slug": "irs-2027-tax-brackets-alaska", "vertical": "b2b_tax_advisory", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "calculated_amount": 450000.0, "state": "AK", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1793081928311_21o7u09f", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "calculated_amount": 325000.0, "state": "CA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_profithelm_1793081930019_o8n9ykhd", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1793081925203_z4uq6m78", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_prexvo_1793081926996_wzgjrqwi", "property_id": "prexvo", "tool_slug": "grad-plus-borrowing-cap-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793081910343_xfjb8oz", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793081910732_8atpp2s", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793081924411_zbzhkwp", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793081924766_pi17p2a", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793093437180_oxhmfq7", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 58200.0, "state": "DE", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793093437853_sxs30od", "property_id": "gainhelm", "tool_slug": "cmmc-2-0-compliance-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 86900.0, "state": "VA", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
+        {"lead_id": "lead_gainhelm_1793093438500_soc26th", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
+    ]
+    p_filt = property_id.strip().lower() if property_id else ""
+    out: List[Dict[str, Any]] = []
+    for row in raw_specs:
+        if p_filt and row["property_id"] != p_filt:
+            continue
+        priced = resolve_offer_pricing(
+            row["property_id"],
+            slug=row["tool_slug"],
+            vertical=row["vertical"],
+            sku=row["offer_sku"],
+        )
+        price_usd = float(priced["price_usd"])
+        item = dict(row)
+        item["offer_price_usd"] = price_usd
+        if item.get("settlement_status") == "settled":
+            fee_est = round(price_usd * 0.029 + 0.30, 2)
+            item["attributed_revenue_usd"] = price_usd
+            item["net_settled_revenue_usd"] = max(0.0, round(price_usd - fee_est, 2))
+        out.append(item)
+    return out
+
+
 def compute_scenario_demand_and_conversion_metrics(
     property_id: Optional[str] = None,
     leads_ledger_path: Optional[Any] = None,
@@ -8147,38 +8216,7 @@ def compute_scenario_demand_and_conversion_metrics(
     engine = PartnerTrackingEngine()
     leads = engine.get_captured_leads(property_id=property_id, leads_ledger_path=leads_ledger_path)
     if not leads and leads_ledger_path is None:
-        seeded_leads = [
-            {"lead_id": "lead_profithelm_e603b297f23f", "property_id": "profithelm", "tool_slug": "invoice-factoring-vs-business-line-of-credit-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k"},
-            {"lead_id": "lead_profithelm_ccb296a0ff9d", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "calculated_amount": 450000.0, "state": "CA", "capital_band": "250k_500k"},
-            {"lead_id": "lead_profithelm_8dc843cd7b47", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "calculated_amount": 160000.0, "state": "FL", "capital_band": "100k_250k"},
-            {"lead_id": "lead_prexvo_82d2dae30312", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k"},
-            {"lead_id": "lead_profithelm_1792695503769_sj164pul", "property_id": "profithelm", "tool_slug": "invoice-factoring-cost-apr-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792716643158_0vp0m0yu", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792695504170_2t9t89i3", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792716644511_vls5qvqz", "property_id": "prexvo", "tool_slug": "student-loan-repayment-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792740357523_pzxjhfmj", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792748808305_8rmtc162", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 325000.0, "state": "WA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792748811678_9o58u1j7", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792740363042_i39m8z5h", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792748809986_j829140y", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 165000.0, "state": "NY", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793079948238_f1w0x208", "property_id": "profithelm", "tool_slug": "irs-2027-tax-brackets-alaska", "vertical": "b2b_tax_advisory", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 450000.0, "state": "AK", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793081928311_21o7u09f", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 325000.0, "state": "CA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793081930019_o8n9ykhd", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1793081925203_z4uq6m78", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1793081926996_wzgjrqwi", "property_id": "prexvo", "tool_slug": "grad-plus-borrowing-cap-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081910343_xfjb8oz", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081910732_8atpp2s", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081924411_zbzhkwp", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081924766_pi17p2a", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093437180_oxhmfq7", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 58200.0, "state": "DE", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093437853_sxs30od", "property_id": "gainhelm", "tool_slug": "cmmc-2-0-compliance-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 86900.0, "state": "VA", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093438500_soc26th", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-        ]
-        if property_id:
-            p_filt = property_id.strip().lower()
-            leads = [r for r in seeded_leads if r["property_id"] == p_filt]
-        else:
-            leads = seeded_leads
+        leads = _build_seeded_monitoring_leads(property_id=property_id)
 
     edge_telemetry_clicks: Dict[str, Dict[str, int]] = {
         "profithelm": {
@@ -8434,7 +8472,12 @@ def compute_scenario_demand_and_conversion_metrics(
         ))
         stage = str(rec.get("lifecycle_stage") or "captured")
         calc_amt = float(rec.get("calculated_amount") or 0.0)
-        price_usd = float(rec.get("offer_price_usd") or bucket["offer_price_usd"] or 49.0)
+        fallback_price = 0.0
+        if not (prop == "prexvo" and is_restricted_public_service_slug(slug, slug)):
+            fallback_price = float(
+                resolve_offer_pricing(prop, tier_kind="full", slug=slug, vertical=vert)["price_usd"]
+            )
+        price_usd = float(rec.get("offer_price_usd") or bucket["offer_price_usd"] or fallback_price)
         state_c = str(rec.get("state") or "US").strip().upper()[:2]
         band_c = str(rec.get("capital_band") or "under_50k")
 
@@ -11689,7 +11732,20 @@ def sync_edge_leads_to_ledger(
                 sku=off_sku_r,
             )
         except Exception:
-            off_r = {"offer_sku": "", "offer_title": "", "offer_price_usd": 49.0}
+            try:
+                from pseofactory.affiliates import is_restricted_public_service_slug
+
+                if prop_r == "prexvo" and is_restricted_public_service_slug(slug_r, slug_r):
+                    off_r = {"offer_sku": "", "offer_title": "", "offer_price_usd": 0.0}
+                else:
+                    fallback_priced = resolve_offer_pricing(prop_r, tier_kind="full", slug=slug_r)
+                    off_r = {
+                        "offer_sku": str(fallback_priced["sku"]),
+                        "offer_title": str(fallback_priced["title"]),
+                        "offer_price_usd": float(fallback_priced["price_usd"]),
+                    }
+            except Exception:
+                off_r = {"offer_sku": "", "offer_title": "", "offer_price_usd": 0.0}
         if not rec.get("lead_type"):
             rec["lead_type"] = "qualified_quote" if rec.get("partner_sharing_consent") else "playbook_subscription"
         if not rec.get("lifecycle_stage"):
@@ -11754,45 +11810,12 @@ def get_lead_monitoring_summary(
     engine = PartnerTrackingEngine()
     leads = engine.get_captured_leads(property_id=property_id, leads_ledger_path=leads_ledger_path)
     if not leads and leads_ledger_path is None:
-        seeded_leads = [
-            {"lead_id": "lead_profithelm_e603b297f23f", "property_id": "profithelm", "tool_slug": "invoice-factoring-vs-business-line-of-credit-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k"},
-            {"lead_id": "lead_profithelm_ccb296a0ff9d", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "calculated_amount": 450000.0, "state": "CA", "capital_band": "250k_500k"},
-            {"lead_id": "lead_profithelm_8dc843cd7b47", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "calculated_amount": 160000.0, "state": "FL", "capital_band": "100k_250k"},
-            {"lead_id": "lead_prexvo_82d2dae30312", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "captured", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k"},
-            {"lead_id": "lead_profithelm_1792695503769_sj164pul", "property_id": "profithelm", "tool_slug": "invoice-factoring-cost-apr-calculator", "vertical": "invoice_factoring", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 185000.0, "state": "TX", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792716643158_0vp0m0yu", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792695504170_2t9t89i3", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 142000.0, "state": "CA", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792716644511_vls5qvqz", "property_id": "prexvo", "tool_slug": "student-loan-repayment-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792740357523_pzxjhfmj", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792748808305_8rmtc162", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 325000.0, "state": "WA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1792748811678_9o58u1j7", "property_id": "profithelm", "tool_slug": "general", "vertical": "b2b_tax_advisory", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792740363042_i39m8z5h", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1792748809986_j829140y", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 165000.0, "state": "NY", "capital_band": "100k_250k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793079948238_f1w0x208", "property_id": "profithelm", "tool_slug": "irs-2027-tax-brackets-alaska", "vertical": "b2b_tax_advisory", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "ph_statutory_tax_audit_workpapers", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 450000.0, "state": "AK", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793081928311_21o7u09f", "property_id": "profithelm", "tool_slug": "section-1031-calculator", "vertical": "1031_exchange", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_1031_boot_replacement_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 325000.0, "state": "CA", "capital_band": "250k_500k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_profithelm_1793081930019_o8n9ykhd", "property_id": "profithelm", "tool_slug": "section-179-calculator", "vertical": "capex_section_179", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "ph_commercial_capital_audit_toolkit", "offer_price_usd": 49.0, "attributed_revenue_usd": 49.0, "net_settled_revenue_usd": 47.28, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1793081925203_z4uq6m78", "property_id": "prexvo", "tool_slug": "student-loan-refinance-break-even-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_prexvo_1793081926996_wzgjrqwi", "property_id": "prexvo", "tool_slug": "grad-plus-borrowing-cap-calculator", "vertical": "student_loan_refinance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "px_refi_amortization_decision_audit", "offer_price_usd": 39.0, "attributed_revenue_usd": 39.0, "net_settled_revenue_usd": 37.57, "calculated_amount": 0.0, "state": "US", "capital_band": "under_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081910343_xfjb8oz", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081910732_8atpp2s", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081924411_zbzhkwp", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793081924766_pi17p2a", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093437180_oxhmfq7", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "playbook_subscription", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 58200.0, "state": "DE", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093437853_sxs30od", "property_id": "gainhelm", "tool_slug": "cmmc-2-0-compliance-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 86900.0, "state": "VA", "capital_band": "50k_100k", "settlement_status": "settled", "datapack_delivered": True},
-            {"lead_id": "lead_gainhelm_1793093438500_soc26th", "property_id": "gainhelm", "tool_slug": "soc-2-audit-cost-calculator", "vertical": "b2b_cyber_compliance", "lead_type": "qualified_quote", "lifecycle_stage": "fulfilled", "offer_sku": "gh_soc2_cmmc_audit_workpapers", "offer_price_usd": 79.0, "attributed_revenue_usd": 79.0, "net_settled_revenue_usd": 76.41, "calculated_amount": 48500.0, "state": "DE", "capital_band": "25k_50k", "settlement_status": "settled", "datapack_delivered": True},
-        ]
-        if property_id:
-            p_filt = property_id.strip().lower()
-            leads = [r for r in seeded_leads if r["property_id"] == p_filt]
-        else:
-            leads = seeded_leads
+        leads = _build_seeded_monitoring_leads(property_id=property_id)
 
-    by_property: Dict[str, int] = {
-        "profithelm": 0,
-        "prexvo": 0,
-        "gainhelm": 0,
-        "lienbond": 0,
-    }
+    discovered_bases = _discover_active_tenant_bases(
+        extra_ids=[property_id] if property_id else None
+    )
+    by_property: Dict[str, int] = {pid: 0 for pid in discovered_bases}
     by_stage: Dict[str, int] = {}
     by_type: Dict[str, int] = {}
     by_vertical: Dict[str, int] = {}
@@ -12238,8 +12261,19 @@ def _audit_tenant_outbound_routing_truth(
     if repo_root is not None:
         resolved_repo = Path(repo_root)
     elif use_default_workspace:
-        folder = "profithelm-platform" if prop_clean == "profithelm" else prop_clean
-        resolved_repo = Path("/home/ubuntuadmin/projects") / folder
+        try:
+            from pseofactory.impact_planner import discover_active_tenants
+
+            ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+            for pid, t_repo in discover_active_tenants(ws_root):
+                if pid == prop_clean:
+                    resolved_repo = t_repo
+                    break
+        except Exception:
+            pass
+        if resolved_repo is None:
+            folder = "profithelm-platform" if prop_clean == "profithelm" else prop_clean
+            resolved_repo = Path("/home/ubuntuadmin/projects") / folder
 
     resolved_dist: Optional[Path] = None
     if dist_dir is not None:
@@ -12443,12 +12477,17 @@ def audit_end_to_end_monetization_and_fulfillment(
             },
             mode="paid_toolkit",
         )
+        is_partner_slot_sku = (
+            str(offer.get("tier_kind") or "").strip().lower() == "partner_slot"
+            or str(sku_id).strip().lower().endswith("_verified_partner_slot")
+        )
+        expected_return_path = "/partners/" if is_partner_slot_sku else "/tools/"
         checkout_ok = (
             offer["offer_sku"] == sku_id
             and direct_sku_offer["offer_sku"] == sku_id
             and float(offer["offer_price_usd"]) == expected_price
-            and "/tools/" in offer["success_url"]
-            and "/tools/" in direct_sku_offer["success_url"]
+            and expected_return_path in offer["success_url"]
+            and expected_return_path in direct_sku_offer["success_url"]
         )
         upgrade_spec = resolve_post_calculation_upgrade_spec(prop_id, canon_slug)
         dp_obj = wp.get("statutory_data_pack") if isinstance(wp.get("statutory_data_pack"), dict) else {}
@@ -12487,15 +12526,8 @@ def audit_end_to_end_monetization_and_fulfillment(
         )
         live_edge_probe: Optional[Dict[str, Any]] = None
         if execute_live:
-            domain = (
-                "https://prexvo.com"
-                if prop_id == "prexvo"
-                else (
-                    "https://gainhelm.com"
-                    if prop_id == "gainhelm"
-                    else ("https://lienbond.com" if prop_id == "lienbond" else "https://profithelm.com")
-                )
-            )
+            active_bases_live = _discover_active_tenant_bases(extra_ids=(prop_id,))
+            domain = active_bases_live.get(prop_id, f"https://{prop_id}.com")
             chk_url = f"{domain}/api/lead-capture?checkout=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             ff_url = f"{domain}/api/lead-capture?fulfill=1&sku={sku_id}&tool_slug={canon_slug}&lead_id=lead_{prop_id}_live_{sku_id[:8]}"
             import urllib.error
@@ -12566,13 +12598,14 @@ def audit_end_to_end_monetization_and_fulfillment(
             ymyl_blocked.append(y_slug)
     ymyl_isolated = len(ymyl_blocked) == len(ymyl_slugs)
 
+    from pseofactory.affiliates import AFFILIATE_REGISTRY_BY_PROPERTY
+
+    active_bases = _discover_active_tenant_bases(
+        extra_ids=list(repo_roots.keys()) if isinstance(repo_roots, dict) else None
+    )
     outbound_summary: Dict[str, Any] = {}
-    for prop_id, reg_map in (
-        ("profithelm", PROFITHELM_AFFILIATES),
-        ("prexvo", PREXVO_AFFILIATES),
-        ("gainhelm", GAINHELM_AFFILIATES),
-        ("lienbond", LIENBOND_AFFILIATES),
-    ):
+    for prop_id in active_bases:
+        reg_map = AFFILIATE_REGISTRY_BY_PROPERTY.get(prop_id) or {}
         r_override = repo_roots.get(prop_id) if isinstance(repo_roots, dict) else None
         e_override = edge_redirect_sources.get(prop_id) if isinstance(edge_redirect_sources, dict) else None
         outbound_summary[prop_id] = _audit_tenant_outbound_routing_truth(

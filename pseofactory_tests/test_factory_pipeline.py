@@ -490,13 +490,13 @@ def test_factory_pipeline_grant_o_triad_contract_enforcement():
     assert result.aborted_opportunities[0].reason == "DERIVATIVE_SERP_ANGLE"
 
 
-def test_factory_pipeline_stateless_worker_physics_and_environment_restoration():
+def test_factory_pipeline_stateless_worker_physics_and_environment_restoration(monkeypatch):
     """
     Asserts that FACTORY_* environment variables are restored cleanly
     after scoped execution, preserving stateless worker physics.
     """
-    os.environ["FACTORY_CANONICAL_BASE"] = "https://baseline-sentinel.com"
-    os.environ["FACTORY_DOMAIN"] = "baseline-sentinel.com"
+    monkeypatch.setenv("FACTORY_CANONICAL_BASE", "https://baseline-sentinel.com")
+    monkeypatch.setenv("FACTORY_DOMAIN", "baseline-sentinel.com")
 
     spike = _make_spike(
         spike_id="spike-stateless-01",
@@ -517,10 +517,6 @@ def test_factory_pipeline_stateless_worker_physics_and_environment_restoration()
     # Environment variables must be restored to their original values
     assert os.environ.get("FACTORY_CANONICAL_BASE") == "https://baseline-sentinel.com"
     assert os.environ.get("FACTORY_DOMAIN") == "baseline-sentinel.com"
-
-    # Clean up test keys
-    del os.environ["FACTORY_CANONICAL_BASE"]
-    del os.environ["FACTORY_DOMAIN"]
 
 
 def test_factory_pipeline_typography_invariants():

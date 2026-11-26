@@ -449,6 +449,8 @@ def test_live_edge_verifier_full_monetization_checkout_and_partner_slot_matrix(t
         d = tmp_path / "tools" / slug
         d.mkdir(parents=True, exist_ok=True)
         (d / "index.html").write_text(f"<html><body><h1>{slug}</h1></body></html>", encoding="utf-8")
+    (tmp_path / "partners").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "partners" / "index.html").write_text("<html><body><h1>Partners</h1></body></html>", encoding="utf-8")
     (tmp_path / "index.html").write_text("<html><body><h1>Home</h1></body></html>", encoding="utf-8")
 
     extractor = RouteManifestExtractor(tmp_path)
@@ -498,9 +500,20 @@ def test_verify_edge_functions_accepts_canonical_operator_mailbox_and_auth_requi
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_html(self, code: int, body: str):
+            raw = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
         def do_GET(self):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
+            if parsed.path in ("/partners", "/partners/", "/partners/index.html"):
+                self._send_html(200, "<html><body><h1>Prexvo Partners</h1></body></html>")
+                return
             if parsed.path.startswith("/r/"):
                 self.send_response(302)
                 self.send_header("Location", "https://prexvo.com/tools/student-loan-refinance-break-even-calculator/")
@@ -510,31 +523,69 @@ def test_verify_edge_functions_accepts_canonical_operator_mailbox_and_auth_requi
                 self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
                 return
             if parsed.path == "/api/checkout":
+                sku_catalog = {
+                    "px_instant_repayment_worksheet_19": (9.0, 900),
+                    "px_refi_amortization_decision_audit": (19.0, 1900),
+                    "px_verified_partner_slot": (299.0, 29900),
+                }
+                raw_sku = (qs.get("sku") or ["px_refi_amortization_decision_audit"])[0]
+                if raw_sku not in sku_catalog:
+                    self._send_json(400, {"ok": False, "error": "invalid_or_foreign_sku", "sku": raw_sku})
+                    return
+                price_usd, price_cents = sku_catalog[raw_sku]
+                tool_slug = (qs.get("tool_slug") or ["student-loan-refinance-break-even-calculator"])[0]
+                success_url = (
+                    "https://prexvo.com/partners/?checkout_status=success&session_id={CHECKOUT_SESSION_ID}"
+                    if raw_sku == "px_verified_partner_slot"
+                    else f"https://prexvo.com/tools/{tool_slug}/?checkout_status=success&session_id={{CHECKOUT_SESSION_ID}}"
+                )
                 self._send_json(
                     200,
                     {
                         "ok": True,
                         "status": "checkout_session_ready",
+                        "checkout_mode": "stripe_live_session",
+                        "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_test",
+                        "success_url": success_url,
+                        "livemode": True,
                         "property_id": "prexvo",
+                        "offer_sku": raw_sku,
+                        "offer_price_usd": price_usd,
+                        "price_cents": price_cents,
                         "stripe_merchant_email": "arif.coskun@profithelm.com",
                     },
                 )
                 return
             if parsed.path == "/api/lead-capture":
                 if qs.get("playbook") == ["1"]:
+                    fmt = (qs.get("format") or ["json"])[0].lower()
+                    if fmt in ("csv", "datapack", "datapack_json"):
+                        self._send_json(
+                            402,
+                            {
+                                "ok": False,
+                                "status": "payment_required",
+                                "error": "paid_export_requires_checkout",
+                            },
+                        )
+                        return
                     self._send_json(
                         200,
                         {
                             "ok": True,
                             "status": "playbook_ready",
                             "property_id": "prexvo",
-                            "reconciliation_schedule": [1, 2, 3],
+                            "preview_mode": True,
+                            "paid_unlock_required": True,
+                            "preview_summary_rows": [
+                                {"line_code": "PX-PREV-1", "line_item": "Summary Row", "execution_status": "REDACTED_PREVIEW_ONLY"}
+                            ],
                         },
                     )
                     return
                 if qs.get("checkout") == ["1"]:
                     sku = (qs.get("sku") or ["px_refi_amortization_decision_audit"])[0]
-                    price = 299.0 if sku == "px_verified_partner_slot" else 39.0
+                    price = 299.0 if sku == "px_verified_partner_slot" else (9.0 if sku == "px_instant_repayment_worksheet_19" else 19.0)
                     cancel_url = (
                         "https://profithelm.com/leak/"
                         if leak_mode["inject_foreign_url"]
@@ -562,6 +613,13 @@ def test_verify_edge_functions_accepts_canonical_operator_mailbox_and_auth_requi
             self._send_json(404, {"ok": False})
 
         def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/stripe-webhook":
+                if not self.headers.get("Stripe-Signature"):
+                    self._send_json(400, {"ok": False, "error": "missing_stripe_signature"})
+                    return
+                self._send_json(200, {"ok": True, "received": True})
+                return
             length = int(self.headers.get("Content-Length") or "0")
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if body.get("intent") == "partner_registration":
@@ -678,9 +736,20 @@ def test_live_edge_verifier_tenant_partner_route_selection_and_synthetic_telemet
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_html(self, code: int, body: str):
+            raw = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
         def do_GET(self):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
+            if parsed.path in ("/partners", "/partners/", "/partners/index.html"):
+                self._send_html(200, "<html><body><h1>LienBond Partners</h1></body></html>")
+                return
             if parsed.path.startswith("/r/"):
                 slug = parsed.path[len("/r/") :].strip("/")
                 captured_redirects.append(
@@ -701,31 +770,70 @@ def test_live_edge_verifier_tenant_partner_route_selection_and_synthetic_telemet
                 self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
                 return
             if parsed.path == "/api/checkout":
+                sku_catalog = {
+                    "lb_instant_lien_bond_worksheet_19": (15.0, 1500),
+                    "lb_surety_bond_underwriting_kit": (29.0, 2900),
+                    "lb_surety_lien_wh347_packet": (29.0, 2900),
+                    "lb_verified_partner_slot": (299.0, 29900),
+                }
+                raw_sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
+                if raw_sku not in sku_catalog:
+                    self._send_json(400, {"ok": False, "error": "invalid_or_foreign_sku", "sku": raw_sku})
+                    return
+                price_usd, price_cents = sku_catalog[raw_sku]
+                tool_slug = (qs.get("tool_slug") or ["contractor-license-bond-cost-calculator-by-credit-score"])[0]
+                success_url = (
+                    "https://lienbond.com/partners/?checkout_status=success&session_id={CHECKOUT_SESSION_ID}"
+                    if raw_sku == "lb_verified_partner_slot"
+                    else f"https://lienbond.com/tools/{tool_slug}/?checkout_status=success&session_id={{CHECKOUT_SESSION_ID}}"
+                )
                 self._send_json(
                     200,
                     {
                         "ok": True,
                         "status": "checkout_session_ready",
+                        "checkout_mode": "stripe_live_session",
+                        "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_lb",
+                        "success_url": success_url,
+                        "livemode": True,
                         "property_id": "lienbond",
+                        "offer_sku": raw_sku,
+                        "offer_price_usd": price_usd,
+                        "price_cents": price_cents,
                         "stripe_merchant_email": "arif.coskun@profithelm.com",
                     },
                 )
                 return
             if parsed.path == "/api/lead-capture":
                 if qs.get("playbook") == ["1"]:
+                    fmt = (qs.get("format") or ["json"])[0].lower()
+                    if fmt in ("csv", "datapack", "datapack_json"):
+                        self._send_json(
+                            402,
+                            {
+                                "ok": False,
+                                "status": "payment_required",
+                                "error": "paid_export_requires_checkout",
+                            },
+                        )
+                        return
                     self._send_json(
                         200,
                         {
                             "ok": True,
                             "status": "playbook_ready",
                             "property_id": "lienbond",
-                            "reconciliation_schedule": [1, 2, 3],
+                            "preview_mode": True,
+                            "paid_unlock_required": True,
+                            "preview_summary_rows": [
+                                {"line_code": "LB-PREV-1", "line_item": "Summary Row", "execution_status": "REDACTED_PREVIEW_ONLY"}
+                            ],
                         },
                     )
                     return
                 if qs.get("checkout") == ["1"]:
                     sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
-                    price = 299.0 if sku == "lb_verified_partner_slot" else 49.0
+                    price = 299.0 if sku == "lb_verified_partner_slot" else (15.0 if sku == "lb_instant_lien_bond_worksheet_19" else 29.0)
                     self._send_json(
                         200,
                         {
@@ -746,6 +854,13 @@ def test_live_edge_verifier_tenant_partner_route_selection_and_synthetic_telemet
             self._send_json(404, {"ok": False})
 
         def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/stripe-webhook":
+                if not self.headers.get("Stripe-Signature"):
+                    self._send_json(400, {"ok": False, "error": "missing_stripe_signature"})
+                    return
+                self._send_json(200, {"ok": True, "received": True})
+                return
             length = int(self.headers.get("Content-Length") or "0")
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if body.get("intent") == "partner_registration":
@@ -814,10 +929,21 @@ def test_verify_edge_functions_retries_transient_http_0_cold_swap(tmp_path: Path
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_html(self, code: int, body: str) -> None:
+            raw = body.encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
         def do_GET(self):
             parsed = urllib.parse.urlsplit(self.path)
             qs = urllib.parse.parse_qs(parsed.query)
             attempt_counts[parsed.path] = attempt_counts.get(parsed.path, 0) + 1
+            if parsed.path in ("/partners", "/partners/", "/partners/index.html"):
+                self._send_html(200, "<html><body><h1>LienBond Partners</h1></body></html>")
+                return
             if parsed.path == "/r/simply_business" and attempt_counts[parsed.path] == 1:
                 self.connection.close()
                 return
@@ -834,31 +960,70 @@ def test_verify_edge_functions_retries_transient_http_0_cold_swap(tmp_path: Path
                 self._send_json(402, {"ok": False, "status": "payment_required", "settled": False})
                 return
             if parsed.path == "/api/checkout":
+                sku_catalog = {
+                    "lb_instant_lien_bond_worksheet_19": (15.0, 1500),
+                    "lb_surety_bond_underwriting_kit": (29.0, 2900),
+                    "lb_surety_lien_wh347_packet": (29.0, 2900),
+                    "lb_verified_partner_slot": (299.0, 29900),
+                }
+                raw_sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
+                if raw_sku not in sku_catalog:
+                    self._send_json(400, {"ok": False, "error": "invalid_or_foreign_sku", "sku": raw_sku})
+                    return
+                price_usd, price_cents = sku_catalog[raw_sku]
+                tool_slug = (qs.get("tool_slug") or ["contractor-license-bond-cost-calculator-by-credit-score"])[0]
+                success_url = (
+                    "https://lienbond.com/partners/?checkout_status=success&session_id={CHECKOUT_SESSION_ID}"
+                    if raw_sku == "lb_verified_partner_slot"
+                    else f"https://lienbond.com/tools/{tool_slug}/?checkout_status=success&session_id={{CHECKOUT_SESSION_ID}}"
+                )
                 self._send_json(
                     200,
                     {
                         "ok": True,
                         "status": "checkout_session_ready",
+                        "checkout_mode": "stripe_live_session",
+                        "checkout_url": "https://checkout.stripe.com/c/pay/cs_live_lb",
+                        "success_url": success_url,
+                        "livemode": True,
                         "property_id": "lienbond",
+                        "offer_sku": raw_sku,
+                        "offer_price_usd": price_usd,
+                        "price_cents": price_cents,
                         "stripe_merchant_email": "arif.coskun@profithelm.com",
                     },
                 )
                 return
             if parsed.path == "/api/lead-capture":
                 if qs.get("playbook") == ["1"]:
+                    fmt = (qs.get("format") or ["json"])[0].lower()
+                    if fmt in ("csv", "datapack", "datapack_json"):
+                        self._send_json(
+                            402,
+                            {
+                                "ok": False,
+                                "status": "payment_required",
+                                "error": "paid_export_requires_checkout",
+                            },
+                        )
+                        return
                     self._send_json(
                         200,
                         {
                             "ok": True,
                             "status": "playbook_ready",
                             "property_id": "lienbond",
-                            "reconciliation_schedule": [1, 2, 3],
+                            "preview_mode": True,
+                            "paid_unlock_required": True,
+                            "preview_summary_rows": [
+                                {"line_code": "LB-PREV-1", "line_item": "Summary Row", "execution_status": "REDACTED_PREVIEW_ONLY"}
+                            ],
                         },
                     )
                     return
                 if qs.get("checkout") == ["1"]:
                     sku = (qs.get("sku") or ["lb_surety_bond_underwriting_kit"])[0]
-                    price = 299.0 if sku == "lb_verified_partner_slot" else 49.0
+                    price = 299.0 if sku == "lb_verified_partner_slot" else (15.0 if sku == "lb_instant_lien_bond_worksheet_19" else 29.0)
                     self._send_json(
                         200,
                         {
@@ -879,6 +1044,13 @@ def test_verify_edge_functions_retries_transient_http_0_cold_swap(tmp_path: Path
             self._send_json(404, {"ok": False})
 
         def do_POST(self):
+            parsed = urllib.parse.urlsplit(self.path)
+            if parsed.path == "/api/stripe-webhook":
+                if not self.headers.get("Stripe-Signature"):
+                    self._send_json(400, {"ok": False, "error": "missing_stripe_signature"})
+                    return
+                self._send_json(200, {"ok": True, "received": True})
+                return
             length = int(self.headers.get("Content-Length") or "0")
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if body.get("intent") == "partner_registration":

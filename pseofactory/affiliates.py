@@ -2675,17 +2675,36 @@ def get_gainhelm_compliance_strip_text(slug: str = "") -> str:
 _GAINHELM_NON_ATTESTATION_CLAUSE = (
     "GainHelm is not a licensed CPA/C3PAO/QSA; these figures are a planning estimate."
 )
+_GAINHELM_NON_ATTESTATION_PRACTITIONER_CLAUSE = (
+    "GainHelm is not a registered practitioner; these figures are a planning estimate."
+)
 
 
 def get_gainhelm_statutory_disclaimer(slug: str = "") -> str:
     """Returns the framework-specific GainHelm statutory disclaimer for a calculator slug."""
-    base = str(get_gainhelm_framework_profile(slug=slug).get("statutory_disclaimer", "")).strip()
+    prof = get_gainhelm_framework_profile(slug=slug)
+    fw_key = str(prof.get("framework_key") or "").strip().lower()
+    slug_low = str(slug or "").strip().lower()
+    use_practitioner_clause = (
+        fw_key in GAINHELM_STRICT_ISOLATED_FRAMEWORKS
+        or any(tok in slug_low for tok in ("dora", "eu-ai-act", "eu_ai_act", "gdpr", "nis2"))
+    )
+    clause = (
+        _GAINHELM_NON_ATTESTATION_PRACTITIONER_CLAUSE
+        if use_practitioner_clause
+        else _GAINHELM_NON_ATTESTATION_CLAUSE
+    )
+    base = str(prof.get("statutory_disclaimer", "")).strip()
     if not base:
-        return _GAINHELM_NON_ATTESTATION_CLAUSE
-    if "gainhelm is not a licensed cpa/c3pao/qsa; these figures are a planning estimate" in base.lower():
+        return clause
+    base_low = base.lower()
+    if (
+        "gainhelm is not a licensed cpa/c3pao/qsa; these figures are a planning estimate" in base_low
+        or "gainhelm is not a registered practitioner; these figures are a planning estimate" in base_low
+    ):
         return base
     sep = "" if base.endswith((".", "!", "?")) else "."
-    return f"{base}{sep} {_GAINHELM_NON_ATTESTATION_CLAUSE}"
+    return f"{base}{sep} {clause}"
 
 
 def has_gainhelm_cross_framework_leak(
@@ -3292,9 +3311,15 @@ PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS: Tuple[str, ...] = (
     "pslf",
     "public-service",
     "public service",
+    "save-plan",
+    "save_plan",
     "save-plan-litigation",
     "save plan litigation",
     "save-forbearance",
+    "buyback",
+    "ibr-hardship",
+    "hardship-cap",
+    "income-driven-forgiveness",
     "forbearance",
     "deferment",
     "borrower-defense",
@@ -3316,6 +3341,26 @@ PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS: Tuple[str, ...] = (
     "default-rehabilitation",
     "default rehabilitation",
 )
+
+RESTRICTED_PUBLIC_SERVICE_REGEX_TOKENS: Tuple[str, ...] = (
+    "pslf",
+    "save-plan",
+    "save_plan",
+    "buyback",
+    "ibr-hardship",
+    "hardship-cap",
+    "income-driven-forgiveness",
+    "disclaimers",
+    "methodology",
+)
+
+
+def get_restricted_public_service_slug_regex_pattern() -> str:
+    """
+    Single Source of Truth regex pattern (Python and JS compatible) matching
+    restricted public-service YMYL and non-commercial governance routes.
+    """
+    return "(?:" + "|".join(RESTRICTED_PUBLIC_SERVICE_REGEX_TOKENS) + ")"
 
 INTENT_ROUTING_TABLE: Dict[str, List[str]] = {
     "section-1031": ["ipx1031", "lawdepot", "xendoo", "mercury", "wallethub"],

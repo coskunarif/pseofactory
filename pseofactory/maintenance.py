@@ -5235,7 +5235,6 @@ class MaintenanceLifecycle:
             if (
                 not dry_run
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
                 and not (
                     "PYTEST_CURRENT_TEST" in os.environ
                     and str(Path(adapter.repo_path).resolve()).startswith("/home/ubuntuadmin/projects/")
@@ -5251,7 +5250,7 @@ class MaintenanceLifecycle:
                         reconcile_workspace_tracking_state(untrack_agy_runs=True)
                 except Exception:
                     pass
-                if (Path(adapter.repo_path) / "functions" / "r").is_dir():
+                if (Path(adapter.repo_path) / "functions").is_dir():
                     try:
                         from pseofactory.edge import sync_tenant_edge_redirect_function
                         sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
@@ -18965,11 +18964,11 @@ def reflect_and_recompile_all_assets(
         )
         reflect_lock_guard.__enter__()
 
+        edge_sync_warnings: List[str] = []
         edge_functions_updated = False
         if (
             getattr(adapter, "repo_path", None)
-            and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
-            and (Path(adapter.repo_path) / "functions" / "r").is_dir()
+            and (Path(adapter.repo_path) / "functions").is_dir()
             and not is_live_repo_blocked
         ):
             try:
@@ -18978,8 +18977,9 @@ def reflect_and_recompile_all_assets(
                 if isinstance(edge_sync_res, dict) and edge_sync_res.get("status") == "UPDATED":
                     edge_functions_updated = True
             except Exception as edge_err:
-                if verbose:
-                    print(f"Warning: Edge redirect sync error for '{p_id}': {edge_err}")
+                warn_msg = f"Edge redirect sync error for '{p_id}': {edge_err}"
+                edge_sync_warnings.append(warn_msg)
+                print(f"Warning: {warn_msg}")
 
         porc_sync_updated: List[str] = []
         if (
@@ -20496,15 +20496,16 @@ def reflect_and_recompile_all_assets(
             if (
                 should_run_full_build
                 and getattr(adapter, "repo_path", None)
-                and adapter.property_id in ("profithelm", "prexvo", "gainhelm", "lienbond")
-                and (Path(adapter.repo_path) / "functions" / "r").is_dir()
+                and (Path(adapter.repo_path) / "functions").is_dir()
                 and not is_live_repo_blocked
             ):
                 try:
                     from pseofactory.edge import sync_tenant_edge_redirect_function
                     sync_tenant_edge_redirect_function(adapter.repo_path, property_id=adapter.property_id)
-                except Exception:
-                    pass
+                except Exception as edge_err:
+                    warn_msg = f"Post-build edge redirect sync error for '{p_id}': {edge_err}"
+                    edge_sync_warnings.append(warn_msg)
+                    print(f"Warning: {warn_msg}")
 
             # Re-apply any non-hub remediation overlays from content/overlays/ and .agy/overlays/ so full builds preserve them,
             # and heal any legacy cross-vertical polluted overlay specs in .agy/overlays/
@@ -21456,6 +21457,9 @@ def reflect_and_recompile_all_assets(
         }
         if build_error_msg:
             prop_rep_entry["build_error"] = build_error_msg
+        if edge_sync_warnings:
+            prop_rep_entry["edge_sync_warnings"] = edge_sync_warnings
+            results.setdefault("warnings", []).extend(edge_sync_warnings)
         results["property_reports"][p_id] = prop_rep_entry
         if prop_final_status != "PASS":
             results["status"] = "DRIFT"

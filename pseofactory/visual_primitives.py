@@ -2767,7 +2767,18 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
       try {
         var p = (window.location && window.location.pathname) ? window.location.pathname : "";
         var clean = p.replace(/^\\/+|\\/+$/g, "");
-        if (!clean) return "homepage";
+        if (!clean) {
+          var unlockEl = document.getElementById("workpaper-unlock-card");
+          var unlockSlug = unlockEl && unlockEl.getAttribute ? (unlockEl.getAttribute("data-tool-slug") || "") : "";
+          if (unlockSlug) return unlockSlug;
+          var previewEl = document.getElementById("btn-preview-workpaper") || document.querySelector("[data-workpaper-preview]");
+          var previewSlug = previewEl && previewEl.getAttribute ? (previewEl.getAttribute("data-tool-slug") || "") : "";
+          if (previewSlug) return previewSlug;
+          var calcEl = document.querySelector(".interactive-calculator-container[data-tool-slug], [data-tool-slug]");
+          var calcSlug = calcEl && calcEl.getAttribute ? (calcEl.getAttribute("data-tool-slug") || "") : "";
+          if (calcSlug) return calcSlug;
+          return "homepage";
+        }
         if (clean.indexOf("tools/") === 0) {
           return clean.slice(6).replace(/\\//g, "-") || "tools-directory";
         }
@@ -3161,36 +3172,123 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
       } catch (err) {}
     }
 
+    function isPartnerSlotContext(sku, tierKind) {
+      try {
+        var p = String((window.location && window.location.pathname) || "").toLowerCase();
+        var s = String(sku || "").trim().toLowerCase();
+        var t = String(tierKind || "").trim().toLowerCase();
+        if (/^\\/partners(?:\\/|$)/.test(p)) return true;
+        if (document.getElementById("partner-registration-drawer")) return true;
+        if (t === "partner_slot") return true;
+        if (/_verified_partner_slot$/.test(s)) return true;
+      } catch (e) {}
+      return false;
+    }
+
+    function formatUsdRevenue(rawVal) {
+      if (rawVal === undefined || rawVal === null || rawVal === "") return "";
+      var num = Number(String(rawVal).replace(/[$,\\s]/g, ""));
+      if (isFinite(num)) return num.toFixed(2);
+      return String(rawVal);
+    }
+
     function renderPlaybookAndFulfillmentDrawer(parentContainer, data, mode) {
       try {
         if (!parentContainer || !data) return;
-        var existingId = mode === "checkout_fulfill" ? "checkout-fulfillment-panel" : "playbook-inline-workpaper-summary";
+        var isCheckoutFulfill = mode === "checkout_fulfill";
+        var existingId = isCheckoutFulfill ? "checkout-fulfillment-panel" : "playbook-inline-workpaper-summary";
         var oldEl = document.getElementById(existingId);
         if (oldEl && oldEl.parentNode) oldEl.parentNode.removeChild(oldEl);
+        if (isCheckoutFulfill) {
+          var staleNote = document.getElementById("checkout-status-notice");
+          if (staleNote && staleNote.parentNode) staleNote.parentNode.removeChild(staleNote);
+        }
         var panel = document.createElement("div");
         panel.id = existingId;
         panel.setAttribute("data-workpaper-mode", mode || "playbook");
         panel.style.cssText = "margin-top:10px;padding:12px 14px;border-radius:8px;background:var(--bg-inset);border:1px solid var(--border);font-size:12px;line-height:1.5;";
         var stl = (data && data.settlement_attribution) || (data && data.statutory_data_pack && data.statutory_data_pack.settlement_attribution) || null;
-        if (mode === "checkout_fulfill" || (stl && stl.settlement_status === "settled")) {
+        var tierKind = String(data.tier_kind || (stl && stl.tier_kind) || "").trim().toLowerCase();
+        var skuClean = String(data.offer_sku || data.sku || (stl && stl.offer_sku) || "").trim().toLowerCase();
+        var isPartner = isPartnerSlotContext(skuClean, tierKind);
+        var isQuickTier = tierKind === "quick" || /(?:_quick_|_worksheet_19$)/.test(skuClean);
+        var rawRev = "";
+        if (stl && stl.attributed_revenue_usd !== undefined && stl.attributed_revenue_usd !== null && stl.attributed_revenue_usd !== "" && Number(stl.attributed_revenue_usd) > 0) {
+          rawRev = stl.attributed_revenue_usd;
+        } else if (stl && stl.realized_revenue_usd !== undefined && stl.realized_revenue_usd !== null && stl.realized_revenue_usd !== "" && Number(stl.realized_revenue_usd) > 0) {
+          rawRev = stl.realized_revenue_usd;
+        } else if (data.offer_price_usd !== undefined && data.offer_price_usd !== null && data.offer_price_usd !== "") {
+          rawRev = data.offer_price_usd;
+        } else if (stl && stl.gross_amount_usd !== undefined && stl.gross_amount_usd !== null && stl.gross_amount_usd !== "") {
+          rawRev = stl.gross_amount_usd;
+        } else if (stl && stl.attributed_revenue_usd !== undefined && stl.attributed_revenue_usd !== null) {
+          rawRev = stl.attributed_revenue_usd;
+        }
+        var attrRev = formatUsdRevenue(rawRev);
+        if (isCheckoutFulfill || (stl && stl.settlement_status === "settled")) {
           var stlId = (stl && stl.settlement_id) || ("stl_" + (data.lead_id || "verified"));
           var stlStatus = (stl && stl.settlement_status) || "settled";
-          var attrRev = (stl && stl.attributed_revenue_usd !== undefined) ? stl.attributed_revenue_usd : (data.offer_price_usd !== undefined ? data.offer_price_usd : "");
           var dpId = (stl && stl.datapack_pack_id) || (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ("dp_" + (data.lead_id || "verified"));
+          var revDisplay = attrRev || (isPartner ? "299.00" : "0.00");
           panel.setAttribute("data-settlement-status", String(stlStatus));
           panel.setAttribute("data-settlement-id", String(stlId));
-          panel.setAttribute("data-attributed-revenue-usd", String(attrRev));
-          panel.setAttribute("data-datapack-id", String(dpId));
+          panel.setAttribute("data-attributed-revenue-usd", revDisplay);
+          if (!isPartner) panel.setAttribute("data-datapack-id", String(dpId));
           var stlBanner = document.createElement("div");
           stlBanner.id = "checkout-settlement-attribution-banner";
           stlBanner.setAttribute("data-settlement-id", String(stlId));
           stlBanner.setAttribute("data-settlement-status", String(stlStatus));
-          stlBanner.setAttribute("data-attributed-revenue-usd", String(attrRev));
-          stlBanner.setAttribute("data-datapack-id", String(dpId));
+          stlBanner.setAttribute("data-attributed-revenue-usd", revDisplay);
+          if (!isPartner) stlBanner.setAttribute("data-datapack-id", String(dpId));
           stlBanner.style.cssText = "margin-bottom:6px;padding:5px 8px;border-radius:6px;background:var(--status-positive-bg);border:1px solid var(--status-positive-border);font-size:11px;font-weight:700;color:var(--status-positive);";
-          stlBanner.textContent = "Settlement Verified (" + String(stlId) + ") | Attributed Revenue: $" + String(attrRev) + " | Data Pack: " + String(dpId);
+          stlBanner.textContent = isPartner
+            ? ("Settlement Verified (" + String(stlId) + ") | Attributed Revenue: $" + revDisplay)
+            : ("Settlement Verified (" + String(stlId) + ") | Attributed Revenue: $" + revDisplay + " | Data Pack: " + String(dpId));
           panel.appendChild(stlBanner);
         }
+        function toSafeHtmlActionUrl(rawU) {
+          var s = String(rawU || "").trim();
+          if (!s || s.charAt(0) !== "/" || s.indexOf("//") === 0) return "";
+          if (s.indexOf("format=") === -1) {
+            s += (s.indexOf("?") === -1 ? "?format=html" : "&format=html");
+          }
+          return s;
+        }
+        var pbUrl = toSafeHtmlActionUrl(data.playbook_url);
+        var ffUrl = toSafeHtmlActionUrl(data.fulfillment_url);
+
+        if (isCheckoutFulfill && isPartner) {
+          var firmName = String(data.firm_name || (stl && stl.firm_name) || "Verified Advisory Partner").trim();
+          var partnerPriceDisplay = attrRev || "299.00";
+          var partnerLeadRef = String(data.lead_id || (stl && stl.lead_id) || "verified");
+          var pTitle = document.createElement("div");
+          pTitle.id = "partner-slot-onboarding-title";
+          pTitle.style.cssText = "margin-bottom:6px;font-weight:700;font-size:14px;color:var(--text-primary);";
+          pTitle.textContent = "Verified Partner Slot Onboarding Confirmation";
+          panel.appendChild(pTitle);
+          var pMeta = document.createElement("div");
+          pMeta.id = "partner-slot-onboarding-details";
+          pMeta.style.cssText = "margin-bottom:8px;color:var(--text-primary);";
+          pMeta.textContent = "Firm: " + firmName + " | Placement Status: Verified ($" + partnerPriceDisplay + " active) | Reference: " + partnerLeadRef;
+          panel.appendChild(pMeta);
+          if (ffUrl) {
+            var pLinks = document.createElement("div");
+            pLinks.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;";
+            var pReceiptLink = document.createElement("a");
+            pReceiptLink.id = "partner-slot-receipt-link";
+            pReceiptLink.className = "touch-target";
+            pReceiptLink.href = ffUrl;
+            pReceiptLink.target = "_blank";
+            pReceiptLink.rel = "noopener noreferrer";
+            pReceiptLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
+            pReceiptLink.textContent = "View Verified Partner Slot Receipt";
+            pLinks.appendChild(pReceiptLink);
+            panel.appendChild(pLinks);
+          }
+          parentContainer.appendChild(panel);
+          return;
+        }
+
         var sched = Array.isArray(data.reconciliation_schedule) ? data.reconciliation_schedule : [];
         if (sched.length > 0) {
           var summaryLine = sched.slice(0, 2).map(function(r) {
@@ -3203,93 +3301,119 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         }
         var linksRow = document.createElement("div");
         linksRow.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;align-items:center;";
-        function toSafeHtmlActionUrl(rawU) {
-          var s = String(rawU || "").trim();
-          if (!s || s.charAt(0) !== "/" || s.indexOf("//") === 0) return "";
-          if (s.indexOf("format=") === -1) {
-            s += (s.indexOf("?") === -1 ? "?format=html" : "&format=html");
+
+        if (isCheckoutFulfill) {
+          if (ffUrl) {
+            var ffLink = document.createElement("a");
+            ffLink.id = "checkout-fulfillment-html-link";
+            ffLink.className = "touch-target";
+            ffLink.href = ffUrl;
+            ffLink.target = "_blank";
+            ffLink.rel = "noopener noreferrer";
+            ffLink.setAttribute("data-workpaper-html-download", "1");
+            ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
+            ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
+            ffLink.addEventListener("click", function(ev) {
+              ffLink.setAttribute("data-download-triggered", "true");
+              if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+              emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
+                offer_sku: data.offer_sku || ""
+              });
+            });
+            linksRow.appendChild(ffLink);
           }
-          return s;
-        }
-        var pbUrl = toSafeHtmlActionUrl(data.playbook_url);
-        var ffUrl = toSafeHtmlActionUrl(data.fulfillment_url);
-        var csvUrl = mode === "checkout_fulfill"
-          ? (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")
-          : (data.playbook_csv_url ? String(data.playbook_csv_url) : (data.playbook_url ? (String(data.playbook_url) + "&format=csv") : (data.csv_fulfillment_url ? String(data.csv_fulfillment_url) : "")));
-        if (mode === "checkout_fulfill" && ffUrl) {
-          var ffLink = document.createElement("a");
-          ffLink.id = "checkout-fulfillment-html-link";
-          ffLink.className = "touch-target";
-          ffLink.href = ffUrl;
-          ffLink.target = "_blank";
-          ffLink.rel = "noopener noreferrer";
-          ffLink.setAttribute("data-workpaper-html-download", "1");
-          ffLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
-          ffLink.textContent = "Open Instant Audit Workpaper (HTML/PDF)";
-          ffLink.addEventListener("click", function(ev) {
-            ffLink.setAttribute("data-download-triggered", "true");
-            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
-            emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
-              offer_sku: data.offer_sku || ""
+          var csvUrl = data.csv_fulfillment_url ? String(data.csv_fulfillment_url).trim() : "";
+          if (csvUrl && !isPartner) {
+            var csvLink = document.createElement("a");
+            csvLink.id = "checkout-fulfillment-csv-link";
+            csvLink.className = "touch-target";
+            csvLink.href = csvUrl;
+            csvLink.setAttribute("data-workpaper-csv-download", "1");
+            csvLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
+            csvLink.textContent = "Download CSV Reconciliation Schedule";
+            csvLink.addEventListener("click", function(ev) {
+              csvLink.setAttribute("data-download-triggered", "true");
+              if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+              emitWorkbenchEngagementBeacon("workpaper_csv_downloaded", "post_calculation_upgrade_drawer", {
+                offer_sku: data.offer_sku || ""
+              });
             });
-          });
-          linksRow.appendChild(ffLink);
-        } else if (pbUrl) {
-          var pbLink = document.createElement("a");
-          pbLink.id = "playbook-download-link";
-          pbLink.className = "touch-target";
-          pbLink.href = pbUrl;
-          pbLink.target = "_blank";
-          pbLink.rel = "noopener noreferrer";
-          pbLink.setAttribute("data-workpaper-html-download", "1");
-          pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
-          pbLink.textContent = "Open Personalized Playbook Worksheet";
-          pbLink.addEventListener("click", function(ev) {
-            pbLink.setAttribute("data-download-triggered", "true");
-            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
-            emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
-              offer_sku: data.offer_sku || ""
+            linksRow.appendChild(csvLink);
+          }
+          var dpUrl = (!isQuickTier && !isPartner && data.datapack_url) ? String(data.datapack_url).trim() : "";
+          if (dpUrl) {
+            var dpLink = document.createElement("a");
+            dpLink.id = "checkout-fulfillment-datapack-link";
+            dpLink.className = "touch-target";
+            dpLink.href = dpUrl;
+            dpLink.setAttribute("data-datapack-download", "1");
+            dpLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
+            dpLink.textContent = "Download Statutory Data Pack (JSON)";
+            dpLink.addEventListener("click", function(ev) {
+              dpLink.setAttribute("data-download-triggered", "true");
+              if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+              emitWorkbenchEngagementBeacon("statutory_datapack_downloaded", "post_calculation_upgrade_drawer", {
+                offer_sku: data.offer_sku || "",
+                datapack_id: (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ""
+              });
             });
-          });
-          linksRow.appendChild(pbLink);
-        }
-        if (csvUrl) {
-          var csvLink = document.createElement("a");
-          csvLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-csv-link" : "playbook-csv-link";
-          csvLink.className = "touch-target";
-          csvLink.href = csvUrl;
-          csvLink.setAttribute("data-workpaper-csv-download", "1");
-          csvLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
-          csvLink.textContent = "Download CSV Reconciliation Schedule";
-          csvLink.addEventListener("click", function(ev) {
-            csvLink.setAttribute("data-download-triggered", "true");
-            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
-            emitWorkbenchEngagementBeacon("workpaper_csv_downloaded", "post_calculation_upgrade_drawer", {
-              offer_sku: data.offer_sku || ""
+            linksRow.appendChild(dpLink);
+          }
+        } else {
+          if (pbUrl) {
+            var pbLink = document.createElement("a");
+            pbLink.id = "playbook-download-link";
+            pbLink.className = "touch-target";
+            pbLink.href = pbUrl;
+            pbLink.target = "_blank";
+            pbLink.rel = "noopener noreferrer";
+            pbLink.setAttribute("data-workpaper-html-download", "1");
+            pbLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--status-positive);text-decoration:underline;";
+            pbLink.textContent = "Open Free Playbook Summary";
+            pbLink.addEventListener("click", function(ev) {
+              pbLink.setAttribute("data-download-triggered", "true");
+              if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
+              emitWorkbenchEngagementBeacon("workpaper_html_opened", "post_calculation_upgrade_drawer", {
+                offer_sku: data.offer_sku || ""
+              });
             });
-          });
-          linksRow.appendChild(csvLink);
-        }
-        var dpUrl = mode === "checkout_fulfill"
-          ? (data.datapack_url ? String(data.datapack_url) : (data.fulfillment_url ? (String(data.fulfillment_url) + "&format=datapack") : ""))
-          : (data.playbook_datapack_url ? String(data.playbook_datapack_url) : (data.playbook_url ? (String(data.playbook_url) + "&format=datapack") : (data.datapack_url ? String(data.datapack_url) : "")));
-        if (dpUrl) {
-          var dpLink = document.createElement("a");
-          dpLink.id = mode === "checkout_fulfill" ? "checkout-fulfillment-datapack-link" : "playbook-datapack-link";
-          dpLink.className = "touch-target";
-          dpLink.href = dpUrl;
-          dpLink.setAttribute("data-datapack-download", "1");
-          dpLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 10px;font-weight:700;color:var(--brand-primary);text-decoration:underline;";
-          dpLink.textContent = "Download Statutory Data Pack (JSON)";
-          dpLink.addEventListener("click", function(ev) {
-            dpLink.setAttribute("data-download-triggered", "true");
-            if (window.__PSEO_SYNTHETIC_TEST__) ev.preventDefault();
-            emitWorkbenchEngagementBeacon("statutory_datapack_downloaded", "post_calculation_upgrade_drawer", {
-              offer_sku: data.offer_sku || "",
-              datapack_id: (data.statutory_data_pack && data.statutory_data_pack.pack_id) || ""
-            });
-          });
-          linksRow.appendChild(dpLink);
+            linksRow.appendChild(pbLink);
+          }
+          var unlockCardNode = document.getElementById("workpaper-unlock-card");
+          var upgradeSlug = String(data.tool_slug || resolveCurrentToolSlug() || "general");
+          var qSku = String(data.quick_sku || (unlockCardNode && unlockCardNode.getAttribute("data-quick-sku")) || "");
+          var qPrice = String(data.quick_price || (unlockCardNode && unlockCardNode.getAttribute("data-quick-price")) || "");
+          var fSku = String(data.full_sku || data.offer_sku || (unlockCardNode && (unlockCardNode.getAttribute("data-full-sku") || unlockCardNode.getAttribute("data-offer-sku"))) || "");
+          var fPrice = String(data.full_price || data.offer_price_usd || (unlockCardNode && (unlockCardNode.getAttribute("data-full-price") || unlockCardNode.getAttribute("data-offer-price"))) || "");
+          if (qSku) {
+            var upgQuick = document.createElement("a");
+            upgQuick.id = "playbook-upgrade-quick-link";
+            upgQuick.className = "touch-target";
+            upgQuick.rel = "nofollow";
+            upgQuick.href = "/api/checkout?sku=" + encodeURIComponent(qSku) + "&tool_slug=" + encodeURIComponent(upgradeSlug) + "&redirect=1";
+            upgQuick.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--border);font-weight:700;color:var(--brand-primary);text-decoration:none;";
+            upgQuick.textContent = qPrice ? ("Unlock Quick Worksheet ($" + qPrice + ")") : "Unlock Quick Worksheet";
+            linksRow.appendChild(upgQuick);
+          }
+          if (fSku) {
+            var upgFull = document.createElement("a");
+            upgFull.id = "playbook-upgrade-full-link";
+            upgFull.className = "touch-target";
+            upgFull.rel = "nofollow";
+            upgFull.href = "/api/checkout?sku=" + encodeURIComponent(fSku) + "&tool_slug=" + encodeURIComponent(upgradeSlug) + "&redirect=1";
+            upgFull.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--brand-primary);font-weight:700;color:var(--brand-primary);text-decoration:none;";
+            upgFull.textContent = fPrice ? ("Unlock Full Workpaper & Data Pack ($" + fPrice + ")") : "Unlock Full Workpaper & Data Pack";
+            linksRow.appendChild(upgFull);
+          } else if (!qSku) {
+            var upgFallback = document.createElement("a");
+            upgFallback.id = "playbook-upgrade-full-link";
+            upgFallback.className = "touch-target";
+            upgFallback.rel = "nofollow";
+            upgFallback.href = "/api/checkout?tool_slug=" + encodeURIComponent(upgradeSlug) + "&redirect=1";
+            upgFallback.style.cssText = "display:inline-flex;align-items:center;min-height:44px;padding:6px 12px;border-radius:6px;border:1px solid var(--brand-primary);font-weight:700;color:var(--brand-primary);text-decoration:none;";
+            upgFallback.textContent = "Upgrade via Stripe Checkout";
+            linksRow.appendChild(upgFallback);
+          }
         }
         panel.appendChild(linksRow);
         parentContainer.appendChild(panel);
@@ -3302,20 +3426,40 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         if (!rawSearch) return;
         var qs = new URLSearchParams(rawSearch);
         var checkoutStatus = String(qs.get("checkout_status") || "").trim().toLowerCase();
+        function removeElById(elId) {
+          var el = document.getElementById(elId);
+          if (el && el.parentNode) el.parentNode.removeChild(el);
+        }
+        function renderCheckoutNotice(targetHost, statusVal, roleVal, textVal) {
+          removeElById("checkout-status-notice");
+          var box = document.createElement("div");
+          box.id = "checkout-status-notice";
+          box.setAttribute("data-checkout-status", statusVal);
+          box.setAttribute("role", roleVal);
+          box.setAttribute("aria-live", "polite");
+          box.style.cssText = "margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--status-warning-bg);border:1px solid var(--status-warning-border);color:var(--text-primary);font-size:14px;line-height:1.5;";
+          box.textContent = textVal;
+          targetHost.appendChild(box);
+          return box;
+        }
+
         if (checkoutStatus === "unavailable" || checkoutStatus === "cancelled") {
           var statusLeadId = qs.get("lead_id") || "";
           var statusSku = qs.get("sku") || "";
           var statusSlug = resolveCurrentToolSlug();
-          var upgTarget = document.getElementById("workpaper-unlock-card");
-          var noticeHost = document.getElementById("workpaper-checkout-status") || upgTarget || document.querySelector("main");
+          var isPartnerCancel = isPartnerSlotContext(statusSku, "");
+          var upgTarget = isPartnerCancel
+            ? document.getElementById("partner-registration-drawer")
+            : document.getElementById("workpaper-unlock-card");
+          var noticeHost = isPartnerCancel
+            ? (document.getElementById("partner-registration-status") || document.getElementById("partner-registration-drawer") || document.querySelector("main"))
+            : (document.getElementById("workpaper-checkout-status") || upgTarget || document.querySelector("main"));
           if (!noticeHost) return;
           if (upgTarget) {
             upgTarget.setAttribute("data-checkout-status", checkoutStatus);
           }
-          var existingNotice = document.getElementById("checkout-status-notice");
-          if (existingNotice && existingNotice.parentNode) {
-            existingNotice.parentNode.removeChild(existingNotice);
-          }
+          removeElById("checkout-fulfillment-panel");
+          removeElById("checkout-status-notice");
           var notice = document.createElement("div");
           notice.id = "checkout-status-notice";
           notice.setAttribute("data-checkout-status", checkoutStatus);
@@ -3324,9 +3468,15 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
           notice.style.cssText = "margin-top:12px;padding:12px 14px;border-radius:8px;background:var(--status-warning-bg);border:1px solid var(--status-warning-border);color:var(--text-primary);font-size:14px;line-height:1.5;";
           var msg = document.createElement("p");
           msg.style.cssText = "margin:0 0 10px 0;color:var(--text-primary);font-weight:600;";
-          msg.textContent = checkoutStatus === "unavailable"
-            ? "Paid checkout is temporarily unavailable. You can retry checkout or open the free calculation playbook pack below."
-            : "Checkout was cancelled and no payment was charged. You can resume checkout or open the free calculation playbook pack below.";
+          if (isPartnerCancel) {
+            msg.textContent = checkoutStatus === "unavailable"
+              ? "Partner slot checkout is temporarily unavailable. You can retry partner slot checkout below."
+              : "Partner slot checkout was cancelled and no payment was charged. You can resume partner slot checkout below.";
+          } else {
+            msg.textContent = checkoutStatus === "unavailable"
+              ? "Paid checkout is temporarily unavailable. You can retry checkout or open the free calculation playbook pack below."
+              : "Checkout was cancelled and no payment was charged. You can resume checkout or open the free calculation playbook pack below.";
+          }
           notice.appendChild(msg);
           var actionRow = document.createElement("div");
           actionRow.style.cssText = "display:flex;gap:10px;flex-wrap:wrap;align-items:center;";
@@ -3338,18 +3488,22 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
           retryLink.className = "touch-target";
           retryLink.href = "/api/lead-capture?checkout=1" + commonQs + "&redirect=1";
           retryLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:8px 14px;border-radius:6px;border:1px solid var(--status-warning-border);color:var(--text-primary);font-weight:700;text-decoration:none;";
-          retryLink.textContent = checkoutStatus === "unavailable" ? "Retry Paid Checkout" : "Resume Paid Checkout";
+          retryLink.textContent = isPartnerCancel
+            ? (checkoutStatus === "unavailable" ? "Retry Partner Slot Checkout" : "Resume Partner Slot Checkout")
+            : (checkoutStatus === "unavailable" ? "Retry Paid Checkout" : "Resume Paid Checkout");
           actionRow.appendChild(retryLink);
-          var freePackLink = document.createElement("a");
-          freePackLink.id = "checkout-status-free-pack-link";
-          freePackLink.className = "touch-target";
-          freePackLink.href = "/api/lead-capture?playbook=1" + commonQs + "&format=html";
-          freePackLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:8px 14px;border-radius:6px;border:1px solid var(--border);color:var(--accent);font-weight:700;text-decoration:none;";
-          freePackLink.textContent = "Open Free Playbook Pack";
-          actionRow.appendChild(freePackLink);
+          if (!isPartnerCancel) {
+            var freePackLink = document.createElement("a");
+            freePackLink.id = "checkout-status-free-pack-link";
+            freePackLink.className = "touch-target";
+            freePackLink.href = "/api/lead-capture?playbook=1" + commonQs + "&format=html";
+            freePackLink.style.cssText = "display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:8px 14px;border-radius:6px;border:1px solid var(--border);color:var(--accent);font-weight:700;text-decoration:none;";
+            freePackLink.textContent = "Open Free Playbook Pack";
+            actionRow.appendChild(freePackLink);
+          }
           notice.appendChild(actionRow);
           noticeHost.appendChild(notice);
-          emitWorkbenchEngagementBeacon("checkout_status_" + checkoutStatus, "post_calculation_upgrade_drawer", {
+          emitWorkbenchEngagementBeacon("checkout_status_" + checkoutStatus, isPartnerCancel ? "partner_supply_registration" : "post_calculation_upgrade_drawer", {
             offer_sku: statusSku,
             lead_id: statusLeadId
           });
@@ -3360,55 +3514,83 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         var sku = qs.get("sku") || "";
         var sessionId = qs.get("session_id") || "";
         var slug = resolveCurrentToolSlug();
-        var hostTarget = document.getElementById("workpaper-checkout-status") || document.getElementById("workpaper-unlock-card") || document.querySelector("main");
+        var isPartnerSuccess = isPartnerSlotContext(sku, "");
+        var hostTarget = isPartnerSuccess
+          ? (document.getElementById("partner-registration-status") || document.getElementById("partner-registration-drawer") || document.querySelector("main"))
+          : (document.getElementById("workpaper-checkout-status") || document.getElementById("workpaper-unlock-card") || document.querySelector("main"));
         if (!hostTarget) return;
-        var upgDrawer = document.getElementById("workpaper-unlock-card");
+        var upgDrawer = isPartnerSuccess
+          ? document.getElementById("partner-registration-drawer")
+          : document.getElementById("workpaper-unlock-card");
+        removeElById("checkout-fulfillment-panel");
         if (!/^cs_live_[A-Za-z0-9_]+$/.test(sessionId)) {
           if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+          renderCheckoutNotice(hostTarget, "payment_unverified", "alert", "Payment could not be verified yet (payment_unverified). Please confirm your Stripe checkout session or retry checkout.");
           return;
         }
         if (upgDrawer) {
           upgDrawer.setAttribute("data-checkout-status", "payment_verifying");
         }
+        renderCheckoutNotice(hostTarget, "payment_verifying", "status", "Verifying Stripe payment settlement...");
         var fulfillBase = "/api/lead-capture?fulfill=1&lead_id=" + encodeURIComponent(leadId) + "&sku=" + encodeURIComponent(sku) + "&tool_slug=" + encodeURIComponent(slug) + "&session_id=" + encodeURIComponent(sessionId);
-        renderPlaybookAndFulfillmentDrawer(hostTarget, {
-          fulfillment_url: fulfillBase,
-          csv_fulfillment_url: fulfillBase + "&format=csv",
-          datapack_url: fulfillBase + "&format=datapack",
-          reconciliation_schedule: []
-        }, "checkout_fulfill");
-        if (typeof fetch === "function") {
-          fetch(fulfillBase, { headers: { "Accept": "application/json" } })
+        var fetchFn = (typeof window !== "undefined" && typeof window.fetch === "function") ? window.fetch : (typeof fetch === "function" ? fetch : null);
+        if (fetchFn) {
+          fetchFn(fulfillBase, { headers: { "Accept": "application/json" } })
             .then(function(res) {
-              if (res && res.status === 402) {
+              if (!res || !res.ok || res.status === 402) {
+                removeElById("checkout-fulfillment-panel");
                 if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+                renderCheckoutNotice(hostTarget, "payment_unverified", "alert", "Stripe payment settlement could not be verified (payment_unverified). Paid deliverables remain locked until verification completes.");
                 return null;
               }
-              return res && res.ok ? res.json() : null;
+              return res.json();
             })
             .then(function(data) {
-              if (data && data.settlement_attribution && data.settlement_attribution.settlement_status === "settled" && upgDrawer) {
+              if (!data) return;
+              if (data.ok === false) {
+                removeElById("checkout-fulfillment-panel");
+                if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+                renderCheckoutNotice(hostTarget, "payment_unverified", "alert", String(data.message || data.error || "Stripe payment verification failed (payment_unverified)."));
+                return;
+              }
+              removeElById("checkout-status-notice");
+              if (upgDrawer) {
                 upgDrawer.setAttribute("data-checkout-status", "fulfilled");
               }
-              if (data && Array.isArray(data.reconciliation_schedule) && data.reconciliation_schedule.length > 0) {
-                var ffResolved = data.fulfillment_url || fulfillBase;
-                var csvResolved = data.csv_fulfillment_url || (fulfillBase + "&format=csv");
-                var dpResolved = data.datapack_url || (fulfillBase + "&format=datapack");
-                if (sessionId) {
-                  var sessParam = "&session_id=" + encodeURIComponent(sessionId);
-                  if (ffResolved.indexOf("session_id=") === -1) ffResolved += sessParam;
-                  if (csvResolved.indexOf("session_id=") === -1) csvResolved += sessParam;
-                  if (dpResolved.indexOf("session_id=") === -1) dpResolved += sessParam;
+              function appendSessParam(rawUrl) {
+                var cleanUrl = String(rawUrl || "").trim();
+                if (!cleanUrl) return "";
+                if (sessionId && cleanUrl.indexOf("session_id=") === -1) {
+                  cleanUrl += (cleanUrl.indexOf("?") === -1 ? "?" : "&") + "session_id=" + encodeURIComponent(sessionId);
                 }
-                renderPlaybookAndFulfillmentDrawer(hostTarget, {
-                  fulfillment_url: ffResolved,
-                  csv_fulfillment_url: csvResolved,
-                  datapack_url: dpResolved,
-                  reconciliation_schedule: data.reconciliation_schedule
-                }, "checkout_fulfill");
+                return cleanUrl;
               }
+              var ffResolved = appendSessParam(data.fulfillment_url);
+              var csvResolved = appendSessParam(data.csv_fulfillment_url);
+              var dpResolved = appendSessParam(data.datapack_url);
+              var payload = {
+                ok: true,
+                lead_id: data.lead_id || leadId,
+                offer_sku: data.offer_sku || sku,
+                offer_title: data.offer_title || "",
+                offer_price_usd: data.offer_price_usd,
+                tier_kind: data.tier_kind || (isPartnerSuccess ? "partner_slot" : ""),
+                firm_name: data.firm_name || (data.settlement_attribution && data.settlement_attribution.firm_name) || "",
+                tool_slug: data.tool_slug || slug,
+                settlement_attribution: data.settlement_attribution || null,
+                statutory_data_pack: data.statutory_data_pack || null,
+                fulfillment_url: ffResolved,
+                csv_fulfillment_url: csvResolved,
+                datapack_url: dpResolved,
+                reconciliation_schedule: Array.isArray(data.reconciliation_schedule) ? data.reconciliation_schedule : []
+              };
+              renderPlaybookAndFulfillmentDrawer(hostTarget, payload, "checkout_fulfill");
             })
-            .catch(function() {});
+            .catch(function() {
+              removeElById("checkout-fulfillment-panel");
+              if (upgDrawer) { upgDrawer.setAttribute("data-checkout-status", "payment_unverified"); }
+              renderCheckoutNotice(hostTarget, "payment_unverified", "alert", "Unable to verify Stripe payment settlement right now (payment_unverified). Please refresh to retry.");
+            });
         }
       } catch (e) {}
     }
@@ -4018,8 +4200,12 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
           }
           prevTrigger.setAttribute("aria-expanded", "true");
           var pCard = document.getElementById("workpaper-unlock-card");
+          var pvSlug = (prevTrigger.getAttribute && prevTrigger.getAttribute("data-tool-slug"))
+            || (pCard && pCard.getAttribute ? pCard.getAttribute("data-tool-slug") : "")
+            || (pState && pState.slug)
+            || resolveCurrentToolSlug();
           var pAmt = pState.calculated_amount > 0 ? Math.round(pState.calculated_amount) : (pCard ? (parseInt(pCard.getAttribute("data-calculated-amount") || "100000", 10) || 100000) : 100000);
-          var pbUrl = "/api/lead-capture?playbook=1&tool_slug=" + encodeURIComponent(pState.slug) + "&amount=" + encodeURIComponent(String(pAmt));
+          var pbUrl = "/api/lead-capture?playbook=1&tool_slug=" + encodeURIComponent(pvSlug) + "&amount=" + encodeURIComponent(String(pAmt));
           if (pState.inputs && Object.keys(pState.inputs).length > 0) {
             pbUrl += "&inputs_json=" + encodeURIComponent(JSON.stringify(pState.inputs).slice(0, 600));
           }
@@ -7823,16 +8009,23 @@ def normalize_html_visual_primitives(
     return updated, repaired
 
 
-RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS: Tuple[str, ...] = (
-    "ibr-hardship-cap-calculator",
-    "pslf-buyback-months-reconsideration-student-loan-calculator",
-    "pslf-qualifying-payment-simulator",
-    "save-plan-litigation-transition",
-    "pell-grant",
-    "idr-payment",
-    "student-loan-repayment",
-    "tuition-roi",
-)
+def _build_restricted_public_service_ymyl_slugs() -> Tuple[str, ...]:
+    from pseofactory.affiliates import PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS
+
+    merged = set(PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS) | {
+        "ibr-hardship-cap-calculator",
+        "pslf-buyback-months-reconsideration-student-loan-calculator",
+        "pslf-qualifying-payment-simulator",
+        "save-plan-litigation-transition",
+        "pell-grant",
+        "idr-payment",
+        "student-loan-repayment",
+        "tuition-roi",
+    }
+    return tuple(sorted(merged))
+
+
+RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS: Tuple[str, ...] = _build_restricted_public_service_ymyl_slugs()
 
 
 def _run_node_vm_button_action_simulation() -> Dict[str, Any]:
@@ -8566,13 +8759,24 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
     from pathlib import Path
 
     if dist_dirs is None:
+        import json as _vp_json
+        from pseofactory.impact_planner import discover_active_tenants
+
         workspace_root = Path("/home/ubuntuadmin/projects")
-        dist_dirs = {
-            "profithelm": workspace_root / "profithelm-platform" / "dist" / "tools",
-            "prexvo": workspace_root / "prexvo" / "dist" / "tools",
-            "gainhelm": workspace_root / "gainhelm" / "dist" / "tools",
-            "lienbond": workspace_root / "lienbond" / "dist" / "tools",
-        }
+        discovered_dirs: Dict[str, Any] = {}
+        for t_pid, t_repo in discover_active_tenants(workspace_root):
+            repo_path = Path(t_repo)
+            rel_dist = "dist"
+            marker = repo_path / ".pseofactory.json"
+            if marker.is_file():
+                try:
+                    m_data = _vp_json.loads(marker.read_text(encoding="utf-8"))
+                    if isinstance(m_data, dict) and m_data.get("dist_dir"):
+                        rel_dist = str(m_data["dist_dir"]).strip() or "dist"
+                except Exception:
+                    pass
+            discovered_dirs[t_pid] = repo_path / rel_dist / "tools"
+        dist_dirs = discovered_dirs
 
     tenant_summaries: Dict[str, Any] = {}
     total_pages = 0
@@ -8627,7 +8831,10 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
                 except Exception:
                     ext_rt_js_valid = False
 
-        from pseofactory.affiliates import load_live_partner_keys_from_vault as _vp_live_keys
+        from pseofactory.affiliates import (
+            is_restricted_public_service_slug,
+            load_live_partner_keys_from_vault as _vp_live_keys,
+        )
 
         tenant_live_keys = _vp_live_keys(tenant)
         for html_file in html_files:
@@ -8638,6 +8845,8 @@ def audit_monetization_and_datapack_ui_ux_surfaces(
             is_restricted = (
                 slug in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
                 or html_file.parent.name in RESTRICTED_PUBLIC_SERVICE_YMYL_SLUGS
+                or is_restricted_public_service_slug(slug)
+                or is_restricted_public_service_slug(html_file.parent.name)
             )
 
             t_pages += 1

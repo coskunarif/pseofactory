@@ -3075,6 +3075,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_ta.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic tenant discovery")
     p_ta.add_argument("--json", action="store_true", help="Output machine-readable JSON truth-audit report")
 
+    p_ca = subparsers.add_parser(
+        "commerce-audit",
+        help="Execute fail-closed Autonomous Commerce, Paywall Isolation & Edge Replay audit across one or all properties",
+    )
+    p_ca.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_ca.add_argument("--dist-dir", type=str, default=None, help="Explicit dist directory override for single property")
+    p_ca.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic tenant discovery")
+    p_ca.add_argument("--live", action="store_true", help="Also run read-only live production endpoint probes")
+    p_ca.add_argument("--base-url", type=str, default=None, help="Explicit live base URL override for single property")
+    p_ca.add_argument("--json", action="store_true", help="Output machine-readable JSON commerce-audit report")
+
     return parser
 
 
@@ -3353,9 +3364,129 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_revenue_truth(args)
     elif args.command == "truth-audit":
         return cmd_truth_audit(args)
+    elif args.command == "commerce-audit":
+        return cmd_commerce_audit(args)
     else:
         parser.print_help()
         return 1
+
+
+def _resolve_cli_live_base_url(
+    property_id: str,
+    repo_root: Path,
+    reg: TenantRegistry,
+) -> Optional[str]:
+    marker_file = repo_root / ".pseofactory.json"
+    if marker_file.is_file():
+        try:
+            marker = json.loads(marker_file.read_text(encoding="utf-8"))
+            if isinstance(marker, dict):
+                c_base = str(marker.get("canonical_base") or "").strip()
+                if c_base:
+                    return c_base.rstrip("/")
+                dom = str(marker.get("domain") or "").strip()
+                if dom:
+                    return f"https://{dom}".rstrip("/")
+        except Exception:
+            pass
+    try:
+        adp = reg.get_adapter(property_id)
+        for attr in ("canonical_base", "base_url"):
+            val = str(getattr(adp, attr, "") or "").strip()
+            if val:
+                return val.rstrip("/")
+    except KeyError:
+        pass
+    try:
+        from pseofactory.tenant_facts import (
+            CANONICAL_TENANT_DECLARATIONS,
+            SPAWNED_TENANT_DECLARATIONS,
+        )
+
+        decl = CANONICAL_TENANT_DECLARATIONS.get(property_id) or SPAWNED_TENANT_DECLARATIONS.get(property_id)
+        if decl and getattr(decl, "canonical_base", ""):
+            return str(decl.canonical_base).strip().rstrip("/")
+    except Exception:
+        pass
+    return f"https://{property_id}.com"
+
+
+def cmd_commerce_audit(args: argparse.Namespace) -> int:
+    """
+    Runs fail-closed audit_tenant_commerce_fail_closed across one property or all
+    dynamically discovered properties. Returns 0 on PASS, 1 on FAIL.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.commerce_gate import audit_tenant_commerce_fail_closed
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    prop_arg = str(getattr(args, "property", "all") or "all").strip().lower()
+    dist_override = getattr(args, "dist_dir", None)
+    run_live = bool(getattr(args, "live", False))
+    base_url_override = getattr(args, "base_url", None)
+    as_json = bool(getattr(args, "json", False))
+
+    if prop_arg == "all":
+        target_props = _discover_cli_tenant_ids(ws_root)
+    else:
+        target_props = [prop_arg]
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    results: Dict[str, Any] = {}
+    all_passed = True
+
+    for p_id in target_props:
+        if dist_override and len(target_props) == 1:
+            d_dir = Path(dist_override).resolve()
+            repo_root = d_dir.parent
+        else:
+            try:
+                adp = reg.get_adapter(p_id)
+                d_dir = Path(adp.dist_dir).resolve()
+                repo_root = Path(getattr(adp, "repo_path", None) or d_dir.parent).resolve()
+            except KeyError:
+                repo_root = (Path(ws_root) / p_id).resolve()
+                d_dir = repo_root / "dist"
+
+        live_url = None
+        if run_live:
+            live_url = (
+                str(base_url_override).strip().rstrip("/")
+                if base_url_override and len(target_props) == 1
+                else _resolve_cli_live_base_url(p_id, repo_root, reg)
+            )
+
+        rep = audit_tenant_commerce_fail_closed(
+            repo_root=repo_root,
+            property_id=p_id,
+            live_base_url=live_url,
+            dist_dir=d_dir,
+        )
+        if not rep.passed:
+            all_passed = False
+        results[p_id] = rep.to_dict()
+
+    payload = {
+        "status": "PASS" if all_passed else "FAIL",
+        "passed": all_passed,
+        "properties_audited": len(target_props),
+        "live_probe_enabled": run_live,
+        "properties": results,
+    }
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        for p_id, res in results.items():
+            leak_cnt = (res.get("static_leak_audit") or {}).get("violations_count", 0)
+            replay_st = (res.get("edge_replay") or {}).get("status", "UNKNOWN")
+            live_st = (res.get("live_probe") or {}).get("status", "SKIPPED") if run_live else "SKIPPED"
+            print(
+                f"[{res['status']}] commerce-audit ({p_id}): "
+                f"static_leaks={leak_cnt} | edge_replay={replay_st} | live_probe={live_st}"
+            )
+            for issue in res.get("issues", [])[:25]:
+                print(f"  - {issue}")
+    return 0 if all_passed else 1
 
 
 def cmd_truth_audit(args: argparse.Namespace) -> int:

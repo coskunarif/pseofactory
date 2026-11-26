@@ -2067,13 +2067,278 @@ def _render_edge_ssrf_guard_js(
     )
 
 
+def _resolve_edge_tenant_metadata(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    audience_tier: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves tenant domain, brand name, KV binding names, and pricing tier dynamically
+    for canonical and 5th-50th+ sites from .pseofactory.json and pseofactory.pricing.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.pricing import TENANT_BRAND_NAMES, get_audience_tier
+
+    raw_prop = str(property_id or "profithelm").strip().lower()
+    prop_clean = "profithelm" if raw_prop in ("profithelm-platform", "factory") else raw_prop
+    if not prop_clean:
+        raise ValueError(f"Unsupported empty property_id for edge generation: {property_id!r}")
+
+    legacy_cfg: Dict[str, Dict[str, Any]] = {
+        "profithelm": {
+            "brand_name": "ProfitHelm",
+            "domain": "profithelm.com",
+            "from_name": "ProfitHelm Advisory Desk",
+            "default_slug": "section-1031-calculator",
+            "default_amt": 250000,
+            "default_state": "US",
+            "default_buyer_label": "Verified Buyer",
+        },
+        "prexvo": {
+            "brand_name": "Prexvo",
+            "domain": "prexvo.com",
+            "from_name": "Prexvo Education Desk",
+            "default_slug": "student-loan-refinance-break-even-calculator",
+            "default_amt": 85000,
+            "default_state": "US",
+            "default_buyer_label": "Verified Borrower",
+        },
+        "gainhelm": {
+            "brand_name": "GainHelm",
+            "domain": "gainhelm.com",
+            "from_name": "GainHelm Compliance Desk",
+            "default_slug": "soc-2-audit-cost-calculator",
+            "default_amt": 48500,
+            "default_state": "US",
+            "default_buyer_label": "Verified Buyer",
+        },
+        "lienbond": {
+            "brand_name": "LienBond",
+            "domain": "lienbond.com",
+            "from_name": "LienBond Underwriting Desk",
+            "default_slug": "contractor-license-bond-cost-calculator-by-credit-score",
+            "default_amt": 125000,
+            "default_state": "CA",
+            "default_buyer_label": "Verified Contractor",
+        },
+    }
+
+    resolved_repo: Optional[Path] = Path(repo_root).resolve() if repo_root else None
+    marker_data: Dict[str, Any] = {}
+    if resolved_repo is None and prop_clean not in legacy_cfg:
+        try:
+            from pseofactory.impact_planner import discover_active_tenants
+
+            ws_root = Path(os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")).resolve()
+            for pid, t_repo in discover_active_tenants(ws_root):
+                if pid == prop_clean:
+                    resolved_repo = Path(t_repo).resolve()
+                    break
+        except Exception:
+            pass
+    if resolved_repo is not None:
+        marker_file = resolved_repo / ".pseofactory.json"
+        if marker_file.is_file():
+            try:
+                loaded = json.loads(marker_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    marker_data = loaded
+            except Exception:
+                marker_data = {}
+
+    base = dict(legacy_cfg.get(prop_clean, {}))
+    slug_domain_stem = re.sub(r"[^a-z0-9-]", "", prop_clean.replace("_", "-")) or "site"
+    raw_domain = str(marker_data.get("domain") or "").strip().lower()
+    if not raw_domain and marker_data.get("canonical_base"):
+        raw_domain = re.sub(r"^https?://", "", str(marker_data.get("canonical_base") or "")).split("/")[0].strip().lower()
+    domain = base.get("domain") or raw_domain or f"{slug_domain_stem}.com"
+    domain = re.sub(r"^www\.", "", domain.split("/")[0].split(":")[0].strip().lower()) or f"{slug_domain_stem}.com"
+
+    brand_name = (
+        base.get("brand_name")
+        or str(marker_data.get("brand_name") or marker_data.get("brand") or "").strip()
+        or TENANT_BRAND_NAMES.get(prop_clean)
+        or prop_clean.replace("-", " ").replace("_", " ").title()
+    )
+    from_name = base.get("from_name") or f"{brand_name} Advisory Desk"
+    default_slug = base.get("default_slug") or str(marker_data.get("default_slug") or "general").strip().lower() or "general"
+    eff_aud_tier = audience_tier or get_audience_tier(prop_clean, repo_root=resolved_repo)
+    kv_stem = re.sub(r"[^A-Z0-9_]", "_", prop_clean.upper()) or "SITE"
+    stmt_desc = re.sub(r"[^A-Z0-9]", "", prop_clean.upper())[:22] or "PSEODESK"
+
+    return {
+        "property_id": prop_clean,
+        "brand_name": brand_name,
+        "domain": domain,
+        "from_name": from_name,
+        "default_slug": default_slug,
+        "default_amt": int(base.get("default_amt") or 100000),
+        "default_state": str(base.get("default_state") or "US"),
+        "default_buyer_label": str(base.get("default_buyer_label") or "Verified Buyer"),
+        "audience_tier": eff_aud_tier,
+        "kv_leads_binding": f"{kv_stem}_LEADS",
+        "kv_telemetry_binding": f"{kv_stem}_TELEMETRY_KV",
+        "statement_descriptor": stmt_desc,
+        "repo_root": str(resolved_repo) if resolved_repo else None,
+    }
+
+
+def _resolve_edge_pricing_catalog(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    audience_tier: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Resolves canonical pricing offers, serialized edge catalog JSON, and aliases
+    from pseofactory.pricing with safe fallback to resolve_offer_pricing.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory import pricing as _pricing
+
+    prop_clean = str(property_id or "profithelm").strip().lower()
+    if prop_clean in ("profithelm-platform", "factory"):
+        prop_clean = "profithelm"
+
+    sku_prefix_fn = getattr(_pricing, "sanitize_property_sku_prefix", None)
+    default_prefix_stem = (
+        sku_prefix_fn(prop_clean)
+        if callable(sku_prefix_fn)
+        else _pricing.TENANT_SKU_PREFIX.get(prop_clean, prop_clean[:3] or "pf")
+    )
+
+    get_edge_cat_fn = getattr(_pricing, "get_tenant_edge_pricing_catalog", None)
+    if callable(get_edge_cat_fn):
+        try:
+            cat_payload = get_edge_cat_fn(
+                prop_clean,
+                repo_root=repo_root,
+                audience_tier=audience_tier,
+            )
+            if isinstance(cat_payload, dict):
+                offers_map = cat_payload.get("catalog") or cat_payload.get("offers")
+                if isinstance(offers_map, dict) and offers_map:
+                    has_full_shape = all(
+                        k in cat_payload
+                        for k in (
+                            "quick_offer",
+                            "full_offer",
+                            "partner_offer",
+                            "catalog",
+                            "catalog_json",
+                            "aliases",
+                            "sku_prefix_stem",
+                        )
+                    )
+                    if has_full_shape:
+                        return cat_payload
+                    quick_sku = str(cat_payload.get("quick_sku") or "")
+                    full_sku = str(cat_payload.get("default_full_sku") or "")
+                    partner_sku = str(cat_payload.get("partner_slot_sku") or "")
+                    quick_offer = offers_map.get(quick_sku) or next(
+                        (v for v in offers_map.values() if isinstance(v, dict) and v.get("tier_kind") == "quick"),
+                        None,
+                    )
+                    full_offer = offers_map.get(full_sku) or next(
+                        (v for v in offers_map.values() if isinstance(v, dict) and v.get("tier_kind") == "full"),
+                        None,
+                    )
+                    partner_offer = offers_map.get(partner_sku) or next(
+                        (v for v in offers_map.values() if isinstance(v, dict) and v.get("tier_kind") == "partner_slot"),
+                        None,
+                    )
+                    if quick_offer and full_offer and partner_offer:
+                        edge_map: Dict[str, Dict[str, Any]] = {}
+                        for sku_k, item in offers_map.items():
+                            if not isinstance(item, dict):
+                                continue
+                            p_usd = float(item.get("price_usd") or 0)
+                            edge_map[sku_k] = {
+                                "sku": item["sku"],
+                                "property_id": item["property_id"],
+                                "audience_tier": item["audience_tier"],
+                                "tier_kind": item["tier_kind"],
+                                "vertical": item["vertical"],
+                                "title": item["title"],
+                                "description": item["description"],
+                                "price_usd": int(p_usd) if p_usd.is_integer() else p_usd,
+                                "price_cents": int(item["price_cents"]),
+                                "currency": item["currency"],
+                                "billing_mode": item["billing_mode"],
+                                "statutory_authority": item["statutory_authority"],
+                                "default_slug": item["default_slug"],
+                                "deliverables": list(item.get("deliverables") or []),
+                            }
+                        catalog_json = str(
+                            cat_payload.get("catalog_json")
+                            or json.dumps(edge_map, indent=2, sort_keys=False)
+                        )
+                        aliases_map = cat_payload.get("aliases")
+                        return {
+                            "property_id": str(cat_payload.get("property_id") or prop_clean),
+                            "quick_offer": dict(quick_offer),
+                            "full_offer": dict(full_offer),
+                            "partner_offer": dict(partner_offer),
+                            "catalog": edge_map,
+                            "offers": offers_map,
+                            "catalog_json": catalog_json,
+                            "aliases": dict(aliases_map) if isinstance(aliases_map, dict) else {},
+                            "sku_prefix_stem": str(cat_payload.get("sku_prefix_stem") or default_prefix_stem),
+                        }
+        except Exception:
+            pass
+
+    quick_offer = _pricing.resolve_offer_pricing(
+        prop_clean,
+        tier_kind="quick",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    full_offer = _pricing.resolve_offer_pricing(
+        prop_clean,
+        tier_kind="full",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    partner_offer = _pricing.resolve_offer_pricing(
+        prop_clean,
+        tier_kind="partner_slot",
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    catalog_json = _pricing.get_edge_pricing_table_json(
+        prop_clean,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    catalog_map = json.loads(catalog_json)
+    sku_prefix_stem = default_prefix_stem
+    sku_prefix = sku_prefix_stem + "_"
+    tenant_aliases = {
+        k: v
+        for k, v in _pricing.SKU_ALIASES.items()
+        if str(k).startswith(sku_prefix) or str(v).startswith(sku_prefix)
+    }
+    return {
+        "property_id": prop_clean,
+        "quick_offer": quick_offer,
+        "full_offer": full_offer,
+        "partner_offer": partner_offer,
+        "catalog": catalog_map,
+        "offers": catalog_map,
+        "catalog_json": catalog_json,
+        "aliases": tenant_aliases,
+        "sku_prefix_stem": sku_prefix_stem,
+    }
+
+
 def generate_edge_redirect_function(
     property_id: str = "profithelm",
     hub: Optional[Any] = None,
 ) -> str:
     """
     Generates the deterministic Cloudflare Pages Function (functions/r/[partner].js)
-    for ProfitHelm or Prexvo outbound affiliate redirects from the canonical affiliate registry,
+    for ProfitHelm, Prexvo, GainHelm, LienBond, or any 5th-50th+ dynamic tenant
+    outbound affiliate redirects from the canonical affiliate registry,
     verified Sovrn merchant coverage table, and monetization vault.
     Zero em-dashes. Zero en-dashes.
     """
@@ -2086,11 +2351,8 @@ def generate_edge_redirect_function(
     )
     from pseofactory.affiliates_hub import MonetizationHub
 
-    prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        raise ValueError(
-            f"Edge redirect function generation is only supported for profithelm, prexvo, gainhelm, or lienbond (got '{property_id}')."
-        )
+    meta = _resolve_edge_tenant_metadata(property_id)
+    prop_clean = meta["property_id"]
 
     active_hub = hub if hub is not None else MonetizationHub()
     human_gate_js = _render_edge_redirect_human_gate_js()
@@ -3385,6 +3647,236 @@ export async function onRequest(context) {{
         assert_no_forbidden_dashes(prexvo_js, "generate_edge_redirect_function(prexvo)")
         return prexvo_js
 
+    if prop_clean != "profithelm":
+        dyn_domain = meta["domain"]
+        dyn_brand = meta["brand_name"]
+        dyn_kv_tel = meta["kv_telemetry_binding"]
+        dyn_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {}) if active_hub else {}
+        dyn_direct_upgrades: Dict[str, str] = {}
+        if hasattr(active_hub, "get_direct_contract_upgrades"):
+            try:
+                dyn_direct_upgrades.update(active_hub.get_direct_contract_upgrades(prop_clean) or {})
+            except Exception:
+                pass
+        dyn_entries: List[str] = []
+        if isinstance(dyn_vault, dict):
+            for k, ve in dyn_vault.items():
+                if not isinstance(ve, dict):
+                    continue
+                k_clean = re.sub(r"[^a-z0-9_]", "_", str(k).strip().lower())
+                if not k_clean:
+                    continue
+                vst = str(ve.get("status") or "pending").strip().lower()
+                d_url = str(ve.get("approved_tracking_url") or ve.get("url") or ve.get("direct_url") or "").strip()
+                c_url = dyn_direct_upgrades.get(k) or d_url
+                env_var = f"AFFILIATE_{k_clean.upper()}_URL"
+                st_env = f"AFFILIATE_{k_clean.upper()}_STATUS"
+                extra_line = f'    directContractUrl: {json.dumps(c_url)},\n' if c_url else ""
+                dyn_entries.append(
+                    f"  {k_clean}: {{\n"
+                    f"    defaultUrl: {json.dumps(d_url or f'https://{dyn_domain}/')},\n"
+                    f"{extra_line}"
+                    f"    envVar: {json.dumps(env_var)},\n"
+                    f"    statusEnvVar: {json.dumps(st_env)},\n"
+                    f"    status: {json.dumps(vst)},\n"
+                    f"    isDirect: {'true' if vst in ('live', 'active_direct', 'approved', 'active') else 'false'},\n"
+                    f"  }},"
+                )
+        dyn_catalog_block = "\n".join(dyn_entries)
+        dyn_js = f"""/**
+ * Cloudflare Pages Function: {dyn_brand} Outbound Affiliate Redirect Handler (/r/:partner)
+ * Enforces partner whitelist, SSRF protection, and durable KV click telemetry.
+ * Zero em-dashes. Zero en-dashes.
+ */
+
+const PARTNER_CATALOG = {{
+{dyn_catalog_block}
+}};
+
+const EDUCATIONAL_CALCULATOR_URL = "https://{dyn_domain}/tools/";
+
+const FORBIDDEN_AGGREGATOR_DOMAINS = [
+  "sovrn.com",
+  "viglink.com",
+  "redirect.viglink.com",
+  "skimlinks.com",
+  "go.redirectingat.com",
+];
+
+const TRACKING_PARAMS = [
+  "subid",
+  "click_id",
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_term",
+  "utm_content",
+  "gclid",
+  "source_tool",
+  "source",
+  "cta_slot",
+  "slot",
+  "ph_tier",
+  "tier",
+];
+
+function extractNormalizedParams(reqUrl) {{
+  const map = new Map();
+  for (const [rawKey, val] of reqUrl.searchParams.entries()) {{
+    const cleanKey = rawKey.replace(/^(?:amp;)+/i, "");
+    if (val !== null && val !== "" && !map.has(cleanKey)) {{
+      map.set(cleanKey, val);
+    }}
+  }}
+  return map;
+}}
+
+async function persistEdgeRedirectTelemetry(context, eventPayload) {{
+  try {{
+    if (!globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__ = [];
+    }}
+    globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.unshift(eventPayload);
+    if (globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length > 250) {{
+      globalThis.__PSEOFACTORY_TELEMETRY_BUFFER__.length = 250;
+    }}
+    const env = context && context.env ? context.env : null;
+    const kv = env && (env.{dyn_kv_tel} || env.TELEMETRY_KV || null);
+    if (kv && typeof kv.put === "function") {{
+      const putPromise = kv
+        .put(eventPayload.event_id, JSON.stringify(eventPayload), {{
+          expirationTtl: 60 * 86400,
+          metadata: {{
+            event_id: eventPayload.event_id,
+            property_id: eventPayload.property_id,
+            partner_key: eventPayload.partner_key,
+            tool_slug: eventPayload.tool_slug,
+            timestamp: eventPayload.timestamp,
+          }},
+        }})
+        .catch(() => {{}});
+      if (context && typeof context.waitUntil === "function") {{
+        context.waitUntil(putPromise);
+      }} else {{
+        await putPromise;
+      }}
+    }}
+  }} catch (_) {{}}
+}}
+
+{safe_compliant_guard_js}
+
+{human_gate_js}
+
+export async function onRequest(context) {{
+  const {{ request, env, params }} = context;
+  const earlyReqUrl = new URL(request.url);
+  const gate = evaluateEdgeRedirectGate(request, earlyReqUrl);
+  if (gate.blockedResponse) {{
+    return gate.blockedResponse;
+  }}
+  const isEarlySynth = gate.isSyntheticProbe;
+  const earlySynthHdrs = isEarlySynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}};
+  const rawPartner = (params.partner || "").trim().toLowerCase();
+  const partnerConfig = PARTNER_CATALOG[rawPartner] || PARTNER_CATALOG[rawPartner.replace(/-/g, "_")];
+  if (!partnerConfig) {{
+    return new Response("Partner not found", {{
+      status: 404,
+      headers: {{
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const envStatus =
+    env && partnerConfig.statusEnvVar && env[partnerConfig.statusEnvVar]
+      ? String(env[partnerConfig.statusEnvVar]).trim().toLowerCase()
+      : null;
+  const effectiveStatus = envStatus || partnerConfig.status || "pending";
+  if (effectiveStatus === "declined" || effectiveStatus === "rejected" || effectiveStatus === "pending_p2") {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+        "X-Edge-Partner": rawPartner,
+        "X-Edge-Contract-Tier": "declined_partner_blocked",
+        ...earlySynthHdrs,
+      }},
+    }});
+  }}
+  const normParams = extractNormalizedParams(earlyReqUrl);
+  const envUrl = env && partnerConfig.envVar ? env[partnerConfig.envVar] : null;
+  const hasDirectConfig = Boolean(envUrl && String(envUrl).trim().length > 0);
+  const hasDirectContract = Boolean(!hasDirectConfig && partnerConfig.directContractUrl && String(partnerConfig.directContractUrl).trim().length > 0);
+  const rawTargetUrl = String(hasDirectConfig ? envUrl : (hasDirectContract ? partnerConfig.directContractUrl : partnerConfig.defaultUrl)).trim();
+  const contractTier = hasDirectConfig ? "direct_env_override" : (hasDirectContract ? "direct_contract_upgraded" : "native_unmonetized_destination");
+  if (!isSafeAndCompliantUrl(rawTargetUrl)) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  const targetObj = new URL(rawTargetUrl);
+  for (const param of TRACKING_PARAMS) {{
+    const val = normParams.get(param);
+    if (val !== undefined && val !== "" && !targetObj.searchParams.has(param)) {{
+      targetObj.searchParams.set(param, val);
+    }}
+  }}
+  const sourceTool = normParams.get("source_tool") || normParams.get("source") || "";
+  const ctaSlot = normParams.get("cta_slot") || normParams.get("slot") || "";
+  const effectiveSubid = normParams.get("subid") || (sourceTool ? `${{sourceTool}}_${{ctaSlot || "cta"}}` : ctaSlot || `${{rawPartner}}_edge`);
+  if (effectiveSubid && !targetObj.searchParams.has("subid")) {{
+    targetObj.searchParams.set("subid", effectiveSubid);
+  }}
+  const finalRedirectUrl = targetObj.toString();
+  if (!isSafeAndCompliantUrl(finalRedirectUrl)) {{
+    return new Response(null, {{
+      status: 302,
+      headers: {{
+        Location: EDUCATIONAL_CALCULATOR_URL,
+        "Cache-Control": "private, no-cache, no-store, must-revalidate",
+        "X-Robots-Tag": "noindex, nofollow",
+      }},
+    }});
+  }}
+  if (!isEarlySynth) {{
+    await persistEdgeRedirectTelemetry(context, {{
+      event_id: "evt_" + Math.random().toString(36).substring(2, 11) + "_" + Date.now(),
+      event: "affiliate_click",
+      event_type: "affiliate_click",
+      property_id: {json.dumps(prop_clean)},
+      partner_key: rawPartner,
+      tool_slug: sourceTool || "direct",
+      contract_tier: contractTier,
+      destination_url: finalRedirectUrl,
+      timestamp: new Date().toISOString(),
+    }});
+  }}
+  return new Response(null, {{
+    status: 302,
+    headers: {{
+      Location: finalRedirectUrl,
+      "Cache-Control": "private, no-cache, no-store, must-revalidate",
+      "X-Robots-Tag": "noindex, nofollow",
+      "X-Edge-Partner": rawPartner,
+      "X-Edge-Subid": effectiveSubid || "default",
+      "X-Edge-Contract-Tier": contractTier,
+      "X-Edge-Telemetry": isEarlySynth ? "synthetic_suppressed" : "recorded",
+      ...earlySynthHdrs,
+    }},
+  }});
+}}
+"""
+        assert_no_forbidden_dashes(dyn_js, f"generate_edge_redirect_function({prop_clean})")
+        return dyn_js
+
     prop_vault = getattr(active_hub, "_vault", {}).get("profithelm", {})
     sovrn_key = getattr(active_hub, "sovrn_domain_key", "0a5ac1bfe04034bff021b394f5e71d90")
 
@@ -4347,17 +4839,14 @@ def resolve_canonical_partner_redirect(
 def generate_edge_telemetry_function(property_id: str = "profithelm") -> str:
     """
     Generates the deterministic Cloudflare Pages Function (functions/api/telemetry.js)
-    for ProfitHelm or Prexvo calculation, slider, and affiliate click telemetry ingestion.
-    Supports multi-KV fallback (PROFITHELM_TELEMETRY_KV, PREXVO_TELEMETRY_KV, PROFITHELM_LEADS,
-    PREXVO_LEADS) plus an in-isolate ring buffer so events persist and round-trip cleanly.
+    for ProfitHelm, Prexvo, GainHelm, LienBond, or any 5th-50th+ dynamic tenant
+    calculation, slider, and affiliate click telemetry ingestion.
+    Supports multi-KV fallback plus an in-isolate ring buffer so events persist and round-trip cleanly.
     Zero em-dashes. Zero en-dashes.
     """
-    prop_clean = (property_id or "profithelm").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        raise ValueError(
-            f"Edge telemetry function generation is only supported for profithelm, prexvo, gainhelm, or lienbond (got '{property_id}')."
-        )
-    prop_upper = prop_clean.upper()
+    meta = _resolve_edge_tenant_metadata(property_id)
+    prop_clean = meta["property_id"]
+    prop_upper = re.sub(r"[^A-Z0-9_]", "_", prop_clean.upper()) or "SITE"
 
     telemetry_js = f"""/**
  * Cloudflare Pages Function: /api/telemetry ({prop_clean})
@@ -4870,10 +5359,9 @@ def _render_edge_lead_abuse_guard_js(property_id: str) -> str:
     - Slug sanitization (including index.html -> homepage) and HTML escaping
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
-    prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        raise ValueError(f"Unsupported property_id for lead abuse guard: {property_id!r}")
-    prop_upper = prop_clean.upper()
+    meta = _resolve_edge_tenant_metadata(property_id)
+    prop_clean = meta["property_id"]
+    prop_upper = re.sub(r"[^A-Z0-9_]", "_", prop_clean.upper()) or "SITE"
     js_block = f"""
 const __EDGE_ABUSE_MEM_KEY = "__PSEO_EDGE_ABUSE_STORE_{prop_upper}__";
 
@@ -5532,57 +6020,33 @@ def _render_edge_pricing_and_workpaper_engine_js(
     Supports both canonical tenants and any dynamic 5th+ tenant.
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
-    from pseofactory.pricing import (
-        SKU_ALIASES,
-        TENANT_BRAND_NAMES,
-        TENANT_SKU_PREFIX,
-        get_edge_pricing_table_json,
-        resolve_offer_pricing,
-    )
+    from pseofactory.pricing import TENANT_BRAND_NAMES
 
-    prop_clean = (property_id or "").strip().lower()
-    if prop_clean == "profithelm-platform":
-        prop_clean = "profithelm"
-    if not prop_clean:
-        raise ValueError(f"Unsupported empty property_id for edge pricing engine: {property_id!r}")
-
-    quick_offer = resolve_offer_pricing(
-        prop_clean,
-        tier_kind="quick",
+    meta = _resolve_edge_tenant_metadata(
+        property_id,
         repo_root=repo_root,
         audience_tier=audience_tier,
     )
-    full_offer = resolve_offer_pricing(
+    prop_clean = meta["property_id"]
+    pricing_bundle = _resolve_edge_pricing_catalog(
         prop_clean,
-        tier_kind="full",
-        repo_root=repo_root,
-        audience_tier=audience_tier,
+        repo_root=meta["repo_root"] or repo_root,
+        audience_tier=meta["audience_tier"],
     )
-    partner_offer = resolve_offer_pricing(
-        prop_clean,
-        tier_kind="partner_slot",
-        repo_root=repo_root,
-        audience_tier=audience_tier,
-    )
-    catalog_json = get_edge_pricing_table_json(
-        prop_clean,
-        repo_root=repo_root,
-        audience_tier=audience_tier,
-    )
-    sku_prefix_stem = TENANT_SKU_PREFIX.get(prop_clean, prop_clean[:3] or "pf")
-    sku_prefix = sku_prefix_stem + "_"
+    quick_offer = pricing_bundle["quick_offer"]
+    full_offer = pricing_bundle["full_offer"]
+    partner_offer = pricing_bundle["partner_offer"]
+    catalog_json = pricing_bundle["catalog_json"]
+    sku_prefix_stem = pricing_bundle["sku_prefix_stem"]
     exec_prefix = sku_prefix_stem.upper()
-    tenant_aliases = {
-        k: v for k, v in SKU_ALIASES.items()
-        if str(k).startswith(sku_prefix) or str(v).startswith(sku_prefix)
-    }
-    aliases_json = json.dumps(tenant_aliases, sort_keys=True)
+    aliases_json = json.dumps(pricing_bundle["aliases"], sort_keys=True)
     quick_sku = str(quick_offer["sku"])
     partner_sku = str(partner_offer["sku"])
-    brand_name = TENANT_BRAND_NAMES.get(
+    brand_name = meta["brand_name"] or TENANT_BRAND_NAMES.get(
         prop_clean,
         prop_clean.replace("-", " ").replace("_", " ").title(),
     )
+    domain_name = meta["domain"]
     full_price_int = int(round(float(full_offer["price_usd"])))
     default_full_sku_map = {
         "profithelm": "ph_statutory_tax_audit_workpapers",
@@ -5590,16 +6054,10 @@ def _render_edge_pricing_and_workpaper_engine_js(
         "gainhelm": "gh_soc2_cmmc_audit_workpapers",
         "lienbond": "lb_surety_lien_wh347_packet",
     }
-    default_state_map = {"lienbond": "CA"}
-    default_buyer_label_map = {
-        "prexvo": "Verified Borrower",
-        "lienbond": "Verified Contractor",
-    }
-    default_amt_map = {"profithelm": 250000, "prexvo": 85000, "gainhelm": 48500, "lienbond": 125000}
     default_full_sku = default_full_sku_map.get(prop_clean, str(full_offer["sku"]))
-    default_state = default_state_map.get(prop_clean, "US")
-    default_buyer_label = default_buyer_label_map.get(prop_clean, "Verified Buyer")
-    default_amt = default_amt_map.get(prop_clean, 100000)
+    default_state = meta["default_state"]
+    default_buyer_label = meta["default_buyer_label"]
+    default_amt = meta["default_amt"]
 
     if prop_clean == "prexvo":
         tenant_compute_js = """
@@ -6267,12 +6725,70 @@ const CANONICAL_QUICK_SKU = {json.dumps(quick_sku)};
 const CANONICAL_DEFAULT_FULL_SKU = {json.dumps(default_full_sku)};
 const CANONICAL_PARTNER_SLOT_SKU = {json.dumps(partner_sku)};
 const CANONICAL_BRAND_NAME = {json.dumps(brand_name)};
+const CANONICAL_DOMAIN_NAME = {json.dumps(domain_name)};
 const CANONICAL_EXEC_PREFIX = {json.dumps(exec_prefix)};
 
 function normalizeEdgeSku(rawSku) {{
   const clean = String(rawSku || "").trim().toLowerCase();
   if (!clean) return "";
   return CANONICAL_SKU_ALIASES[clean] || clean;
+}}
+
+function validateRequestedEdgeSku(rawSku) {{
+  const raw = String(rawSku === undefined || rawSku === null ? "" : rawSku).trim();
+  if (!raw) {{
+    return {{ valid: true, rawSku: "", canonicalSku: "", offer: null }};
+  }}
+  const norm = normalizeEdgeSku(raw);
+  if (norm && Object.prototype.hasOwnProperty.call(CANONICAL_OFFER_CATALOG, norm)) {{
+    const o = CANONICAL_OFFER_CATALOG[norm];
+    return {{
+      valid: true,
+      rawSku: raw,
+      canonicalSku: norm,
+      offer: {{ ...o, deliverables: Array.isArray(o.deliverables) ? [...o.deliverables] : [] }},
+    }};
+  }}
+  return {{ valid: false, rawSku: raw, canonicalSku: norm, offer: null }};
+}}
+
+function buildInvalidSkuResponse(rawSku, corsHeaders = {{}}) {{
+  const baseCors = typeof CORS_HEADERS !== "undefined" ? CORS_HEADERS : {{}};
+  return new Response(
+    JSON.stringify({{
+      ok: false,
+      success: false,
+      status: "error",
+      error: "invalid_or_cross_tenant_sku",
+      requested_sku: String(rawSku === undefined || rawSku === null ? "" : rawSku),
+      property_id: "{prop_clean}",
+    }}),
+    {{
+      status: 400,
+      headers: {{
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        ...baseCors,
+        ...(corsHeaders && typeof corsHeaders === "object" ? corsHeaders : {{}}),
+      }},
+    }}
+  );
+}}
+
+function isPartnerSlotOfferOrSlug(offer, toolSlug = "") {{
+  const tk = String((offer && (offer.tier_kind || offer.tierKind)) || "").trim().toLowerCase();
+  const sku = String((offer && (offer.sku || offer.offerSku)) || "").trim().toLowerCase();
+  const slugClean = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  return tk === "partner_slot" || slugClean === "partners" || sku.endsWith("_verified_partner_slot");
+}}
+
+function buildPartnerSlotReturnUrls(domain, leadId, offerSku) {{
+  const dom = String(domain || CANONICAL_DOMAIN_NAME).trim().toLowerCase();
+  const sku = String(offerSku || CANONICAL_PARTNER_SLOT_SKU).trim().toLowerCase();
+  const returnPath = "/partners/";
+  const successUrl = `https://${{dom}}${{returnPath}}?checkout_status=success&checkout_fulfilled=1&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(sku)}}&tier=partner_slot&session_id={{CHECKOUT_SESSION_ID}}`;
+  const cancelUrl = `https://${{dom}}${{returnPath}}?checkout_status=cancelled&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(sku)}}&tier=partner_slot`;
+  return {{ returnPath, successUrl, cancelUrl }};
 }}
 
 function getCanonicalEdgeOffer(rawSku, fallbackSku = CANONICAL_DEFAULT_FULL_SKU) {{
@@ -6404,7 +6920,7 @@ function resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, fallbackOffer,
   if (!paidSku) {{
     if (paidCents > 0 && paidCents <= quickOffer.price_cents) {{
       paidSku = quickOffer.sku;
-    }} else if (paidCents >= partnerOffer.price_cents && requestedSku === partnerOffer.sku) {{
+    }} else if (paidCents >= partnerOffer.price_cents) {{
       paidSku = partnerOffer.sku;
     }} else if (fallbackOffer && (fallbackOffer.sku || fallbackOffer.offerSku)) {{
       const fbNorm = normalizeEdgeSku(fallbackOffer.sku || fallbackOffer.offerSku);
@@ -6442,6 +6958,9 @@ function resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, fallbackOffer,
         return {{ allowed: false, reason: "tier_escalation_requires_full_checkout", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
       }}
     }}
+  }}
+  if (paidTier === "partner_slot" && (fmtClean === "datapack" || fmtClean === "datapack_json" || fmtClean === "csv")) {{
+    return {{ allowed: false, reason: "partner_slot_receipt_html_only", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
   }}
   if (paidTier === "full" && requestedSku === partnerOffer.sku) {{
     return {{ allowed: false, reason: "partner_slot_requires_partner_checkout", paidOffer: effectiveOffer, paidSku: effectiveOffer.sku }};
@@ -6483,14 +7002,18 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   }} = params;
 
   const isPaidMode = mode === "paid_toolkit";
-  const tierKind = String((offer && offer.tier_kind) || "full").toLowerCase();
+  const tierKind = String((offer && (offer.tier_kind || offer.tierKind)) || "full").toLowerCase();
   const isQuickTier = tierKind === "quick";
   const isPartnerSlot = tierKind === "partner_slot";
-  const isFullPaid = isPaidMode && tierKind === "full";
+  const verifiedSessionId = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
+  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
+  const isPaidSession = Boolean(isPaidMode && (verifiedSessionId || isPaidSettled));
+  const isFullPaid = isPaidSession && tierKind === "full";
   const leadId = String((record && record.lead_id) || "lead_" + propertyId + "_session");
   const toolSlug = String((record && record.tool_slug) || (offer && offer.default_slug) || "general");
   const stateCode = String((record && record.state) || (fwMeta && fwMeta.jurisdiction) || "{default_state}").toUpperCase();
   const email = String((record && record.email) || "{default_buyer_label}");
+  const firmName = String((record && (record.firm_name || record.company_name)) || (record && record.metadata && record.metadata.firm_name) || "").trim();
   const inputs = (record && (record.scenario_inputs || record.calculator_inputs) && typeof (record.scenario_inputs || record.calculator_inputs) === "object")
     ? (record.scenario_inputs || record.calculator_inputs)
     : {{}};
@@ -6532,7 +7055,6 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   const offerAuth = String((offer && (offer.statutory_authority || offer.statutoryAuthority)) || "");
   const offerDeliverables = Array.isArray(offer && offer.deliverables) ? offer.deliverables : [];
 
-  const verifiedSessionId = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
   const buildUrl = (flagName, extraParams = {{}}) => {{
     if (typeof actionUrlBuilder === "function") {{
       return actionUrlBuilder(flagName, extraParams);
@@ -6554,12 +7076,13 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     return `/api/lead-capture?${{qs.toString()}}`;
   }};
 
+  const datapackIncluded = !isQuickTier && !isPartnerSlot;
   const fulfillmentUrl = buildUrl("fulfill");
   const playbookUrl = buildUrl("playbook");
-  const playbookCsvUrl = `${{playbookUrl}}&format=csv`;
-  const playbookDatapackUrl = `${{playbookUrl}}&format=datapack`;
-  const csvFulfillmentUrl = `${{fulfillmentUrl}}&format=csv`;
-  const datapackUrl = `${{fulfillmentUrl}}&format=datapack`;
+  const playbookCsvUrl = isPartnerSlot ? null : `${{playbookUrl}}&format=csv`;
+  const playbookDatapackUrl = datapackIncluded ? `${{playbookUrl}}&format=datapack` : null;
+  const csvFulfillmentUrl = isPartnerSlot ? null : `${{fulfillmentUrl}}&format=csv`;
+  const datapackUrl = datapackIncluded ? `${{fulfillmentUrl}}&format=datapack` : null;
   const checkoutUrl = buildUrl("checkout");
   const quickOffer = getCanonicalEdgeOffer(CANONICAL_QUICK_SKU);
   const rawFullOffer = getCanonicalEdgeOffer(
@@ -6567,7 +7090,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
       ? ((fwMeta && fwMeta.offerSku) || CANONICAL_DEFAULT_FULL_SKU)
       : offerSku
   );
-  const fullOffer = (fwMeta && fwMeta.title && (isQuickTier || !isPaidMode))
+  const fullOffer = (fwMeta && fwMeta.title && (isQuickTier || !isPaidSession))
     ? {{ ...rawFullOffer, title: fwMeta.title }}
     : rawFullOffer;
   const quickCheckoutUrl = buildUrl("checkout", {{ sku: quickOffer.sku, redirect: true }});
@@ -6575,7 +7098,6 @@ function buildCanonicalWorkpaperDeliverable(params) {{
 
   const estFeeUsd = Math.round((offerPriceUsd * 0.029 + 0.3) * 100) / 100;
   const netSettledUsd = Math.max(0, Math.round((offerPriceUsd - estFeeUsd) * 100) / 100);
-  const isPaidSettled = isEdgeVerifiedPaidRecord(record);
 
   // Security: NEVER include merchant_account_id or settlement_bank in public/paid JSON or HTML.
   const settlementAttribution = {{
@@ -6592,7 +7114,8 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     estimated_processor_fee_usd: estFeeUsd,
     net_settled_revenue_usd: isPaidSettled ? netSettledUsd : 0,
     attributed_revenue_usd: isPaidSettled ? offerPriceUsd : 0,
-    datapack_delivered: Boolean(isPaidSettled),
+    datapack_included: datapackIncluded,
+    datapack_delivered: Boolean(isPaidSettled && datapackIncluded),
     datapack_pack_id: `dp_${{leadId}}`,
     datapack_url: datapackUrl,
     calculated_amount: baseAmount,
@@ -6609,62 +7132,69 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     outputs,
   }};
 
-  const csvLines = ["Section,Line Code,Line Item,Authority / Detail,Baseline Value,Optimized / Modeled Value,Delta / Notes"];
-  for (const [k, v] of Object.entries(inputs)) {{
-    csvLines.push(["INPUT", `IN-${{k}}`, `Calculator Input: ${{k}}`, "Buyer Calculator State", String(v), String(v), "Captured"].map(csvEscapeCell).join(","));
-  }}
-  for (const [k, v] of Object.entries(outputs)) {{
-    csvLines.push(["OUTPUT", `OUT-${{k}}`, `Calculator Output: ${{k}}`, "Live Engine Output", String(v), String(v), "Computed"].map(csvEscapeCell).join(","));
-  }}
-  for (const r of reconciliationSchedule) {{
-    csvLines.push(["RECONCILIATION", r.line_code, r.line_item, r.authority, r.baseline_value, r.optimized_value, r.delta_impact].map(csvEscapeCell).join(","));
-  }}
-  if (!isQuickTier && !isPartnerSlot) {{
-    for (let i = 0; i < sensitivityMatrix.length; i++) {{
-      const s = sensitivityMatrix[i];
-      csvLines.push(["SENSITIVITY", `SENS-${{i + 1}}`, s.scenario_label, "Dynamic 5-Point Sensitivity", s.modeled_principal, s.effective_rate, s.estimated_net_benefit].map(csvEscapeCell).join(","));
+  let csvContent = null;
+  if (isPaidSession && !isPartnerSlot) {{
+    const csvLines = ["Section,Line Code,Line Item,Authority / Detail,Baseline Value,Optimized / Modeled Value,Delta / Notes"];
+    for (const [k, v] of Object.entries(inputs)) {{
+      csvLines.push(["INPUT", `IN-${{k}}`, `Calculator Input: ${{k}}`, "Buyer Calculator State", String(v), String(v), "Captured"].map(csvEscapeCell).join(","));
     }}
-    for (let i = 0; i < periodSchedule.length; i++) {{
-      const p = periodSchedule[i];
-      csvLines.push(["SCHEDULE", `PER-${{i + 1}}`, p.period, p.note, p.metric_a, `${{p.metric_b}} | ${{p.metric_c}}`, p.metric_d].map(csvEscapeCell).join(","));
+    for (const [k, v] of Object.entries(outputs)) {{
+      csvLines.push(["OUTPUT", `OUT-${{k}}`, `Calculator Output: ${{k}}`, "Live Engine Output", String(v), String(v), "Computed"].map(csvEscapeCell).join(","));
     }}
-    for (const ts of statutoryTrendTimeseries) {{
-      const v24 = ts.points && ts.points["2024"] !== undefined ? ts.points["2024"] : "";
-      const v26 = ts.points && ts.points["2026"] !== undefined ? ts.points["2026"] : "";
-      const v30 = ts.points && ts.points["2030"] !== undefined ? ts.points["2030"] : "";
-      csvLines.push(["BENCHMARK", `TREND-${{ts.series_id}}`, ts.metric_label, ts.statutory_citation, `2024: ${{v24}} ${{ts.unit}}`, `2026: ${{v26}} ${{ts.unit}}`, `2030 Proj: ${{v30}} ${{ts.unit}}`].map(csvEscapeCell).join(","));
+    for (const r of reconciliationSchedule) {{
+      csvLines.push(["RECONCILIATION", r.line_code, r.line_item, r.authority, r.baseline_value, r.optimized_value, r.delta_impact].map(csvEscapeCell).join(","));
     }}
+    if (isFullPaid) {{
+      for (let i = 0; i < sensitivityMatrix.length; i++) {{
+        const s = sensitivityMatrix[i];
+        csvLines.push(["SENSITIVITY", `SENS-${{i + 1}}`, s.scenario_label, "Dynamic 5-Point Sensitivity", s.modeled_principal, s.effective_rate, s.estimated_net_benefit].map(csvEscapeCell).join(","));
+      }}
+      for (let i = 0; i < periodSchedule.length; i++) {{
+        const p = periodSchedule[i];
+        csvLines.push(["SCHEDULE", `PER-${{i + 1}}`, p.period, p.note, p.metric_a, `${{p.metric_b}} | ${{p.metric_c}}`, p.metric_d].map(csvEscapeCell).join(","));
+      }}
+      for (const ts of statutoryTrendTimeseries) {{
+        const v24 = ts.points && ts.points["2024"] !== undefined ? ts.points["2024"] : "";
+        const v26 = ts.points && ts.points["2026"] !== undefined ? ts.points["2026"] : "";
+        const v30 = ts.points && ts.points["2030"] !== undefined ? ts.points["2030"] : "";
+        csvLines.push(["BENCHMARK", `TREND-${{ts.series_id}}`, ts.metric_label, ts.statutory_citation, `2024: ${{v24}} ${{ts.unit}}`, `2026: ${{v26}} ${{ts.unit}}`, `2030 Proj: ${{v30}} ${{ts.unit}}`].map(csvEscapeCell).join(","));
+      }}
+    }}
+    csvContent = csvLines.join("\\n") + "\\n";
   }}
-  const csvContent = csvLines.join("\\n") + "\\n";
 
   const regulatorName = String((fwMeta && (fwMeta.regulatorName || fwMeta.regulator_name)) || (offer && offer.regulator_name) || "").trim();
-  const statutoryDataPack = {{
-    pack_id: `dp_${{leadId}}`,
-    schema_version: "pseo-datapack-v1",
-    property_id: propertyId,
-    tool_slug: toolSlug,
-    {datapack_cycle_js}
-    ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
-    offer_sku: offerSku,
-    offer_title: offerTitle,
-    tier_kind: tierKind,
-    statutory_authority: offerAuth,
-    buyer_inputs: inputs,
-    buyer_outputs: outputs,
-    modeled_scenario_summary: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    ...(isFullPaid || isPartnerSlot ? {{ sensitivity_matrix: sensitivityMatrix, period_schedule: periodSchedule, longitudinal_benchmark_series: statutoryTrendTimeseries }} : {{ sensitivity_matrix: isPaidMode ? sensitivityMatrix.slice(0, 1) : [], period_schedule: [], longitudinal_benchmark_series: [] }}),
-    statutory_execution_artifacts: isFullPaid ? statutoryExecutionArtifacts : [],
-    methodology_notes: methodologyNotes,
-    settlement_attribution: settlementAttribution,
-  }};
+  const statutoryDataPack = isFullPaid
+    ? {{
+        pack_id: `dp_${{leadId}}`,
+        schema_version: "pseo-datapack-v1",
+        property_id: propertyId,
+        tool_slug: toolSlug,
+        {datapack_cycle_js}
+        ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
+        offer_sku: offerSku,
+        offer_title: offerTitle,
+        tier_kind: tierKind,
+        statutory_authority: offerAuth,
+        buyer_inputs: inputs,
+        buyer_outputs: outputs,
+        modeled_scenario_summary: customParameterLedger,
+        reconciliation_schedule: reconciliationSchedule,
+        sensitivity_matrix: sensitivityMatrix,
+        period_schedule: periodSchedule,
+        longitudinal_benchmark_series: statutoryTrendTimeseries,
+        statutory_execution_artifacts: statutoryExecutionArtifacts,
+        methodology_notes: methodologyNotes,
+        settlement_attribution: settlementAttribution,
+      }}
+    : null;
 
   // Build 100% XSS-escaped HTML Workpaper
   const esc = escapeEdgeHtml;
-  const badgeText = isPaidMode
+  const badgeText = isPaidSession
     ? (isPartnerSlot ? "VERIFIED PARTNER SLOT CONFIRMATION" : (isQuickTier ? "PAID QUICK WORKSHEET" : "PAID FULL WORKPAPER & DATA PACK"))
     : "FREE ON-SCREEN SAMPLE PREVIEW";
-  const badgeStyle = isPaidMode
+  const badgeStyle = isPaidSession
     ? "background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;"
     : "background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;";
 
@@ -6674,7 +7204,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   ].join("");
 
   const kpiHtml = kpis.map((k) => `<div class="kpi"><div class="kpi-label">${{esc(k.label)}}</div><div class="kpi-val">${{esc(k.value)}}</div></div>`).join("");
-  const visibleRecon = isPaidMode ? reconciliationSchedule : reconciliationSchedule.slice(0, 2);
+  const visibleRecon = isPaidSession ? reconciliationSchedule : reconciliationSchedule.slice(0, 2);
   const reconRowsHtml = visibleRecon.map((r) =>
     `<tr><td><strong>${{esc(r.line_code)}}</strong></td><td>${{esc(r.line_item)}}<div class="sub">${{esc(r.authority)}}</div></td><td>${{esc(r.baseline_value)}}</td><td><strong>${{esc(r.optimized_value)}}</strong></td><td>${{esc(r.delta_impact)}}</td></tr>`
   ).join("");
@@ -6684,20 +7214,21 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   let bodySectionsHtml = "";
 
   if (isPartnerSlot) {{
-    actionsHtml = isPaidMode
-      ? `<button class="btn btn-primary" onclick="window.print()">Print / Save Confirmation PDF</button>` +
-        `<a class="btn btn-secondary" href="${{esc(datapackUrl)}}">Download Confirmation Manifest (JSON)</a>`
+    const displayFirmName = firmName || `${{CANONICAL_BRAND_NAME}} Verified Partner`;
+    actionsHtml = isPaidSession
+      ? `<button class="btn btn-primary" onclick="window.print()">Print / Save Confirmation PDF</button>`
       : `<a class="btn btn-primary" href="${{esc(buildUrl("checkout", {{ sku: offerSku, redirect: true }}))}}">Reserve Verified Calculator Partner Slot ($${{esc(offerPriceUsd)}})</a>`;
     bodySectionsHtml =
-      `<h2>Verified Calculator Partner Slot Onboarding ${{isPaidMode ? "Confirmation" : "Summary"}} ($${{esc(offerPriceUsd)}})</h2>` +
+      `<h2>Verified Calculator Partner Slot Onboarding ${{isPaidSession ? "Confirmation" : "Summary"}} ($${{esc(offerPriceUsd)}})</h2>` +
       `<table><thead><tr><th>Attribute</th><th>Verified Specification</th></tr></thead><tbody>` +
+      `<tr><td>Partner Firm</td><td><strong>${{esc(displayFirmName)}}</strong></td></tr>` +
       `<tr><td>Partner Property</td><td><strong>${{esc(CANONICAL_BRAND_NAME)}}</strong></td></tr>` +
       `<tr><td>Placement Fee</td><td><strong>$${{esc(offerPriceUsd)}}</strong></td></tr>` +
       `<tr><td>Target Calculator Route</td><td><code>${{esc(toolSlug)}}</code></td></tr>` +
       `<tr><td>Settlement Status</td><td><strong>${{esc(settlementAttribution.settlement_status)}}</strong></td></tr>` +
       `<tr><td>Included Deliverables</td><td><ul>${{offerDeliverables.map((d) => `<li>${{esc(d)}}</li>`).join("")}}</ul></td></tr>` +
       `</tbody></table>`;
-  }} else if (!isPaidMode) {{
+  }} else if (!isPaidSession) {{
     actionsHtml =
       `<a class="btn btn-primary" href="${{esc(quickCheckoutUrl)}}">Unlock Quick Worksheet ($${{esc(quickOffer.price_usd)}})</a>` +
       `<a class="btn btn-secondary" href="${{esc(fullCheckoutUrl)}}">Unlock Full Workpaper &amp; Data Pack ($${{esc(fullOffer.price_usd)}})</a>`;
@@ -6792,7 +7323,7 @@ function buildCanonicalWorkpaperDeliverable(params) {{
   <span class="badge">${{esc(badgeText)}}</span>
   <h1>${{esc(offerTitle)}}</h1>
   <div class="meta">
-    Reference: <strong>${{esc(leadId)}}</strong> | Prepared For: <strong>${{esc(email)}}</strong> | Tool: <code>${{esc(toolSlug)}}</code> | Jurisdiction: <strong>${{esc(stateCode)}}</strong> | Authority: <strong>${{esc(offerAuth)}}</strong>
+    Reference: <strong>${{esc(leadId)}}</strong> | Prepared For: <strong>${{esc(firmName || email)}}</strong> | Tool: <code>${{esc(toolSlug)}}</code> | Jurisdiction: <strong>${{esc(stateCode)}}</strong> | Authority: <strong>${{esc(offerAuth)}}</strong>
   </div>
   <div class="actions">${{actionsHtml}}</div>
   ${{bodySectionsHtml}}
@@ -6801,15 +7332,28 @@ function buildCanonicalWorkpaperDeliverable(params) {{
 </body>
 </html>`;
 
-  return {{
+  const previewSummaryRows = reconciliationSchedule.slice(0, 2).map((r) => ({{
+    line_code: r.line_code,
+    line_item: r.line_item,
+    authority: r.authority,
+    baseline_value: r.baseline_value,
+    optimized_value: r.optimized_value,
+    delta_impact: r.delta_impact,
+    execution_status: "REDACTED_PREVIEW_ONLY",
+  }}));
+
+  const commonBundle = {{
     workpaper_id: `wp_${{leadId}}`,
     lead_id: leadId,
     property_id: propertyId,
     tool_slug: toolSlug,
     ...(fwMeta && fwMeta.vertical ? {{ vertical: fwMeta.vertical, framework_key: fwMeta.frameworkKey }} : {{}}),
     ...(regulatorName ? {{ regulator_name: regulatorName }} : {{}}),
+    ...(firmName || isPartnerSlot ? {{ firm_name: firmName || `${{CANONICAL_BRAND_NAME}} Verified Partner` }} : {{}}),
     state: stateCode,
     mode,
+    preview_mode: !isPaidSession,
+    paid_unlock_required: !isPaidSession,
     tier_kind: tierKind,
     offer_sku: offerSku,
     offer_title: offerTitle,
@@ -6822,13 +7366,9 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     scenario_inputs: inputs,
     scenario_outputs: outputs,
     custom_parameter_ledger: customParameterLedger,
-    reconciliation_schedule: reconciliationSchedule,
-    sensitivity_matrix: sensitivityMatrix,
-    period_schedule: periodSchedule,
-    statutory_trend_timeseries: statutoryTrendTimeseries,
-    statutory_execution_artifacts: statutoryExecutionArtifacts,
-    statutory_data_pack: statutoryDataPack,
     settlement_attribution: settlementAttribution,
+    statutory_trend_series_count: Array.isArray(statutoryTrendTimeseries) ? statutoryTrendTimeseries.length : 0,
+    datapack_included: datapackIncluded,
     fulfillment_url: fulfillmentUrl,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -6836,8 +7376,40 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     csv_fulfillment_url: csvFulfillmentUrl,
     datapack_url: datapackUrl,
     checkout_url: checkoutUrl,
-    csv_content: csvContent,
+    upgrade_checkout_url: isPartnerSlot ? checkoutUrl : fullCheckoutUrl,
+    quick_checkout_url: quickCheckoutUrl,
+    full_checkout_url: fullCheckoutUrl,
     html_report: htmlReport,
+  }};
+
+  if (!isPaidSession) {{
+    return {{
+      ...commonBundle,
+      preview_summary_rows: previewSummaryRows,
+    }};
+  }}
+
+  if (isPartnerSlot) {{
+    return commonBundle;
+  }}
+
+  if (isQuickTier) {{
+    return {{
+      ...commonBundle,
+      reconciliation_schedule: reconciliationSchedule,
+      csv_content: csvContent,
+    }};
+  }}
+
+  return {{
+    ...commonBundle,
+    reconciliation_schedule: reconciliationSchedule,
+    sensitivity_matrix: sensitivityMatrix,
+    period_schedule: periodSchedule,
+    statutory_trend_timeseries: statutoryTrendTimeseries,
+    statutory_execution_artifacts: statutoryExecutionArtifacts,
+    statutory_data_pack: statutoryDataPack,
+    csv_content: csvContent,
   }};
 }}
 """
@@ -6845,43 +7417,34 @@ function buildCanonicalWorkpaperDeliverable(params) {{
     return js_engine
 
 
-def _render_edge_paid_fulfillment_and_exports_js(property_id: str) -> str:
+def _render_edge_paid_fulfillment_and_exports_js(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+    audience_tier: Optional[str] = None,
+) -> str:
     """
     Renders the tenant-isolated paid-fulfillment email helper and ES-module exports
     appended to each tenant's functions/api/lead-capture.js so functions/api/stripe-webhook.js
     shares the exact same KV schema, settlement writer, and zero-double-email idempotency.
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
-    prop_clean = (property_id or "").strip().lower()
-    tenant_cfg = {
-        "profithelm": (
-            "ProfitHelm",
-            "profithelm.com",
-            "ProfitHelm Advisory Desk",
-            "section-1031-calculator",
-        ),
-        "prexvo": (
-            "Prexvo",
-            "prexvo.com",
-            "Prexvo Education Desk",
-            "student-loan-refinance-break-even-calculator",
-        ),
-        "gainhelm": (
-            "GainHelm",
-            "gainhelm.com",
-            "GainHelm Compliance Desk",
-            "soc-2-audit-cost-calculator",
-        ),
-        "lienbond": (
-            "LienBond",
-            "lienbond.com",
-            "LienBond Underwriting Desk",
-            "contractor-license-bond-cost-calculator-by-credit-score",
-        ),
-    }
-    if prop_clean not in tenant_cfg:
-        raise ValueError(f"Unsupported property_id for paid fulfillment exports: {property_id!r}")
-    brand_name, domain, default_from_name, default_slug = tenant_cfg[prop_clean]
+    meta = _resolve_edge_tenant_metadata(
+        property_id,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    pricing_cat = _resolve_edge_pricing_catalog(
+        property_id,
+        repo_root=repo_root,
+        audience_tier=meta["audience_tier"],
+    )
+    partner_price_usd = int(pricing_cat["partner_offer"]["price_usd"])
+    quick_price_usd = int(pricing_cat["quick_offer"]["price_usd"])
+    prop_clean = meta["property_id"]
+    brand_name = meta["brand_name"]
+    domain = meta["domain"]
+    default_from_name = meta["from_name"]
+    default_slug = meta["default_slug"]
     js_block = f"""
 async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSyntheticProbe = false) {{
   const sid = String(sessionId || (record && record.stripe_checkout_session_id) || "").trim();
@@ -6931,8 +7494,8 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
       }}
     }} catch (_) {{}}
   }}
-  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
-    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
     : "";
   const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
   const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
@@ -6947,9 +7510,40 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
   }}
   const leadId = String((record && record.lead_id) || "lead_{prop_clean}_direct");
   const toolSlug = String((record && record.tool_slug) || "{default_slug}").trim().toLowerCase() || "{default_slug}";
-  const sku = String((record && record.offer_sku) || "").trim().toLowerCase();
-  const skuQs = sku ? `&sku=${{encodeURIComponent(sku)}}` : "";
-  const fulfillBaseUrl = `https://{domain}/api/lead-capture?fulfill=1&lead_id=${{encodeURIComponent(leadId)}}${{skuQs}}&tool_slug=${{encodeURIComponent(toolSlug)}}&session_id=${{encodeURIComponent(sid)}}`;
+  const rawSku = String((record && record.offer_sku) || "").trim().toLowerCase();
+  const normSku = typeof normalizeEdgeSku === "function" ? normalizeEdgeSku(rawSku) : rawSku;
+  const catalogOffer = normSku && typeof CANONICAL_OFFER_CATALOG !== "undefined" && CANONICAL_OFFER_CATALOG[normSku]
+    ? CANONICAL_OFFER_CATALOG[normSku]
+    : null;
+  const partnerOffer = typeof getCanonicalEdgeOffer === "function"
+    ? getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU)
+    : {{ sku: normSku, price_usd: {partner_price_usd} }};
+  const quickOffer = typeof getCanonicalEdgeOffer === "function"
+    ? getCanonicalEdgeOffer(CANONICAL_QUICK_SKU)
+    : {{ sku: normSku, price_usd: {quick_price_usd} }};
+  const recPrice = Number((record && record.offer_price_usd) || 0);
+  let tierKind = catalogOffer ? String(catalogOffer.tier_kind || "full").toLowerCase() : "";
+  if (!tierKind) {{
+    if (
+      normSku.includes("partner_slot") ||
+      (record && record.lead_type === "partner_registration") ||
+      (partnerOffer && recPrice > 0 && recPrice >= Number(partnerOffer.price_usd || 0))
+    ) {{
+      tierKind = "partner_slot";
+    }} else if (
+      normSku.includes("_instant_") ||
+      normSku.endsWith("_worksheet_19") ||
+      normSku.endsWith("_quick_worksheet") ||
+      (quickOffer && recPrice > 0 && recPrice <= Number(quickOffer.price_usd || 0))
+    ) {{
+      tierKind = "quick";
+    }} else {{
+      tierKind = "full";
+    }}
+  }}
+  const effectiveSku = (catalogOffer && catalogOffer.sku) || normSku || "";
+  const skuQs = effectiveSku ? `&sku=${{encodeURIComponent(effectiveSku)}}` : "";
+  const fulfillBaseUrl = `https://{domain}/api/lead-fulfillment?lead_id=${{encodeURIComponent(leadId)}}${{skuQs}}&tool_slug=${{encodeURIComponent(toolSlug)}}&session_id=${{encodeURIComponent(sid)}}`;
   const fulfillHtmlUrl = `${{fulfillBaseUrl}}&format=html`;
   const fulfillCsvUrl = `${{fulfillBaseUrl}}&format=csv`;
   const fulfillDatapackUrl = `${{fulfillBaseUrl}}&format=datapack`;
@@ -6966,20 +7560,48 @@ async function dispatchEdgePaidFulfillmentEmail(env, record, sessionId, isSynthe
   const safeSid = escapeHtml(sid);
   const safeLeadId = escapeHtml(leadId);
   const safeToolSlug = escapeHtml(toolSlug);
-  const safeFulfillBaseUrl = escapeHtml(fulfillBaseUrl);
   const safeFulfillHtmlUrl = escapeHtml(fulfillHtmlUrl);
   const safeFulfillCsvUrl = escapeHtml(fulfillCsvUrl);
   const safeFulfillDatapackUrl = escapeHtml(fulfillDatapackUrl);
-  const subject = `[{brand_name} Paid Toolkit Ready] Your Verified Workpaper & Statutory Data Pack (${{toolSlug.replace(/[\\r\\n]+/g, " ").slice(0, 120)}})`;
-  const htmlBody =
-    `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
-    `<h2>Your {brand_name} Paid Audit Workpaper &amp; Statutory Data Pack Is Ready</h2>` +
-    `<p>Payment Reference: <strong>${{safeSid}}</strong> | Lead Reference: <strong>${{safeLeadId}}</strong></p>` +
-    `<p>Calculator Scenario: <strong>${{safeToolSlug}}</strong></p>` +
-    `<p><a href="${{safeFulfillHtmlUrl}}">Open Verified Paid Workpaper (HTML / Print PDF)</a></p>` +
-    `<p><a href="${{safeFulfillCsvUrl}}">Download Reconciliation Schedule (CSV)</a> | <a href="${{safeFulfillDatapackUrl}}">Download Statutory Data Pack (JSON)</a></p>` +
-    `<p>Direct Fulfillment Link: <a href="${{safeFulfillBaseUrl}}">${{safeFulfillBaseUrl}}</a></p>` +
-    `</div>`;
+  const cleanSlugLabel = toolSlug.replace(/[\\r\\n]+/g, " ").slice(0, 120);
+  const firmName = String((record && (record.firm_name || record.company_name)) || (record && record.metadata && record.metadata.firm_name) || "{brand_name} Verified Partner").trim();
+  const safeFirmName = escapeHtml(firmName);
+  const partnerFeeLabel = escapeHtml(String((partnerOffer && partnerOffer.price_usd) || recPrice || {partner_price_usd}));
+
+  let subject = "";
+  let htmlBody = "";
+  if (tierKind === "partner_slot") {{
+    subject = `[{brand_name} Verified Partner Slot Confirmed] Partner Onboarding & Placement Confirmation`;
+    htmlBody =
+      `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+      `<h2>Your {brand_name} Verified Partner Slot Placement Is Confirmed</h2>` +
+      `<p>Partner Firm: <strong>${{safeFirmName}}</strong> | Verified Placement Fee: <strong>$${{partnerFeeLabel}}</strong></p>` +
+      `<p>Payment Reference: <strong>${{safeSid}}</strong> | Partner Lead Reference: <strong>${{safeLeadId}}</strong></p>` +
+      `<p>Target Calculator Route: <strong>${{safeToolSlug}}</strong></p>` +
+      `<p>Your verified partner slot is active for onboarding and state-filtered attribution routing.</p>` +
+      `<p><a href="${{safeFulfillHtmlUrl}}">Open Partner Onboarding Confirmation Receipt (HTML)</a></p>` +
+      `</div>`;
+  }} else if (tierKind === "quick") {{
+    subject = `[{brand_name} Paid Worksheet Ready] Your Instant Statutory Worksheet (${{cleanSlugLabel}})`;
+    htmlBody =
+      `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+      `<h2>Your {brand_name} Instant Statutory Worksheet Is Ready</h2>` +
+      `<p>Payment Reference: <strong>${{safeSid}}</strong> | Lead Reference: <strong>${{safeLeadId}}</strong></p>` +
+      `<p>Calculator Scenario: <strong>${{safeToolSlug}}</strong></p>` +
+      `<p><a href="${{safeFulfillHtmlUrl}}">Open Instant Statutory Worksheet (HTML / Print PDF)</a></p>` +
+      `<p><a href="${{safeFulfillCsvUrl}}">Download Summary Worksheet Schedule (CSV)</a></p>` +
+      `</div>`;
+  }} else {{
+    subject = `[{brand_name} Paid Workpaper & Data Pack Ready] Your Verified Workpaper & Statutory Data Pack (${{cleanSlugLabel}})`;
+    htmlBody =
+      `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;">` +
+      `<h2>Your {brand_name} Paid Audit Workpaper &amp; Statutory Data Pack Is Ready</h2>` +
+      `<p>Payment Reference: <strong>${{safeSid}}</strong> | Lead Reference: <strong>${{safeLeadId}}</strong></p>` +
+      `<p>Calculator Scenario: <strong>${{safeToolSlug}}</strong></p>` +
+      `<p><a href="${{safeFulfillHtmlUrl}}">Open Verified Paid Workpaper (HTML / Print PDF)</a></p>` +
+      `<p><a href="${{safeFulfillCsvUrl}}">Download Reconciliation Schedule (CSV)</a> | <a href="${{safeFulfillDatapackUrl}}">Download Statutory Data Pack (JSON)</a></p>` +
+      `</div>`;
+  }}
 
   let dispatched = false;
   let status = "queued_central_responder";
@@ -7141,21 +7763,23 @@ export {{
     return js_block
 
 
-def generate_edge_lead_capture_function(property_id: str = "profithelm") -> str:
+def generate_edge_lead_capture_function(
+    property_id: str = "profithelm",
+    audience_tier: Optional[str] = None,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> str:
     """
     Generates the deterministic Cloudflare Pages Function (functions/api/lead-capture.js)
-    for ProfitHelm or Prexvo TCPA-compliant partner quote intake and CPL lead capture.
-    Enforces vertical thresholds ($100k+ 1031/CapEx, $50k+ Factoring, $50k+ Prexvo Refi),
-    keeps sub-threshold calculations frictionless, persists consented CPL records in KV,
-    routes to the highest-yielding live partner with pre-filled context, and flags $100k+
-    leads for HumanActionBus operator dispatch.
+    for ProfitHelm, Prexvo, GainHelm, LienBond, or any 5th-50th+ dynamic tenant
+    TCPA-compliant partner quote intake, paywall-gated deliverables, and Stripe Checkout.
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
-    prop_clean = (property_id or "").strip().lower()
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        raise ValueError(
-            f"Edge lead capture function generation is only supported for profithelm, prexvo, gainhelm, or lienbond (got '{property_id}')."
-        )
+    tenant_meta = _resolve_edge_tenant_metadata(
+        property_id,
+        repo_root=repo_root,
+        audience_tier=audience_tier,
+    )
+    prop_clean = tenant_meta["property_id"]
 
     if prop_clean == "lienbond":
         lead_js = """/**
@@ -7479,12 +8103,13 @@ function isEdgeVerifiedPaidRecord(item) {
   );
 }
 
-async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+async function verifyEdgeStripePaidSession(env, sessionId, leadId, allowInferredLeadId = false) {
   const sid = String(sessionId || "").trim();
   const out = {
     verified: false,
     reason: "",
     session_id: sid,
+    lead_id: null,
     payment_status: null,
     amount_total_cents: null,
     currency: null,
@@ -7529,13 +8154,16 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
     out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.firm_name = meta.firm_name || null;
     out.inputs_json = meta.inputs_json || null;
     out.outputs_json = meta.outputs_json || null;
-    const ref = String(data.client_reference_id || meta.lead_id || "");
+    const ref = String(data.client_reference_id || meta.lead_id || "").trim();
+    out.lead_id = ref || null;
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
     else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
-    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (!allowInferredLeadId && (!leadId || ref !== leadId)) out.reason = "lead_id_mismatch";
+    else if (allowInferredLeadId && !ref) out.reason = "lead_id_mismatch";
     else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
     else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
     else out.verified = true;
@@ -7628,6 +8256,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const resolvedSku = payment.offer_sku
     ? normalizeEdgeSku(payment.offer_sku)
     : normalizeEdgeSku(baseRec.offer_sku || "");
+  const resolvedFirmName = String((payment && payment.firm_name) || baseRec.firm_name || baseRec.company_name || "").trim();
   const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
@@ -7657,10 +8286,12 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
     ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
+    ...(resolvedFirmName ? { firm_name: resolvedFirmName } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
+    settled: true,
     settlement_status: "settled",
     settlement_rail:
       payment.settlement_rail ||
@@ -7755,31 +8386,44 @@ function buildEdgePerCalculatorConversionMetrics(leads, propertyId, defaultPrice
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null) {
+  const tierKind = String((offer && (offer.tier_kind || offer.tierKind)) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlot = isPartnerSlotOfferOrSlug(offer, toolSlug);
   const playbookUrl = bundle ? bundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookCsvUrl = bundle && bundle.playbook_csv_url ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = bundle && bundle.playbook_datapack_url ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
+  const playbookCsvUrl = isPartnerSlot ? null : (bundle && bundle.playbook_csv_url !== undefined ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`);
+  const playbookDatapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.playbook_datapack_url !== undefined ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`);
   const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
+  const csvFulfillmentUrl = isPartnerSlot ? null : (bundle && bundle.csv_fulfillment_url !== undefined ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`);
+  const datapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.datapack_url !== undefined ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`);
+  const datapackIncluded = !isQuickTier && !isPartnerSlot;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "LienBond";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
-  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
-    ? "/"
-    : slugNorm === "general"
-    ? "/tools/contractor-license-bond-cost-calculator-by-credit-score/"
-    : `/tools/${slugNorm}/`;
-  const successUrl = `https://lienbond.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://lienbond.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  let successUrl = "";
+  let cancelUrl = "";
+  if (isPartnerSlot) {
+    const partnerUrls = buildPartnerSlotReturnUrls("lienbond.com", leadId, offer.sku);
+    successUrl = partnerUrls.successUrl;
+    cancelUrl = partnerUrls.cancelUrl;
+  } else {
+    const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+      ? "/"
+      : slugNorm === "general"
+      ? "/tools/contractor-license-bond-cost-calculator-by-credit-score/"
+      : `/tools/${slugNorm}/`;
+    successUrl = `https://lienbond.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+    cancelUrl = `https://lienbond.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  }
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
     calculated_amount: bundle.calculated_amount,
     settlement_attribution: bundle.settlement_attribution,
-    statutory_trend_series_count: Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0,
+    statutory_trend_series_count: typeof bundle.statutory_trend_series_count === "number" ? bundle.statutory_trend_series_count : (Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0),
   } : {};
+  const firmNameMeta = String((bundle && bundle.firm_name) || "").trim();
 
   if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {
     try {
@@ -7807,6 +8451,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 125000),
         "metadata[state]": String((bundle && bundle.state) || "CA"),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+        ...(firmNameMeta ? { "metadata[firm_name]": firmNameMeta.slice(0, 120) } : {}),
         ...(buildCompactMetadataJson(bundle && bundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(bundle.scenario_inputs, 480) } : {}),
         ...(buildCompactMetadataJson(bundle && bundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(bundle.scenario_outputs, 480) } : {}),
       };
@@ -7828,9 +8473,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
           offer_sku: offer.sku,
           offer_title: offer.title,
           offer_price_usd: offer.price_usd,
+          tier_kind: tierKind,
           statutory_authority: offer.statutory_authority,
           deliverables: offer.deliverables,
           billing_mode: "payment",
+          datapack_included: datapackIncluded,
           checkout_url: data.url,
           playbook_url: playbookUrl,
           playbook_csv_url: playbookCsvUrl,
@@ -7862,9 +8509,11 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
     offer_sku: offer.sku,
     offer_title: offer.title,
     offer_price_usd: offer.price_usd,
+    tier_kind: tierKind,
     statutory_authority: offer.statutory_authority,
     deliverables: offer.deliverables,
     billing_mode: "payment",
+    datapack_included: datapackIncluded,
     checkout_url: null,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -7921,8 +8570,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "daily_cap_suppressed",
     };
   }
-  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
-    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
     : "";
   const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
   const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
@@ -7948,7 +8597,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const lbPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_lienbond_direct")}${lbSkuQs}&tool_slug=${encodeURIComponent(cleanLbSlug)}`);
   const lbPlaybookHtmlUrl = `https://lienbond.com${lbPlaybookPath}${lbPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const lbPlaybookCsvUrl = `https://lienbond.com${record.playbook_csv_url || (lbPlaybookPath + "&format=csv")}`;
-  const lbSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const lbSchedRows = (
+    Array.isArray(record.preview_summary_rows)
+      ? record.preview_summary_rows
+      : (Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [])
+  ).slice(0, 2);
   const lbTableHtml = lbSchedRows.length > 0
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
@@ -8180,9 +8833,11 @@ export async function onRequestGet(context) {
   )
     .trim()
     .toLowerCase();
-  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawReqSku = (reqUrl.searchParams.get("sku") || "").trim();
+  const reqSku = rawReqSku.toLowerCase();
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_lienbond_direct";
   const email = reqUrl.searchParams.get("email") || "";
+  const firmNameParam = (reqUrl.searchParams.get("firm_name") || reqUrl.searchParams.get("company_name") || "").trim();
   const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
 
   if (reqUrl.searchParams.get("health") === "1") {
@@ -8198,10 +8853,17 @@ export async function onRequestGet(context) {
     modeParam === "fulfill" ||
     modeParam === "playbook"
   ) {
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
     const { record, offer: initialOffer } = await resolveLienBondGetContext(env, reqUrl, leadId, rawToolSlug, reqSku, email);
     let offer = initialOffer;
     let gatedRecord = record;
+    if (firmNameParam && gatedRecord && !gatedRecord.firm_name) {
+      gatedRecord = { ...gatedRecord, firm_name: firmNameParam };
+    }
     if (!isFulfill && reqSku && gatedRecord) {
       gatedRecord = { ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) };
     }
@@ -8210,15 +8872,25 @@ export async function onRequestGet(context) {
       return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
     }
     let verifiedSid = "";
+    let effectiveLeadId = leadId;
     if (isFulfill) {
-      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      const hasExplicitLeadId = Boolean(reqUrl.searchParams.get("lead_id"));
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId, !hasExplicitLeadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      if (!hasExplicitLeadId && payment.lead_id && payment.lead_id !== effectiveLeadId) {
+        effectiveLeadId = payment.lead_id;
+        const { record: hydratedRec } = await resolveLienBondGetContext(env, reqUrl, effectiveLeadId, rawToolSlug, reqSku, email);
+        gatedRecord = hydratedRec;
+        if (firmNameParam && gatedRecord && !gatedRecord.firm_name) {
+          gatedRecord = { ...gatedRecord, firm_name: firmNameParam };
+        }
+      }
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialOffer, fmt);
-      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, effectiveLeadId);
       verifiedSid = String(payment.session_id || "");
       offer = selectOfferForSlug((gatedRecord && gatedRecord.tool_slug) || rawToolSlug, tierGuard.paidSku);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku };
       if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
         await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
       }
@@ -8276,9 +8948,14 @@ export async function onRequestGet(context) {
   }
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "lienbond");
     const { record, toolSlug, offer } = await resolveLienBondGetContext(env, reqUrl, checkoutLeadId, rawToolSlug, reqSku, email);
     record.lead_id = checkoutLeadId;
+    if (firmNameParam && !record.firm_name) record.firm_name = firmNameParam;
     await persistPreCheckoutLeadRecord(env, record, offer, toolSlug, isSynth);
     const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, checkoutLeadId, email || (record && record.email) || "", toolSlug, offer, isSynth, bundle);
@@ -8396,7 +9073,7 @@ export async function onRequestGet(context) {
     }
   }
 
-  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "lienbond", 69);
+  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "lienbond", getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU).price_usd);
   const totalAttrRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.attributed_revenue_usd || 0), 0) * 100) / 100;
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
@@ -8480,7 +9157,12 @@ export async function onRequestPost(context) {
     );
     const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : 125000;
     const thresholdUsd = 25000;
-    const reqPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const rawPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim();
+    const postSkuCheck = validateRequestedEdgeSku(rawPostSku);
+    if (!postSkuCheck.valid) {
+      return buildInvalidSkuResponse(rawPostSku, postCorsHeaders);
+    }
+    const reqPostSku = rawPostSku.toLowerCase();
     const offer = selectOfferForSlug(toolSlug, reqPostSku);
     const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_lienbond_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
 
@@ -8505,8 +9187,12 @@ export async function onRequestPost(context) {
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqPostSku, initialFulfillOffer, String(body.format || reqUrl.searchParams.get("format") || "json"));
       if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
       const effFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, tierGuard.paidSku);
-      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      const ffBundle = buildLienBondWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, effFulfillOffer, "paid_toolkit", String(payment.session_id || ""));
+      let settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      settledRecord = { ...(settledRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && settledRecord && settledRecord.email && !settledRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, settledRecord, String(payment.session_id || ""), false);
+      }
+      const ffBundle = buildLienBondWorkpaperBundle(settledRecord, effFulfillOffer, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -8566,8 +9252,9 @@ export async function onRequestPost(context) {
     if (intentParam === "partner_registration") {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Surety & Insurance Partner Agency";
       const partnerLeadId = String(body.lead_id || `lead_lienbond_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      const partnerSku = "lb_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+      const partnerSku = partnerOffer.sku;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${encodeURIComponent(partnerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "lienbond",
@@ -8580,8 +9267,8 @@ export async function onRequestPost(context) {
         firm_name: firmName,
         state,
         offer_sku: partnerSku,
-        offer_title: "Verified Calculator Partner Slot",
-        offer_price_usd: 299,
+        offer_title: partnerOffer.title,
+        offer_price_usd: partnerOffer.price_usd,
         checkout_url: partnerCheckoutUrl,
         captured_at: new Date().toISOString(),
       };
@@ -8686,8 +9373,12 @@ export async function onRequestPost(context) {
     };
     const bundle = buildLienBondWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
-    record.reconciliation_schedule = bundle.reconciliation_schedule;
-    record.sensitivity_matrix = bundle.sensitivity_matrix;
+    record.preview_mode = true;
+    record.paid_unlock_required = true;
+    record.preview_summary_rows = bundle.preview_summary_rows;
+    record.upgrade_checkout_url = bundle.upgrade_checkout_url;
+    record.quick_checkout_url = bundle.quick_checkout_url;
+    record.full_checkout_url = bundle.full_checkout_url;
     record.fulfillment_url = bundle.fulfillment_url;
     record.fulfill_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
@@ -9626,12 +10317,13 @@ function isEdgeVerifiedPaidRecord(item) {
   );
 }
 
-async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+async function verifyEdgeStripePaidSession(env, sessionId, leadId, allowInferredLeadId = false) {
   const sid = String(sessionId || "").trim();
   const out = {
     verified: false,
     reason: "",
     session_id: sid,
+    lead_id: null,
     payment_status: null,
     amount_total_cents: null,
     currency: null,
@@ -9676,13 +10368,16 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
     out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.firm_name = meta.firm_name || null;
     out.inputs_json = meta.inputs_json || null;
     out.outputs_json = meta.outputs_json || null;
-    const ref = String(data.client_reference_id || meta.lead_id || "");
+    const ref = String(data.client_reference_id || meta.lead_id || "").trim();
+    out.lead_id = ref || null;
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
     else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
-    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (!allowInferredLeadId && (!leadId || ref !== leadId)) out.reason = "lead_id_mismatch";
+    else if (allowInferredLeadId && !ref) out.reason = "lead_id_mismatch";
     else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
     else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
     else out.verified = true;
@@ -9781,6 +10476,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const resolvedSku = payment.offer_sku
     ? normalizeEdgeSku(payment.offer_sku)
     : normalizeEdgeSku(baseRec.offer_sku || "");
+  const resolvedFirmName = String((payment && payment.firm_name) || baseRec.firm_name || baseRec.company_name || "").trim();
   const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
@@ -9810,10 +10506,12 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
     ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
+    ...(resolvedFirmName ? { firm_name: resolvedFirmName } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
+    settled: true,
     settlement_status: "settled",
     settlement_rail:
       payment.settlement_rail ||
@@ -9914,6 +10612,9 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   const callerSku = normalizeEdgeSku(explicitSku);
   const hasExplicitSku = Boolean(callerSku && Object.prototype.hasOwnProperty.call(CANONICAL_OFFER_CATALOG, callerSku));
   const effVert = hasExplicitVertical ? callerVert : String((bundle && bundle.vertical) || "").trim();
+  const tierKind = String((offer && (offer.tier_kind || offer.tierKind)) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlot = isPartnerSlotOfferOrSlug(offer, toolSlug);
   const fallbackRec = {
     lead_id: leadId,
     tool_slug: toolSlug,
@@ -9924,11 +10625,12 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
   };
   const fallbackUrl = bundle ? bundle.checkout_url : buildGainHelmActionUrl("checkout", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
   const playbookUrl = bundle ? bundle.playbook_url : buildGainHelmActionUrl("playbook", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
-  const playbookCsvUrl = bundle && bundle.playbook_csv_url ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = bundle && bundle.playbook_datapack_url ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
+  const playbookCsvUrl = isPartnerSlot ? null : (bundle && bundle.playbook_csv_url !== undefined ? bundle.playbook_csv_url : `${playbookUrl}&format=csv`);
+  const playbookDatapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.playbook_datapack_url !== undefined ? bundle.playbook_datapack_url : `${playbookUrl}&format=datapack`);
   const fulfillmentUrl = bundle ? bundle.fulfillment_url : buildGainHelmActionUrl("fulfill", fallbackRec, offer, { tool_slug: toolSlug, vertical: effVert });
-  const csvFulfillmentUrl = bundle ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = bundle ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`;
+  const csvFulfillmentUrl = isPartnerSlot ? null : (bundle && bundle.csv_fulfillment_url !== undefined ? bundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`);
+  const datapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.datapack_url !== undefined ? bundle.datapack_url : `${fulfillmentUrl}&format=datapack`);
+  const datapackIncluded = !isQuickTier && !isPartnerSlot;
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "GainHelm";
@@ -9944,20 +10646,29 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
       : fwDefaultSlug;
   const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools(?:\\/|$)/, "");
   const isGenericSlug = !slugNorm || slugNorm === "general" || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage";
-  const toolPath = slugNorm.endsWith("-hub") || (isGenericSlug && !hasExplicitVertical && !hasExplicitSku)
-    ? "/"
-    : isGenericSlug
-    ? `/tools/${skuDefaultSlug}/`
-    : `/tools/${slugNorm}/`;
-  const successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://gainhelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  let successUrl = "";
+  let cancelUrl = "";
+  if (isPartnerSlot) {
+    const partnerUrls = buildPartnerSlotReturnUrls("gainhelm.com", leadId, offer.sku);
+    successUrl = partnerUrls.successUrl;
+    cancelUrl = partnerUrls.cancelUrl;
+  } else {
+    const toolPath = slugNorm.endsWith("-hub") || (isGenericSlug && !hasExplicitVertical && !hasExplicitSku)
+      ? "/"
+      : isGenericSlug
+      ? `/tools/${skuDefaultSlug}/`
+      : `/tools/${slugNorm}/`;
+    successUrl = `https://gainhelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+    cancelUrl = `https://gainhelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(offer.sku)}`;
+  }
   const fwVertical = GAINHELM_VERTICAL_BY_FRAMEWORK[fwKey] || "soc2_grc_automation";
   const bundleExtras = bundle ? {
     workpaper_id: bundle.workpaper_id,
     calculated_amount: bundle.calculated_amount,
     settlement_attribution: bundle.settlement_attribution,
-    statutory_trend_series_count: Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0,
+    statutory_trend_series_count: typeof bundle.statutory_trend_series_count === "number" ? bundle.statutory_trend_series_count : (Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0),
   } : {};
+  const firmNameMeta = String((bundle && bundle.firm_name) || "").trim();
 
   if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {
     try {
@@ -9986,6 +10697,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
         "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : 48500),
         "metadata[state]": String((bundle && bundle.state) || resolveGainHelmDefaultJurisdiction(classifyGainHelmFramework(toolSlug, fwVertical), toolSlug)),
         "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+        ...(firmNameMeta ? { "metadata[firm_name]": firmNameMeta.slice(0, 120) } : {}),
         ...(buildCompactMetadataJson(bundle && bundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(bundle.scenario_inputs, 480) } : {}),
         ...(buildCompactMetadataJson(bundle && bundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(bundle.scenario_outputs, 480) } : {}),
       };
@@ -10007,10 +10719,12 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
           offer_sku: offer.sku,
           offer_title: offer.title,
           offer_price_usd: offer.price_usd,
+          tier_kind: tierKind,
           vertical: fwVertical,
           statutory_authority: offer.statutory_authority,
           deliverables: offer.deliverables,
           billing_mode: "payment",
+          datapack_included: datapackIncluded,
           checkout_url: data.url,
           playbook_url: playbookUrl,
           playbook_csv_url: playbookCsvUrl,
@@ -10042,10 +10756,12 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offe
     offer_sku: offer.sku,
     offer_title: offer.title,
     offer_price_usd: offer.price_usd,
+    tier_kind: tierKind,
     vertical: fwVertical,
     statutory_authority: offer.statutory_authority,
     deliverables: offer.deliverables,
     billing_mode: "payment",
+    datapack_included: datapackIncluded,
     checkout_url: null,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -10102,8 +10818,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "daily_cap_suppressed",
     };
   }
-  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
-    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
     : "";
   const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
   const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
@@ -10131,7 +10847,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const ghPlaybookPath = String(record.playbook_url || buildGainHelmActionUrl("playbook", record, recOfferObj));
   const ghPlaybookHtmlUrl = `https://gainhelm.com${ghPlaybookPath}${ghPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const ghPlaybookCsvUrl = `https://gainhelm.com${record.playbook_csv_url || (ghPlaybookPath + "&format=csv")}`;
-  const ghSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const ghSchedRows = (
+    Array.isArray(record.preview_summary_rows)
+      ? record.preview_summary_rows
+      : (Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [])
+  ).slice(0, 2);
   const ghTableHtml = ghSchedRows.length > 0
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
@@ -10339,9 +11059,11 @@ export async function onRequestGet(context) {
     .toLowerCase()
     .replace(/^\\/+|\\/+$/g, "")
     .replace(/^tools(?:\\/|$)/, "");
-  const reqSku = String(reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawReqSku = String(reqUrl.searchParams.get("sku") || "").trim();
+  const reqSku = rawReqSku.toLowerCase();
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_gainhelm_direct";
   const email = reqUrl.searchParams.get("email") || "";
+  const firmNameParam = String(reqUrl.searchParams.get("firm_name") || reqUrl.searchParams.get("company_name") || "").trim();
   const amountParam = reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "";
   const stateParam = reqUrl.searchParams.get("state") || "";
   const inputsJsonParam = reqUrl.searchParams.get("inputs_json") || "";
@@ -10361,6 +11083,10 @@ export async function onRequestGet(context) {
     modeParam === "fulfill" ||
     modeParam === "playbook"
   ) {
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
     const record = await lookupEdgeLeadRecord(
       env,
@@ -10376,20 +11102,43 @@ export async function onRequestGet(context) {
     const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
     let offer = effState.offer;
     let gatedRecord = record;
+    if (firmNameParam && gatedRecord && !gatedRecord.firm_name) {
+      gatedRecord = { ...gatedRecord, firm_name: firmNameParam };
+    }
     const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
     if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {
       return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId, effState.paymentRequiredCtx);
     }
     let verifiedSid = "";
+    let effectiveLeadId = leadId;
     if (isFulfill) {
-      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      const hasExplicitLeadId = Boolean(reqUrl.searchParams.get("lead_id"));
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId, !hasExplicitLeadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId, effState.paymentRequiredCtx);
-      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, effState.offer, fmt);
-      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId, effState.paymentRequiredCtx);
+      if (!hasExplicitLeadId && payment.lead_id && payment.lead_id !== effectiveLeadId) {
+        effectiveLeadId = payment.lead_id;
+        gatedRecord = await lookupEdgeLeadRecord(
+          env,
+          effectiveLeadId,
+          toolSlug,
+          amountParam,
+          stateParam,
+          email,
+          inputsJsonParam,
+          outputsJsonParam,
+          verticalParam
+        );
+        if (firmNameParam && gatedRecord && !gatedRecord.firm_name) {
+          gatedRecord = { ...gatedRecord, firm_name: firmNameParam };
+        }
+      }
+      const effFulfillState = resolveGainHelmEffectiveRequestState(gatedRecord, toolSlug, verticalParam, reqSku);
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, effFulfillState.offer, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, effectiveLeadId, effFulfillState.paymentRequiredCtx);
       verifiedSid = String(payment.session_id || "");
-      offer = selectOfferForSlug(effState.effSlug, tierGuard.paidSku, effState.effVert);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(record || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      offer = selectOfferForSlug(effFulfillState.effSlug, tierGuard.paidSku, effFulfillState.effVert);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku };
       if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
         await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
       }
@@ -10447,6 +11196,10 @@ export async function onRequestGet(context) {
   }
 
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "gainhelm");
     const record = await lookupEdgeLeadRecord(
       env,
@@ -10460,6 +11213,7 @@ export async function onRequestGet(context) {
       verticalParam
     );
     record.lead_id = checkoutLeadId;
+    if (firmNameParam && !record.firm_name) record.firm_name = firmNameParam;
     const effState = resolveGainHelmEffectiveRequestState(record, toolSlug, verticalParam, reqSku);
     const offer = effState.offer;
     await persistPreCheckoutLeadRecord(env, record, offer, effState.effSlug, isSynth);
@@ -10589,7 +11343,7 @@ export async function onRequestGet(context) {
     }
   }
 
-  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "gainhelm", 79);
+  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "gainhelm", getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU).price_usd);
   const totalAttrRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.attributed_revenue_usd || 0), 0) * 100) / 100;
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
@@ -10664,7 +11418,12 @@ export async function onRequestPost(context) {
       ? ""
       : String(rawToolSlugCandidate);
     const toolSlug = sanitizeEdgeToolSlug(fallbackSlugVal, "");
-    const reqPostSku = normalizeEdgeSku(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "");
+    const rawPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim();
+    const postSkuCheck = validateRequestedEdgeSku(rawPostSku);
+    if (!postSkuCheck.valid) {
+      return buildInvalidSkuResponse(rawPostSku, postCorsHeaders);
+    }
+    const reqPostSku = normalizeEdgeSku(rawPostSku);
     const hasExplicitVertical = isExplicitGainHelmVertical(reqVertical);
     const hasExplicitSku = Boolean(reqPostSku && Object.prototype.hasOwnProperty.call(CANONICAL_OFFER_CATALOG, reqPostSku));
     const isBareRoot = Boolean(isGenericGainHelmToolSlug(toolSlug) && !hasExplicitVertical && !hasExplicitSku);
@@ -10721,8 +11480,12 @@ export async function onRequestPost(context) {
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqPostSku, effFulfillState.offer, String(body.format || reqUrl.searchParams.get("format") || "json"));
       if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId, effFulfillState.paymentRequiredCtx);
       const pinnedOffer = selectOfferForSlug(effFulfillState.effSlug, tierGuard.paidSku, effFulfillState.effVert);
-      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      const ffBundle = buildGainHelmWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, pinnedOffer, "paid_toolkit", String(payment.session_id || ""));
+      let settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
+      settledRecord = { ...(settledRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSynth && settledRecord && settledRecord.email && !settledRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, settledRecord, String(payment.session_id || ""), false);
+      }
+      const ffBundle = buildGainHelmWorkpaperBundle(settledRecord, pinnedOffer, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -10784,8 +11547,9 @@ export async function onRequestPost(context) {
     if (intentParam === "partner_registration") {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
       const partnerLeadId = String(body.lead_id || `lead_gainhelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      const partnerSku = "gh_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+      const partnerSku = partnerOffer.sku;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${encodeURIComponent(partnerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "gainhelm",
@@ -10799,8 +11563,8 @@ export async function onRequestPost(context) {
         state,
         offer_sku: partnerSku,
         has_explicit_sku: true,
-        offer_title: "Verified Calculator Partner Slot",
-        offer_price_usd: 299,
+        offer_title: partnerOffer.title,
+        offer_price_usd: partnerOffer.price_usd,
         checkout_url: partnerCheckoutUrl,
         captured_at: new Date().toISOString(),
       };
@@ -10913,8 +11677,12 @@ export async function onRequestPost(context) {
     };
     const bundle = buildGainHelmWorkpaperBundle(record, offer, "free_playbook");
     const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle, reqVertical, reqPostSku);
-    record.reconciliation_schedule = bundle.reconciliation_schedule;
-    record.sensitivity_matrix = bundle.sensitivity_matrix;
+    record.preview_mode = true;
+    record.paid_unlock_required = true;
+    record.preview_summary_rows = bundle.preview_summary_rows;
+    record.upgrade_checkout_url = bundle.upgrade_checkout_url;
+    record.quick_checkout_url = bundle.quick_checkout_url;
+    record.full_checkout_url = bundle.full_checkout_url;
     record.fulfillment_url = bundle.fulfillment_url;
     record.fulfill_url = bundle.fulfillment_url;
     record.csv_fulfillment_url = bundle.csv_fulfillment_url;
@@ -10996,12 +11764,64 @@ const CORS_HEADERS = {
 };
 
 const RESTRICTED_PUBLIC_SERVICE_SLUGS = [
+  "pslf-qualifying-payment-calculator",
   "pslf-qualifying-payment-simulator",
-  "ibr-hardship-cap-calculator",
+  "pslf-employer-ein-eligibility",
   "save-plan-litigation-transition",
+  "save-forbearance-interest-tracker",
+  "borrower-defense-discharge-calculator",
+  "total-permanent-disability-discharge-calculator",
+  "teacher-loan-forgiveness-calculator",
+  "closed-school-discharge-calculator",
+  "federal-poverty-guideline-discretionary-income-calculator",
+  "student-loan-default-rehabilitation-calculator",
+  "ibr-hardship-cap-calculator",
   "disclaimers",
   "methodology",
 ];
+
+const RESTRICTED_PUBLIC_SERVICE_TOKENS = [
+  "pslf",
+  "public-service",
+  "public service",
+  "save-plan",
+  "save_plan",
+  "save plan",
+  "save-forbearance",
+  "buyback",
+  "ibr-hardship",
+  "hardship-cap",
+  "income-driven-forgiveness",
+  "forbearance",
+  "deferment",
+  "borrower-defense",
+  "borrower defense",
+  "disability-discharge",
+  "disability discharge",
+  "total-and-permanent-disability",
+  "total and permanent disability",
+  "total-permanent-disability",
+  "teacher-loan-forgiveness",
+  "teacher loan forgiveness",
+  "closed-school",
+  "closed school",
+  "low-income",
+  "low income",
+  "poverty-guideline",
+  "poverty guideline",
+  "hardship",
+  "default-rehabilitation",
+  "default rehabilitation",
+  "disclaimers",
+  "methodology",
+];
+
+function isRestrictedPublicServiceSlug(rawSlug) {
+  const s = String(rawSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  if (!s) return false;
+  if (RESTRICTED_PUBLIC_SERVICE_SLUGS.includes(s)) return true;
+  return RESTRICTED_PUBLIC_SERVICE_TOKENS.some((tok) => s.includes(tok));
+}
 
 const PARTNER_ROUTES = {
   splash_financial: "https://www.splashfinancial.com/",
@@ -11221,12 +12041,13 @@ function isEdgeVerifiedPaidRecord(item) {
   );
 }
 
-async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+async function verifyEdgeStripePaidSession(env, sessionId, leadId, allowInferredLeadId = false) {
   const sid = String(sessionId || "").trim();
   const out = {
     verified: false,
     reason: "",
     session_id: sid,
+    lead_id: null,
     payment_status: null,
     amount_total_cents: null,
     currency: null,
@@ -11271,13 +12092,16 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
     out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.firm_name = meta.firm_name || null;
     out.inputs_json = meta.inputs_json || null;
     out.outputs_json = meta.outputs_json || null;
-    const ref = String(data.client_reference_id || meta.lead_id || "");
+    const ref = String(data.client_reference_id || meta.lead_id || "").trim();
+    out.lead_id = ref || null;
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
     else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
-    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (!allowInferredLeadId && (!leadId || ref !== leadId)) out.reason = "lead_id_mismatch";
+    else if (allowInferredLeadId && !ref) out.reason = "lead_id_mismatch";
     else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
     else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
     else out.verified = true;
@@ -11370,6 +12194,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const resolvedSku = payment.offer_sku
     ? normalizeEdgeSku(payment.offer_sku)
     : normalizeEdgeSku(baseRec.offer_sku || "");
+  const resolvedFirmName = String((payment && payment.firm_name) || baseRec.firm_name || baseRec.company_name || "").trim();
   const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
@@ -11399,10 +12224,12 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
     ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
+    ...(resolvedFirmName ? { firm_name: resolvedFirmName } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
+    settled: true,
     settlement_status: "settled",
     settlement_rail:
       payment.settlement_rail ||
@@ -11581,7 +12408,10 @@ function isSyntheticProbeRequest(request, body, email) {
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSyntheticProbe = false, customRecord = null, reqSku = "") {
   const cleanSku = String(reqSku || (customRecord && customRecord.offer_sku) || "").trim().toLowerCase();
   const activeOffer = resolvePrexvoOfferSpec(cleanSku);
-  const isPartnerSlotSku = activeOffer.sku === "px_verified_partner_slot";
+  const tierKind = String((activeOffer && activeOffer.tier_kind) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlotSku = isPartnerSlotOfferOrSlug(activeOffer, toolSlug);
+  const datapackIncluded = !isQuickTier && !isPartnerSlotSku;
   const customBundle = customRecord
     ? buildEdgePersonalizedWorkpaperBundle(
         {
@@ -11595,39 +12425,50 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     : null;
   const fallbackUrl = customBundle && !isPartnerSlotSku ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = customBundle && customBundle.playbook_datapack_url ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
+  const playbookCsvUrl = isPartnerSlotSku ? null : (customBundle && customBundle.playbook_csv_url !== undefined ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`);
+  const playbookDatapackUrl = (isQuickTier || isPartnerSlotSku) ? null : (customBundle && customBundle.playbook_datapack_url !== undefined ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`);
   const fulfillmentUrl = customBundle && !isPartnerSlotSku ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
+  const csvFulfillmentUrl = isPartnerSlotSku ? null : (customBundle && customBundle.csv_fulfillment_url !== undefined ? customBundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`);
+  const datapackUrl = (isQuickTier || isPartnerSlotSku) ? null : (customBundle && customBundle.datapack_url !== undefined ? customBundle.datapack_url : `${fulfillmentUrl}&format=datapack`);
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "Prexvo";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
   const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
-  const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
-    ? "/"
-    : slugNorm === "general"
-    ? "/tools/student-loan-refinance-break-even-calculator/"
-    : `/tools/${slugNorm}/`;
-  const successUrl = `https://prexvo.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}`;
+  let successUrl = "";
+  let cancelUrl = "";
+  if (isPartnerSlotSku) {
+    const partnerUrls = buildPartnerSlotReturnUrls("prexvo.com", leadId, activeOffer.sku);
+    successUrl = partnerUrls.successUrl;
+    cancelUrl = partnerUrls.cancelUrl;
+  } else {
+    const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+      ? "/"
+      : slugNorm === "general"
+      ? "/tools/student-loan-refinance-break-even-calculator/"
+      : `/tools/${slugNorm}/`;
+    successUrl = `https://prexvo.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}&session_id={CHECKOUT_SESSION_ID}`;
+    cancelUrl = `https://prexvo.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(activeOffer.sku)}`;
+  }
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
     calculated_amount: customBundle.calculated_amount,
     capital_band: customBundle.capital_band,
     custom_parameter_ledger: customBundle.custom_parameter_ledger,
     settlement_attribution: customBundle.settlement_attribution,
-    statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
+    statutory_trend_series_count: typeof customBundle.statutory_trend_series_count === "number" ? customBundle.statutory_trend_series_count : (Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0),
   } : {};
+  const firmNameMeta = String((customBundle && customBundle.firm_name) || (customRecord && (customRecord.firm_name || customRecord.company_name)) || "").trim();
   if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: activeOffer.sku,
       offer_title: activeOffer.title,
       offer_price_usd: activeOffer.price_usd,
+      tier_kind: tierKind,
       statutory_authority: activeOffer.statutory_authority,
       deliverables: activeOffer.deliverables,
+      datapack_included: datapackIncluded,
       checkout_url: null,
       playbook_url: playbookUrl,
       playbook_csv_url: playbookCsvUrl,
@@ -11687,6 +12528,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 85000),
       "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+      ...(firmNameMeta ? { "metadata[firm_name]": firmNameMeta.slice(0, 120) } : {}),
       ...(buildCompactMetadataJson(customBundle && customBundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(customBundle.scenario_inputs, 480) } : {}),
       ...(buildCompactMetadataJson(customBundle && customBundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(customBundle.scenario_outputs, 480) } : {}),
     };
@@ -11709,8 +12551,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
         offer_sku: activeOffer.sku,
         offer_title: activeOffer.title,
         offer_price_usd: activeOffer.price_usd,
+        tier_kind: tierKind,
         statutory_authority: activeOffer.statutory_authority,
         deliverables: activeOffer.deliverables,
+        datapack_included: datapackIncluded,
         checkout_url: data.url,
         playbook_url: playbookUrl,
         playbook_csv_url: playbookCsvUrl,
@@ -11753,8 +12597,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, isSy
     offer_sku: activeOffer.sku,
     offer_title: activeOffer.title,
     offer_price_usd: activeOffer.price_usd,
+    tier_kind: tierKind,
     statutory_authority: activeOffer.statutory_authority,
     deliverables: activeOffer.deliverables,
+    datapack_included: datapackIncluded,
     checkout_url: null,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -11815,8 +12661,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "daily_cap_suppressed",
     };
   }
-  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
-    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
     : "";
   const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
   const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
@@ -11842,7 +12688,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const pxPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_prexvo_direct")}${pxSkuQs}&tool_slug=${encodeURIComponent(cleanPxSlug)}`);
   const pxPlaybookHtmlUrl = `https://prexvo.com${pxPlaybookPath}${pxPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const pxPlaybookCsvUrl = `https://prexvo.com${record.playbook_csv_url || (pxPlaybookPath + "&format=csv")}`;
-  const pxSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const pxSchedRows = (
+    Array.isArray(record.preview_summary_rows)
+      ? record.preview_summary_rows
+      : (Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [])
+  ).slice(0, 2);
   const pxTableHtml = pxSchedRows.length > 0
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
@@ -12036,7 +12886,9 @@ export async function onRequestOptions(context = {}) {
 async function resolvePrexvoGetContext(env, reqUrl, request) {
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_prexvo_direct";
   const email = reqUrl.searchParams.get("email") || "";
-  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawReqSku = (reqUrl.searchParams.get("sku") || "").trim();
+  const reqSku = rawReqSku.toLowerCase();
+  const firmNameParam = (reqUrl.searchParams.get("firm_name") || reqUrl.searchParams.get("company_name") || "").trim();
   const rawToolParam = (
     reqUrl.searchParams.get("tool_slug") ||
     reqUrl.searchParams.get("tool") ||
@@ -12045,8 +12897,8 @@ async function resolvePrexvoGetContext(env, reqUrl, request) {
     reqUrl.searchParams.get("source") ||
     ""
   ).trim().toLowerCase();
-  if (rawToolParam && RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => rawToolParam.includes(s))) {
-    return { restricted: true, leadId, email, reqSku, toolSlug: rawToolParam, storedRecord: null, isSynth: false };
+  if (rawToolParam && isRestrictedPublicServiceSlug(rawToolParam)) {
+    return { restricted: true, leadId, email, rawReqSku, reqSku, firmNameParam, toolSlug: rawToolParam, storedRecord: null, isSynth: false };
   }
   const isSynth = isSyntheticProbeRequest(request, null, email);
   const storedRecord = await lookupEdgeLeadRecord(
@@ -12059,6 +12911,9 @@ async function resolvePrexvoGetContext(env, reqUrl, request) {
     reqUrl.searchParams.get("inputs_json"),
     reqUrl.searchParams.get("outputs_json")
   );
+  if (firmNameParam && storedRecord && !storedRecord.firm_name) {
+    storedRecord.firm_name = firmNameParam;
+  }
   const storedSlug = String((storedRecord && storedRecord.tool_slug) || "").trim().toLowerCase();
   const toolSlug =
     rawToolParam && rawToolParam !== "general"
@@ -12067,8 +12922,8 @@ async function resolvePrexvoGetContext(env, reqUrl, request) {
   if (storedRecord && (!storedSlug || storedSlug === "general")) {
     storedRecord.tool_slug = toolSlug;
   }
-  const restricted = RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s));
-  return { restricted, leadId, email, reqSku, toolSlug, storedRecord, isSynth };
+  const restricted = isRestrictedPublicServiceSlug(toolSlug);
+  return { restricted, leadId, email, rawReqSku, reqSku, firmNameParam, toolSlug, storedRecord, isSynth };
 }
 
 export async function onRequestGet(context) {
@@ -12097,7 +12952,11 @@ export async function onRequestGet(context) {
           { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
         );
       }
-      const { leadId, reqSku, storedRecord, isSynth } = ctx;
+      const { leadId, rawReqSku, reqSku, storedRecord, isSynth } = ctx;
+      const skuCheck = validateRequestedEdgeSku(rawReqSku);
+      if (!skuCheck.valid) {
+        return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+      }
       let gatedRecord = storedRecord;
       if (!isFulfill && reqSku && gatedRecord) {
         gatedRecord = { ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) };
@@ -12107,15 +12966,33 @@ export async function onRequestGet(context) {
         return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
       }
       let verifiedSid = "";
+      let effectiveLeadId = leadId;
     if (isFulfill) {
-      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      const hasExplicitLeadId = Boolean(reqUrl.searchParams.get("lead_id"));
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId, !hasExplicitLeadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      if (!hasExplicitLeadId && payment.lead_id && payment.lead_id !== effectiveLeadId) {
+        effectiveLeadId = payment.lead_id;
+        gatedRecord = await lookupEdgeLeadRecord(
+          env,
+          effectiveLeadId,
+          ctx.toolSlug,
+          reqUrl.searchParams.get("amount"),
+          reqUrl.searchParams.get("state"),
+          ctx.email,
+          reqUrl.searchParams.get("inputs_json"),
+          reqUrl.searchParams.get("outputs_json")
+        );
+        if (ctx.firmNameParam && gatedRecord && !gatedRecord.firm_name) {
+          gatedRecord.firm_name = ctx.firmNameParam;
+        }
+      }
       const initialPxOffer = resolvePrexvoOfferSpec(reqSku || (gatedRecord && gatedRecord.offer_sku) || "");
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialPxOffer, fmt);
-      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, effectiveLeadId);
       verifiedSid = String(payment.session_id || "");
-      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku };
       if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
         await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
       }
@@ -12183,7 +13060,11 @@ export async function onRequestGet(context) {
         { status: 400, headers: { "Content-Type": "application/json", ...CORS_HEADERS } }
       );
     }
-    const { email, reqSku, toolSlug, storedRecord: customRecord, isSynth } = ctx;
+    const { email, rawReqSku, reqSku, toolSlug, storedRecord: customRecord, isSynth } = ctx;
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "prexvo");
     const preRec = { ...(customRecord || {}), lead_id: checkoutLeadId, tool_slug: toolSlug, offer_sku: normalizeEdgeSku(reqSku) || (customRecord && customRecord.offer_sku) || "" };
     const resolvedPxOffer = resolvePrexvoOfferSpec(preRec.offer_sku);
@@ -12302,7 +13183,7 @@ export async function onRequestGet(context) {
     }
   }
 
-  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "prexvo", 39);
+  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "prexvo", getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU).price_usd);
   const totalAttrRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.attributed_revenue_usd || 0), 0) * 100) / 100;
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
@@ -12341,7 +13222,7 @@ export async function onRequestPost(context) {
     const email = String(body.email || "").trim().toLowerCase();
     const state = String(body.state || reqUrl.searchParams.get("state") || "").trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2);
     const toolSlug = sanitizeEdgeToolSlug(
-      body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
+      body.tool_slug || body.slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
       "student-loan-refinance-break-even-calculator"
     );
     const reqPartner = String(body.partner_key || "splash_financial").trim().toLowerCase();
@@ -12350,7 +13231,12 @@ export async function onRequestPost(context) {
       : "splash_financial";
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
-    const reqSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const rawPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim();
+    const postSkuCheck = validateRequestedEdgeSku(rawPostSku);
+    if (!postSkuCheck.valid) {
+      return buildInvalidSkuResponse(rawPostSku, postCorsHeaders);
+    }
+    const reqSku = rawPostSku.toLowerCase();
     const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
     const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
     if (isFulfillMode) {
@@ -12374,8 +13260,12 @@ export async function onRequestPost(context) {
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialPxOffer, String(body.format || reqUrl.searchParams.get("format") || "json"));
       if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
       storedRecord.offer_sku = tierGuard.paidSku;
-      const settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
-      const bundle = buildEdgePersonalizedWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, "paid_toolkit", String(payment.session_id || ""));
+      let settledRecord = await persistSettledEdgeLeadRecord(env, storedRecord, payment, isSyntheticProbe);
+      settledRecord = { ...(settledRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSyntheticProbe && settledRecord && settledRecord.email && !settledRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, settledRecord, String(payment.session_id || ""), false);
+      }
+      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -12398,7 +13288,7 @@ export async function onRequestPost(context) {
     const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSyntheticProbe, postCorsHeaders);
     if (!abuseGuard.allowed) return abuseGuard.response;
 
-    if (RESTRICTED_PUBLIC_SERVICE_SLUGS.some((s) => toolSlug.includes(s))) {
+    if (isRestrictedPublicServiceSlug(toolSlug)) {
       return new Response(
         JSON.stringify({
           ok: false,
@@ -12419,8 +13309,9 @@ export async function onRequestPost(context) {
       }
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
       const partnerLeadId = String(body.lead_id || `lead_prexvo_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      const partnerSku = "px_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+      const partnerSku = partnerOffer.sku;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${encodeURIComponent(partnerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "prexvo",
@@ -12433,8 +13324,8 @@ export async function onRequestPost(context) {
         firm_name: firmName,
         state: state || "CA",
         offer_sku: partnerSku,
-        offer_title: "Verified Calculator Partner Slot",
-        offer_price_usd: 299,
+        offer_title: partnerOffer.title,
+        offer_price_usd: partnerOffer.price_usd,
         checkout_url: partnerCheckoutUrl,
         captured_at: new Date().toISOString(),
       };
@@ -12543,8 +13434,12 @@ export async function onRequestPost(context) {
         captured_at: ts,
       };
       const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(playbookRecord, "free_playbook");
-      playbookRecord.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
-      playbookRecord.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+      playbookRecord.preview_mode = true;
+      playbookRecord.paid_unlock_required = true;
+      playbookRecord.preview_summary_rows = workpaperBundle.preview_summary_rows;
+      playbookRecord.upgrade_checkout_url = workpaperBundle.upgrade_checkout_url;
+      playbookRecord.quick_checkout_url = workpaperBundle.quick_checkout_url;
+      playbookRecord.full_checkout_url = workpaperBundle.full_checkout_url;
       playbookRecord.playbook_url = workpaperBundle.playbook_url;
       playbookRecord.playbook_csv_url = workpaperBundle.playbook_csv_url;
       playbookRecord.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
@@ -12699,9 +13594,13 @@ export async function onRequestPost(context) {
       ...checkoutOffer,
       captured_at: ts,
     };
-    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, "paid_toolkit");
-    record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
-    record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, "free_playbook");
+    record.preview_mode = true;
+    record.paid_unlock_required = true;
+    record.preview_summary_rows = workpaperBundle.preview_summary_rows;
+    record.upgrade_checkout_url = workpaperBundle.upgrade_checkout_url;
+    record.quick_checkout_url = workpaperBundle.quick_checkout_url;
+    record.full_checkout_url = workpaperBundle.full_checkout_url;
     record.playbook_url = workpaperBundle.playbook_url;
     record.playbook_csv_url = workpaperBundle.playbook_csv_url;
     record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
@@ -12751,7 +13650,7 @@ export async function onRequestPost(context) {
   }
 }
 """
-    else:
+    elif prop_clean == "profithelm":
         lead_js = """/**
  * Cloudflare Pages Function: ProfitHelm B2B & Tax Partner Quote Intake (/api/lead-capture)
  * Captures TCPA-consented commercial quote requests and regulatory playbook subscriptions
@@ -12821,6 +13720,10 @@ function resolveCanonicalToolPath(toolSlug, sku = "") {
     .toLowerCase()
     .replace(/^\\/+|\\/+$/g, "")
     .replace(/^tools\\//, "");
+  const skuClean = String(sku || "").trim().toLowerCase();
+  if (s === "partners" || skuClean.endsWith("_verified_partner_slot")) {
+    return "/partners/";
+  }
   if (
     s === "index" ||
     s === "home" ||
@@ -13185,12 +14088,13 @@ function isEdgeVerifiedPaidRecord(item) {
   );
 }
 
-async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
+async function verifyEdgeStripePaidSession(env, sessionId, leadId, allowInferredLeadId = false) {
   const sid = String(sessionId || "").trim();
   const out = {
     verified: false,
     reason: "",
     session_id: sid,
+    lead_id: null,
     payment_status: null,
     amount_total_cents: null,
     currency: null,
@@ -13235,13 +14139,16 @@ async function verifyEdgeStripePaidSession(env, sessionId, leadId) {
     out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
     out.state = meta.state || null;
     out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.firm_name = meta.firm_name || null;
     out.inputs_json = meta.inputs_json || null;
     out.outputs_json = meta.outputs_json || null;
-    const ref = String(data.client_reference_id || meta.lead_id || "");
+    const ref = String(data.client_reference_id || meta.lead_id || "").trim();
+    out.lead_id = ref || null;
     if (data.id !== sid) out.reason = "session_id_mismatch";
     else if (data.livemode !== true) out.reason = "session_not_livemode";
     else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
-    else if (!leadId || ref !== leadId) out.reason = "lead_id_mismatch";
+    else if (!allowInferredLeadId && (!leadId || ref !== leadId)) out.reason = "lead_id_mismatch";
+    else if (allowInferredLeadId && !ref) out.reason = "lead_id_mismatch";
     else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
     else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
     else out.verified = true;
@@ -13334,6 +14241,7 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
   const resolvedSku = payment.offer_sku
     ? normalizeEdgeSku(payment.offer_sku)
     : normalizeEdgeSku(baseRec.offer_sku || "");
+  const resolvedFirmName = String((payment && payment.firm_name) || baseRec.firm_name || baseRec.company_name || "").trim();
   const { mergedInputs, mergedOutputs } = mergePaymentMetadataInputs(baseRec, payment);
   const preservedSettledAt =
     (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) ||
@@ -13363,10 +14271,12 @@ async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = fals
     ...(Object.keys(mergedInputs).length > 0 ? { scenario_inputs: mergedInputs, calculator_inputs: mergedInputs } : {}),
     ...(Object.keys(mergedOutputs).length > 0 ? { scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs } : {}),
     ...(resolvedSku ? { offer_sku: resolvedSku } : {}),
+    ...(resolvedFirmName ? { firm_name: resolvedFirmName } : {}),
     lifecycle_stage: "fulfilled",
     fulfillment_status: "datapack_settled_and_delivered",
     offer_price_usd: grossUsd,
     settlement_id: "stl_" + payment.session_id,
+    settled: true,
     settlement_status: "settled",
     settlement_rail:
       payment.settlement_rail ||
@@ -13547,37 +14457,52 @@ function isSyntheticProbeRequest(request, body, email) {
 }
 
 async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec, isSyntheticProbe = false, customRecord = null) {
+  const tierKind = String((spec && spec.tierKind) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlot = isPartnerSlotOfferOrSlug({ tier_kind: tierKind, sku: spec && spec.offerSku }, toolSlug);
+  const datapackIncluded = !isQuickTier && !isPartnerSlot;
   const customBundle = customRecord ? buildEdgePersonalizedWorkpaperBundle(customRecord, spec, "free_playbook") : null;
   const fallbackUrl = customBundle ? customBundle.checkout_url : `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
   const playbookUrl = customBundle ? customBundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const playbookCsvUrl = customBundle && customBundle.playbook_csv_url ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`;
-  const playbookDatapackUrl = customBundle && customBundle.playbook_datapack_url ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`;
+  const playbookCsvUrl = isPartnerSlot ? null : (customBundle && customBundle.playbook_csv_url !== undefined ? customBundle.playbook_csv_url : `${playbookUrl}&format=csv`);
+  const playbookDatapackUrl = (isQuickTier || isPartnerSlot) ? null : (customBundle && customBundle.playbook_datapack_url !== undefined ? customBundle.playbook_datapack_url : `${playbookUrl}&format=datapack`);
   const fulfillmentUrl = customBundle ? customBundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&tool_slug=${encodeURIComponent(toolSlug)}`;
-  const csvFulfillmentUrl = `${fulfillmentUrl}&format=csv`;
-  const datapackUrl = `${fulfillmentUrl}&format=datapack`;
+  const csvFulfillmentUrl = isPartnerSlot ? null : (customBundle && customBundle.csv_fulfillment_url !== undefined ? customBundle.csv_fulfillment_url : `${fulfillmentUrl}&format=csv`);
+  const datapackUrl = (isQuickTier || isPartnerSlot) ? null : (customBundle && customBundle.datapack_url !== undefined ? customBundle.datapack_url : `${fulfillmentUrl}&format=datapack`);
   const stripeAccountId = env && env.STRIPE_ACCOUNT_ID ? String(env.STRIPE_ACCOUNT_ID).trim() : "acct_1T6fSTIq0ckFsf5j";
   const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
   const stripeDisplayName = "ProfitHelm";
   const stripePubKeyPresent = Boolean(env && env.STRIPE_PUBLISHABLE_KEY);
   const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
-  const toolPath = resolveCanonicalToolPath(toolSlug, spec && spec.offerSku);
-  const successUrl = `https://profithelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `https://profithelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  let successUrl = "";
+  let cancelUrl = "";
+  if (isPartnerSlot) {
+    const partnerUrls = buildPartnerSlotReturnUrls("profithelm.com", leadId, spec.offerSku);
+    successUrl = partnerUrls.successUrl;
+    cancelUrl = partnerUrls.cancelUrl;
+  } else {
+    const toolPath = resolveCanonicalToolPath(toolSlug, spec && spec.offerSku);
+    successUrl = `https://profithelm.com${toolPath}?checkout_status=success&checkout_fulfilled=1&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}&session_id={CHECKOUT_SESSION_ID}`;
+    cancelUrl = `https://profithelm.com${toolPath}?checkout_status=cancelled&lead_id=${encodeURIComponent(leadId)}&sku=${encodeURIComponent(spec.offerSku)}`;
+  }
   const extraFields = customBundle ? {
     workpaper_id: customBundle.workpaper_id,
     calculated_amount: customBundle.calculated_amount,
     capital_band: customBundle.capital_band,
     custom_parameter_ledger: customBundle.custom_parameter_ledger,
     settlement_attribution: customBundle.settlement_attribution,
-    statutory_trend_series_count: Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0,
+    statutory_trend_series_count: typeof customBundle.statutory_trend_series_count === "number" ? customBundle.statutory_trend_series_count : (Array.isArray(customBundle.statutory_trend_timeseries) ? customBundle.statutory_trend_timeseries.length : 0),
   } : {};
+  const firmNameMeta = String((customBundle && customBundle.firm_name) || (customRecord && (customRecord.firm_name || customRecord.company_name)) || "").trim();
   if (isSyntheticProbe || !stripeKey || typeof fetch !== "function") {
     return {
       offer_sku: spec.offerSku,
       offer_title: spec.offerTitle,
       offer_price_usd: spec.offerPriceUsd,
+      tier_kind: tierKind,
       statutory_authority: spec.statutoryAuthority,
       deliverables: spec.deliverables,
+      datapack_included: datapackIncluded,
       checkout_url: null,
       playbook_url: playbookUrl,
       playbook_csv_url: playbookCsvUrl,
@@ -13637,6 +14562,7 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
       "metadata[calculated_amount]": String(customBundle ? customBundle.calculated_amount : 250000),
       "metadata[state]": String((customRecord && customRecord.state) || "US"),
       "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+      ...(firmNameMeta ? { "metadata[firm_name]": firmNameMeta.slice(0, 120) } : {}),
       ...(buildCompactMetadataJson(customBundle && customBundle.scenario_inputs, 480) ? { "metadata[inputs_json]": buildCompactMetadataJson(customBundle.scenario_inputs, 480) } : {}),
       ...(buildCompactMetadataJson(customBundle && customBundle.scenario_outputs, 480) ? { "metadata[outputs_json]": buildCompactMetadataJson(customBundle.scenario_outputs, 480) } : {}),
     };
@@ -13659,8 +14585,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
         offer_sku: spec.offerSku,
         offer_title: spec.offerTitle,
         offer_price_usd: spec.offerPriceUsd,
+        tier_kind: tierKind,
         statutory_authority: spec.statutoryAuthority,
         deliverables: spec.deliverables,
+        datapack_included: datapackIncluded,
         checkout_url: data.url,
         playbook_url: playbookUrl,
         playbook_csv_url: playbookCsvUrl,
@@ -13703,8 +14631,10 @@ async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, spec
     offer_sku: spec.offerSku,
     offer_title: spec.offerTitle,
     offer_price_usd: spec.offerPriceUsd,
+    tier_kind: tierKind,
     statutory_authority: spec.statutoryAuthority,
     deliverables: spec.deliverables,
+    datapack_included: datapackIncluded,
     checkout_url: null,
     playbook_url: playbookUrl,
     playbook_csv_url: playbookCsvUrl,
@@ -13765,8 +14695,8 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
       fulfillment_status: "daily_cap_suppressed",
     };
   }
-  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT)
-    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT).trim()
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
     : "";
   const nangoSecretKey = env && env.NANGO_SECRET_KEY ? String(env.NANGO_SECRET_KEY).trim() : "";
   const nangoConnId = env && env.NANGO_CONNECTION_ID ? String(env.NANGO_CONNECTION_ID).trim() : "";
@@ -13792,7 +14722,11 @@ async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = fal
   const phPlaybookPath = String(record.playbook_url || `/api/lead-capture?playbook=1&lead_id=${encodeURIComponent(record.lead_id || "lead_profithelm_direct")}${phSkuQs}&tool_slug=${encodeURIComponent(cleanPhSlug)}`);
   const phPlaybookHtmlUrl = `https://profithelm.com${phPlaybookPath}${phPlaybookPath.includes("format=") ? "" : "&format=html"}`;
   const phPlaybookCsvUrl = `https://profithelm.com${record.playbook_csv_url || (phPlaybookPath + "&format=csv")}`;
-  const phSchedRows = Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [];
+  const phSchedRows = (
+    Array.isArray(record.preview_summary_rows)
+      ? record.preview_summary_rows
+      : (Array.isArray(record.reconciliation_schedule) ? record.reconciliation_schedule : [])
+  ).slice(0, 2);
   const phTableHtml = phSchedRows.length > 0
     ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;">` +
       `<thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:6px 8px;border:1px solid #cbd5e1;">Code</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Statutory Line Item</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Baseline</th><th style="padding:6px 8px;border:1px solid #cbd5e1;">Optimized</th></tr></thead>` +
@@ -13986,7 +14920,9 @@ export async function onRequestOptions(context = {}) {
 async function resolveProfitHelmGetContext(env, reqUrl) {
   const leadId = reqUrl.searchParams.get("lead_id") || "lead_profithelm_direct";
   const email = reqUrl.searchParams.get("email") || "";
-  const reqSku = (reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+  const rawReqSku = (reqUrl.searchParams.get("sku") || "").trim();
+  const reqSku = rawReqSku.toLowerCase();
+  const firmNameParam = (reqUrl.searchParams.get("firm_name") || reqUrl.searchParams.get("company_name") || "").trim();
   const rawToolParam = (
     reqUrl.searchParams.get("tool_slug") ||
     reqUrl.searchParams.get("tool") ||
@@ -14007,6 +14943,9 @@ async function resolveProfitHelmGetContext(env, reqUrl) {
     reqUrl.searchParams.get("inputs_json"),
     reqUrl.searchParams.get("outputs_json")
   );
+  if (firmNameParam && storedRecord && !storedRecord.firm_name) {
+    storedRecord.firm_name = firmNameParam;
+  }
   const effSku = reqSku || String((storedRecord && storedRecord.offer_sku) || "").trim().toLowerCase();
   const defaultSlugForSku = defaultSlugForProfitHelmSku(effSku);
   const storedSlug = String((storedRecord && storedRecord.tool_slug) || "").trim().toLowerCase();
@@ -14018,7 +14957,7 @@ async function resolveProfitHelmGetContext(env, reqUrl) {
     storedRecord.tool_slug = toolSlug;
   }
   const spec = resolveVerticalAndThreshold(toolSlug, "", effSku);
-  return { leadId, email, reqSku, effSku, toolSlug, spec, storedRecord };
+  return { leadId, email, rawReqSku, reqSku, effSku, toolSlug, spec, storedRecord };
 }
 
 export async function onRequestGet(context) {
@@ -14042,7 +14981,11 @@ export async function onRequestGet(context) {
   ) {
     const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
     const ctx = await resolveProfitHelmGetContext(env, reqUrl);
-    const { leadId, email, reqSku, storedRecord } = ctx;
+    const { leadId, email, rawReqSku, reqSku, storedRecord } = ctx;
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     let spec = ctx.spec;
     const isSynth = isSyntheticProbeRequest(request, null, email);
     let gatedRecord = storedRecord;
@@ -14054,15 +14997,30 @@ export async function onRequestGet(context) {
       return buildEdgePaymentRequiredResponse({ reason: "paid_export_requires_checkout" }, leadId);
     }
     let verifiedSid = "";
+    let effectiveLeadId = leadId;
     if (isFulfill) {
-      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId);
+      const hasExplicitLeadId = Boolean(reqUrl.searchParams.get("lead_id"));
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId, !hasExplicitLeadId);
       if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      if (!hasExplicitLeadId && payment.lead_id && payment.lead_id !== effectiveLeadId) {
+        effectiveLeadId = payment.lead_id;
+        gatedRecord = await lookupEdgeLeadRecord(
+          env,
+          effectiveLeadId,
+          ctx.toolSlug,
+          reqUrl.searchParams.get("amount"),
+          reqUrl.searchParams.get("state"),
+          email,
+          reqUrl.searchParams.get("inputs_json"),
+          reqUrl.searchParams.get("outputs_json")
+        );
+      }
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, spec, fmt);
-      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, effectiveLeadId);
       verifiedSid = String(payment.session_id || "");
       spec = resolveVerticalAndThreshold((gatedRecord && gatedRecord.tool_slug) || ctx.toolSlug, "", tierGuard.paidSku);
-      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSynth);
-      gatedRecord = { ...(gatedRecord || {}), offer_sku: tierGuard.paidSku };
+      gatedRecord = await persistSettledEdgeLeadRecord(env, { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }, payment, isSynth);
+      gatedRecord = { ...(gatedRecord || {}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku };
       if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {
         await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
       }
@@ -14119,7 +15077,11 @@ export async function onRequestGet(context) {
     );
   }
   if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {
-    const { email, toolSlug, spec, storedRecord: customRecord } = await resolveProfitHelmGetContext(env, reqUrl);
+    const { email, rawReqSku, toolSlug, spec, storedRecord: customRecord } = await resolveProfitHelmGetContext(env, reqUrl);
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) {
+      return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    }
     const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), "profithelm");
     const preRec = { ...(customRecord || {}), lead_id: checkoutLeadId, tool_slug: toolSlug, offer_sku: spec.offerSku };
     const isSynth = isSyntheticProbeRequest(request, null, email);
@@ -14238,7 +15200,7 @@ export async function onRequestGet(context) {
     }
   }
 
-  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "profithelm", 49);
+  const perCalculatorMetrics = buildEdgePerCalculatorConversionMetrics(leads, "profithelm", getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU).price_usd);
   const totalAttrRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.attributed_revenue_usd || 0), 0) * 100) / 100;
   const totalNetRev = Math.round(perCalculatorMetrics.reduce((acc, m) => acc + Number(m.net_settled_revenue_usd || 0), 0) * 100) / 100;
   const settledCount = perCalculatorMetrics.reduce((acc, m) => acc + Number(m.settled_upgrades_count || 0), 0);
@@ -14276,11 +15238,16 @@ export async function onRequestPost(context) {
     const body = await parseLeadCapturePostBody(request);
     const email = String(body.email || "").trim().toLowerCase();
     const toolSlug = sanitizeEdgeToolSlug(
-      body.tool_slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
+      body.tool_slug || body.slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
       "general"
     );
     const reqPartner = String(body.partner_key || "").trim().toLowerCase();
-    const reqSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim().toLowerCase();
+    const rawPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim();
+    const postSkuCheck = validateRequestedEdgeSku(rawPostSku);
+    if (!postSkuCheck.valid) {
+      return buildInvalidSkuResponse(rawPostSku, postCorsHeaders);
+    }
+    const reqSku = rawPostSku.toLowerCase();
     const spec = resolveVerticalAndThreshold(toolSlug, reqPartner, reqSku);
 
     const isSyntheticProbe = isSyntheticProbeRequest(request, body, email);
@@ -14308,8 +15275,12 @@ export async function onRequestPost(context) {
       const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, initialFulfillSpec, String(body.format || reqUrl.searchParams.get("format") || "json"));
       if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({ reason: tierGuard.reason }, leadId);
       const effFulfillSpec = resolveVerticalAndThreshold((storedRecord && storedRecord.tool_slug) || toolSlug, reqPartner, tierGuard.paidSku);
-      const settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSyntheticProbe);
-      const bundle = buildEdgePersonalizedWorkpaperBundle({ ...(settledRecord || {}), offer_sku: tierGuard.paidSku }, effFulfillSpec, "paid_toolkit", String(payment.session_id || ""));
+      let settledRecord = await persistSettledEdgeLeadRecord(env, { ...(storedRecord || {}), offer_sku: tierGuard.paidSku }, payment, isSyntheticProbe);
+      settledRecord = { ...(settledRecord || {}), offer_sku: tierGuard.paidSku };
+      if (!isSyntheticProbe && settledRecord && settledRecord.email && !settledRecord.paid_fulfillment_email_dispatched) {
+        await dispatchEdgePaidFulfillmentEmail(env, settledRecord, String(payment.session_id || ""), false);
+      }
+      const bundle = buildEdgePersonalizedWorkpaperBundle(settledRecord, effFulfillSpec, "paid_toolkit", String(payment.session_id || ""));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -14343,8 +15314,9 @@ export async function onRequestPost(context) {
       const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
       const partnerState = inferStateFromToolSlug(toolSlug, body.state);
       const partnerLeadId = String(body.lead_id || `lead_profithelm_partner_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
-      const partnerSku = "ph_verified_partner_slot";
-      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${partnerSku}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
+      const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+      const partnerSku = partnerOffer.sku;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${encodeURIComponent(partnerLeadId)}&sku=${encodeURIComponent(partnerSku)}&tool_slug=${encodeURIComponent(toolSlug)}&redirect=1`;
       const partnerRecord = {
         lead_id: partnerLeadId,
         property_id: "profithelm",
@@ -14357,8 +15329,8 @@ export async function onRequestPost(context) {
         firm_name: firmName,
         state: partnerState,
         offer_sku: partnerSku,
-        offer_title: "Verified Calculator Partner Slot",
-        offer_price_usd: 299,
+        offer_title: partnerOffer.title,
+        offer_price_usd: partnerOffer.price_usd,
         checkout_url: partnerCheckoutUrl,
         captured_at: new Date().toISOString(),
       };
@@ -14468,8 +15440,12 @@ export async function onRequestPost(context) {
         captured_at: ts,
       };
       const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(playbookRecord, spec, "free_playbook");
-      playbookRecord.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
-      playbookRecord.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+      playbookRecord.preview_mode = true;
+      playbookRecord.paid_unlock_required = true;
+      playbookRecord.preview_summary_rows = workpaperBundle.preview_summary_rows;
+      playbookRecord.upgrade_checkout_url = workpaperBundle.upgrade_checkout_url;
+      playbookRecord.quick_checkout_url = workpaperBundle.quick_checkout_url;
+      playbookRecord.full_checkout_url = workpaperBundle.full_checkout_url;
       playbookRecord.playbook_url = workpaperBundle.playbook_url;
       playbookRecord.playbook_csv_url = workpaperBundle.playbook_csv_url;
       playbookRecord.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
@@ -14628,9 +15604,13 @@ export async function onRequestPost(context) {
       ...checkoutOffer,
       captured_at: ts,
     };
-    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, spec, "paid_toolkit");
-    record.reconciliation_schedule = workpaperBundle.reconciliation_schedule;
-    record.sensitivity_matrix = workpaperBundle.sensitivity_matrix;
+    const workpaperBundle = buildEdgePersonalizedWorkpaperBundle(record, spec, "free_playbook");
+    record.preview_mode = true;
+    record.paid_unlock_required = true;
+    record.preview_summary_rows = workpaperBundle.preview_summary_rows;
+    record.upgrade_checkout_url = workpaperBundle.upgrade_checkout_url;
+    record.quick_checkout_url = workpaperBundle.quick_checkout_url;
+    record.full_checkout_url = workpaperBundle.full_checkout_url;
     record.playbook_url = workpaperBundle.playbook_url;
     record.playbook_csv_url = workpaperBundle.playbook_csv_url;
     record.playbook_datapack_url = workpaperBundle.playbook_datapack_url;
@@ -14680,16 +15660,1001 @@ export async function onRequestPost(context) {
   }
 }
 """
+    else:
+        dyn_brand = tenant_meta["brand_name"]
+        dyn_domain = tenant_meta["domain"]
+        dyn_from_name = tenant_meta["from_name"]
+        dyn_default_slug = tenant_meta["default_slug"]
+        dyn_default_amt = tenant_meta["default_amt"]
+        dyn_default_state = tenant_meta["default_state"]
+        dyn_kv_leads = tenant_meta["kv_leads_binding"]
+        dyn_stmt_desc = tenant_meta["statement_descriptor"]
+        lead_js = f"""/**
+ * Cloudflare Pages Function: {dyn_brand} Partner Quote Intake & Workpaper Checkout (/api/lead-capture)
+ * Dynamic 50+ site edge commerce, paywall isolation, Stripe Checkout, and buyer delivery handler.
+ * Zero AI slop. Zero em-dashes. Zero en-dashes.
+ */
+
+const CORS_HEADERS = {{
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, X-Telemetry-Secret, X-Pseofactory-Test",
+  "Cache-Control": "private, no-cache, no-store, must-revalidate",
+  "X-Robots-Tag": "noindex, nofollow",
+}};
+
+const EDGE_PROPERTY_ID = {json.dumps(prop_clean)};
+const EDGE_DOMAIN = {json.dumps(dyn_domain)};
+const EDGE_BRAND_NAME = {json.dumps(dyn_brand)};
+const EDGE_DEFAULT_SLUG = {json.dumps(dyn_default_slug)};
+const EDGE_DEFAULT_AMOUNT = {dyn_default_amt};
+const EDGE_DEFAULT_STATE = {json.dumps(dyn_default_state)};
+const EDGE_CLASSIFIER = __EDGE_CLASSIFIER_JSON__;
+
+function getLeadsKv(env) {{
+  if (!env) return null;
+  return env.{dyn_kv_leads} || env.LEADS_KV || env.LEADS || null;
+}}
+
+function getMemoryBuffer() {{
+  if (!globalThis.__PSEOFACTORY_LEADS_BUFFER__) {{
+    globalThis.__PSEOFACTORY_LEADS_BUFFER__ = [];
+  }}
+  return globalThis.__PSEOFACTORY_LEADS_BUFFER__;
+}}
+
+function deriveCapitalBand(amount) {{
+  if (amount >= 500000) return "500k_plus";
+  if (amount >= 250000) return "250k_500k";
+  if (amount >= 100000) return "100k_250k";
+  if (amount >= 25000) return "25k_100k";
+  return "under_25k";
+}}
+
+function selectOfferForSlug(toolSlug, reqSku = "") {{
+  const normSku = normalizeEdgeSku(reqSku);
+  if (normSku && CANONICAL_OFFER_CATALOG[normSku]) {{
+    return getCanonicalEdgeOffer(normSku);
+  }}
+  return getCanonicalEdgeOffer(CANONICAL_DEFAULT_FULL_SKU);
+}}
+
+function parseEdgeJsonParam(rawVal) {{
+  if (!rawVal) return {{}};
+  if (typeof rawVal === "object") return rawVal;
+  try {{
+    const parsed = JSON.parse(String(rawVal));
+    return parsed && typeof parsed === "object" ? parsed : {{}};
+  }} catch (_) {{
+    return {{}};
+  }}
+}}
+
+async function lookupEdgeLeadRecord(env, leadId, toolSlug, amountParam, stateParam, emailParam, inputsJsonParam, outputsJsonParam) {{
+  const mem = getMemoryBuffer();
+  const isDirectLead = String(leadId || "").endsWith("_direct");
+  let baseRecord = null;
+  if (leadId) {{
+    const foundMem = mem.find((r) => r && r.lead_id === leadId && (!isDirectLead || !toolSlug || !r.tool_slug || r.tool_slug === toolSlug));
+    if (foundMem) baseRecord = {{ ...foundMem }};
+    if (!baseRecord) {{
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.get === "function") {{
+        try {{
+          const kvRec = await kv.get(leadId, {{ type: "json" }});
+          if (kvRec && typeof kvRec === "object" && (!isDirectLead || !toolSlug || !kvRec.tool_slug || kvRec.tool_slug === toolSlug)) {{
+            baseRecord = {{ ...kvRec }};
+          }}
+        }} catch (_) {{}}
+      }}
+    }}
+  }}
+  const parsedAmount = Number(amountParam);
+  const safeAmount = Number.isFinite(parsedAmount) && parsedAmount > 0 ? Math.round(parsedAmount * 100) / 100 : EDGE_DEFAULT_AMOUNT;
+  if (baseRecord) {{
+    if (Number.isFinite(parsedAmount) && parsedAmount > 0) baseRecord.calculated_amount = safeAmount;
+    if (toolSlug && toolSlug !== "general") baseRecord.tool_slug = toolSlug;
+    if (stateParam) baseRecord.state = String(stateParam).toUpperCase().slice(0, 2) || baseRecord.state;
+    if (emailParam && !isPlaceholderCheckoutEmail(emailParam)) baseRecord.email = emailParam;
+    return baseRecord;
+  }}
+  return {{
+    lead_id: leadId || `lead_${{EDGE_PROPERTY_ID}}_direct`,
+    property_id: EDGE_PROPERTY_ID,
+    email: emailParam || "",
+    state: String(stateParam || EDGE_DEFAULT_STATE).toUpperCase().slice(0, 2) || EDGE_DEFAULT_STATE,
+    tool_slug: toolSlug || EDGE_DEFAULT_SLUG,
+    calculated_amount: safeAmount,
+    calculator_inputs: parseEdgeJsonParam(inputsJsonParam),
+    calculator_outputs: parseEdgeJsonParam(outputsJsonParam),
+    created_at: new Date().toISOString(),
+  }};
+}}
+
+function buildDynamicTenantWorkpaperBundle(record, offer, mode = "paid_toolkit", sessionId = "") {{
+  return buildCanonicalWorkpaperDeliverable({{
+    propertyId: EDGE_PROPERTY_ID,
+    record,
+    offer,
+    mode,
+    sessionId,
+  }});
+}}
+
+function edgeDomainHash32(str) {{
+  let h = 0x811c9dc5;
+  const clean = String(str || "").trim().toLowerCase();
+  for (let i = 0; i < clean.length; i += 1) {{
+    h ^= clean.charCodeAt(i) & 0xff;
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }}
+  return h.toString(16).padStart(8, "0");
+}}
+
+function isFleetManagedDomain(domain) {{
+  const d = String(domain || "").trim().toLowerCase();
+  if (!d) return false;
+  if (d === EDGE_DOMAIN || d.endsWith("." + EDGE_DOMAIN)) return true;
+  if (Array.isArray(EDGE_CLASSIFIER.own_domains)) {{
+    for (const own of EDGE_CLASSIFIER.own_domains) {{
+      if (d === own || d.endsWith("." + own)) return true;
+    }}
+  }}
+  const hashes = Array.isArray(EDGE_CLASSIFIER.fleet_domain_hashes) ? EDGE_CLASSIFIER.fleet_domain_hashes : [];
+  if (hashes.length > 0) {{
+    if (hashes.includes(edgeDomainHash32(d))) return true;
+    const parts = d.split(".");
+    if (parts.length >= 2) {{
+      const apex = parts.slice(-2).join(".");
+      if (hashes.includes(edgeDomainHash32(apex))) return true;
+    }}
+  }}
+  return false;
+}}
+
+const CANONICAL_OPERATOR_MAILBOX = atob("YXJpZi5jb3NrdW5AcHJvZml0aGVsbS5jb20=");
+
+function normalizeCanonicalSenderEmail(rawEmail) {{
+  const raw = String(rawEmail || "").trim();
+  const clean = raw.toLowerCase();
+  if (!clean || !clean.includes("@") || clean.includes("*")) return CANONICAL_OPERATOR_MAILBOX;
+  if (clean === CANONICAL_OPERATOR_MAILBOX) return CANONICAL_OPERATOR_MAILBOX;
+  const at = clean.lastIndexOf("@");
+  const local = clean.slice(0, at);
+  const domain = clean.slice(at + 1);
+  if (!local || !domain) return CANONICAL_OPERATOR_MAILBOX;
+  if (isFleetManagedDomain(domain)) return CANONICAL_OPERATOR_MAILBOX;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {{
+    return CANONICAL_OPERATOR_MAILBOX;
+  }}
+  return raw;
+}}
+
+function classifyEdgeLeadEmail(email) {{
+  const value = String(email || "").trim().toLowerCase();
+  if (!value || value.includes("*")) return "synthetic";
+  const at = value.lastIndexOf("@");
+  if (at < 1) return "synthetic";
+  const local = value.slice(0, at);
+  const domain = value.slice(at + 1);
+  if (!domain) return "synthetic";
+  if (isFleetManagedDomain(domain)) return "synthetic";
+  if (EDGE_CLASSIFIER.synthetic_domains.includes(domain)) return "synthetic";
+  if (EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s))) return "synthetic";
+  if (EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) return "synthetic";
+  return "real";
+}}
+
+function buildEdgeLeadKvMetadata(rec) {{
+  if (!rec || typeof rec !== "object") return {{}};
+  return {{
+    lead_id: rec.lead_id || "",
+    property_id: rec.property_id || EDGE_PROPERTY_ID,
+    lead_type: rec.lead_type || "qualified_quote",
+    lifecycle_stage: rec.lifecycle_stage || "captured",
+    tool_slug: String(rec.tool_slug || "general").slice(0, 80),
+    email: String(rec.email || "").slice(0, 80),
+    state: String(rec.state || "US").slice(0, 4),
+    capital_band: String(rec.capital_band || "standard").slice(0, 24),
+    calculated_amount: Number(rec.calculated_amount || 0),
+    offer_sku: String(rec.offer_sku || "").slice(0, 48),
+    offer_price_usd: Number(rec.offer_price_usd || 0),
+    settled: Boolean(rec.settled),
+    settlement_status: String(rec.settlement_status || "unsettled").slice(0, 24),
+    stripe_payment_verified: Boolean(rec.stripe_payment_verified),
+    stripe_payment_status: String(rec.stripe_payment_status || "").slice(0, 16),
+    stripe_checkout_session_id: String(rec.stripe_checkout_session_id || "").slice(0, 64),
+    attributed_revenue_usd: Number(rec.attributed_revenue_usd || 0),
+    net_settled_revenue_usd: Number(rec.net_settled_revenue_usd || 0),
+    captured_at: String(rec.captured_at || "").slice(0, 32),
+  }};
+}}
+
+function maskEdgeEmail(email) {{
+  const s = String(email || "");
+  const at = s.indexOf("@");
+  if (at < 1) return "";
+  return s.slice(0, 1) + "***" + s.slice(at);
+}}
+
+function isPlaceholderCheckoutEmail(email) {{
+  const e = String(email || "").trim().toLowerCase();
+  if (!e || !e.includes("@") || e.includes("*")) return true;
+  if (e === CANONICAL_OPERATOR_MAILBOX) return false;
+  const at = e.lastIndexOf("@");
+  const local = e.slice(0, at);
+  const domain = e.slice(at + 1);
+  if (!local || !domain) return true;
+  if (isFleetManagedDomain(domain)) return true;
+  if (
+    domain === "localhost" ||
+    domain === "example.invalid" ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_domains) && EDGE_CLASSIFIER.synthetic_domains.includes(domain)) ||
+    (Array.isArray(EDGE_CLASSIFIER.synthetic_tld_suffixes) && EDGE_CLASSIFIER.synthetic_tld_suffixes.some((s) => domain.endsWith(s)))
+  ) {{
+    return true;
+  }}
+  if (Array.isArray(EDGE_CLASSIFIER.local_prefixes) && EDGE_CLASSIFIER.local_prefixes.some((p) => local.startsWith(p))) {{
+    return true;
+  }}
+  return false;
+}}
+
+function isSyntheticTestEmail(email) {{
+  return isPlaceholderCheckoutEmail(email);
+}}
+
+function isEdgeVerifiedPaidRecord(item) {{
+  return Boolean(
+    item &&
+      item.stripe_payment_verified === true &&
+      item.stripe_payment_status === "paid" &&
+      item.settlement_status === "settled" &&
+      /^cs_live_[A-Za-z0-9_]+$/.test(String(item.stripe_checkout_session_id || ""))
+  );
+}}
+
+async function verifyEdgeStripePaidSession(env, sessionId, leadId, allowInferredLeadId = false) {{
+  const sid = String(sessionId || "").trim();
+  const out = {{
+    verified: false,
+    reason: "",
+    session_id: sid,
+    lead_id: null,
+    payment_status: null,
+    amount_total_cents: null,
+    currency: null,
+    livemode: null,
+    stripe_http_status: null,
+    customer_email: null,
+    calculated_amount: null,
+    state: null,
+    offer_sku: null,
+    firm_name: null,
+  }};
+  if (!/^cs_live_[A-Za-z0-9_]+$/.test(sid)) {{
+    out.reason = "session_id_must_be_a_live_stripe_checkout_session";
+    return out;
+  }}
+  const key = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  if (!key) {{
+    out.reason = "stripe_secret_key_not_configured";
+    return out;
+  }}
+  if (typeof fetch !== "function") {{
+    out.reason = "fetch_unavailable";
+    return out;
+  }}
+  try {{
+    const resp = await fetch("https://api.stripe.com/v1/checkout/sessions/" + encodeURIComponent(sid), {{
+      method: "GET",
+      headers: {{ Authorization: "Bearer " + key }},
+    }});
+    out.stripe_http_status = resp.status;
+    const data = await resp.json().catch(() => ({{}}));
+    if (!resp.ok) {{
+      const err = (data && data.error) || {{}};
+      out.reason = "stripe_lookup_failed_" + (err.code || err.type || ("http_" + resp.status));
+      return out;
+    }}
+    out.payment_status = data.payment_status || null;
+    out.amount_total_cents = Number.isFinite(Number(data.amount_total)) ? Number(data.amount_total) : null;
+    out.currency = data.currency || null;
+    out.livemode = data.livemode === true;
+    const custDetails = (data && data.customer_details) || {{}};
+    out.customer_email = custDetails.email || data.customer_email || null;
+    const meta = (data && data.metadata) || {{}};
+    out.calculated_amount = Number.isFinite(Number(meta.calculated_amount)) && Number(meta.calculated_amount) > 0 ? Number(meta.calculated_amount) : null;
+    out.state = meta.state || null;
+    out.offer_sku = meta.offer_sku || meta.sku || null;
+    out.firm_name = meta.firm_name || null;
+    out.inputs_json = meta.inputs_json || null;
+    out.outputs_json = meta.outputs_json || null;
+    const ref = String(data.client_reference_id || meta.lead_id || "").trim();
+    out.lead_id = ref || null;
+    if (data.id !== sid) out.reason = "session_id_mismatch";
+    else if (data.livemode !== true) out.reason = "session_not_livemode";
+    else if (data.payment_status !== "paid") out.reason = "payment_status_" + String(data.payment_status || "unknown");
+    else if (!allowInferredLeadId && (!leadId || ref !== leadId)) out.reason = "lead_id_mismatch";
+    else if (allowInferredLeadId && !ref) out.reason = "lead_id_mismatch";
+    else if (meta.property_id && meta.property_id !== EDGE_PROPERTY_ID) out.reason = "property_mismatch";
+    else if (!(out.amount_total_cents > 0)) out.reason = "amount_total_missing";
+    else out.verified = true;
+  }} catch (_) {{
+    out.reason = "stripe_lookup_network_error";
+  }}
+  return out;
+}}
+
+function buildEdgePaymentRequiredResponse(payment, leadId) {{
+  const lid = String(leadId || "");
+  return new Response(
+    JSON.stringify({{
+      ok: false,
+      success: false,
+      status: "payment_required",
+      settled: false,
+      settlement_status: "unsettled",
+      attributed_revenue_usd: 0,
+      net_settled_revenue_usd: 0,
+      reason: (payment && payment.reason) || "payment_not_verified",
+      lead_id: lid,
+      checkout_url: "/api/lead-capture?checkout=1&lead_id=" + encodeURIComponent(lid) + "&redirect=1",
+      message: "Paid workpapers unlock only after a live Stripe Checkout session_id is verified as paid.",
+    }}),
+    {{ status: 402, headers: {{ "Content-Type": "application/json", "Cache-Control": "no-store", ...CORS_HEADERS }} }}
+  );
+}}
+
+function exposeEdgeLeads(request, env, leads) {{
+  const adminToken = env && env.LEADS_ADMIN_TOKEN ? String(env.LEADS_ADMIN_TOKEN).trim() : "";
+  const auth = request && request.headers ? String(request.headers.get("authorization") || "") : "";
+  const isAdmin = Boolean(adminToken) && auth === "Bearer " + adminToken;
+  return (leads || []).map((l) => {{
+    const item = l || {{}};
+    const origin = classifyEdgeLeadEmail(item.email) === "synthetic" ? "internal_probe" : "real";
+    const verified = isEdgeVerifiedPaidRecord(item);
+    if (isAdmin) return {{ ...item, lead_origin: origin }};
+    return {{
+      lead_id: item.lead_id,
+      lead_type: item.lead_type || null,
+      lead_origin: origin,
+      property_id: item.property_id || EDGE_PROPERTY_ID,
+      tool_slug: item.tool_slug || null,
+      email: maskEdgeEmail(item.email),
+      captured_at: item.captured_at || null,
+      settlement_status: verified ? "settled" : "unsettled",
+      stripe_payment_verified: verified,
+      attributed_revenue_usd: verified ? Number(item.attributed_revenue_usd || 0) : 0,
+    }};
+  }});
+}}
+
+async function persistSettledEdgeLeadRecord(env, record, payment, isSynth = false) {{
+  if (isSynth || !record || !record.lead_id) return record;
+  if (!payment || payment.verified !== true) return record;
+  const kv = getLeadsKv(env);
+  let existingRecord = null;
+  if (kv && typeof kv.get === "function") {{
+    try {{
+      const rawExisting = await kv.get(record.lead_id);
+      if (rawExisting) existingRecord = typeof rawExisting === "string" ? JSON.parse(rawExisting) : rawExisting;
+    }} catch (_) {{}}
+  }}
+  const baseRec = existingRecord && typeof existingRecord === "object" ? {{ ...existingRecord, ...record }} : record;
+  const grossUsd = Math.round(Number(payment.amount_total_cents || 0)) / 100;
+  const feeUsd = Math.round((grossUsd * 0.029 + 0.3) * 100) / 100;
+  const netUsd = Math.max(0, Math.round((grossUsd - feeUsd) * 100) / 100);
+  const resolvedEmail = payment.customer_email && (isPlaceholderCheckoutEmail(baseRec.email) || !baseRec.email)
+    ? String(payment.customer_email).trim().toLowerCase()
+    : baseRec.email;
+  const resolvedAmount = Number(payment.calculated_amount) > 0 && (!baseRec.calculated_amount || Number(baseRec.calculated_amount) <= 0)
+    ? Number(payment.calculated_amount)
+    : baseRec.calculated_amount;
+  const resolvedState = payment.state && (!baseRec.state || baseRec.state === "US") ? payment.state : baseRec.state;
+  const resolvedSku = payment.offer_sku ? normalizeEdgeSku(payment.offer_sku) : normalizeEdgeSku(baseRec.offer_sku || "");
+  const resolvedFirmName = String((payment && payment.firm_name) || baseRec.firm_name || baseRec.company_name || "").trim();
+  const {{ mergedInputs, mergedOutputs }} = mergePaymentMetadataInputs(baseRec, payment);
+  const settledRecord = {{
+    ...baseRec,
+    email: resolvedEmail,
+    calculated_amount: resolvedAmount,
+    state: resolvedState,
+    ...(Object.keys(mergedInputs).length > 0 ? {{ scenario_inputs: mergedInputs, calculator_inputs: mergedInputs }} : {{}}),
+    ...(Object.keys(mergedOutputs).length > 0 ? {{ scenario_outputs: mergedOutputs, calculator_outputs: mergedOutputs }} : {{}}),
+    ...(resolvedSku ? {{ offer_sku: resolvedSku }} : {{}}),
+    ...(resolvedFirmName ? {{ firm_name: resolvedFirmName }} : {{}}),
+    lifecycle_stage: "fulfilled",
+    fulfillment_status: "datapack_settled_and_delivered",
+    offer_price_usd: grossUsd,
+    settlement_id: "stl_" + payment.session_id,
+    settled: true,
+    settlement_status: "settled",
+    settlement_rail: payment.settlement_rail || (existingRecord && existingRecord.settlement_rail) || "stripe_checkout_verified",
+    stripe_payment_verified: true,
+    stripe_payment_status: "paid",
+    stripe_checkout_session_id: payment.session_id,
+    stripe_verified_at: (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.stripe_verified_at) || new Date().toISOString(),
+    attributed_revenue_usd: grossUsd,
+    net_settled_revenue_usd: netUsd,
+    datapack_delivered: true,
+    datapack_pack_id: "dp_" + record.lead_id,
+    settled_at: (existingRecord && existingRecord.stripe_checkout_session_id === payment.session_id && existingRecord.settled_at) || new Date().toISOString(),
+  }};
+  const mem = getMemoryBuffer();
+  let updatedMem = false;
+  for (let i = 0; i < mem.length; i++) {{
+    if (mem[i] && mem[i].lead_id === settledRecord.lead_id) {{
+      mem[i] = settledRecord;
+      updatedMem = true;
+      break;
+    }}
+  }}
+  if (!updatedMem) mem.unshift(settledRecord);
+  if (kv && typeof kv.put === "function") {{
+    try {{
+      await kv.put(settledRecord.lead_id, JSON.stringify(settledRecord), {{
+        expirationTtl: 60 * 60 * 24 * 90,
+        metadata: buildEdgeLeadKvMetadata(settledRecord),
+      }});
+    }} catch (_) {{}}
+  }}
+  return settledRecord;
+}}
+
+async function resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSyntheticProbe = false, bundle = null) {{
+  const tierKind = String((offer && (offer.tier_kind || offer.tierKind)) || "full").toLowerCase();
+  const isQuickTier = tierKind === "quick";
+  const isPartnerSlot = isPartnerSlotOfferOrSlug(offer, toolSlug);
+  const datapackIncluded = !isQuickTier && !isPartnerSlot;
+  const playbookUrl = bundle ? bundle.playbook_url : `/api/lead-capture?playbook=1&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(offer.sku)}}&tool_slug=${{encodeURIComponent(toolSlug)}}`;
+  const playbookCsvUrl = isPartnerSlot ? null : (bundle && bundle.playbook_csv_url !== undefined ? bundle.playbook_csv_url : `${{playbookUrl}}&format=csv`);
+  const playbookDatapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.playbook_datapack_url !== undefined ? bundle.playbook_datapack_url : `${{playbookUrl}}&format=datapack`);
+  const fulfillmentUrl = bundle ? bundle.fulfillment_url : `/api/lead-capture?fulfill=1&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(offer.sku)}}&tool_slug=${{encodeURIComponent(toolSlug)}}`;
+  const csvFulfillmentUrl = isPartnerSlot ? null : (bundle && bundle.csv_fulfillment_url !== undefined ? bundle.csv_fulfillment_url : `${{fulfillmentUrl}}&format=csv`);
+  const datapackUrl = (isQuickTier || isPartnerSlot) ? null : (bundle && bundle.datapack_url !== undefined ? bundle.datapack_url : `${{fulfillmentUrl}}&format=datapack`);
+  const stripeMerchantEmail = normalizeCanonicalSenderEmail(env && env.STRIPE_MERCHANT_EMAIL);
+  const stripeKey = env && (env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY) ? String(env.STRIPE_SECRET_KEY || env.STRIPE_API_KEY).trim() : "";
+  const slugNorm = String(toolSlug || "").trim().toLowerCase().replace(/^\\/+|\\/+$/g, "").replace(/^tools\\//, "");
+  let successUrl = "";
+  let cancelUrl = "";
+  if (isPartnerSlot) {{
+    const partnerUrls = buildPartnerSlotReturnUrls(EDGE_DOMAIN, leadId, offer.sku);
+    successUrl = partnerUrls.successUrl;
+    cancelUrl = partnerUrls.cancelUrl;
+  }} else {{
+    const toolPath = !slugNorm || slugNorm === "index" || slugNorm === "home" || slugNorm === "homepage" || slugNorm.endsWith("-hub")
+      ? "/"
+      : `/tools/${{slugNorm}}/`;
+    successUrl = `https://${{EDGE_DOMAIN}}${{toolPath}}?checkout_status=success&checkout_fulfilled=1&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(offer.sku)}}&session_id={{CHECKOUT_SESSION_ID}}`;
+    cancelUrl = `https://${{EDGE_DOMAIN}}${{toolPath}}?checkout_status=cancelled&lead_id=${{encodeURIComponent(leadId)}}&sku=${{encodeURIComponent(offer.sku)}}`;
+  }}
+  const bundleExtras = bundle ? {{
+    workpaper_id: bundle.workpaper_id,
+    calculated_amount: bundle.calculated_amount,
+    settlement_attribution: bundle.settlement_attribution,
+    statutory_trend_series_count: typeof bundle.statutory_trend_series_count === "number" ? bundle.statutory_trend_series_count : (Array.isArray(bundle.statutory_trend_timeseries) ? bundle.statutory_trend_timeseries.length : 0),
+  }} : {{}};
+  const firmNameMeta = String((bundle && bundle.firm_name) || "").trim();
+  if (!isSyntheticProbe && stripeKey && typeof fetch === "function") {{
+    try {{
+      const candidateEmail = String((bundle && bundle.email) || email || "").trim();
+      const paramsObj = {{
+        mode: "payment",
+        "payment_method_types[0]": "card",
+        client_reference_id: leadId,
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        "line_items[0][price_data][currency]": offer.currency || "usd",
+        "line_items[0][price_data][unit_amount]": String(offer.price_cents),
+        "line_items[0][price_data][product_data][name]": offer.title,
+        "line_items[0][price_data][product_data][description]": offer.description || `${{EDGE_BRAND_NAME}} ${{offer.title}}`,
+        "line_items[0][quantity]": "1",
+        "branding_settings[display_name]": EDGE_BRAND_NAME,
+        "payment_intent_data[statement_descriptor_suffix]": {json.dumps(dyn_stmt_desc)},
+        "metadata[lead_id]": leadId,
+        "metadata[workpaper_id]": `wp_${{leadId}}`,
+        "metadata[property_id]": EDGE_PROPERTY_ID,
+        "metadata[tool_slug]": toolSlug,
+        "metadata[sku]": offer.sku,
+        "metadata[offer_sku]": offer.sku,
+        "metadata[merchant_email]": stripeMerchantEmail,
+        "metadata[calculated_amount]": String(bundle ? bundle.modeled_amount_usd : EDGE_DEFAULT_AMOUNT),
+        "metadata[state]": String((bundle && bundle.state) || EDGE_DEFAULT_STATE),
+        "metadata[fulfillment_url]": fulfillmentUrl.slice(0, 480),
+        ...(firmNameMeta ? {{ "metadata[firm_name]": firmNameMeta.slice(0, 120) }} : {{}}),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_inputs, 480) ? {{ "metadata[inputs_json]": buildCompactMetadataJson(bundle.scenario_inputs, 480) }} : {{}}),
+        ...(buildCompactMetadataJson(bundle && bundle.scenario_outputs, 480) ? {{ "metadata[outputs_json]": buildCompactMetadataJson(bundle.scenario_outputs, 480) }} : {{}}),
+      }};
+      if (!isPlaceholderCheckoutEmail(candidateEmail)) paramsObj.customer_email = candidateEmail;
+      const resp = await fetch("https://api.stripe.com/v1/checkout/sessions", {{
+        method: "POST",
+        headers: {{
+          Authorization: `Bearer ${{stripeKey}}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        }},
+        body: new URLSearchParams(paramsObj).toString(),
+      }});
+      const data = await resp.json().catch(() => ({{}}));
+      if (resp.ok && data && data.url) {{
+        return {{
+          offer_sku: offer.sku,
+          offer_title: offer.title,
+          offer_price_usd: offer.price_usd,
+          tier_kind: tierKind,
+          statutory_authority: offer.statutory_authority,
+          deliverables: offer.deliverables,
+          billing_mode: "payment",
+          datapack_included: datapackIncluded,
+          checkout_url: data.url,
+          playbook_url: playbookUrl,
+          playbook_csv_url: playbookCsvUrl,
+          playbook_datapack_url: playbookDatapackUrl,
+          fulfillment_url: fulfillmentUrl,
+          csv_fulfillment_url: csvFulfillmentUrl,
+          datapack_url: datapackUrl,
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          checkout_session_id: data.id,
+          checkout_mode: "stripe_live_session",
+          ...bundleExtras,
+        }};
+      }}
+    }} catch (_) {{}}
+  }}
+  return {{
+    offer_sku: offer.sku,
+    offer_title: offer.title,
+    offer_price_usd: offer.price_usd,
+    tier_kind: tierKind,
+    statutory_authority: offer.statutory_authority,
+    deliverables: offer.deliverables,
+    billing_mode: "payment",
+    datapack_included: datapackIncluded,
+    checkout_url: null,
+    playbook_url: playbookUrl,
+    playbook_csv_url: playbookCsvUrl,
+    playbook_datapack_url: playbookDatapackUrl,
+    fulfillment_url: fulfillmentUrl,
+    csv_fulfillment_url: csvFulfillmentUrl,
+    datapack_url: datapackUrl,
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    checkout_session_id: null,
+    checkout_mode: "checkout_unavailable",
+    ...bundleExtras,
+  }};
+}}
+
+async function dispatchEdgeZeptoMailPlaybook(env, record, isSyntheticProbe = false) {{
+  if (isSyntheticProbe) {{
+    return {{ zeptomail_dispatched: false, zeptomail_status: "synthetic_test_suppressed", zeptomail_request_id: null, fulfillment_status: "synthetic_verified" }};
+  }}
+  if (isPlaceholderCheckoutEmail(record && record.email) || isSyntheticTestEmail(record && record.email)) {{
+    return {{ zeptomail_dispatched: false, zeptomail_status: "skipped_placeholder_or_internal_recipient", zeptomail_request_id: null, fulfillment_status: "suppressed_probe_email" }};
+  }}
+  const dailyCap = await checkEdgeDailyEmailCap(env, 25);
+  if (!dailyCap.allowed) {{
+    return {{ zeptomail_dispatched: false, zeptomail_status: "daily_cap_suppressed", zeptomail_request_id: null, email_provider: "none", fulfillment_status: "daily_cap_suppressed" }};
+  }}
+  const zeptoToken = env && (env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY)
+    ? String(env.ZEPTOMAIL_TOKEN || env.ZEPTO_TOKEN_DEFAULT || env.ZEPTO_API_KEY).trim()
+    : "";
+  if (!zeptoToken || typeof fetch !== "function") {{
+    return {{ zeptomail_dispatched: false, zeptomail_status: "queued_central_responder", zeptomail_request_id: null, fulfillment_status: "ready_for_dispatch" }};
+  }}
+  const apiBase = (env && env.ZEPTO_API_BASE ? String(env.ZEPTO_API_BASE).trim() : "https://api.zeptomail.com/v1.1").replace(/\\/+$/, "");
+  const fromEmail = normalizeCanonicalSenderEmail(env && (env.ZOHO_FROM_EMAIL || env.ZEPTOMAIL_FROM_EMAIL));
+  const fromName = env && env.ZEPTOMAIL_FROM_NAME ? String(env.ZEPTOMAIL_FROM_NAME).trim() : {json.dumps(dyn_from_name)};
+  const cleanSlug = sanitizeEdgeToolSlug(record && record.tool_slug, EDGE_DEFAULT_SLUG);
+  const emailSubject = `[${{EDGE_BRAND_NAME}} Playbook] Your Calculation Preview (${{cleanSlug}})`.replace(/[\\r\\n]+/g, " ");
+  const previewRows = (Array.isArray(record.preview_summary_rows) ? record.preview_summary_rows : []).slice(0, 2);
+  const tableHtml = previewRows.length > 0
+    ? `<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;"><tbody>` +
+      previewRows.map((r) => `<tr><td style="padding:6px 8px;border:1px solid #cbd5e1;">${{escapeEdgeHtml(r.line_code || "LINE")}}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${{escapeEdgeHtml(r.line_item || "")}}</td><td style="padding:6px 8px;border:1px solid #cbd5e1;">${{escapeEdgeHtml(r.optimized_value || "")}}</td></tr>`).join("") +
+      `</tbody></table>`
+    : "";
+  const htmlBody = `<div style="font-family:system-ui,-apple-system,sans-serif;color:#0f172a;line-height:1.6;"><h2>Your ${{escapeEdgeHtml(EDGE_BRAND_NAME)}} Calculation Preview</h2><p>Lead Reference: <strong>${{escapeEdgeHtml(record.lead_id || "")}}</strong></p>${{tableHtml}}<p><a href="${{escapeEdgeHtml(`https://${{EDGE_DOMAIN}}${{record.playbook_url || ""}}`)}}">Open Free Preview Worksheet (HTML)</a></p></div>`;
+  try {{
+    const authHeader = zeptoToken.startsWith("Zoho-enczapikey") ? zeptoToken : `Zoho-enczapikey ${{zeptoToken}}`;
+    const resp = await fetch(`${{apiBase}}/email`, {{
+      method: "POST",
+      headers: {{ Accept: "application/json", "Content-Type": "application/json", Authorization: authHeader }},
+      body: JSON.stringify({{
+        from: {{ address: fromEmail, name: fromName }},
+        to: [{{ email_address: {{ address: record.email, name: record.email.split("@")[0] }} }}],
+        subject: emailSubject,
+        htmlbody: htmlBody,
+      }}),
+    }});
+    const data = await resp.json().catch(() => ({{}}));
+    if (resp.ok) {{
+      const reqId = data.request_id || "ok";
+      await incrementEdgeDailyEmailCap(env, dailyCap);
+      return {{ zeptomail_dispatched: true, zeptomail_status: "sent_edge_zeptomail", email_provider: "zeptomail_v1", email_message_id: reqId, fulfillment_status: "dispatched" }};
+    }}
+  }} catch (_) {{}}
+  return {{ zeptomail_dispatched: false, zeptomail_status: "queued_central_responder", zeptomail_request_id: null, fulfillment_status: "ready_for_dispatch" }};
+}}
+
+function isSyntheticProbeRequest(request, body, email) {{
+  try {{
+    if (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") return true;
+    if (request && request.url && new URL(request.url).searchParams.get("synthetic_test") === "1") return true;
+  }} catch (_) {{}}
+  if (body && body.synthetic_test === true) return true;
+  const e = String(email || "").toLowerCase();
+  return e.endsWith("@example.invalid") || e.endsWith("@synthetic.pseofactory.test");
+}}
+
+export async function onRequestOptions(context = {{}}) {{
+  return new Response(null, {{
+    status: 204,
+    headers: buildEdgeCorsHeaders(context && context.request, context && context.env, {{ forPost: true }}),
+  }});
+}}
+
+export async function onRequestGet(context) {{
+  const {{ request, env }} = context;
+  const reqUrl = new URL((request && request.url) || `https://${{EDGE_DOMAIN}}/api/lead-capture`);
+  if (reqUrl.searchParams.get("config") === "1") return buildEdgeConfigResponse(request, env);
+  if (reqUrl.searchParams.get("health") === "1") {{
+    return new Response(JSON.stringify({{ ok: true, auth_required: true }}), {{ status: 200, headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }} }});
+  }}
+  const isSynth =
+    (request && request.headers && typeof request.headers.get === "function" && request.headers.get("x-pseofactory-test") === "1") ||
+    reqUrl.searchParams.get("synthetic_test") === "1";
+  const rawToolSlug = (reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || reqUrl.searchParams.get("source_tool") || reqUrl.searchParams.get("source") || "").trim().toLowerCase();
+  const rawReqSku = (reqUrl.searchParams.get("sku") || "").trim();
+  const reqSku = rawReqSku.toLowerCase();
+  const leadId = reqUrl.searchParams.get("lead_id") || `lead_${{EDGE_PROPERTY_ID}}_direct`;
+  const email = reqUrl.searchParams.get("email") || "";
+  const firmNameParam = (reqUrl.searchParams.get("firm_name") || reqUrl.searchParams.get("company_name") || "").trim();
+  const modeParam = (reqUrl.searchParams.get("mode") || "").toLowerCase();
+
+  if (reqUrl.searchParams.get("fulfill") === "1" || reqUrl.searchParams.get("playbook") === "1" || modeParam === "fulfill" || modeParam === "playbook") {{
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    const isFulfill = reqUrl.searchParams.get("fulfill") === "1" || modeParam === "fulfill";
+    const record = await lookupEdgeLeadRecord(
+      env, leadId, rawToolSlug,
+      reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "",
+      reqUrl.searchParams.get("state") || "", email,
+      reqUrl.searchParams.get("inputs_json") || "", reqUrl.searchParams.get("outputs_json") || ""
+    );
+    if (firmNameParam && record && !record.firm_name) record.firm_name = firmNameParam;
+    let gatedRecord = record;
+    let offer = selectOfferForSlug((record && record.tool_slug) || rawToolSlug, reqSku || (record && record.offer_sku) || "");
+    if (!isFulfill && reqSku && gatedRecord) gatedRecord = {{ ...gatedRecord, offer_sku: normalizeEdgeSku(reqSku) }};
+    const fmt = (reqUrl.searchParams.get("format") || "json").toLowerCase();
+    if (!isFulfill && (fmt === "csv" || fmt === "datapack" || fmt === "datapack_json")) {{
+      return buildEdgePaymentRequiredResponse({{ reason: "paid_export_requires_checkout" }}, leadId);
+    }}
+    let verifiedSid = "";
+    let effectiveLeadId = leadId;
+    if (isFulfill) {{
+      const hasExplicitLeadId = Boolean(reqUrl.searchParams.get("lead_id"));
+      const payment = await verifyEdgeStripePaidSession(env, reqUrl.searchParams.get("session_id"), leadId, !hasExplicitLeadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      if (!hasExplicitLeadId && payment.lead_id && payment.lead_id !== effectiveLeadId) {{
+        effectiveLeadId = payment.lead_id;
+        gatedRecord = await lookupEdgeLeadRecord(
+          env, effectiveLeadId, rawToolSlug,
+          reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "",
+          reqUrl.searchParams.get("state") || "", email,
+          reqUrl.searchParams.get("inputs_json") || "", reqUrl.searchParams.get("outputs_json") || ""
+        );
+        if (firmNameParam && gatedRecord && !gatedRecord.firm_name) gatedRecord.firm_name = firmNameParam;
+      }}
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqSku, offer, fmt);
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({{ reason: tierGuard.reason }}, effectiveLeadId);
+      verifiedSid = String(payment.session_id || "");
+      offer = selectOfferForSlug((gatedRecord && gatedRecord.tool_slug) || rawToolSlug, tierGuard.paidSku);
+      gatedRecord = await persistSettledEdgeLeadRecord(env, {{ ...(gatedRecord || {{}}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }}, payment, isSynth);
+      gatedRecord = {{ ...(gatedRecord || {{}}), lead_id: effectiveLeadId, offer_sku: tierGuard.paidSku }};
+      if (!isSynth && gatedRecord && gatedRecord.email && !gatedRecord.paid_fulfillment_email_dispatched) {{
+        await dispatchEdgePaidFulfillmentEmail(env, gatedRecord, verifiedSid, false);
+      }}
+    }}
+    const bundle = buildDynamicTenantWorkpaperBundle(gatedRecord, offer, isFulfill ? "paid_toolkit" : "free_playbook", verifiedSid);
+    if (fmt === "csv") {{
+      return new Response(bundle.csv_content, {{
+        status: 200,
+        headers: {{
+          "Content-Type": "text/csv; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${{EDGE_PROPERTY_ID}}_${{offer.sku}}_${{leadId}}.csv"`,
+          ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
+          ...CORS_HEADERS,
+        }},
+      }});
+    }}
+    if (fmt === "datapack" || fmt === "datapack_json") {{
+      return new Response(JSON.stringify(bundle.statutory_data_pack, null, 2), {{
+        status: 200,
+        headers: {{
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${{EDGE_PROPERTY_ID}}_${{offer.sku}}_datapack_${{leadId}}.json"`,
+          ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
+          ...CORS_HEADERS,
+        }},
+      }});
+    }}
+    if (fmt === "html") {{
+      return new Response(bundle.html_report, {{
+        status: 200,
+        headers: {{
+          "Content-Type": "text/html; charset=utf-8",
+          ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
+          ...CORS_HEADERS,
+        }},
+      }});
+    }}
+    return new Response(
+      JSON.stringify({{ ok: true, success: true, synthetic_test: isSynth, status: isFulfill ? "toolkit_fulfilled" : "playbook_ready", ...bundle }}),
+      {{ status: 200, headers: {{ "Content-Type": "application/json", ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}), ...CORS_HEADERS }} }}
+    );
+  }}
+
+  if (reqUrl.searchParams.get("checkout") === "1" || modeParam === "checkout") {{
+    const skuCheck = validateRequestedEdgeSku(rawReqSku);
+    if (!skuCheck.valid) return buildInvalidSkuResponse(rawReqSku, CORS_HEADERS);
+    const checkoutLeadId = resolveCheckoutLeadId(reqUrl.searchParams.get("lead_id"), EDGE_PROPERTY_ID);
+    const record = await lookupEdgeLeadRecord(
+      env, checkoutLeadId, rawToolSlug,
+      reqUrl.searchParams.get("amount") || reqUrl.searchParams.get("calculated_amount") || "",
+      reqUrl.searchParams.get("state") || "", email,
+      reqUrl.searchParams.get("inputs_json") || "", reqUrl.searchParams.get("outputs_json") || ""
+    );
+    record.lead_id = checkoutLeadId;
+    if (firmNameParam && !record.firm_name) record.firm_name = firmNameParam;
+    const toolSlug = (record && record.tool_slug) || rawToolSlug || EDGE_DEFAULT_SLUG;
+    const offer = selectOfferForSlug(toolSlug, reqSku || (record && record.offer_sku) || "");
+    await persistPreCheckoutLeadRecord(env, record, offer, toolSlug, isSynth);
+    const bundle = buildDynamicTenantWorkpaperBundle(record, offer, "free_playbook");
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, checkoutLeadId, email || record.email || "", toolSlug, offer, isSynth, bundle);
+    const wantsBrowserRedirect =
+      reqUrl.searchParams.get("format") !== "json" &&
+      (reqUrl.searchParams.get("redirect") === "1" || String(request.headers.get("accept") || "").toLowerCase().includes("text/html"));
+    if (wantsBrowserRedirect) {{
+      const targetCheckoutLoc = String(stripeOffer.checkout_url || "").startsWith("https://checkout.stripe.com/")
+        ? stripeOffer.checkout_url
+        : String(stripeOffer.cancel_url || "/").replace("checkout_status=cancelled", "checkout_status=unavailable");
+      return new Response(null, {{
+        status: 302,
+        headers: {{
+          Location: targetCheckoutLoc,
+          "X-Edge-Checkout-Mode": stripeOffer.checkout_mode || "stripe_live_session",
+          "X-Edge-Offer-Sku": stripeOffer.offer_sku || offer.sku,
+          ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}),
+          ...CORS_HEADERS,
+        }},
+      }});
+    }}
+    return new Response(
+      JSON.stringify({{
+        ok: stripeOffer.checkout_mode === "stripe_live_session",
+        success: stripeOffer.checkout_mode === "stripe_live_session",
+        synthetic_test: isSynth,
+        status: stripeOffer.checkout_mode === "stripe_live_session" ? "checkout_session_ready" : "checkout_unavailable",
+        property_id: EDGE_PROPERTY_ID,
+        lead_id: checkoutLeadId,
+        tool_slug: toolSlug,
+        ...stripeOffer,
+      }}),
+      {{
+        status: (stripeOffer.checkout_mode === "stripe_live_session" ? 200 : 503),
+        headers: {{ "Content-Type": "application/json", ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}), ...CORS_HEADERS }},
+      }}
+    );
+  }}
+
+  const authHeader = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("authorization") : "") || "";
+  const headerSecret = (request && request.headers && typeof request.headers.get === "function" ? request.headers.get("x-telemetry-secret") : "") || "";
+  const bearerToken = /^Bearer\\s+/i.test(authHeader) ? authHeader.replace(/^Bearer\\s+/i, "").trim() : "";
+  const providedSecret = bearerToken || headerSecret.trim();
+  const expectedSecret = String((env && env.TELEMETRY_EXPORT_SECRET) || "").trim();
+  const isAuthorized = Boolean(expectedSecret) && Boolean(providedSecret) && providedSecret === expectedSecret;
+  if (!isAuthorized) {{
+    if (isSynth) return new Response(JSON.stringify({{ ok: true, auth_required: true }}), {{ status: 200, headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }} }});
+    return new Response(JSON.stringify({{ ok: false, error: "Unauthorized", auth_required: true }}), {{ status: 401, headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }} }});
+  }}
+  const leads = getMemoryBuffer().slice(0, 100);
+  return new Response(
+    JSON.stringify({{ ok: true, success: true, property_id: EDGE_PROPERTY_ID, count: leads.length, leads: exposeEdgeLeads(request, env, leads) }}),
+    {{ status: 200, headers: {{ "Content-Type": "application/json", ...CORS_HEADERS }} }}
+  );
+}}
+
+export async function onRequestPost(context) {{
+  let postCorsHeaders = CORS_HEADERS;
+  try {{
+    const {{ request, env }} = context;
+    postCorsHeaders = buildEdgeCorsHeaders(request, env, {{ forPost: true }});
+    const reqUrl = new URL((request && request.url) || `https://${{EDGE_DOMAIN}}/api/lead-capture`);
+    const body = await parseLeadCapturePostBody(request);
+    const rawEmail = String(body.email || "").trim().toLowerCase();
+    const state = String(body.state || reqUrl.searchParams.get("state") || EDGE_DEFAULT_STATE).trim().toUpperCase().replace(/[^A-Z]/g, "").slice(0, 2) || EDGE_DEFAULT_STATE;
+    const toolSlug = sanitizeEdgeToolSlug(
+      body.tool_slug || body.slug || body.source_tool || body.source || reqUrl.searchParams.get("tool_slug") || reqUrl.searchParams.get("slug") || "",
+      EDGE_DEFAULT_SLUG
+    );
+    const isSynth = isSyntheticProbeRequest(request, body, rawEmail);
+    const rawPostSku = String(body.sku || body.offer_sku || reqUrl.searchParams.get("sku") || "").trim();
+    const postSkuCheck = validateRequestedEdgeSku(rawPostSku);
+    if (!postSkuCheck.valid) return buildInvalidSkuResponse(rawPostSku, postCorsHeaders);
+    const reqPostSku = rawPostSku.toLowerCase();
+    const modeParam = String(body.mode || reqUrl.searchParams.get("mode") || "").toLowerCase();
+    const isCheckoutMode = reqUrl.searchParams.get("checkout") === "1" || body.checkout === true || modeParam === "checkout";
+    const isFulfillMode = reqUrl.searchParams.get("fulfill") === "1" || body.fulfill === true || modeParam === "fulfill";
+    const rawAmount = Number(body.calculated_amount !== undefined ? body.calculated_amount : reqUrl.searchParams.get("amount") || EDGE_DEFAULT_AMOUNT);
+    const calculatedAmount = Number.isFinite(rawAmount) && rawAmount >= 0 ? rawAmount : EDGE_DEFAULT_AMOUNT;
+    const offer = selectOfferForSlug(toolSlug, reqPostSku);
+    const leadId = String(body.lead_id || reqUrl.searchParams.get("lead_id") || `lead_${{EDGE_PROPERTY_ID}}_${{Date.now()}}_${{Math.random().toString(36).slice(2, 9)}}`);
+
+    if (isFulfillMode) {{
+      const fulfillGuard = await enforceEdgeFulfillPostGuard(request, env, isSynth, leadId, postCorsHeaders);
+      if (!fulfillGuard.allowed) return fulfillGuard.response;
+      const sessionId = String(body.session_id || reqUrl.searchParams.get("session_id") || "").trim();
+      const payment = await verifyEdgeStripePaidSession(env, sessionId, leadId);
+      if (!payment.verified) return buildEdgePaymentRequiredResponse(payment, leadId);
+      const storedRecord = await lookupEdgeLeadRecord(
+        env, leadId, toolSlug, String(calculatedAmount), state, rawEmail || "",
+        body.inputs_json ? JSON.stringify(body.inputs_json) : reqUrl.searchParams.get("inputs_json"),
+        body.outputs_json ? JSON.stringify(body.outputs_json) : reqUrl.searchParams.get("outputs_json")
+      );
+      const initialFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, reqPostSku || (storedRecord && storedRecord.offer_sku) || "");
+      const tierGuard = resolveVerifiedFulfillmentOfferAndGuard(payment, reqPostSku, initialFulfillOffer, String(body.format || reqUrl.searchParams.get("format") || "json"));
+      if (!tierGuard.allowed) return buildEdgePaymentRequiredResponse({{ reason: tierGuard.reason }}, leadId);
+      const effFulfillOffer = selectOfferForSlug((storedRecord && storedRecord.tool_slug) || toolSlug, tierGuard.paidSku);
+      let settledRecord = await persistSettledEdgeLeadRecord(env, {{ ...(storedRecord || {{}}), offer_sku: tierGuard.paidSku }}, payment, isSynth);
+      settledRecord = {{ ...(settledRecord || {{}}), offer_sku: tierGuard.paidSku }};
+      if (!isSynth && settledRecord && settledRecord.email && !settledRecord.paid_fulfillment_email_dispatched) {{
+        await dispatchEdgePaidFulfillmentEmail(env, settledRecord, String(payment.session_id || ""), false);
+      }}
+      const ffBundle = buildDynamicTenantWorkpaperBundle(settledRecord, effFulfillOffer, "paid_toolkit", String(payment.session_id || ""));
+      return new Response(
+        JSON.stringify({{ ok: true, success: true, synthetic_test: isSynth, status: "toolkit_fulfilled", ...ffBundle }}),
+        {{ status: 200, headers: {{ "Content-Type": "application/json", ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}), ...postCorsHeaders }} }}
+      );
+    }}
+
+    const abuseGuard = await enforceEdgePostAbuseGuards(request, env, body, isSynth, postCorsHeaders);
+    if (!abuseGuard.allowed) return abuseGuard.response;
+
+    const email = rawEmail;
+    if (
+      isCheckoutMode
+        ? Boolean(email) && (email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))
+        : !email || email.includes("*") || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)
+    ) {{
+      return new Response(JSON.stringify({{ ok: false, success: false, error: "Please enter a valid email address." }}), {{ status: 400, headers: {{ "Content-Type": "application/json", ...postCorsHeaders }} }});
+    }}
+
+    const intentParam = String(body.intent || body.lead_type || reqUrl.searchParams.get("intent") || "").trim().toLowerCase();
+    if (intentParam === "partner_registration") {{
+      const firmName = String(body.firm_name || body.company_name || reqUrl.searchParams.get("firm_name") || "").trim() || email.split("@")[1] || "Advisory Partner Firm";
+      const partnerLeadId = String(body.lead_id || `lead_${{EDGE_PROPERTY_ID}}_partner_${{Date.now()}}_${{Math.random().toString(36).slice(2, 8)}}`);
+      const partnerOffer = getCanonicalEdgeOffer(CANONICAL_PARTNER_SLOT_SKU);
+      const partnerSku = partnerOffer.sku;
+      const partnerCheckoutUrl = `/api/lead-capture?checkout=1&lead_id=${{encodeURIComponent(partnerLeadId)}}&sku=${{encodeURIComponent(partnerSku)}}&tool_slug=${{encodeURIComponent(toolSlug)}}&redirect=1`;
+      const partnerRecord = {{
+        lead_id: partnerLeadId,
+        property_id: EDGE_PROPERTY_ID,
+        lead_type: "partner_registration",
+        intent: "partner_registration",
+        lifecycle_stage: "partner_registered",
+        tool_slug: toolSlug,
+        email,
+        firm_name: firmName,
+        state,
+        offer_sku: partnerSku,
+        offer_title: partnerOffer.title,
+        offer_price_usd: partnerOffer.price_usd,
+        checkout_url: partnerCheckoutUrl,
+        captured_at: new Date().toISOString(),
+      }};
+      if (!isSynth) {{
+        const buf = getMemoryBuffer();
+        buf.unshift(partnerRecord);
+        if (buf.length > 250) buf.length = 250;
+        const kv = getLeadsKv(env);
+        if (kv && typeof kv.put === "function") {{
+          await kv.put(partnerLeadId, JSON.stringify(partnerRecord), {{ expirationTtl: 90 * 86400, metadata: buildEdgeLeadKvMetadata(partnerRecord) }});
+        }}
+      }}
+      return new Response(
+        JSON.stringify({{ ok: true, success: true, synthetic_test: isSynth, persisted: !isSynth, status: "partner_registered", ...partnerRecord }}),
+        {{ status: 200, headers: {{ "Content-Type": "application/json", ...postCorsHeaders }} }}
+      );
+    }}
+
+    const record = {{
+      lead_id: leadId,
+      property_id: EDGE_PROPERTY_ID,
+      lead_type: "playbook_subscription",
+      lifecycle_stage: "playbook_subscribed",
+      tool_slug: toolSlug,
+      email,
+      state,
+      capital_band: String(body.capital_band || deriveCapitalBand(calculatedAmount)),
+      calculated_amount: calculatedAmount,
+      offer_sku: offer.sku,
+      offer_title: offer.title,
+      offer_price_usd: offer.price_usd,
+      captured_at: new Date().toISOString(),
+    }};
+    const bundle = buildDynamicTenantWorkpaperBundle(record, offer, "free_playbook");
+    const stripeOffer = await resolveEdgeStripeCheckoutOffer(env, leadId, email, toolSlug, offer, isSynth, bundle);
+    record.preview_mode = true;
+    record.paid_unlock_required = true;
+    record.preview_summary_rows = bundle.preview_summary_rows;
+    record.upgrade_checkout_url = bundle.upgrade_checkout_url;
+    record.quick_checkout_url = bundle.quick_checkout_url;
+    record.full_checkout_url = bundle.full_checkout_url;
+    record.fulfillment_url = bundle.fulfillment_url;
+    record.fulfill_url = bundle.fulfillment_url;
+    record.csv_fulfillment_url = bundle.csv_fulfillment_url;
+    Object.assign(record, stripeOffer);
+    if (!record.playbook_url) record.playbook_url = bundle.playbook_url;
+    const emailDispatch = await dispatchFreeFormPlaybookEmailIfEnabled(env, record, isSynth);
+    Object.assign(record, emailDispatch);
+
+    if (!isSynth) {{
+      const buf = getMemoryBuffer();
+      buf.unshift(record);
+      if (buf.length > 250) buf.length = 250;
+      const kv = getLeadsKv(env);
+      if (kv && typeof kv.put === "function") {{
+        await kv.put(leadId, JSON.stringify(record), {{ expirationTtl: 90 * 86400, metadata: buildEdgeLeadKvMetadata(record) }});
+      }}
+      await recordEdgeEmailDedup(env, email, record, isSynth);
+    }}
+
+    return new Response(
+      JSON.stringify({{
+        ok: true,
+        success: true,
+        status: isCheckoutMode ? "checkout_session_ready" : "playbook_subscribed",
+        persisted: !isSynth,
+        synthetic_test: isSynth,
+        ...record,
+      }}),
+      {{ status: 200, headers: {{ "Content-Type": "application/json", ...(isSynth ? {{ "X-Edge-Synthetic-Test": "1" }} : {{}}), ...postCorsHeaders }} }}
+    );
+  }} catch (err) {{
+    return new Response(
+      JSON.stringify({{ ok: false, success: false, error: "Unable to process request." }}),
+      {{ status: 500, headers: {{ "Content-Type": "application/json", ...postCorsHeaders }} }}
+    );
+  }}
+}}
+"""
 
     lead_js = lead_js.replace("__EDGE_CLASSIFIER_JSON__", edge_classifier_json(prop_clean))
-    lead_js = lead_js + _render_edge_pricing_and_workpaper_engine_js(prop_clean)
+    lead_js = lead_js + _render_edge_pricing_and_workpaper_engine_js(
+        prop_clean,
+        audience_tier=tenant_meta["audience_tier"],
+        repo_root=tenant_meta["repo_root"],
+    )
     lead_js = lead_js + _render_edge_lead_abuse_guard_js(prop_clean)
-    lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js(prop_clean)
-    assert_no_forbidden_dashes(lead_js, "generate_edge_lead_capture_function")
+    lead_js = lead_js + _render_edge_paid_fulfillment_and_exports_js(
+        prop_clean,
+        repo_root=tenant_meta["repo_root"],
+        audience_tier=tenant_meta["audience_tier"],
+    )
+    assert_no_forbidden_dashes(lead_js, f"generate_edge_lead_capture_function({prop_clean})")
     return lead_js
 
 
-def generate_edge_stripe_webhook_function(property_id: str = "profithelm") -> str:
+def generate_edge_stripe_webhook_function(
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+) -> str:
     """
     Generates the deterministic, fail-closed Cloudflare Pages Function
     (functions/api/stripe-webhook.js) verifying Stripe-Signature HMAC-SHA256
@@ -14698,18 +16663,10 @@ def generate_edge_stripe_webhook_function(property_id: str = "profithelm") -> st
     settlement persistence, and zero-double-email idempotency.
     Zero em-dashes. Zero en-dashes. Strictly tenant-isolated.
     """
-    prop_clean = (property_id or "").strip().lower()
-    tenant_cfg = {
-        "profithelm": ("profithelm.com", "section-1031-calculator"),
-        "prexvo": ("prexvo.com", "student-loan-refinance-break-even-calculator"),
-        "gainhelm": ("gainhelm.com", "soc-2-audit-cost-calculator"),
-        "lienbond": ("lienbond.com", "contractor-license-bond-cost-calculator-by-credit-score"),
-    }
-    if prop_clean not in tenant_cfg:
-        raise ValueError(
-            f"Unsupported property_id for Stripe webhook function: {property_id!r}"
-        )
-    domain, default_slug = tenant_cfg[prop_clean]
+    meta = _resolve_edge_tenant_metadata(property_id, repo_root=repo_root)
+    prop_clean = meta["property_id"]
+    domain = meta["domain"]
+    default_slug = meta["default_slug"]
     webhook_js = f"""/**
  * Cloudflare Pages Function: /api/stripe-webhook ({domain})
  * Verifies Stripe-Signature HMAC-SHA256 over the raw body using Web Crypto,
@@ -14945,6 +16902,7 @@ export async function onRequestPost(context) {{
     const customerEmail = String(custDetails.email || session.customer_email || "").trim().toLowerCase();
     const toolSlug = String(meta.tool_slug || DEFAULT_TOOL_SLUG).trim().toLowerCase() || DEFAULT_TOOL_SLUG;
     const offerSku = String(meta.offer_sku || meta.sku || "").trim().toLowerCase();
+    const firmName = String(meta.firm_name || "").trim();
     const calcAmountStr = meta.calculated_amount !== undefined && meta.calculated_amount !== null
       ? String(meta.calculated_amount)
       : "";
@@ -14966,6 +16924,7 @@ export async function onRequestPost(context) {{
       property_id: EDGE_PROPERTY_ID,
       tool_slug: (baseRecord && baseRecord.tool_slug && baseRecord.tool_slug !== "general") ? baseRecord.tool_slug : toolSlug,
       ...(offerSku && !(baseRecord && baseRecord.offer_sku) ? {{ offer_sku: offerSku }} : {{}}),
+      ...(firmName && !(baseRecord && baseRecord.firm_name) ? {{ firm_name: firmName }} : {{}}),
       email:
         customerEmail && (!baseRecord || !baseRecord.email || isPlaceholderCheckoutEmail(baseRecord.email))
           ? customerEmail
@@ -15013,6 +16972,7 @@ export async function onRequestPost(context) {{
           : null,
       state: stateCode || null,
       offer_sku: offerSku || null,
+      firm_name: firmName || null,
       inputs_json: meta.inputs_json || null,
       outputs_json: meta.outputs_json || null,
       settlement_rail: "stripe_webhook_verified",
@@ -15248,13 +17208,14 @@ def sync_tenant_edge_redirect_function(
     )
     from pseofactory.affiliates_hub import MonetizationHub
 
-    prop_clean = (property_id or "").strip().lower()
     repo = Path(repo_path)
+    meta = _resolve_edge_tenant_metadata(property_id, repo_root=repo)
+    prop_clean = meta["property_id"]
     fn_root = repo / "functions"
     r_dir = fn_root / "r"
     target_file = r_dir / "[partner].js"
 
-    if prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond") or not fn_root.is_dir():
+    if not prop_clean or not fn_root.is_dir():
         return {
             "status": "SKIPPED",
             "path": str(target_file),
@@ -15265,8 +17226,12 @@ def sync_tenant_edge_redirect_function(
     active_hub = hub if hub is not None else MonetizationHub()
     js_code = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
     telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
-    lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
-    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean)
+    lead_capture_js = generate_edge_lead_capture_function(
+        property_id=prop_clean,
+        audience_tier=meta["audience_tier"],
+        repo_root=repo,
+    )
+    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean, repo_root=repo)
 
     prop_vault = getattr(active_hub, "_vault", {}).get(prop_clean, {})
     registry_map = (
@@ -15275,7 +17240,11 @@ def sync_tenant_edge_redirect_function(
         else (
             GAINHELM_AFFILIATES
             if prop_clean == "gainhelm"
-            else (LIENBOND_AFFILIATES if prop_clean == "lienbond" else PROFITHELM_AFFILIATES)
+            else (
+                LIENBOND_AFFILIATES
+                if prop_clean == "lienbond"
+                else (PROFITHELM_AFFILIATES if prop_clean == "profithelm" else {})
+            )
         )
     )
     live_direct_partners: List[str] = []
@@ -15401,11 +17370,7 @@ def sync_tenant_edge_redirect_function(
 
     # Ensure functions/_middleware.js enforces www->apex 301 redirects, legacy GSC 301 redirects,
     # non-apex noindex lockdown, and RFC 5988 canonical Link header on apex HTML responses.
-    apex_domain = (
-        "prexvo.com"
-        if prop_clean == "prexvo"
-        else ("gainhelm.com" if prop_clean == "gainhelm" else ("lienbond.com" if prop_clean == "lienbond" else "profithelm.com"))
-    )
+    apex_domain = meta["domain"]
     existing_gov_routes = {
         g
         for g in ("about", "methodology", "privacy", "terms", "disclaimers", "contact")
@@ -15730,6 +17695,7 @@ def sync_tenant_edge_redirect_function(
 def get_expected_edge_functions_map(
     property_id: str,
     hub: Optional[Any] = None,
+    repo_root: Optional[Union[str, Path]] = None,
 ) -> Dict[str, str]:
     """
     Returns a deterministic mapping of relative edge function paths to expected JS source
@@ -15742,8 +17708,8 @@ def get_expected_edge_functions_map(
     active_hub = hub if hub is not None else MonetizationHub()
     redirect_js = generate_edge_redirect_function(property_id=prop_clean, hub=active_hub)
     telemetry_js = generate_edge_telemetry_function(property_id=prop_clean)
-    lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean)
-    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean)
+    lead_capture_js = generate_edge_lead_capture_function(property_id=prop_clean, repo_root=repo_root)
+    stripe_webhook_js = generate_edge_stripe_webhook_function(property_id=prop_clean, repo_root=repo_root)
     checkout_js = (
         'import { onRequestGet as lcGet, onRequestPost as lcPost, onRequestOptions as lcOpt } from "./lead-capture.js";\n\n'
         "function withCheckoutFlag(context) {\n"
@@ -15801,7 +17767,7 @@ def verify_tenant_edge_functions_parity(
     Zero em-dashes. Zero en-dashes.
     """
     repo = Path(repo_path)
-    expected_map = get_expected_edge_functions_map(property_id, hub=hub)
+    expected_map = get_expected_edge_functions_map(property_id, hub=hub, repo_root=repo)
     reasons: List[str] = []
     if (repo / "dist" / "functions").exists():
         reasons.append(f"{property_id}: dist/functions must not exist in public static output")

@@ -46,6 +46,39 @@ _DEFAULT_RECEIPTS_DIR = Path("/home/ubuntuadmin/projects/.agy/browser_verify_rec
 _MAX_FULL_HASH_ASSET_BYTES = 5 * 1024 * 1024
 
 
+def _build_restricted_ymyl_path_regex_json() -> str:
+    """Aligns browser YMYL restricted path regex with affiliates.py SSOT."""
+    try:
+        from pseofactory import affiliates
+
+        fn = getattr(affiliates, "get_restricted_public_service_slug_regex_pattern", None)
+        if callable(fn):
+            pat = str(fn() or "").strip()
+            if pat:
+                return json.dumps(pat)
+        slugs = list(getattr(affiliates, "PREXVO_RESTRICTED_PUBLIC_SERVICE_SLUGS", ()) or ())
+        tokens = list(getattr(affiliates, "PREXVO_RESTRICTED_PUBLIC_SERVICE_TOKENS", ()) or ())
+        extra = [
+            "save-plan",
+            "save_plan",
+            "buyback",
+            "income-driven-forgiveness",
+            "ibr-hardship",
+            "hardship-cap",
+        ]
+        parts = []
+        for item in slugs + tokens + extra:
+            clean = str(item or "").strip()
+            if clean:
+                parts.append(re.escape(clean).replace(" ", r"[\s_-]+"))
+        if parts:
+            deduped = list(dict.fromkeys(parts))
+            return json.dumps(f"(?:{'|'.join(deduped)})")
+    except Exception:
+        pass
+    return json.dumps(r"(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness|ibr-hardship|hardship-cap)")
+
+
 def _atexit_cleanup_chrome_instances() -> None:
     """Safety net ensuring no orphaned headless Chromium processes or temp profiles survive exit."""
     with _ACTIVE_CHROME_LOCK:
@@ -2498,7 +2531,7 @@ class UnifiedBrowserAuditor:
             hash_navigation_and_focus: { present: false, passed: true, links_tested_count: 0, failures: [] },
             hero_state_and_range_anchor: { present: false, passed: true, range_anchor_present: false, synced_state: '', peer_sync_passed: true },
             validation_focus_and_error_states: { present: false, passed: true, forms_tested_count: 0, focus_failures: [] },
-            sellable_assets_and_fulfillment_gate: { present: false, passed: true, unpaid_402_enforced: false, free_playbook_verified: false, free_csv_402_enforced: false, free_datapack_402_enforced: false, paid_html_verified: false, paid_csv_verified: false, paid_datapack_verified: false, email_dispatch_verified: false, failures: [] },
+            sellable_assets_and_fulfillment_gate: { present: false, passed: true, unpaid_402_enforced: false, free_playbook_verified: false, free_csv_402_enforced: false, free_datapack_402_enforced: false, paid_html_verified: false, paid_csv_verified: false, paid_datapack_verified: false, quick_datapack_402_enforced: false, email_dispatch_verified: false, failures: [] },
             affiliate_redirect_and_telemetry: { tested: false, passed: true, dom_click_handled: false, redirect_status: 0, redirect_location: '', telemetry_status: '', partners_verified_count: 0, all_partner_redirects: [], partner_failures: [] }
         };
 
@@ -2575,9 +2608,29 @@ class UnifiedBrowserAuditor:
                 if (!href.startsWith('/api/') && !href.startsWith('/r/')) {
                     report.links_audit.internal_hrefs.push(href);
                 }
-                if (href.startsWith('#') && href.length > 1) {
-                    const targetId = href.slice(1);
-                    if (!document.getElementById(targetId) && !document.querySelector('[name="' + targetId + '"]')) {
+                const normAnchorPath = (p) => {
+                    let s = String(p || '/').replace(/\\/index\\.html$/i, '/');
+                    if (!s.startsWith('/')) s = '/' + s;
+                    if (s.length > 1 && !s.endsWith('/')) s += '/';
+                    return s;
+                };
+                const curAnchorNormPath = normAnchorPath(window.location.pathname || '/');
+                let isSamePageAnchor = href.startsWith('#');
+                let anchorFrag = href.startsWith('#') ? href.slice(1) : '';
+                if (!isSamePageAnchor && href.includes('#')) {
+                    try {
+                        const pu = new URL(href, window.location.origin);
+                        if (pu.origin === window.location.origin && normAnchorPath(pu.pathname) === curAnchorNormPath) {
+                            isSamePageAnchor = true;
+                            anchorFrag = pu.hash ? pu.hash.slice(1) : '';
+                        }
+                    } catch (uErr) {}
+                }
+                if (isSamePageAnchor && href.includes('#')) {
+                    let decodedId = anchorFrag;
+                    try { decodedId = decodeURIComponent(anchorFrag); } catch (dErr) {}
+                    const escAttr = (v) => String(v || '').replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
+                    if (!decodedId || (!document.getElementById(decodedId) && !document.querySelector('[name="' + escAttr(decodedId) + '"]'))) {
                         report.links_audit.invalid_links.push(href);
                     }
                 }
@@ -2958,7 +3011,7 @@ class UnifiedBrowserAuditor:
         // 3b. Clean 3-Step Funnel Discipline & /partners/ Contract
         const isPartnersRoute = (curPath === '/partners/' || curPath === '/partners' || curPath === '/partners/index.html');
         const hasPorcelainCss = Boolean(document.querySelector('link#pseo-visual-primitives'));
-        const isRestrictedYmylPath = /(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness|ibr-hardship|hardship-cap)/i.test(curPath);
+        const isRestrictedYmylPath = new RegExp(__RESTRICTED_YMYL_PATTERN_JSON__, 'i').test(curPath);
         const allForms = Array.from(document.querySelectorAll('form'));
         const unlockCards = Array.from(document.querySelectorAll('#workpaper-unlock-card'));
         const refCards = Array.from(document.querySelectorAll('.contextual-referral-card'));
@@ -3016,22 +3069,108 @@ class UnifiedBrowserAuditor:
 
         const previewBtn = document.getElementById('btn-preview-workpaper');
         const previewPanel = document.getElementById('workpaper-preview-panel');
+        const unlockCardForSlug = unlockCards[0] || null;
         if (previewBtn && previewPanel) {
-            previewBtn.click();
+            const expectedCardSlug = ((unlockCardForSlug && unlockCardForSlug.getAttribute('data-tool-slug')) || '').trim().toLowerCase();
+            const btnToolSlug = (previewBtn.getAttribute('data-tool-slug') || '').trim().toLowerCase();
+            const capturedPreviewUrls = [];
+            const origPreviewFetch = window.fetch;
+            if (typeof origPreviewFetch === 'function') {
+                window.fetch = function(input, init) {
+                    try {
+                        const reqUrl = typeof input === 'string' ? input : (input && input.url ? String(input.url) : '');
+                        if (reqUrl.includes('/api/lead-capture') && reqUrl.includes('playbook=1')) {
+                            capturedPreviewUrls.push(reqUrl);
+                        }
+                    } catch (spyErr) {}
+                    return origPreviewFetch.apply(this, arguments);
+                };
+            }
+            try {
+                previewBtn.click();
+                await new Promise(r => setTimeout(r, 25));
+            } finally {
+                if (typeof origPreviewFetch === 'function') {
+                    window.fetch = origPreviewFetch;
+                }
+            }
             report.calculator_and_presets.buttons_tested_count += 1;
             report.funnel_discipline.preview_opened = !previewPanel.hasAttribute('hidden') && window.getComputedStyle(previewPanel).display !== 'none';
             if (!report.funnel_discipline.preview_opened) {
                 report.funnel_discipline.failures.push('step1_preview_panel_did_not_open');
             }
+            if (expectedCardSlug && expectedCardSlug !== 'homepage' && expectedCardSlug !== 'general') {
+                if (btnToolSlug === 'homepage') {
+                    report.funnel_discipline.failures.push('preview_workpaper_btn_has_homepage_slug');
+                }
+                for (const pvUrl of capturedPreviewUrls) {
+                    try {
+                        const pvParsed = new URL(pvUrl, window.location.origin);
+                        const sentSlug = (pvParsed.searchParams.get('tool_slug') || '').trim().toLowerCase();
+                        if (sentSlug === 'homepage' || (sentSlug && sentSlug !== expectedCardSlug)) {
+                            report.funnel_discipline.failures.push('preview_workpaper_sent_wrong_tool_slug:' + sentSlug + ':expected:' + expectedCardSlug);
+                        }
+                    } catch (pvParseErr) {}
+                }
+            }
         }
 
         const unlockCard = unlockCards[0] || null;
+        let fullTrigger = null;
+        let quickTrigger = null;
         if (unlockCard) {
             const chkTriggers = Array.from(unlockCard.querySelectorAll('[data-checkout-trigger]'));
             if (chkTriggers.length < 1 || chkTriggers.length > 2) {
                 report.funnel_discipline.failures.push('expected_1_or_2_checkout_triggers_got_' + chkTriggers.length);
             }
-            const firstChk = chkTriggers[0] || null;
+            const getTriggerSku = (el) => {
+                if (!el) return '';
+                let skuVal = String(
+                    el.getAttribute('data-offer-sku') ||
+                    el.getAttribute('data-sku') ||
+                    ''
+                ).trim().toLowerCase();
+                if (!skuVal) {
+                    try {
+                        const rawHref = el.getAttribute('href') || '';
+                        if (rawHref) {
+                            skuVal = (new URL(rawHref, window.location.origin).searchParams.get('sku') || '').trim().toLowerCase();
+                        }
+                    } catch (skuUrlErr) {}
+                }
+                return skuVal;
+            };
+            const isQuickTrigger = (el) => {
+                if (!el) return false;
+                const elId = String(el.id || '').toLowerCase();
+                const tk = String(el.getAttribute('data-tier-kind') || '').trim().toLowerCase();
+                const skuVal = getTriggerSku(el);
+                return (
+                    elId === 'btn-workpaper-quick-checkout' ||
+                    tk === 'quick' ||
+                    skuVal.includes('quick') ||
+                    skuVal.includes('instant')
+                );
+            };
+            const isFullTrigger = (el) => {
+                if (!el) return false;
+                const elId = String(el.id || '').toLowerCase();
+                const tk = String(el.getAttribute('data-tier-kind') || '').trim().toLowerCase();
+                const skuVal = getTriggerSku(el);
+                if (elId === 'btn-workpaper-full-checkout' || tk === 'full') return true;
+                return Boolean(
+                    !isQuickTrigger(el) &&
+                    tk !== 'partner_slot' &&
+                    !skuVal.includes('partner_slot')
+                );
+            };
+            quickTrigger = chkTriggers.find(el => isQuickTrigger(el)) || null;
+            fullTrigger = (
+                chkTriggers.find(el => isFullTrigger(el)) ||
+                (chkTriggers.length > 1 ? chkTriggers[chkTriggers.length - 1] : chkTriggers[0]) ||
+                null
+            );
+            const firstChk = fullTrigger;
             if (firstChk) {
                 const rawOfferPrice = parseInt(firstChk.getAttribute('data-offer-price') || '0', 10);
                 if (![9, 15, 19, 29].includes(rawOfferPrice)) {
@@ -3039,9 +3178,10 @@ class UnifiedBrowserAuditor:
                 }
                 firstChk.click();
                 report.calculator_and_presets.buttons_tested_count += 1;
-                for (let i = 0; i < 600; i++) {
+                const chkDeadline = Date.now() + 10000;
+                while (Date.now() < chkDeadline) {
                     if (firstChk.getAttribute('data-checkout-status') === 'checkout_session_ready') break;
-                    await new Promise(r => setTimeout(r, 5));
+                    await new Promise(r => setTimeout(r, 10));
                 }
                 report.funnel_discipline.checkout_status = firstChk.getAttribute('data-checkout-status') || '';
                 report.funnel_discipline.checkout_session_id = firstChk.getAttribute('data-checkout-session-id') || '';
@@ -3054,30 +3194,70 @@ class UnifiedBrowserAuditor:
             report.funnel_discipline.passed = false;
         }
 
-        // 3c. In-page #hash navigation & focus transfer (TOC anchors)
-        const hashCandidates = Array.from(document.querySelectorAll('.on-this-page-nav a[href^="#"]')).filter(a => {
+        // 3c. All #anchor and same-page /path/#id navigation & focus/scroll transfer
+        const normHashPagePath = (p) => {
+            let s = String(p || '/').replace(/\\/index\\.html$/i, '/');
+            if (!s.startsWith('/')) s = '/' + s;
+            if (s.length > 1 && !s.endsWith('/')) s += '/';
+            return s;
+        };
+        const curNormHashPath = normHashPagePath(window.location.pathname || '/');
+        const hashCandidates = Array.from(document.querySelectorAll('a[href]')).filter(a => {
             if (a.classList && a.classList.contains('skip-to-content-link')) return false;
-            const h = (a.getAttribute('href') || '').trim();
-            if (h.length <= 1) return false;
-            const tEl = document.getElementById(h.slice(1));
-            if (!tEl) return false;
+            const rawH = (a.getAttribute('href') || '').trim();
+            if (!rawH || rawH === '#') return false;
             const cs = window.getComputedStyle(a);
-            return cs.display !== 'none' && cs.visibility !== 'hidden';
-        }).slice(0, 3);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            if (rawH.startsWith('#')) return rawH.length > 1;
+            if (!rawH.includes('#')) return false;
+            try {
+                const pu = new URL(rawH, window.location.origin);
+                return (
+                    pu.origin === window.location.origin &&
+                    normHashPagePath(pu.pathname) === curNormHashPath &&
+                    !pu.search &&
+                    pu.hash.length > 1
+                );
+            } catch (e) {
+                return false;
+            }
+        });
         if (hashCandidates.length > 0) {
             report.hash_navigation_and_focus.present = true;
             const origHashUrl = window.location.pathname + window.location.search + window.location.hash;
+            const escHashAttr = (v) => String(v || '').replace(/\\\\/g, '\\\\\\\\').replace(/"/g, '\\\\"');
             for (const hLink of hashCandidates) {
-                const rawH = hLink.getAttribute('href') || '';
-                const tId = rawH.slice(1);
-                const tEl = document.getElementById(tId);
-                if (!tEl) continue;
-                hLink.click();
+                const rawH = (hLink.getAttribute('href') || '').trim();
+                let rawFrag = '';
+                if (rawH.startsWith('#')) {
+                    rawFrag = rawH.slice(1);
+                } else {
+                    try {
+                        rawFrag = new URL(rawH, window.location.origin).hash.slice(1);
+                    } catch (e) {}
+                }
+                let tId = rawFrag;
+                try { tId = decodeURIComponent(rawFrag); } catch (dErr) {}
+                const tEl = tId ? (document.getElementById(tId) || document.querySelector('[name="' + escHashAttr(tId) + '"]')) : null;
                 report.hash_navigation_and_focus.links_tested_count += 1;
-                const focusedOk = (
+                if (!tEl) {
+                    report.hash_navigation_and_focus.failures.push(rawH + ':missing_target');
+                    continue;
+                }
+                hLink.click();
+                const focusedAttrOk = (
                     tEl.getAttribute('data-focused-target') === 'true' &&
                     Boolean(document.activeElement && (document.activeElement === tEl || tEl.contains(document.activeElement)))
                 );
+                let focusedOk = focusedAttrOk;
+                if (!rawH.startsWith('#') && !focusedOk) {
+                    const rect = tEl.getBoundingClientRect();
+                    let curDecHash = window.location.hash || '';
+                    try { curDecHash = decodeURIComponent(curDecHash); } catch (e) {}
+                    const hashMatches = (curDecHash === '#' + tId || window.location.hash === '#' + rawFrag);
+                    const inViewport = rect.top >= -Math.max(200, tEl.offsetHeight || 0) && rect.top < window.innerHeight;
+                    focusedOk = hashMatches && inViewport;
+                }
                 if (!focusedOk) {
                     report.hash_navigation_and_focus.failures.push(rawH);
                 }
@@ -3243,6 +3423,17 @@ class UnifiedBrowserAuditor:
                     }
                 }
 
+                const previewDrawers = document.querySelectorAll('#workpaper-preview-panel a[href], #workpaper-unlock-card a[href], a[href]');
+                for (const pAnchor of previewDrawers) {
+                    const pHref = String(pAnchor.getAttribute('href') || '');
+                    if (
+                        pHref.includes('playbook=1') &&
+                        (pHref.includes('format=csv') || pHref.includes('format=datapack') || pHref.includes('format=datapack_json'))
+                    ) {
+                        report.sellable_assets_and_fulfillment_gate.failures.push('free_preview_raw_402_download_link:' + pHref);
+                    }
+                }
+
                 const [pbJsonData, pbCsvTxt, pbDpTxt, ffHtmlTxt, ffCsvTxt, ffDpTxt] = await Promise.all([
                     pbJsonResp.json().catch(() => ({})),
                     pbCsvResp.text(),
@@ -3254,33 +3445,32 @@ class UnifiedBrowserAuditor:
                 let ffDpJson = {};
                 try { ffDpJson = JSON.parse(ffDpTxt || '{}'); } catch (e) {}
 
-                const pbArts = Array.isArray(pbJsonData.statutory_execution_artifacts)
-                    ? pbJsonData.statutory_execution_artifacts
-                    : (pbJsonData.statutory_data_pack && Array.isArray(pbJsonData.statutory_data_pack.statutory_execution_artifacts)
-                        ? pbJsonData.statutory_data_pack.statutory_execution_artifacts
-                        : []);
+                const pbDp = pbJsonData && typeof pbJsonData.statutory_data_pack === 'object' ? pbJsonData.statutory_data_pack : null;
+                const hasFreeLeak = Boolean(
+                    (pbJsonData && pbJsonData.csv_content) ||
+                    (pbJsonData && Array.isArray(pbJsonData.period_schedule) && pbJsonData.period_schedule.length > 0) ||
+                    (pbJsonData && Array.isArray(pbJsonData.sensitivity_matrix) && pbJsonData.sensitivity_matrix.length > 0) ||
+                    (pbJsonData && Array.isArray(pbJsonData.statutory_trend_timeseries) && pbJsonData.statutory_trend_timeseries.length > 0) ||
+                    (pbDp && pbDp.csv_content) ||
+                    (pbDp && Array.isArray(pbDp.period_schedule) && pbDp.period_schedule.length > 0) ||
+                    (pbDp && Array.isArray(pbDp.sensitivity_matrix) && pbDp.sensitivity_matrix.length > 0) ||
+                    (pbDp && Array.isArray(pbDp.statutory_trend_timeseries) && pbDp.statutory_trend_timeseries.length > 0)
+                );
                 report.sellable_assets_and_fulfillment_gate.free_playbook_verified = (
                     pbJsonResp.status === 200 &&
                     pbJsonData.status === 'playbook_ready' &&
-                    Array.isArray(pbJsonData.reconciliation_schedule) && pbJsonData.reconciliation_schedule.length >= 3 &&
-                    Array.isArray(pbJsonData.sensitivity_matrix) && pbJsonData.sensitivity_matrix.length >= 3 &&
-                    pbArts.length >= 1 &&
-                    pbArts.every(a =>
-                        a.redaction_state === 'PREVIEW_REDACTED' ||
-                        a.execution_status === 'PREVIEW_REDACTED_PENDING_CHECKOUT' ||
-                        String(a.statutory_clause_body || a.body_preview || '').includes('REDACTED')
-                    )
+                    !hasFreeLeak
                 );
                 if (!report.sellable_assets_and_fulfillment_gate.free_playbook_verified) {
-                    report.sellable_assets_and_fulfillment_gate.failures.push('free_playbook_contract_failed');
+                    report.sellable_assets_and_fulfillment_gate.failures.push('free_playbook_contract_or_leak_failed');
                 }
 
                 report.sellable_assets_and_fulfillment_gate.free_csv_402_enforced = pbCsvResp.status === 402;
                 report.sellable_assets_and_fulfillment_gate.free_datapack_402_enforced = pbDpResp.status === 402;
-                if (pbCsvResp.status !== 402 && pbCsvResp.status !== 200) {
+                if (pbCsvResp.status !== 402) {
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_csv_unexpected_status:' + pbCsvResp.status);
                 }
-                if (pbDpResp.status !== 402 && pbDpResp.status !== 200) {
+                if (pbDpResp.status !== 402) {
                     report.sellable_assets_and_fulfillment_gate.failures.push('free_datapack_unexpected_status:' + pbDpResp.status);
                 }
 
@@ -3290,7 +3480,7 @@ class UnifiedBrowserAuditor:
                 report.sellable_assets_and_fulfillment_gate.paid_html_verified = (
                     ffHtmlResp.status === 200 && ffHtmlTxt.includes('<table') && ffHtmlTxt.length > 400
                 );
-                if (pbCsvResp.status === 402 && !ffHtmlTxt.includes('session_id=')) {
+                if (!ffHtmlTxt.includes('session_id=')) {
                     report.sellable_assets_and_fulfillment_gate.paid_html_verified = false;
                     report.sellable_assets_and_fulfillment_gate.failures.push('paid_html_missing_session_id_in_download_links');
                 }
@@ -3318,6 +3508,57 @@ class UnifiedBrowserAuditor:
                 }
                 if (!report.sellable_assets_and_fulfillment_gate.paid_datapack_verified) {
                     report.sellable_assets_and_fulfillment_gate.failures.push('paid_datapack_contract_failed');
+                }
+                if (quickTrigger) {
+                    let qSku = String(
+                        quickTrigger.getAttribute('data-offer-sku') ||
+                        quickTrigger.getAttribute('data-sku') ||
+                        unlockCard.getAttribute('data-quick-sku') ||
+                        ''
+                    ).trim();
+                    if (!qSku) {
+                        try {
+                            const qHrefRaw = quickTrigger.getAttribute('href') || '';
+                            if (qHrefRaw) {
+                                qSku = (new URL(qHrefRaw, window.location.origin).searchParams.get('sku') || '').trim();
+                            }
+                        } catch (qUrlErr) {}
+                    }
+                    const qChkUrl = (
+                        '/api/checkout?format=json&tool_slug=' + encodeURIComponent(curPath) +
+                        (qSku ? '&sku=' + encodeURIComponent(qSku) : '')
+                    );
+                    const qChkResp = await fetch(qChkUrl, {
+                        headers: { 'Accept': 'application/json', 'X-Pseofactory-Test': '1' }
+                    });
+                    const qChkJson = await qChkResp.json().catch(() => ({}));
+                    const qSid = String((qChkJson && qChkJson.checkout_session_id) || '').trim();
+                    if (!qChkResp.ok || !qSid) {
+                        report.sellable_assets_and_fulfillment_gate.quick_datapack_402_enforced = false;
+                        report.sellable_assets_and_fulfillment_gate.failures.push('quick_checkout_probe_failed');
+                    } else {
+                        const qBaseFf = String(
+                            qChkJson.fulfillment_url ||
+                            ('/api/lead-capture?fulfill=1&tool_slug=' + encodeURIComponent(curPath) +
+                             (qSku ? '&sku=' + encodeURIComponent(qSku) : '') +
+                             '&session_id=' + encodeURIComponent(qSid))
+                        );
+                        const qCsvUrlObj = new URL(qChkJson.csv_fulfillment_url || qBaseFf, window.location.origin);
+                        qCsvUrlObj.searchParams.set('format', 'csv');
+                        const qDpUrlObj = new URL(qBaseFf, window.location.origin);
+                        qDpUrlObj.searchParams.set('format', 'datapack');
+                        const [qCsvResp, qDpResp] = await Promise.all([
+                            fetch(qCsvUrlObj.pathname + qCsvUrlObj.search, { headers: { 'X-Pseofactory-Test': '1' } }),
+                            fetch(qDpUrlObj.pathname + qDpUrlObj.search, { headers: { 'X-Pseofactory-Test': '1' } })
+                        ]);
+                        if (qCsvResp.status !== 200) {
+                            report.sellable_assets_and_fulfillment_gate.failures.push('quick_csv_unexpected_status:' + qCsvResp.status);
+                        }
+                        report.sellable_assets_and_fulfillment_gate.quick_datapack_402_enforced = (qDpResp.status === 402);
+                        if (qDpResp.status !== 402) {
+                            report.sellable_assets_and_fulfillment_gate.failures.push('quick_datapack_402_not_enforced:' + qDpResp.status);
+                        }
+                    }
                 }
                 report.sellable_assets_and_fulfillment_gate.email_dispatch_verified = true;
             } catch (e) {
@@ -3448,11 +3689,12 @@ class UnifiedBrowserAuditor:
             report.playbook_lead_capture_and_checkout.passed &&
             report.partner_quote_intake_and_checkout.passed &&
             report.partner_registration_and_slot_checkout.passed &&
+            report.hash_navigation_and_focus.passed &&
             report.sellable_assets_and_fulfillment_gate.passed &&
             report.affiliate_redirect_and_telemetry.passed
         );
         return report;
-    })()"""
+    })()""".replace("__RESTRICTED_YMYL_PATTERN_JSON__", _build_restricted_ymyl_path_regex_json())
 
     JS_CHECK_RESIZE_AND_INTERACTION_CLS = """new Promise(resolve => {
         const describeNode = (node) => {

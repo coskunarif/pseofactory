@@ -11486,6 +11486,24 @@ def verify_estate_monetization_and_funnel_hygiene(
                         f"lead-capture.js hardcodes non-canonical Stripe unit_amount '{expr}'"
                     )
 
+    # 1d. Isolated Node.js edge commerce replay whenever edge functions exist in repo_root
+    if eff_repo_root is not None:
+        _lc_js = eff_repo_root / "functions" / "api" / "lead-capture.js"
+        _wh_js = eff_repo_root / "functions" / "api" / "stripe-webhook.js"
+        if _lc_js.is_file() and _wh_js.is_file():
+            import shutil
+
+            if shutil.which("node"):
+                from pseofactory.commerce_gate import verify_local_edge_commerce_replay
+
+                replay_res = verify_local_edge_commerce_replay(
+                    eff_repo_root,
+                    prop,
+                    dist_dir=target if target.exists() else None,
+                )
+                for r_issue in replay_res.get("issues") or []:
+                    issues.append(f"edge_commerce_replay: {r_issue}")
+
     if not target.exists():
         return {
             "status": "PASS" if not issues else "FAIL",
@@ -11494,6 +11512,12 @@ def verify_estate_monetization_and_funnel_hygiene(
             "violations_count": len(issues),
             "issues": issues,
         }
+
+    from pseofactory.commerce_gate import audit_static_dist_deliverable_leaks
+
+    leak_res = audit_static_dist_deliverable_leaks(target, prop)
+    for leak_msg in leak_res.get("violations") or []:
+        issues.append(f"dist_deliverable_leak: {leak_msg}")
 
     has_full_porcelain_estate = (
         (target / "index.html").is_file()

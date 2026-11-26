@@ -77,9 +77,9 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     q_offer = pricing.resolve_offer_pricing("acme_solar", tier_kind="quick", slug="solar-roi-calculator")
     f_offer = pricing.resolve_offer_pricing("acme_solar", tier_kind="full", slug="solar-roi-calculator")
     p_offer = pricing.resolve_offer_pricing("acme_solar", tier_kind="partner_slot", slug="solar-roi-calculator")
-    assert q_offer["sku"] == "acm_quick_worksheet"
-    assert f_offer["sku"] == "acm_full_workpaper_pack"
-    assert p_offer["sku"] == "acm_verified_partner_slot"
+    assert q_offer["sku"] == "acme_solar_quick_worksheet"
+    assert f_offer["sku"] == "acme_solar_full_workpaper_pack"
+    assert p_offer["sku"] == "acme_solar_verified_partner_slot"
     assert q_offer["price_usd"] == 15.0
     assert f_offer["price_usd"] == 29.0
     assert p_offer["price_usd"] == 299.0
@@ -102,8 +102,8 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     assert 'id="btn-preview-workpaper"' in norm_attr
     assert 'id="workpaper-unlock-card"' in norm_attr
     assert 'data-property="acme_solar"' in norm_attr
-    assert "acm_quick_worksheet" in norm_attr
-    assert "acm_full_workpaper_pack" in norm_attr
+    assert "acme_solar_quick_worksheet" in norm_attr
+    assert "acme_solar_full_workpaper_pack" in norm_attr
     assert "profithelm" not in norm_attr.lower()
     for ph_sku_prefix in ("ph_instant", "ph_statutory", "ph_commercial", "ph_1031", "ph_verified"):
         assert ph_sku_prefix not in norm_attr.lower()
@@ -132,8 +132,8 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     )
     norm_disc, _ = normalize_html_visual_primitives(calc_html_no_attr, is_tenant_porcelain=True)
     assert 'data-property="acme_solar"' in norm_disc
-    assert "acm_quick_worksheet" in norm_disc
-    assert "acm_full_workpaper_pack" in norm_disc
+    assert "acme_solar_quick_worksheet" in norm_disc
+    assert "acme_solar_full_workpaper_pack" in norm_disc
     assert "profithelm" not in norm_disc.lower()
     for ph_sku_prefix in ("ph_instant", "ph_statutory", "ph_commercial", "ph_1031", "ph_verified"):
         assert ph_sku_prefix not in norm_disc.lower()
@@ -170,7 +170,7 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     assert "Apex Tax" not in acme_partners
     assert "Q8161" not in acme_partners
     assert "Acme Solar Partner Advisory Group" in acme_partners
-    assert "acm_verified_partner_slot" in acme_partners
+    assert "acme_solar_verified_partner_slot" in acme_partners
 
     lb_pages = build_governance_pages(get_porcelain_tenant_profile("lienbond"))
     assert "Apex Tax" not in lb_pages["partners"]
@@ -347,7 +347,7 @@ async function runScenario({ protocol, synthetic, exercise, forceCfg, attachSlot
       if (url.includes('config=1')) {
         return { ok: true, status: 200, json: async () => ({ ok: true, turnstile_enabled: false, turnstile_site_key: '' }) };
       }
-      return { ok: true, status: 200, json: async () => ({ ok: true, lead_id: 'lead_1', status: 'partner_registered', checkout_url: '/api/lead-capture?checkout=1&sku=acm_verified_partner_slot', offer_price_usd: 299 }) };
+      return { ok: true, status: 200, json: async () => ({ ok: true, lead_id: 'lead_1', status: 'partner_registered', checkout_url: '/api/lead-capture?checkout=1&sku=acme_solar_verified_partner_slot', offer_price_usd: 299 }) };
     },
     addEventListener() {},
     turnstile: {

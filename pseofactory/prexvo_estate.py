@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from pseofactory.affiliates import (
     PREXVO_AFFILIATES,
     PREXVO_DISCLOSURES,
+    build_step1_preview_controls_html,
     is_restricted_public_service_slug,
     score_partner_yield,
 )
@@ -1947,8 +1948,16 @@ def render_calculator_widget(
     js_fpl_json = json.dumps(_serialize_poverty_table_for_js(poverty_table), separators=(",", ":"))
     rap_js_expr = pack.formulas["rap_monthly_payment"].js_expression
 
+    preview_controls_html = build_step1_preview_controls_html(
+        "prexvo",
+        "rap-payment-calculator",
+        baseline_output=ssr_plans["rap"]["monthly_payment"],
+        display_output=ssr_pay_val,
+        statutory_authority="P.L. 119-21 Section 82001 (Repayment Assistance Plan); 34 CFR Part 685",
+    )
+
     return f"""
-<div class="interactive-calculator-container" id="calculator-{spec.id}">
+<div class="interactive-calculator-container" id="calculator-{spec.id}" data-tool-slug="rap-payment-calculator">
   <div class="calc-header">
     <h2 class="calc-title">{html.escape(spec.title)}</h2>
     <p class="calc-desc">{html.escape(spec.description)}</p>
@@ -1982,6 +1991,7 @@ def render_calculator_widget(
       <div class="calc-metrics-grid">
         {''.join(metrics_html)}
       </div>
+{preview_controls_html}
     </div>
   </div>
 
@@ -2394,8 +2404,10 @@ def _build_workpaper_unlock_cta(
 ) -> str:
     """
     Renders the canonical #workpaper-unlock-card CTA block on commercial Prexvo tool pages
-    using $9 Quick Worksheet and $19 Full Workpaper & Data Pack from TruthPack.pricing_tiers,
-    while strictly omitting paid checkout CTAs on restricted public-service YMYL pages.
+    and homepage using Quick Worksheet ($9) and Full Workpaper & Data Pack ($19) resolved
+    dynamically from resolve_offer_pricing("prexvo", slug=eff_slug) and TruthPack.pricing_tiers,
+    while strictly omitting paid checkout CTAs on restricted public-service slugs
+    (is_restricted_public_service_slug).
     """
     eff_slug = str(slug or "").strip().strip("/").lower() or "general"
     if is_restricted_public_service_slug(eff_slug):
@@ -2403,17 +2415,17 @@ def _build_workpaper_unlock_cta(
     quick_tier = pack.pricing_tiers["quick"]
     full_tier = pack.pricing_tiers["full"]
 
-    quick_price = float(quick_tier["price_usd"])
-    full_price = float(full_tier["price_usd"])
-    quick_price_int = int(round(quick_price))
-    full_price_int = int(round(full_price))
-    quick_label = str(quick_tier.get("label") or "Quick Worksheet")
-    full_label = str(full_tier.get("label") or "Full Workpaper & Data Pack")
-
     quick_offer = resolve_offer_pricing("prexvo", tier_kind="quick", slug=eff_slug)
     full_offer = resolve_offer_pricing("prexvo", tier_kind="full", slug=eff_slug)
     quick_sku = str(quick_offer["sku"])
     full_sku = str(full_offer["sku"])
+
+    quick_price = float(quick_offer.get("price_usd") or quick_tier["price_usd"])
+    full_price = float(full_offer.get("price_usd") or full_tier["price_usd"])
+    quick_price_int = int(round(quick_price))
+    full_price_int = int(round(full_price))
+    quick_label = str(quick_tier.get("label") or "Quick Worksheet")
+    full_label = str(full_tier.get("label") or "Full Workpaper & Data Pack")
 
     amt_int = int(round(float(baseline_amount)))
     amt_qs = f"&amp;amount={amt_int}" if amt_int > 0 else ""
@@ -3119,6 +3131,13 @@ def _build_home_html(
         ),
         "entity_type": "FinancialProductOrService",
     }
+    home_workpaper_card_html = _build_workpaper_unlock_cta(
+        pack=pack,
+        slug="rap-payment-calculator",
+        topic_label="Repayment Assistance Plan (RAP) & Title IV Repayment",
+        statutory_authority=str(home_manifest["statutory_authority"]),
+        baseline_amount=rap_home_pay,
+    )
 
     body = f"""
     <section class="hero-section">
@@ -3132,6 +3151,8 @@ def _build_home_html(
     </section>
 
     {calc_markup}
+
+    {home_workpaper_card_html}
 
     {partners_html}
 
