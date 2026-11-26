@@ -36,13 +36,28 @@ def clean_spec():
         "query": "section 179 equipment expense tax deduction calculator",
         "slug": "section-179-equipment-expense-tax-deduction-calculator",
         "tenant": "profithelm",
-        "statutory_authority": "IRC Section 179(b)(1)",
+        "statutory_authority": "IRC Section 179(b)(1), IRC Section 179(b)(5), and P.L. 119-21 Section 70301",
         "economic_dataset": "FRED CPILFESL Series",
-        "model_name": "Section 179 Grounded Model",
-        "formula": "min(cost, cap)",
-        "inputs": {"cost": 400000, "cap": 1220000},
-        "published_output": 400000.0,
-        "sample_calculation": "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
+        "model_name": "2026 Section 179 (with $32,000 Heavy SUV Cap) + 100% Bonus Depreciation",
+        "formula_id": "section_179_heavy_suv_plus_bonus_2026",
+        "formula": (
+            "round(min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) + "
+            "max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * "
+            "(bonus_pct / 100.0), 2)"
+        ),
+        "inputs": {
+            "equipment_cost": 85000.0,
+            "business_use_pct": 0.8,
+            "is_heavy_suv": 1,
+            "bonus_pct": 100.0,
+        },
+        "published_output": 68000.0,
+        "sample_calculation": (
+            "Heavy SUV equipment cost 85,000 at 80 percent business use with 32,000 Section 179 cap "
+            "and 100 percent bonus depreciation yields 68,000 deduction under 2,560,000 cap"
+        ),
         "canonical_base": "https://profithelm.com",
     }
 
@@ -110,7 +125,7 @@ def test_single_asset_spaced_template_leakage_and_nan(compliance_matrix, clean_s
     assert rep_leak.verdicts_by_principle["GSC-SPAM-02"].status == ComplianceStatus.FAIL
 
     # 2. NaN presence outside script tags
-    html_with_nan = res["html"].replace("400,000", "NaN", 1)
+    html_with_nan = res["html"].replace("68,000", "NaN", 1)
     rep_nan = compliance_matrix.audit_single_asset(html_with_nan, clean_spec)
     assert rep_nan.overall_pass is False
     assert rep_nan.verdicts_by_principle["GSC-SPAM-02"].status == ComplianceStatus.FAIL
@@ -178,7 +193,7 @@ def test_verify_ast_client_js_parity(compliance_matrix):
     spec = {
         "formula": "min(cost, cap)",
     }
-    inputs = {"cost": 400000, "cap": 1220000}
+    inputs = {"cost": 400000, "cap": 2560000}
     parity_ok = compliance_matrix.verify_ast_client_js_parity(spec, inputs)
     assert parity_ok is True
 

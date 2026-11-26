@@ -626,7 +626,7 @@ def test_gainhelm_live_preexisting_html_heals_via_retrofit_html_and_retrofit_est
         # 1a. Verify live gainhelm/dist HTML converges cleanly via retrofit_html & retrofit_estate
         needs_live_repair = bool(
             engine._gainhelm_needs_framework_isolation_heal(orig_live_html, slug)
-            or engine.audit_html_mechanics(orig_live_html)
+            or engine.audit_html_mechanics(orig_live_html, property_id="gainhelm")
         )
         healed_live, repaired_live = engine.retrofit_html(
             orig_live_html,

@@ -8,6 +8,8 @@ Zero em-dashes. Zero en-dashes.
 from __future__ import annotations
 
 import inspect
+import json
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -373,13 +375,62 @@ def test_explicit_child_sitemap_gsc_submission_and_idempotent_ledger(
     assert "sitemap-articles-2026-10.xml" in skipped_names
 
 
-def test_section_exclusion_classifier_and_coverage_attribution() -> None:
+def _register_temp_truth_pack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    property_id: str,
+    brand_name: str,
+    canonical_domain: str,
+) -> None:
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+
+    payload = {
+        "schema_version": "2.0",
+        "property_id": property_id,
+        "brand_name": brand_name,
+        "canonical_domain": canonical_domain,
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {},
+        "citations_allowlist": {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{property_id}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
+
+
+def test_section_exclusion_classifier_and_coverage_attribution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     Oracle 4: Unindexed drops ('Crawled - currently not indexed',
     'Discovered - currently not indexed', 404 dead routes, canonical mismatches,
     and thin content) map cleanly to their template section and child sitemap
     with isolated 'Submitted pages only' scope.
     """
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="alpha",
+        brand_name="Alpha",
+        canonical_domain="https://alpha.io",
+    )
     signals = [
         {
             "url": "https://alpha.io/products/legacy-widget",
@@ -475,6 +526,7 @@ def test_section_exclusion_classifier_and_coverage_attribution() -> None:
 
 def test_unified_atomic_workflow_dispatch_feedback_and_inspector(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """
     Oracle 5: PushIndexer.dispatch_automated_indexing, IndexingFeedbackLoop.run_feedback_cycle,
@@ -482,6 +534,13 @@ def test_unified_atomic_workflow_dispatch_feedback_and_inspector(
     generates child sitemaps, explicitly registers each child sitemap in GSC, and attributes
     per-section coverage.
     """
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="sovereign",
+        brand_name="Sovereign",
+        canonical_domain="https://sovereign.io",
+    )
     base_dir = tmp_path / "sovereign"
     dist_dir = base_dir / "dist"
     ledger_dir = base_dir / ".agy"
@@ -576,12 +635,22 @@ def test_unified_atomic_workflow_dispatch_feedback_and_inspector(
     assert audit_section["section_coverage"]["by_child_sitemap"]["sitemap-guides.xml"]["unindexed_count"] == 1
 
 
-def test_engine_drift_gate_and_no_hardcoded_tenant_routes(tmp_path: Path) -> None:
+def test_engine_drift_gate_and_no_hardcoded_tenant_routes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     Oracle 6: Engine hash drift gate and AssetIntegrityEvaluator validate child sitemaps
     and sitemap-index.xml while still rejecting <sitemapindex> inside sitemap.xml,
     and preflight_airlock contains zero hardcoded tenant content routes.
     """
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="clean_prop",
+        brand_name="Clean Sovereign",
+        canonical_domain="https://clean.io",
+    )
     # Check preflight_airlock source has no hardcoded /products, /collections, /blogs, /pages
     airlock_src = inspect.getsource(PushIndexer.preflight_airlock)
     for forbidden_route in ('"/products"', '"/collections"', '"/blogs"', '"/pages"'):

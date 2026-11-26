@@ -107,7 +107,7 @@ PROFITHELM_B2B_EXPANSION_SPECS: List[Dict[str, Any]] = [
         "query": "contractor license and performance surety bond cost calculator",
         "slug": "contractor-surety-bond-cost-calculator",
         "tenant": "profithelm",
-        "statutory_authority": "40 USC Section 3131 Federal Miller Act and 48 CFR Part 28 Surety Bond Regulations",
+        "statutory_authority": "31 U.S.C. Section 9304 Federal Surety Standards and State Contractor License Bond Schedules",
         "economic_dataset": "FRED Construction Spending Series and SFAA Surety Underwriting Loss Benchmarks",
         "model_name": "ContractorSuretyBondUnderwritingModel",
         "formula": "bond_penalty_amount * (credit_tier_rate_pct / 100.0)",
@@ -2684,6 +2684,16 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         ]
         if clean_lb_siblings:
             sibling_links = clean_lb_siblings
+    elif (not is_prexvo and not is_gainhelm and not is_lienbond) and any(
+        t in slug.lower() for t in ("qsbs", "1202", "section-179", "crypto", "runway")
+    ):
+        clean_ph_siblings = [
+            (s_slug, s_title)
+            for s_slug, s_title in sibling_links
+            if not any(tok in f"{s_slug} {s_title}".lower() for tok in ("section-1031", "section 1031", "8824"))
+        ]
+        if clean_ph_siblings:
+            sibling_links = clean_ph_siblings
 
     from pseofactory.competitor import _format_safe_heading_topic
     primary_sibling_slug, primary_sibling_title = sibling_links[0]

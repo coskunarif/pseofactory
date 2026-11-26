@@ -543,6 +543,7 @@ def test_failed_deployment_rolls_back_substrate_lock_and_completes_wal(tmp_path)
         "<body><main><h1>ProfitHelm Financial Modeling</h1>"
         "<div class='quick-answer'><p>Calculate exact federal and state tax liabilities in seconds.</p></div>"
         "<p>" + ("Quantitative statutory analysis across federal and state brackets. " * 30) + "</p>"
+        "<p class='disclosure'>Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>"
         "</main></body></html>",
         encoding="utf-8",
     )
@@ -1124,7 +1125,9 @@ def test_unattended_timer_concurrency_and_distribution_verification(tmp_path):
     (dist_dir / "index.html").write_text(
         "<!DOCTYPE html><html><head><title>ProfitHelm</title>"
         '<link rel="canonical" href="https://profithelm.com/"></head>'
-        "<body><main><h1>ProfitHelm</h1></main></body></html>",
+        "<body><main><h1>ProfitHelm</h1>"
+        '<p class="disclosure">Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>'
+        "</main></body></html>",
         encoding="utf-8",
     )
     adapter = ConfigurablePropertyAdapter(

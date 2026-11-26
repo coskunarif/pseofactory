@@ -215,6 +215,74 @@ def test_p2_autonomous_daily_trend_page_build_and_supervisor_integration(tmp_pat
          and skips the second candidate for the same tenant on the same day.
       4. Integrates cleanly with AutonomousLifecycleSupervisor.run_cycle.
     """
+    from pseofactory.compiler import compile_high_effort_page
+
+    existing_specs = {
+        "profithelm": {
+            "query": "existing tool calculator",
+            "slug": "existing-tool-calculator",
+            "tenant": "profithelm",
+            "statutory_authority": "IRC Section 179(b)(1)",
+            "economic_dataset": "FRED CPILFESL Series",
+            "model_name": "ProfitHelm Existing Tool Baseline Model",
+            "formula": "round(amount * 0.25, 2)",
+            "inputs": {"amount": 10000.0},
+            "published_output": 2500.0,
+            "sample_calculation": "Amount 10,000 at 25 percent yields 2,500",
+            "canonical_base": "https://profithelm.com",
+            "mandatory_disclosures": [
+                "Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic statutory modeling for educational and planning purposes only and do not constitute individualized tax, legal, or accounting advice."
+            ],
+        },
+        "prexvo": {
+            "query": "existing tool calculator",
+            "slug": "existing-tool-calculator",
+            "tenant": "prexvo",
+            "statutory_authority": "34 CFR Part 685",
+            "economic_dataset": "FRED SLSTTOTAL Series",
+            "model_name": "Prexvo Existing Tool Baseline Model",
+            "formula": "round(balance * 0.05, 2)",
+            "inputs": {"balance": 40000.0},
+            "published_output": 2000.0,
+            "sample_calculation": "Balance 40,000 at 5 percent yields 2,000",
+            "canonical_base": "https://prexvo.com",
+            "mandatory_disclosures": [
+                "Important Federal Borrower Notice: Refinancing federal student loans permanently waives federal protections including Public Service Loan Forgiveness (PSLF)."
+            ],
+        },
+        "gainhelm": {
+            "query": "existing tool calculator",
+            "slug": "existing-tool-calculator",
+            "tenant": "gainhelm",
+            "statutory_authority": "NIST SP 800-171",
+            "economic_dataset": "BLS OEWS Wage Series",
+            "model_name": "GainHelm Existing Tool Baseline Model",
+            "formula": "round(controls * 100.0, 2)",
+            "inputs": {"controls": 25.0},
+            "published_output": 2500.0,
+            "sample_calculation": "25 controls at 100 yields 2,500",
+            "canonical_base": "https://gainhelm.com",
+            "mandatory_disclosures": [
+                "Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited C3PAO, or PCI QSA. Planning estimates only."
+            ],
+        },
+    }
+    disclosures_by_pid = {
+        "profithelm": (
+            "<p>Treasury Circular 230 Notice: ProfitHelm calculators provide deterministic "
+            "statutory modeling for educational and planning purposes only and do not "
+            "constitute individualized tax, legal, or accounting advice.</p>"
+        ),
+        "prexvo": (
+            "<p>Important Federal Borrower Notice: Refinancing federal student loans "
+            "permanently waives federal protections including Public Service Loan "
+            "Forgiveness (PSLF).</p>"
+        ),
+        "gainhelm": (
+            "<p>Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited "
+            "C3PAO, or PCI QSA. Planning estimates only.</p>"
+        ),
+    }
     reg = TenantRegistry()
     for pid, domain, brand in (
         ("profithelm", "profithelm.com", "ProfitHelm"),
@@ -223,12 +291,13 @@ def test_p2_autonomous_daily_trend_page_build_and_supervisor_integration(tmp_pat
     ):
         t_root = tmp_path / pid
         t_dist = t_root / "dist"
+        disclosure_html = disclosures_by_pid[pid]
         (t_dist / "tools" / "existing-tool-calculator").mkdir(parents=True, exist_ok=True)
         (t_dist / "tools" / "existing-tool-calculator" / "index.html").write_text(
-            "<html><body>Existing</body></html>", encoding="utf-8"
+            compile_high_effort_page(existing_specs[pid])["html"], encoding="utf-8"
         )
         (t_dist / "tools" / "index.html").write_text(
-            "<html><body><main><h1>Tools Directory</h1></main></body></html>",
+            f"<html><body><main><h1>Tools Directory</h1>{disclosure_html}</main></body></html>",
             encoding="utf-8",
         )
         (t_dist / "sitemap-leaves.xml").write_text(

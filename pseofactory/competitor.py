@@ -150,6 +150,111 @@ class GapCandidateSpec:
         return hasattr(self, item)
 
 
+def _resolve_gainhelm_model_spec(combined_q: str) -> Dict[str, Any]:
+    """
+    Resolves framework-matched GainHelm model metadata, formula, and baseline inputs.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
+
+    q_low = (combined_q or "").lower()
+    if any(t in q_low for t in ("cmmc", "800-171", "sprs", "dfars", "c3pao")):
+        mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["cmmc-2-0-compliance-cost-calculator"]
+    elif any(t in q_low for t in ("iso-27001", "iso 27001", "isms", "27006")):
+        mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["iso-27001-certification-cost-calculator"]
+    elif any(t in q_low for t in ("hipaa", "hitech", "ocr", "breach", "phi")):
+        return {
+            "statutory_authority": "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5",
+            "economic_dataset": "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report",
+            "model_name": "HIPAA / HITECH Breach Notification & OCR Civil Penalty Exposure Model",
+            "formula": "round((compromised_records * per_record_forensic_cost) + legal_and_credit_monitoring_cost + ocr_tier_penalty_estimate, 2)",
+            "inputs": {
+                "compromised_records": 1500,
+                "per_record_forensic_cost": 175,
+                "legal_and_credit_monitoring_cost": 125000,
+                "ocr_tier_penalty_estimate": 2190294,
+            },
+            "published_output": 2577794.0,
+            "sample_calculation": (
+                "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring "
+                "($387,500 response) plus $2,190,294 45 CFR 160.404 Tier 4 penalty cap yields $2,577,794.00 total HIPAA breach exposure"
+            ),
+        }
+    elif any(
+        t in q_low
+        for t in (
+            "dora",
+            "ict-third-party",
+            "2022/2554",
+            "eu-ai-act",
+            "eu ai act",
+            "article43",
+            "conformity-assessment",
+            "8k-item-105",
+            "item-105",
+            "item 1.05",
+            "sec-cybersecurity",
+            "materiality",
+        )
+    ):
+        if any(t in q_low for t in ("dora", "ict-third-party", "2022/2554")):
+            gh_key = "dora-ict-third-party-risk-compliance-cost-calculator"
+        elif any(t in q_low for t in ("eu-ai-act", "eu ai act", "article43", "conformity-assessment")):
+            gh_key = "eu-ai-act-high-risk-conformity-assessment-cost-calculator"
+        else:
+            gh_key = "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator"
+        mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP[gh_key]
+    else:
+        return {
+            "statutory_authority": "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100",
+            "economic_dataset": "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report",
+            "model_name": "SOC 2 Type II Audit & Readiness TCO Model",
+            "formula": "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)",
+            "inputs": {
+                "cpa_audit_fee": 37000,
+                "grc_platform_annual_cost": 15000,
+                "readiness_hours": 120,
+                "eng_hourly_rate": 121.67,
+                "pentest_and_legal_cost": 11500,
+            },
+            "published_output": 78100.4,
+            "sample_calculation": (
+                "CPA audit fee $37,000.00 plus $15,000.00 GRC platform plus 120 hours at $121.67/hr "
+                "($14,600.40) plus $11,500.00 pentest yields $78,100.40 total SOC 2 Type II TCO"
+            ),
+        }
+
+    return {
+        "statutory_authority": str(mf_ref["statutory_authority"]),
+        "economic_dataset": str(mf_ref["economic_dataset"]),
+        "model_name": str(mf_ref["model_name"]),
+        "formula": str(mf_ref["formula"]),
+        "inputs": dict(mf_ref["inputs"]),
+        "published_output": float(mf_ref["published_output"]),
+        "sample_calculation": str(mf_ref["sample_calculation"]),
+    }
+
+
+def _resolve_profithelm_section_179_model() -> Dict[str, Any]:
+    """
+    Loads the canonical Section 179 + 100% Bonus Depreciation FormulaSpec from ProfitHelm's TruthPack.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.truth_pack import load_truth_pack
+
+    spec = load_truth_pack("profithelm").formulas["section_179_heavy_suv_plus_bonus_2026"]
+    return {
+        "model_name": str(spec.model_name),
+        "formula": str(spec.expression),
+        "inputs": dict(spec.variables),
+        "published_output": float(spec.expected_baseline_output),
+        "sample_calculation": (
+            "Equipment cost $85,000 at 80% business use ($68,000 basis) with $32,000 Section 179 "
+            "heavy SUV cap plus 100% Section 168(k) bonus depreciation ($36,000) yields $68,000.0 deduction"
+        ),
+    }
+
+
 class CompetitorGapEngine:
     """
     Substrate Competitor Gap Engine parameterized by immutable TenantTruthProfile.
@@ -478,75 +583,14 @@ class CompetitorGapEngine:
         elif self.tenant_id == "gainhelm":
             default_category = "Cyber Compliance & GRC Audit"
             affiliates = ["vanta_security", "drata_compliance"]
-            if any(t in combined_q for t in ("cmmc", "800-171", "sprs", "dfars", "c3pao")):
-                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
-
-                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["cmmc-2-0-compliance-cost-calculator"]
-                statutory_authority = str(mf_ref["statutory_authority"])
-                economic_dataset = str(mf_ref["economic_dataset"])
-                model_name = str(mf_ref["model_name"])
-                formula = str(mf_ref["formula"])
-                inputs = dict(mf_ref["inputs"])
-                published_output = float(mf_ref["published_output"])
-                sample_calculation = str(mf_ref["sample_calculation"])
-            elif any(t in combined_q for t in ("iso-27001", "iso 27001", "isms", "27006")):
-                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
-
-                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP["iso-27001-certification-cost-calculator"]
-                statutory_authority = str(mf_ref["statutory_authority"])
-                economic_dataset = str(mf_ref["economic_dataset"])
-                model_name = str(mf_ref["model_name"])
-                formula = str(mf_ref["formula"])
-                inputs = dict(mf_ref["inputs"])
-                published_output = float(mf_ref["published_output"])
-                sample_calculation = str(mf_ref["sample_calculation"])
-            elif any(t in combined_q for t in ("hipaa", "hitech", "ocr", "breach", "phi")):
-                statutory_authority = "45 CFR 160.404, 45 CFR Part 164 & 42 U.S.C. 1320d-5"
-                economic_dataset = "HHS OCR Penalty Inflation Schedule & IBM Cost of a Data Breach Report"
-                model_name = "HIPAA / HITECH Breach Notification & OCR Civil Penalty Exposure Model"
-                formula = "round((compromised_records * per_record_forensic_cost) + legal_and_credit_monitoring_cost + ocr_tier_penalty_estimate, 2)"
-                inputs = {
-                    "compromised_records": 1500,
-                    "per_record_forensic_cost": 175,
-                    "legal_and_credit_monitoring_cost": 125000,
-                    "ocr_tier_penalty_estimate": 2190294,
-                }
-                published_output = 2577794.0
-                sample_calculation = "1,500 ePHI records at $175/record ($262,500) plus $125,000 legal/credit monitoring ($387,500 response) plus $2,190,294 45 CFR 160.404 Tier 4 penalty cap yields $2,577,794.00 total HIPAA breach exposure"
-            elif any(
-                t in combined_q
-                for t in ("dora", "ict-third-party", "2022/2554", "eu-ai-act", "eu ai act", "article43", "conformity-assessment", "8k-item-105", "item-105", "item 1.05", "sec-cybersecurity", "materiality")
-            ):
-                from pseofactory.gainhelm_estate import GAINHELM_FALLBACK_MANIFESTS_MAP
-
-                if any(t in combined_q for t in ("dora", "ict-third-party", "2022/2554")):
-                    gh_key = "dora-ict-third-party-risk-compliance-cost-calculator"
-                elif any(t in combined_q for t in ("eu-ai-act", "eu ai act", "article43", "conformity-assessment")):
-                    gh_key = "eu-ai-act-high-risk-conformity-assessment-cost-calculator"
-                else:
-                    gh_key = "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator"
-                mf_ref = GAINHELM_FALLBACK_MANIFESTS_MAP[gh_key]
-                statutory_authority = str(mf_ref["statutory_authority"])
-                economic_dataset = str(mf_ref["economic_dataset"])
-                model_name = str(mf_ref["model_name"])
-                formula = str(mf_ref["formula"])
-                inputs = dict(mf_ref["inputs"])
-                published_output = float(mf_ref["published_output"])
-                sample_calculation = str(mf_ref["sample_calculation"])
-            else:
-                statutory_authority = "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100"
-                economic_dataset = "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report"
-                model_name = "SOC 2 Type II Audit & Readiness TCO Model"
-                formula = "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)"
-                inputs = {
-                    "cpa_audit_fee": 37000,
-                    "grc_platform_annual_cost": 15000,
-                    "readiness_hours": 120,
-                    "eng_hourly_rate": 121.67,
-                    "pentest_and_legal_cost": 11500,
-                }
-                published_output = 78100.4
-                sample_calculation = "CPA audit fee $37,000.00 plus $15,000.00 GRC platform plus 120 hours at $121.67/hr ($14,600.40) plus $11,500.00 pentest yields $78,100.40 total SOC 2 Type II TCO"
+            gh_model = _resolve_gainhelm_model_spec(combined_q)
+            statutory_authority = str(gh_model["statutory_authority"])
+            economic_dataset = str(gh_model["economic_dataset"])
+            model_name = str(gh_model["model_name"])
+            formula = str(gh_model["formula"])
+            inputs = dict(gh_model["inputs"])
+            published_output = float(gh_model["published_output"])
+            sample_calculation = str(gh_model["sample_calculation"])
             disclosures = [
                 GAINHELM_DISCLOSURES.get("statutory_audit_disclaimer", ""),
                 GAINHELM_DISCLOSURES.get("ftc_disclosure", ""),
@@ -634,11 +678,12 @@ class CompetitorGapEngine:
                 affiliates = ["crest_capital", "mercury"]
                 statutory_authority = "IRC Section 179(b)(1)"
                 economic_dataset = "FRED CPILFESL Series"
-                model_name = "Section 179 Grounded Model"
-                formula = "min(cost, cap)"
-                inputs = {"cost": 400000, "cap": 2560000}
-                published_output = 400000.0
-                sample_calculation = "Cost 400,000 under cap 2,560,000 gives 400,000 deduction"
+                sec179_spec = _resolve_profithelm_section_179_model()
+                model_name = sec179_spec["model_name"]
+                formula = sec179_spec["formula"]
+                inputs = sec179_spec["inputs"]
+                published_output = sec179_spec["published_output"]
+                sample_calculation = sec179_spec["sample_calculation"]
             disclosures = [
                 "Circular 230 Tax Modeling Disclaimer",
                 "FTC Independent Financial Research Publisher Disclosure",
@@ -882,34 +927,23 @@ class CompetitorGapEngine:
                 ])
                 spec.setdefault("ymyl_warning", PREXVO_DISCLOSURES.get("ymyl_forfeiture_disclaimer", ""))
         elif tenant_id == "gainhelm":
+            gh_model = _resolve_gainhelm_model_spec(combined)
             spec.setdefault("tenant", "gainhelm")
             spec.setdefault("property_id", "gainhelm")
             spec.setdefault("domain", "gainhelm.com")
             spec.setdefault("canonical_base", "https://gainhelm.com")
-            spec.setdefault("statutory_authority", "AICPA SSAE 18 / AT-C Section 205 & TSP Section 100")
-            spec.setdefault("economic_dataset", "BLS OEWS 13-2011 / 15-1212 & IBM Cost of a Data Breach Report")
+            spec.setdefault("statutory_authority", str(gh_model["statutory_authority"]))
+            spec.setdefault("economic_dataset", str(gh_model["economic_dataset"]))
             spec.setdefault("category", "Cyber Compliance & GRC Audit")
             spec.setdefault(
                 "affiliates",
                 monetization.get("recommended_partners") or ["vanta_security", "drata_compliance"],
             )
-            spec.setdefault("model_name", "SOC 2 Type II Audit & Readiness TCO Model")
-            spec.setdefault("formula", "round(cpa_audit_fee + grc_platform_annual_cost + (readiness_hours * eng_hourly_rate) + pentest_and_legal_cost, 2)")
-            spec.setdefault(
-                "inputs",
-                {
-                    "cpa_audit_fee": 37000,
-                    "grc_platform_annual_cost": 15000,
-                    "readiness_hours": 120,
-                    "eng_hourly_rate": 121.67,
-                    "pentest_and_legal_cost": 11500,
-                },
-            )
-            spec.setdefault("published_output", 78100.4)
-            spec.setdefault(
-                "sample_calculation",
-                "CPA audit fee $37,000.00 plus $15,000.00 GRC platform plus 120 hours at $121.67/hr ($14,600.40) plus $11,500.00 pentest yields $78,100.40 total SOC 2 Type II TCO",
-            )
+            spec.setdefault("model_name", str(gh_model["model_name"]))
+            spec.setdefault("formula", str(gh_model["formula"]))
+            spec.setdefault("inputs", dict(gh_model["inputs"]))
+            spec.setdefault("published_output", float(gh_model["published_output"]))
+            spec.setdefault("sample_calculation", str(gh_model["sample_calculation"]))
             spec.setdefault(
                 "mandatory_disclosures",
                 [
@@ -1052,14 +1086,12 @@ class CompetitorGapEngine:
                 spec.setdefault("economic_dataset", "FRED CPILFESL Series")
                 spec.setdefault("category", "Commercial Tax Intelligence")
                 spec.setdefault("affiliates", ["crest_capital", "mercury"])
-                spec.setdefault("model_name", "Section 179 Grounded Model")
-                spec.setdefault("formula", "min(cost, cap)")
-                spec.setdefault("inputs", {"cost": 400000, "cap": 2560000})
-                spec.setdefault("published_output", 400000.0)
-                spec.setdefault(
-                    "sample_calculation",
-                    "Cost 400,000 under cap 2,560,000 gives 400,000 deduction",
-                )
+                sec179_spec = _resolve_profithelm_section_179_model()
+                spec.setdefault("model_name", sec179_spec["model_name"])
+                spec.setdefault("formula", sec179_spec["formula"])
+                spec.setdefault("inputs", sec179_spec["inputs"])
+                spec.setdefault("published_output", sec179_spec["published_output"])
+                spec.setdefault("sample_calculation", sec179_spec["sample_calculation"])
             spec.setdefault("mandatory_disclosures", [
                 "Circular 230 Tax Modeling Disclaimer",
                 "FTC Independent Financial Research Publisher Disclosure",
@@ -2496,6 +2528,46 @@ def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[D
         for tok in ("tax-bracket", "tax-rate", "tcja", "capital-gains", "s-corp", "reasonable-salary", "1202", "qsbs", "amt", "niit")
     ):
         return None
+    if any(tok in s_low for tok in ("1202", "qsbs")):
+        return {
+            "trap_title": "Immediate QSBS Section 1202 Asset Ceiling, State Non-Conformity & 10x Basis Cap Trap Alert",
+            "trap_body": (
+                "Under IRC Section 1202 and P.L. 119-21 Section 70431, Qualified Small Business Stock (QSBS) issued by an "
+                "eligible domestic C-Corporation after July 4, 2025 qualifies for a $75,000,000 aggregate gross asset ceiling "
+                "and a $15,000,000 per-issuer gain exclusion cap (or 10x adjusted stock basis), with tiered 50%, 75%, and "
+                "100% federal exclusion percentages at 3, 4, and 5+ year holding periods. However, non-conforming states such "
+                "as California (R&TC Section 18152.5 repeal) and Pennsylvania still tax QSBS capital gains at full state rates."
+            ),
+            "checklist_items": [
+                "Verify domestic C-Corporation active business qualification (80%+ assets in qualified trades) and <= $75,000,000 aggregate gross assets at stock issuance under IRC Section 1202(d).",
+                "Track exact stock acquisition date and holding period milestones (3-year 50%, 4-year 75%, and 5-year 100% exclusion tiers under P.L. 119-21 Section 70431).",
+                "Compute the per-issuer exclusion ceiling as the greater of $15,000,000 (or $10,000,000 for pre-July 4, 2025 issuances) or 10x aggregate adjusted stock basis.",
+                "Model state-level QSBS conformity vs decoupling (e.g., California 13.3% top marginal rate and New Jersey/Pennsylvania state treatment) before liquidation.",
+            ],
+            "pitfalls": [
+                (
+                    "Assuming federal IRC Section 1202 exclusion automatically exempts QSBS gain from state income tax",
+                    "Non-conforming states such as California and Pennsylvania assess full state capital gains tax on excluded federal QSBS proceeds",
+                    "Model federal and state tax liability separately using state conformity schedules prior to exit or secondary sale",
+                ),
+                (
+                    "Exceeding the $75,000,000 aggregate gross asset ceiling immediately after stock issuance (including cash raised)",
+                    "Permanently disqualifies all newly issued shares from IRC Section 1202 QSBS status at the federal level",
+                    "Audit tax-basis balance sheet gross assets before and immediately after each priced equity round",
+                ),
+                (
+                    "Converting an LLC/S-Corp too late or triggering disqualifying redemptions under IRC Section 1202(c)(3)",
+                    "Resets the 3-to-5 year holding period clock or invalidates QSBS eligibility for affected share lots",
+                    "Review corporate conversion timing and stock repurchase lookback windows (1-year / 2-year) with tax counsel before issuance",
+                ),
+            ],
+            "handoff_title": "QSBS Section 1202 Attestation & State Tax Vetting Checklist",
+            "handoff_items": [
+                "Confirm CPA-signed IRC Section 1202 gross asset attestation ($75M post-OBBBA threshold) at each financing tranche.",
+                "Verify original-issuance stock ledger documentation, Section 83(b) election receipts, and 3/4/5-year lot holding schedules.",
+                "Check state residency planning and state-conformity modeling for non-conforming high-tax jurisdictions.",
+            ],
+        }
     if any(tok in s_low for tok in ("s-corp", "reasonable-salary")):
         return {
             "trap_title": "Immediate IRS Revenue Ruling 74-44 Reasonable Compensation and Section 199A Wage Cap Trap Alert (IRC Section 3121)",
@@ -2564,7 +2636,7 @@ def _resolve_tax_bracket_and_entity_competitor_content(s_low: str) -> Optional[D
             (
                 "Realizing long-term capital gains without checking ordinary income bracket stacking and IRC Section 1411 NIIT",
                 "Pushes capital gains across the 15%-to-20% threshold and triggers the 3.8% Net Investment Income Tax surtax",
-                "Coordinate capital gain harvesting and Section 1031/installment deferrals against total MAGI thresholds",
+                "Coordinate capital gain harvesting and tax-deferred installment strategies against total MAGI thresholds",
             ),
         ],
         "handoff_title": "CPA, Tax Strategy & Payroll Compliance Vetting Checklist",
@@ -2714,6 +2786,9 @@ def _resolve_profithelm_tier_clusters(s_low: str) -> List[Tuple[str, List[Tuple[
         if sp_slug not in existing_slugs:
             tier_3.append((sp_slug, sp_label))
             existing_slugs.add(sp_slug)
+    if any(tok in s_low for tok in ("qsbs", "1202", "section-179", "crypto", "runway")):
+        tier_1 = [(sl, lb) for sl, lb in tier_1 if "1031" not in sl and "1031" not in lb.lower()]
+        tier_3 = [(sl, lb) for sl, lb in tier_3 if "1031" not in sl and "1031" not in lb.lower()]
     return [
         ("Tier 1: Core Statutory Tax & Capital Pillar Hubs", tier_1),
         ("Tier 2: Comparative Financing, Entity & Arbitrage Matrices", tier_2),
@@ -2802,17 +2877,18 @@ def _resolve_b2b_commercial_competitor_content(s_low: str) -> Optional[Dict[str,
         }
     if any(tok in s_low for tok in ("surety", "bond", "contractor")):
         return {
-            "trap_title": "Immediate Miller Act Threshold and Personal Indemnity Trap Alert (40 U.S.C. 3131)",
+            "trap_title": "Immediate Surety Penal Sum Threshold and Personal Indemnity Trap Alert (31 U.S.C. 9304)",
             "trap_body": (
-                "Under the federal Miller Act (40 U.S.C. 3131) and state Little Miller Acts, prime contractors on public "
-                "works exceeding $150,000 must furnish 100% Performance and Payment Bonds. Unlike commercial casualty "
-                "insurance, surety bonds require a General Indemnity Agreement (GIA) that binds corporate and personal assets."
+                "Under federal surety regulations (31 U.S.C. Section 9304 and Treasury Circular 570) and state contractor "
+                "licensing statutes, prime contractors on bonded public and private works must furnish compliant "
+                "Performance, Payment, and License Bonds. Unlike commercial casualty insurance, surety bonds require a "
+                "General Indemnity Agreement (GIA) that binds corporate and personal assets."
             ),
             "checklist_items": [
                 "Verify statutory bond penalty amount and obligee wording requirements before submitting bid or license packages.",
                 "Audit Working Capital and Net Worth ratios (typically >=10% of aggregate bonded work-in-progress backlog) for standard market tier qualification.",
                 "Review General Indemnity Agreement (GIA) spousal signature and personal asset subordination clauses prior to execution.",
-                "Confirm surety carrier listing on U.S. Treasury Department Circular 570 for federal Miller Act compliance.",
+                "Confirm surety carrier listing on U.S. Treasury Department Circular 570 for federal bond compliance.",
             ],
             "pitfalls": [
                 (
@@ -4760,8 +4836,8 @@ def _build_b2b_depth_spec(
             ),
             (
                 "Section 301 Tariffs, MPF/HMF &amp; Surety Bonds",
-                "19 U.S.C. 2411, CBP Form 7501 &amp; 40 U.S.C. 3131",
-                "7.5% to 100% Section 301 duty + 0.3464% MPF + 0.125% HMF; $150,000 Miller Act bond threshold",
+                "19 U.S.C. 2411, CBP Form 7501 &amp; 31 U.S.C. 9304",
+                "7.5% to 100% Section 301 duty + 0.3464% MPF + 0.125% HMF; Treasury Circular 570 surety underwriting",
                 "10-digit HTSUS binding origin rulings and Treasury Circular 570 surety underwriting",
             ),
             (

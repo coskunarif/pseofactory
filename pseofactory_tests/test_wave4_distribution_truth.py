@@ -23,12 +23,55 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import patch
 
+import pytest
+
 from pseofactory import distributor as dist_mod
 from pseofactory.qualification import _clean_syndication_directories_and_ledgers
+
+
+def _register_temp_truth_pack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    property_id: str,
+    brand_name: str,
+    canonical_domain: str,
+    citations_allowlist: Dict[str, Any] | None = None,
+) -> None:
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+
+    payload = {
+        "schema_version": "2.0",
+        "property_id": property_id,
+        "brand_name": brand_name,
+        "canonical_domain": canonical_domain,
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {},
+        "citations_allowlist": citations_allowlist or {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{property_id}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
 
 
 LIVE_QUEUE_PATH = Path("/home/ubuntuadmin/projects/arif-cli/social/linkedin-toolkit/data/queue.json")
@@ -121,12 +164,26 @@ def _seed_lienbond_contaminated_ledger(target_ledger: Path) -> List[Dict[str, An
     return entries
 
 
-def test_lienbond_dispatch_preserves_all_profithelm_linkedin_queue_entries(tmp_path: Path) -> None:
+def test_lienbond_dispatch_preserves_all_profithelm_linkedin_queue_entries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
     LienBond has no configured LinkedIn company_id (must resolve to "", never "143884102").
     Dispatching LienBond against a synthetic 65-entry tmp_path queue (29 ProfitHelm, 23 Prexvo, 13 GainHelm)
     must leave 100% of ProfitHelm, Prexvo, and GainHelm entries untouched.
     """
+    with pytest.raises(KeyError, match="TRUTH_PACK_MISSING"):
+        dist_mod._resolve_tenant_linkedin_company_id("truly_unregistered_99")
+
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="unconfigured_tenant_99",
+        brand_name="Unconfigured Tenant 99",
+        canonical_domain="https://unconfigured99.example.com",
+    )
+
     assert dist_mod._resolve_tenant_linkedin_company_id("profithelm") == "143884102"
     assert dist_mod._resolve_tenant_linkedin_company_id("prexvo") == "106482194"
     assert dist_mod._resolve_tenant_linkedin_company_id("gainhelm") == "106482195"
@@ -529,11 +586,14 @@ def test_youtube_caption_and_comment_flags_preserved_from_existing_broadcast_led
     assert v0["comment_count"] == 3
 
 
-def test_newco_50plus_tenant_dispatch_and_export_have_zero_profithelm_or_lienbond_leaks(tmp_path: Path) -> None:
+def test_newco_50plus_tenant_dispatch_and_export_have_zero_profithelm_or_lienbond_leaks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """
-    Proves 50+ tenant isolation for BOTH unregistered ("unregistered_newco") and declaratively
-    registered ("newco", with empty linkedin_company_id) tenants:
-    zero "143884102", zero "106482196", and zero "profithelm.com" anywhere in
+    Proves 50+ tenant isolation for BOTH fail-closed unregistered tenants, TruthPack-backed 5th+
+    tenants without LinkedIn config ("unregistered_newco"), and declaratively registered ("newco")
+    tenants: zero "143884102", zero "106482196", and zero "profithelm.com" anywhere in
     prioritized_queue, all_assets, generate_linkedin_post, directory_manifest.json,
     or broadcast_ledger.json.
     """
@@ -544,7 +604,18 @@ def test_newco_50plus_tenant_dispatch_and_export_have_zero_profithelm_or_lienbon
         unregister_declarative_tenant,
     )
 
-    # 1. Unregistered tenant checks (never inherits ProfitHelm defaults)
+    with pytest.raises(KeyError, match="TRUTH_PACK_MISSING"):
+        dist_mod._resolve_tenant_linkedin_company_id("no_truth_pack_99")
+
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="unregistered_newco",
+        brand_name="Unregistered NewCo",
+        canonical_domain="https://unregistered-newco.com",
+    )
+
+    # 1. TruthPack-backed 5th+ tenant without LinkedIn config (never inherits ProfitHelm defaults)
     unreg_repo = tmp_path / "unregistered_newco"
     unreg_synd = unreg_repo / "syndication"
     unreg_synd.mkdir(parents=True)
@@ -638,6 +709,13 @@ def test_newco_50plus_tenant_dispatch_and_export_have_zero_profithelm_or_lienbon
     )
 
     try:
+        _register_temp_truth_pack(
+            tmp_path,
+            monkeypatch,
+            property_id="newco",
+            brand_name="NewCo",
+            canonical_domain="https://newco.com",
+        )
         register_declarative_tenant(newco_contract)
         res = dist_mod.dispatch_to_distribution_lead(
             run_id="wave4-newco-50plus-isolation",

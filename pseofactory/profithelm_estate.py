@@ -1715,6 +1715,7 @@ def render_head(
         f'  <meta property="og:description" content="{safe_desc}">\n'
         f'  <meta property="og:url" content="{html_lib.escape(canonical_url)}">\n'
         f'  <meta property="og:image" content="{CANONICAL_BASE}/static/img/profithelm-og.png">\n'
+        '  <meta name="twitter:card" content="summary_large_image">\n'
         f'  <meta name="twitter:image" content="{CANONICAL_BASE}/static/img/profithelm-og.png">\n'
         '  <link rel="stylesheet" href="/static/css/style.css">\n'
         f'  <script type="application/ld+json">{ld_json}</script>\n'
@@ -5372,7 +5373,11 @@ def compile_profithelm_estate_impl(
         {
             "slug": es["slug"],
             "title": es.get("title") or es["slug"].replace("-", " ").title(),
-            "short_title": es.get("short_title") or (es.get("title") or es["slug"])[:28],
+            "short_title": es.get("short_title") or (
+                (es.get("title") or es["slug"])
+                if len(str(es.get("title") or es["slug"])) <= 28
+                else (str(es.get("title") or es["slug"])[:28].rsplit(" ", 1)[0].strip() or str(es.get("title") or es["slug"])[:28])
+            ),
             "description": es.get("description") or f"Deterministic tax and financial calculator for {es.get('title') or es['slug']}.",
             "primary_keyword": es.get("primary_keyword") or es.get("query") or es["slug"].replace("-", " "),
             "statutory_authority": es.get("statutory_authority") or _default_authority_for_slug(es["slug"]),

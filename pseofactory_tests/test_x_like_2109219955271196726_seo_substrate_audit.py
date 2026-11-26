@@ -212,6 +212,8 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
         "</head><body>"
         '<h1 id="top">GainHelm Enterprise Cyber Compliance &amp; GRC Cost Intelligence</h1>'
         '<a href="/tools/soc-2-audit-cost-calculator/#calc-section">SOC 2 Calculator</a>'
+        "<p>Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited C3PAO, or PCI QSA. "
+        "All audit budgets, SPRS projections, and remediation timelines are planning estimates only and do not constitute formal certification or legal attestation.</p>"
         "</body></html>"
     )
     tool_html = (
@@ -227,6 +229,29 @@ def test_estate_technical_seo_and_cannibalization_detector(tmp_path):
         '<h1 id="calc-section">SOC 2 Type II Audit Cost &amp; Readiness Calculator</h1>'
         '<a href="/">Home</a>'
         '<a href="/r/vanta_security" rel="noopener sponsored nofollow" target="_blank">Vanta</a>'
+        '<form id="gh-soc2-form" class="calculator-form">'
+        '<input type="number" id="calc-input-cpa_fee" name="cpa_fee" value="37000">'
+        '<input type="number" id="calc-input-grc_cost" name="grc_cost" value="15000">'
+        "</form>"
+        '<div class="output-value" id="metric-total">$52,000.00</div>'
+        "<p>Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited C3PAO, or PCI QSA. "
+        "All audit budgets, SPRS projections, and remediation timelines are planning estimates only and do not constitute formal certification or legal attestation.</p>"
+        '<script type="application/json" id="calculation-manifest" class="calculation-manifest">'
+        '{"manifest_id":"soc-2-audit-cost-calculator-manifest","slug":"soc-2-audit-cost-calculator",'
+        '"model_name":"SOC 2 Model","statutory_authority":"AICPA SSAE 18 (AT-C Section 205)",'
+        '"economic_dataset":"BLS OEWS SOC 15-1212","formula":"cpa_fee + grc_cost",'
+        '"inputs":{"cpa_fee":37000,"grc_cost":15000},"published_output":52000.0}'
+        "</script>"
+        "<script>(function(){function recalc(){"
+        "var a=Number((document.getElementById('calc-input-cpa_fee')||{}).value||0);"
+        "var b=Number((document.getElementById('calc-input-grc_cost')||{}).value||0);"
+        "var out=document.getElementById('metric-total');"
+        "if(out){out.textContent='$'+(a+b).toFixed(2);}}"
+        "var fm=document.getElementById('gh-soc2-form');"
+        "if(fm){fm.addEventListener('input',recalc);fm.addEventListener('change',recalc);fm.addEventListener('submit',recalc);}"
+        "['calc-input-cpa_fee','calc-input-grc_cost'].forEach(function(id){"
+        "var el=document.getElementById(id);if(el){el.addEventListener('input',recalc);el.addEventListener('change',recalc);}});"
+        "recalc();})();</script>"
         "</body></html>"
     )
     (dist_dir / "index.html").write_text(home_html, encoding="utf-8")

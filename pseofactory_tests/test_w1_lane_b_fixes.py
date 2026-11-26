@@ -11,6 +11,7 @@ import fcntl
 import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -74,6 +75,66 @@ def test_dynamic_5th_tenant_discovery_across_gitops_supervisor_cli_pipeline(
     ws = tmp_path / "ws"
     ws.mkdir(parents=True, exist_ok=True)
     _make_minimal_tenant(ws, "novacorp")
+    (ws / "novacorp" / "dist" / "tools" / "sample-calc" / "index.html").write_text(
+        '<!doctype html><html><head><title>Sample Calc | Novacorp</title>'
+        '<link rel="canonical" href="https://novacorp.com/tools/sample-calc/"></head>'
+        '<body><h1>Sample Calc</h1>'
+        '<form id="nova-calc-form" class="calculator-form">'
+        '<input type="number" id="calc-input-revenue" name="revenue" value="100000">'
+        '<input type="number" id="calc-input-cost" name="cost" value="65000">'
+        '</form>'
+        '<div class="output-value" id="metric-margin">$35,000.00</div>'
+        '<script type="application/json" id="calculation-manifest" class="calculation-manifest">'
+        '{"manifest_id":"sample-calc-manifest","slug":"sample-calc","formula":"revenue - cost",'
+        '"inputs":{"revenue":100000,"cost":65000},"published_output":35000.0}</script>'
+        "<script>(function(){function recalc(){"
+        "var r=Number((document.getElementById('calc-input-revenue')||{}).value||0);"
+        "var c=Number((document.getElementById('calc-input-cost')||{}).value||0);"
+        "var out=document.getElementById('metric-margin');"
+        "if(out){out.textContent='$'+(r-c).toFixed(2);}}"
+        "var fm=document.getElementById('nova-calc-form');"
+        "if(fm){fm.addEventListener('input',recalc);fm.addEventListener('change',recalc);fm.addEventListener('submit',recalc);}"
+        "['calc-input-revenue','calc-input-cost'].forEach(function(id){"
+        "var el=document.getElementById(id);if(el){el.addEventListener('input',recalc);el.addEventListener('change',recalc);}});"
+        "recalc();})();</script>"
+        "</body></html>",
+        encoding="utf-8",
+    )
+
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+    (packs_dir / "novacorp.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "2.0",
+                "property_id": "novacorp",
+                "brand_name": "Novacorp",
+                "canonical_domain": "https://novacorp.com",
+                "audience_tier": "business",
+                "pricing_tiers": {
+                    "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+                    **get_tier_pricing("business"),
+                },
+                "entries": {},
+                "formulas": {},
+                "citations_allowlist": {},
+                "disclosures": [],
+                "banned_claims": [],
+                "cross_tenant_brand_tokens": [],
+                "allowed_shared_legal_tokens": [],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
 
     # 1. gitops.reconcile_workspace_tracking_state preserves 5th+ queues & tokens
     queues_dir = ws / ".agy" / "queues"

@@ -505,6 +505,14 @@ def test_network_partition_fail_closed_recovery(tmp_path, monkeypatch):
 
     packs_dir = tmp_path / "truth_packs"
     _write_temp_truth_pack(packs_dir, "recovery_app")
+    ph_tp_path = tp_mod.DEFAULT_TRUTH_PACKS_DIR / "profithelm.json"
+    rec_tp_path = packs_dir / "recovery_app.json"
+    rec_tp = json.loads(rec_tp_path.read_text(encoding="utf-8"))
+    rec_tp["canonical_domain"] = "https://recoveryapp.com"
+    if ph_tp_path.is_file():
+        ph_tp = json.loads(ph_tp_path.read_text(encoding="utf-8"))
+        rec_tp["citations_allowlist"] = ph_tp.get("citations_allowlist") or {}
+    rec_tp_path.write_text(json.dumps(rec_tp, indent=2), encoding="utf-8")
     monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
 
     prop_dir = tmp_path / "property"
@@ -549,7 +557,7 @@ def test_network_partition_fail_closed_recovery(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", mocked_partition_urlopen)
 
-    res_partition = supervisor.run_cycle(force=True, enable_gitops=True)
+    res_partition = supervisor.run_cycle(force=True, enable_gitops=True, enable_distribution=False)
     assert res_partition["status"] in ("FAILED", "ERROR")
 
     # HWL-1349 Invariant: State file remains strictly at initial_hash with zero byte corruption!
@@ -574,7 +582,7 @@ def test_network_partition_fail_closed_recovery(tmp_path, monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=None: MockEdgeResponse())
 
-    res_recovery = supervisor.run_cycle(force=True, enable_gitops=True)
+    res_recovery = supervisor.run_cycle(force=True, enable_gitops=True, enable_distribution=False)
     assert res_recovery["status"] == "SUCCESS"
 
     # Post-recovery latch verified: state file is now latched with current engine hash

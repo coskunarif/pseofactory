@@ -341,6 +341,7 @@ def test_asset_integrity_evaluator_fast_path_parallel_and_mutation_parity(tmp_pa
         "<title>Corporate Tax Modeling Guide | ProfitHelm</title></head>"
         "<body><main><h1>ProfitHelm Corporate Tax Modeling Guide</h1>"
         "<p>Statutory IRC Section 179 analysis for ProfitHelm users and corporate tax planning.</p>"
+        "<p class='disclosure'>Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>"
         "</main></body></html>"
     )
     clean_asset.write_text(clean_html, encoding="utf-8")

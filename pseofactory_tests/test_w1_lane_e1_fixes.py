@@ -268,7 +268,9 @@ def test_maintenance_airlock_exception_fails_closed(tmp_path: Path, dry_run: boo
     (dist_dir / "index.html").write_text(
         "<!DOCTYPE html><html lang='en'><head><title>T</title>"
         "<meta name='description' content='Valid description for test page in maintenance.'></head>"
-        "<body><h1>T</h1><p>Body text.</p></body></html>",
+        "<body><h1>T</h1><p>Body text.</p>"
+        "<p class='disclosure'>Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>"
+        "</body></html>",
         encoding="utf-8",
     )
     adapter = ConfigurablePropertyAdapter(

@@ -11,11 +11,52 @@ Targeted regression tests for:
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
 from bs4 import BeautifulSoup
+
+
+def _register_temp_truth_pack(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    property_id: str,
+    brand_name: str,
+    canonical_domain: str,
+) -> None:
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+
+    payload = {
+        "schema_version": "2.0",
+        "property_id": property_id,
+        "brand_name": brand_name,
+        "canonical_domain": canonical_domain,
+        "audience_tier": "business",
+        "pricing_tiers": {
+            "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+            **get_tier_pricing("business"),
+        },
+        "entries": {},
+        "formulas": {},
+        "citations_allowlist": {},
+        "disclosures": [],
+        "banned_claims": [],
+        "cross_tenant_brand_tokens": [],
+        "allowed_shared_legal_tokens": [],
+    }
+    (packs_dir / f"{property_id}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
 
 
 def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path: Path, monkeypatch) -> None:
@@ -97,7 +138,17 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     for ph_sku_prefix in ("ph_instant", "ph_statutory", "ph_commercial", "ph_1031", "ph_verified"):
         assert ph_sku_prefix not in norm_disc.lower()
 
-    # 4. /partners/ and JSON-LD for acme_solar, lienbond, and profithelm
+    # 4. Unregistered tenant without TruthPack fails closed; registered acme_solar isolates /partners/ & JSON-LD
+    with pytest.raises(KeyError, match="TRUTH_PACK_MISSING"):
+        get_porcelain_tenant_profile("unregistered_solar_99")
+
+    _register_temp_truth_pack(
+        tmp_path,
+        monkeypatch,
+        property_id="acme_solar",
+        brand_name="Acme Solar",
+        canonical_domain="https://acme-solar.com",
+    )
     acme_profile = get_porcelain_tenant_profile("acme_solar")
     acme_profile_dump = json.dumps(acme_profile)
     assert "ProfitHelm" not in acme_profile_dump
@@ -110,7 +161,7 @@ def test_fifth_tenant_acme_solar_funnel_pricing_and_partners_isolation(tmp_path:
     assert acme_profile["legal_entity"] == "Acme Solar LLC"
     assert acme_profile["impact_verification_uuid"] == ""
     assert acme_profile["cj_property_id"] == ""
-    assert acme_profile["contact_email"] == "support@acme-solar.com"
+    assert acme_profile["contact_email"] == "editorial@acme-solar.com"
 
     acme_pages = build_governance_pages(acme_profile)
     acme_partners = acme_pages["partners"]

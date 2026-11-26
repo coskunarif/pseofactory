@@ -267,6 +267,38 @@ def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) ->
         econ_ds="BLS OEWS SOC 15-1212",
     )
     (tool_dir / "index.html").write_text(norm_tool, encoding="utf-8")
+    peer_slug = "cmmc-2-0-compliance-cost-calculator"
+    peer_dir = dist / "tools" / peer_slug
+    peer_dir.mkdir(parents=True, exist_ok=True)
+    raw_peer = (
+        '<!doctype html><html lang="en"><head>'
+        '<title>CMMC 2.0 Compliance Cost Calculator 2026 | GainHelm</title>'
+        '<meta name="description" content="Calculate DoD CMMC 2.0 Level 2 C3PAO assessment fees, NIST SP 800-171 remediation labor, and enclave costs under 32 CFR Part 170.">'
+        f'<link rel="canonical" href="https://gainhelm.com/tools/{peer_slug}/">'
+        '<script type="application/ld+json">'
+        '{"@context":"https://schema.org","@graph":['
+        f'{{"@type":"WebPage","@id":"https://gainhelm.com/tools/{peer_slug}/#webpage","name":"CMMC 2.0 Calculator","url":"https://gainhelm.com/tools/{peer_slug}/"}},'
+        f'{{"@type":"SoftwareApplication","@id":"https://gainhelm.com/tools/{peer_slug}/#app","name":"CMMC 2.0 Calculator","applicationCategory":"BusinessApplication","operatingSystem":"All","url":"https://gainhelm.com/tools/{peer_slug}/","offers":{{"@type":"Offer","price":"0","priceCurrency":"USD"}}}}'
+        ']}</script></head><body><main class="container">'
+        '<h1>CMMC 2.0 Compliance Cost Calculator</h1>'
+        '<aside class="quick-answer"><p>Under 32 CFR Part 170, a 75-employee defense contractor incurs $132,000.00 in CMMC 2.0 Level 2 C3PAO certification costs across 110 controls.</p></aside>'
+        '<div class="ftc-disclosure-card">FTC Partner Compensation Disclosure: Sponsored referral links.</div>'
+        '<script type="application/json" id="calculation-manifest" class="calculation-manifest">'
+        f'{{"manifest_id":"{peer_slug}-manifest","slug":"{peer_slug}","model_name":"CMMC 2.0 Model","statutory_authority":"32 CFR Part 170","economic_dataset":"DoD CMMC 2.0 RIA","formula":"c3pao_fee + enclave_cost","inputs":{{"c3pao_fee":52000,"enclave_cost":80000}},"published_output":132000.0}}'
+        '</script>'
+        '</main></body></html>'
+    )
+    norm_peer = normalize_html_callout_message_match(raw_peer, property_id="gainhelm")
+    norm_peer, _ = _normalize_page_structure_and_geo_parity(
+        norm_peer,
+        property_id="gainhelm",
+        slug=peer_slug,
+        topic_label="CMMC 2.0 Compliance Cost Calculator",
+        canonical_url=f"https://gainhelm.com/tools/{peer_slug}/",
+        stat_auth="32 CFR Part 170",
+        econ_ds="DoD CMMC 2.0 RIA",
+    )
+    (peer_dir / "index.html").write_text(norm_peer, encoding="utf-8")
     (dist / "llms.txt").write_text(
         "# GainHelm\n\n> Summary.\n\n## Calculators\n\n## Documentation\n- [Methodology](https://gainhelm.com/methodology/)\n",
         encoding="utf-8",
@@ -282,7 +314,7 @@ def test_plane_2_catalog_json_and_three_plane_readiness_audit(tmp_path: Path) ->
     readiness = audit_aeo_geo_three_plane_readiness(dist_dir=dist, property_id="gainhelm")
     assert readiness["status"] == "PASS", readiness["issues"]
     assert readiness["plane_2_catalog_feeds_and_manifests"]["catalog_json_present"] is True
-    assert readiness["plane_2_catalog_feeds_and_manifests"]["catalog_tools_verified"] == 1
+    assert readiness["plane_2_catalog_feeds_and_manifests"]["catalog_tools_verified"] == 2
 
 
 def test_gainhelm_gsc_reposition_retains_six_company_roster_and_quick_answer_boundary(tmp_path: Path) -> None:

@@ -443,8 +443,16 @@ def test_p2_daily_builder_stale_ledger_reconciliation_and_fallback_manifests(tmp
     gh_repo = tmp_path / "gainhelm"
     gh_dist = gh_repo / "dist"
     (gh_dist / "tools").mkdir(parents=True, exist_ok=True)
-    (gh_dist / "index.html").write_text("<html><body><main></main></body></html>", encoding="utf-8")
-    (gh_dist / "tools" / "index.html").write_text("<html><body><main></main></body></html>", encoding="utf-8")
+    gh_disclosure = (
+        "<p>Independent Scoping Notice: GainHelm is not a licensed CPA firm, accredited "
+        "C3PAO, or PCI QSA. Planning estimates only.</p>"
+    )
+    (gh_dist / "index.html").write_text(
+        f"<html><body><main>{gh_disclosure}</main></body></html>", encoding="utf-8"
+    )
+    (gh_dist / "tools" / "index.html").write_text(
+        f"<html><body><main>{gh_disclosure}</main></body></html>", encoding="utf-8"
+    )
 
     reg = TenantRegistry()
     reg.register_adapter(

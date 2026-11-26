@@ -2905,6 +2905,8 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
                     parsed_json, hipaa_cap_int, hipaa_cap_float
                 )
                 cleaned_text = json.dumps(scrubbed_json_obj, indent=2, ensure_ascii=False)
+                if raw_text.endswith("\n"):
+                    cleaned_text += "\n"
             except Exception:
                 cleaned_text = _scrub_gainhelm_text_for_truth(
                     raw_text, hipaa_cap_int, hipaa_cap_float, is_html=False, apply_bls_qualifier=False
@@ -2938,6 +2940,7 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
         if cleaned_text != raw_text:
             asset_path.write_text(cleaned_text, encoding="utf-8")
 
+    in_synced_substrate = "_pseo_substrate" in Path(__file__).resolve().parts
     if os.environ.get("PSEO_IN_REFLECT") != "1":
         try:
             from pseofactory.drift import (
@@ -2949,19 +2952,37 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
             )
 
             eng_hash = compute_engine_hash()
+            resolved_engine_hash = eng_hash
+            synced_sub_hash: Optional[str] = eng_hash if in_synced_substrate else None
+            if in_synced_substrate:
+                lock_file = root / "substrate_lock.json"
+                if lock_file.is_file():
+                    try:
+                        lock_data = json.loads(lock_file.read_text(encoding="utf-8"))
+                        cand_full = str((lock_data or {}).get("engine_hash") or "").strip()
+                        if (
+                            isinstance(lock_data, dict)
+                            and lock_data.get("synced_substrate_hash") == eng_hash
+                            and re.fullmatch(r"[0-9a-f]{64}", cand_full)
+                        ):
+                            resolved_engine_hash = cand_full
+                            synced_sub_hash = eng_hash
+                    except Exception:
+                        pass
+
             lock_payload = write_substrate_lock(
                 root,
                 property_id="gainhelm",
-                expected_hash=eng_hash,
+                expected_hash=resolved_engine_hash,
                 dist_dir=dist,
                 sync_ledgers=False,
             )
-            synced_sub_hash = str(lock_payload.get("synced_substrate_hash") or "") or eng_hash
+            synced_sub_hash = str(lock_payload.get("synced_substrate_hash") or "") or synced_sub_hash
             agy_dir = root / ".agy"
             agy_dir.mkdir(parents=True, exist_ok=True)
             record_engine_hash(
                 agy_dir / "engine_hash.json",
-                hash_value=eng_hash,
+                hash_value=resolved_engine_hash,
                 synced_substrate_hash=synced_sub_hash,
             )
             tracked_assets = sorted(
@@ -2979,7 +3000,7 @@ def _reconcile_gainhelm_manifests_and_ledger(root: Path, dist: Path) -> None:
             record_asset_ledger(
                 agy_dir / "asset_ledger.json",
                 asset_hashes=asset_hashes,
-                engine_hash=eng_hash,
+                engine_hash=resolved_engine_hash,
             )
         except Exception:
             pass
@@ -3089,8 +3110,17 @@ def compile_gainhelm_estate_impl(
         assert_high_effort_content_qualified(manifest_doc, context=f"gainhelm manifest '{slug}'")
         (manifests_dir / f"{slug}.json").write_text(json.dumps(manifest_doc, indent=2), encoding="utf-8")
 
+        comp_tools = [
+            {
+                "slug": sib["slug"],
+                "title": sib["title"],
+                "url": f"{GAINHELM_CANONICAL_BASE}/tools/{sib['slug']}/",
+            }
+            for sib in all_tools
+            if sib.get("slug") and sib["slug"] != slug
+        ][:2]
         compiled_pages.append({"slug": slug, "title": tool["title"], "html_path": str(leaf_dir / "index.html"), "published_output": manifest_doc["published_output"]})
-        catalog_tools.append({"slug": slug, "title": tool["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": manifest_doc["statutory_authority"], "economic_dataset": manifest_doc["economic_dataset"], "formula": manifest_doc["formula"], "published_output": manifest_doc["published_output"]})
+        catalog_tools.append({"slug": slug, "title": tool["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": manifest_doc["statutory_authority"], "economic_dataset": manifest_doc["economic_dataset"], "formula": manifest_doc["formula"], "published_output": manifest_doc["published_output"], "complementary_tools": comp_tools})
 
     gsc_meta_val, indexnow_stem = _resolve_gainhelm_public_meta()
     for vs in void_specs:
@@ -3107,8 +3137,17 @@ def compile_gainhelm_estate_impl(
         void_manifest.setdefault("slug", slug)
         void_manifest.setdefault("manifest_id", f"{slug}-manifest")
         (manifests_dir / f"{slug}.json").write_text(json.dumps(void_manifest, indent=2), encoding="utf-8")
+        void_comp_tools = [
+            {
+                "slug": sib["slug"],
+                "title": sib["title"],
+                "url": f"{GAINHELM_CANONICAL_BASE}/tools/{sib['slug']}/",
+            }
+            for sib in all_tools
+            if sib.get("slug") and sib["slug"] != slug
+        ][:2]
         compiled_pages.append({"slug": slug, "title": res["title"], "html_path": str(leaf_dir / "index.html"), "published_output": res["published_output"]})
-        catalog_tools.append({"slug": slug, "title": res["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": spec_in.get("statutory_authority", ""), "economic_dataset": spec_in.get("economic_dataset", ""), "formula": spec_in.get("formula", ""), "published_output": res["published_output"]})
+        catalog_tools.append({"slug": slug, "title": res["title"], "url": f"{GAINHELM_CANONICAL_BASE}/tools/{slug}/", "manifest_url": f"{GAINHELM_CANONICAL_BASE}/manifests/{slug}.json", "statutory_authority": spec_in.get("statutory_authority", ""), "economic_dataset": spec_in.get("economic_dataset", ""), "formula": spec_in.get("formula", ""), "published_output": res["published_output"], "complementary_tools": void_comp_tools})
 
     (tools_dir / "index.html").write_text(_build_tools_directory_html(all_tools, css_text), encoding="utf-8")
     (dist / "methodology" / "index.html").write_text(_build_methodology_html(css_text), encoding="utf-8")

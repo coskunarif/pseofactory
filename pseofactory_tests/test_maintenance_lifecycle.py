@@ -35,8 +35,31 @@ from pseofactory.drift import (
 from pseofactory.cli import main as cli_main
 
 
-# Sample compliant HTML template
+# Sample compliant HTML template (tenant-neutral for synthetic test properties)
 CLEAN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sample Financial Model - Example</title>
+    <meta name="description" content="Calculate your corporate financial liability using precise statutory formulas and schedules.">
+    <link rel="canonical" href="https://example.com/tools/sample-calc/">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Sample Calculator",
+        "applicationCategory": "BusinessApplication"
+    }
+    </script>
+</head>
+<body>
+    <h1>Sample Financial Model</h1>
+    <p>This is a strictly compliant calculation engine without any prompt leakage or slop.</p>
+</body>
+</html>
+"""
+
+PROFITHELM_COMPLIANT_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -55,9 +78,49 @@ CLEAN_HTML = """<!DOCTYPE html>
 <body>
     <h1>Sample Financial Model</h1>
     <p>This is a strictly compliant calculation engine without any prompt leakage or slop.</p>
+    <p class="disclosure">Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>
 </body>
 </html>
 """
+
+
+def _setup_temp_truth_packs(tmp_path, monkeypatch, pids):
+    import shutil
+    import pseofactory.truth_pack as tp_mod
+    from pseofactory.pricing import get_tier_pricing
+
+    packs_dir = tmp_path / "truth_packs"
+    packs_dir.mkdir(parents=True, exist_ok=True)
+    ph_allowlist = {}
+    ph_src = tp_mod.DEFAULT_TRUTH_PACKS_DIR / "profithelm.json"
+    if ph_src.is_file():
+        ph_allowlist = json.loads(ph_src.read_text(encoding="utf-8")).get("citations_allowlist") or {}
+    for src_json in tp_mod.DEFAULT_TRUTH_PACKS_DIR.glob("*.json"):
+        dst_json = packs_dir / src_json.name
+        if not dst_json.exists():
+            shutil.copy2(src_json, dst_json)
+
+    for pid in pids:
+        tp_payload = {
+            "schema_version": "2.0",
+            "property_id": pid,
+            "brand_name": pid.capitalize(),
+            "canonical_domain": f"https://{pid}.com",
+            "audience_tier": "business",
+            "pricing_tiers": {
+                "free": {"tier_kind": "free", "label": "Free", "price_usd": 0.0, "price_cents": 0},
+                **get_tier_pricing("business"),
+            },
+            "entries": {},
+            "formulas": {},
+            "citations_allowlist": ph_allowlist,
+            "disclosures": [],
+            "banned_claims": [],
+            "cross_tenant_brand_tokens": [],
+            "allowed_shared_legal_tokens": [],
+        }
+        (packs_dir / f"{pid}.json").write_text(json.dumps(tp_payload, indent=2), encoding="utf-8")
+    monkeypatch.setattr(tp_mod, "DEFAULT_TRUTH_PACKS_DIR", packs_dir)
 
 # Sample compliant XML sitemap
 CLEAN_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -146,7 +209,7 @@ def test_asset_integrity_evaluator_structural_contracts(tmp_path):
 
     # 1. Clean file passes
     clean_file = dist_dir / "clean.html"
-    clean_file.write_text(CLEAN_HTML, encoding="utf-8")
+    clean_file.write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
     assert evaluator.audit_asset(clean_file, adapter) is None
 
     # 2. Em-dash slop
@@ -205,7 +268,7 @@ def test_asset_drift_classification_and_ledger_mismatch(tmp_path):
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     asset_file = dist_dir / "tool.html"
-    asset_file.write_text(CLEAN_HTML, encoding="utf-8")
+    asset_file.write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
 
     adapter = ConfigurablePropertyAdapter(
         property_id="profithelm",
@@ -234,7 +297,7 @@ def test_refactor_cascade_atomic_swap_and_rollback(tmp_path):
     dist_dir.mkdir(parents=True, exist_ok=True)
     asset_file = dist_dir / "calculator.html"
 
-    original_content = CLEAN_HTML
+    original_content = PROFITHELM_COMPLIANT_HTML
     asset_file.write_text(original_content, encoding="utf-8")
 
     # A builder function that generates bad output (containing em-dash)
@@ -289,7 +352,7 @@ def test_refactor_cascade_successful_swap(tmp_path):
 
     # Compliant builder
     def good_builder(slug: str, target_file=None):
-        asset_file.write_text(CLEAN_HTML, encoding="utf-8")
+        asset_file.write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
         return True
 
     adapter = ConfigurablePropertyAdapter(
@@ -311,12 +374,13 @@ def test_refactor_cascade_successful_swap(tmp_path):
     success = engine.refactor_asset(record, adapter)
 
     assert success is True
-    assert asset_file.read_text(encoding="utf-8") == CLEAN_HTML
+    assert asset_file.read_text(encoding="utf-8") == PROFITHELM_COMPLIANT_HTML
     assert len(list(dist_dir.glob(".tmp*"))) == 0
 
 
-def test_maintenance_lifecycle_end_to_end(tmp_path):
+def test_maintenance_lifecycle_end_to_end(tmp_path, monkeypatch):
     """Verifies full closed loop: audit -> flag -> refactor -> verify -> commit latch."""
+    _setup_temp_truth_packs(tmp_path, monkeypatch, ["test_property"])
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     agy_dir = tmp_path / ".agy"
@@ -346,6 +410,7 @@ def test_maintenance_lifecycle_end_to_end(tmp_path):
     result = lifecycle.run(
         adapter,
         force=True,
+        enable_distribution=False,
         state_file=state_file,
         ledger_file=ledger_file,
     )
@@ -363,8 +428,9 @@ def test_maintenance_lifecycle_end_to_end(tmp_path):
     assert ledger["assets"]["calculator.html"] == compute_asset_fingerprint(asset_file)
 
 
-def test_hwl_1231_universal_idempotency(tmp_path):
+def test_hwl_1231_universal_idempotency(tmp_path, monkeypatch):
     """Verifies running maintenance on already-clean assets returns SKIPPED_NO_CHANGES."""
+    _setup_temp_truth_packs(tmp_path, monkeypatch, ["test_property"])
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     agy_dir = tmp_path / ".agy"
@@ -406,8 +472,9 @@ def test_hwl_1231_universal_idempotency(tmp_path):
     assert result.assets_refactored == 0
 
 
-def test_fleet_maintenance_coordinator(tmp_path):
+def test_fleet_maintenance_coordinator(tmp_path, monkeypatch):
     """Verifies FleetMaintenanceCoordinator manages multiple tenant adapters with clean isolation."""
+    _setup_temp_truth_packs(tmp_path, monkeypatch, ["prop1", "prop2"])
     dist_1 = tmp_path / "dist1"
     dist_1.mkdir(parents=True, exist_ok=True)
     (dist_1 / "page1.html").write_text(CLEAN_HTML, encoding="utf-8")
@@ -427,20 +494,21 @@ def test_fleet_maintenance_coordinator(tmp_path):
     coordinator = FleetMaintenanceCoordinator(registry=reg)
 
     # Test Dry-Run
-    dry_results = coordinator.run_fleet(dry_run=True)
+    dry_results = coordinator.run_fleet(dry_run=True, enable_distribution=False)
     assert len(dry_results) == 2
     assert dry_results["prop1"].status == "DRY_RUN"
     assert dry_results["prop2"].status == "DRY_RUN"
 
     # Test Live Run
-    live_results = coordinator.run_fleet(force=False)
+    live_results = coordinator.run_fleet(force=False, enable_distribution=False)
     assert len(live_results) == 2
     assert live_results["prop1"].status == "SKIPPED_NO_CHANGES"
     assert live_results["prop2"].status == "SKIPPED_NO_CHANGES"
 
 
-def test_cli_subcommands(tmp_path):
+def test_cli_subcommands(tmp_path, monkeypatch):
     """Verifies CLI subcommands audit, drift, maintain, and fleet-maintain."""
+    _setup_temp_truth_packs(tmp_path, monkeypatch, ["custom"])
     dist_dir = tmp_path / "dist"
     dist_dir.mkdir(parents=True, exist_ok=True)
     (dist_dir / "clean.html").write_text(CLEAN_HTML, encoding="utf-8")
@@ -555,8 +623,9 @@ def test_subprocess_property_adapter_memory_isolation(tmp_path):
     assert "custom_tenant" not in sys.modules
 
 
-def test_trigger_drift_cascade_lifecycle_and_hwl_1349_latching(tmp_path):
+def test_trigger_drift_cascade_lifecycle_and_hwl_1349_latching(tmp_path, monkeypatch):
     """Verifies full drift cascade lifecycle and HWL-1349 post-verification commit latch."""
+    _setup_temp_truth_packs(tmp_path, monkeypatch, ["test_app"])
     prop_dir = tmp_path / "test_app"
     prop_dir.mkdir()
     (prop_dir / ".pseofactory.json").write_text(
@@ -676,7 +745,7 @@ def test_stage_execution_order_airlock_before_gitops_and_push_indexing_post_depl
     dist_dir.mkdir(parents=True, exist_ok=True)
     agy_dir = tmp_path / ".agy"
     agy_dir.mkdir(parents=True, exist_ok=True)
-    (dist_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    (dist_dir / "index.html").write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
 
     adapter = ConfigurablePropertyAdapter(
         property_id="profithelm",
@@ -767,7 +836,7 @@ def test_premature_victory_fail_closed_prevents_push_indexing(tmp_path):
     dist_dir.mkdir(parents=True, exist_ok=True)
     agy_dir = tmp_path / ".agy"
     agy_dir.mkdir(parents=True, exist_ok=True)
-    (dist_dir / "index.html").write_text(CLEAN_HTML, encoding="utf-8")
+    (dist_dir / "index.html").write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
 
     adapter = ConfigurablePropertyAdapter(
         property_id="profithelm",
@@ -848,7 +917,7 @@ def test_indexing_preflight_airlock_quarantines_blocked_urls_without_failing_cle
     dist_dir.mkdir(parents=True, exist_ok=True)
     agy_dir = tmp_path / ".agy"
     agy_dir.mkdir(parents=True, exist_ok=True)
-    (dist_dir / "clean.html").write_text(CLEAN_HTML, encoding="utf-8")
+    (dist_dir / "clean.html").write_text(PROFITHELM_COMPLIANT_HTML, encoding="utf-8")
 
     adapter = ConfigurablePropertyAdapter(
         property_id="profithelm",
@@ -947,9 +1016,37 @@ def test_retro_reflection_engine_repairs_legacy_stale_estate_in_single_pass(tmp_
     <form class="calculator-form">
       <label for="agi">Adjusted Gross Income</label>
       <input type="number" id="agi" name="agi" value="65000" class="touch-target" style="min-height: 44px; min-width: 44px;" />
+      <label for="dependents">Dependents</label>
+      <input type="number" id="dependents" name="dependents" value="0" class="touch-target" style="min-height: 44px; min-width: 44px;" />
       <button type="submit" class="touch-target" style="min-height: 44px; min-width: 44px;">Calculate</button>
     </form>
   </main>
+  <script>
+  (function() {
+    function calcRap() {
+      var agiEl = document.getElementById("agi");
+      var depEl = document.getElementById("dependents");
+      var agi = Math.max(0, Number(agiEl ? agiEl.value : 65000) || 0);
+      var dep = Math.max(0, Number(depEl ? depEl.value : 0) || 0);
+      var rate = agi <= 20000 ? 0.01 : (agi <= 30000 ? 0.02 : (agi <= 40000 ? 0.03 : (agi <= 50000 ? 0.04 : (agi <= 60000 ? 0.05 : (agi <= 70000 ? 0.06 : (agi <= 80000 ? 0.07 : (agi <= 90000 ? 0.08 : (agi <= 100000 ? 0.09 : 0.10))))))));
+      var val = agi > 10000 ? Math.max(10.0, (agi * rate / 12.0) - (dep * 50.0)) : 10.0;
+      var out = Math.round(val * 100) / 100;
+      var targets = document.querySelectorAll(".output-value");
+      for (var i = 0; i < targets.length; i++) {
+        if (!targets[i].classList.contains("overlay-preset-readout")) {
+          targets[i].textContent = "$" + out.toFixed(2);
+        }
+      }
+    }
+    document.addEventListener("DOMContentLoaded", calcRap);
+    var form = document.querySelector(".calculator-form");
+    if (form) {
+      form.addEventListener("input", calcRap);
+      form.addEventListener("change", calcRap);
+      form.addEventListener("submit", function(e) { if (e && e.preventDefault) e.preventDefault(); calcRap(); });
+    }
+  })();
+  </script>
 </body>
 </html>"""
 

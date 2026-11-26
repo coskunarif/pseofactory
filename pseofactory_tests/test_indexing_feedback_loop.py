@@ -291,7 +291,13 @@ def test_maintenance_stage_10_does_not_swallow_errors(tmp_path):
         dist_dir=tmp_path / "dist",
     )
     (tmp_path / "dist").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "dist" / "index.html").write_text("<html><body>Root</body></html>", encoding="utf-8")
+    (tmp_path / "dist" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>ProfitHelm</title></head>"
+        "<body><main><h1>Root</h1>"
+        "<p class='disclosure'>Educational tax and financial modeling only; does not constitute tax or legal advice under IRS Circular 230.</p>"
+        "</main></body></html>",
+        encoding="utf-8",
+    )
 
     lifecycle = MaintenanceLifecycle(indexer=failing_indexer)
 

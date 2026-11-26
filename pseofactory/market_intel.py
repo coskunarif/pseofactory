@@ -1080,9 +1080,9 @@ GREENFIELD_VERTICAL_CATALOG: Dict[str, Dict[str, Any]] = {
         ],
         "anchor_tools": [
             {
-                "slug": "dod-cmmc-level-2-assessment-cost-and-sprs-score-calculator",
-                "query": "dod cmmc level 2 sprs score cost calculator",
-                "title": "DoD CMMC 2.0 Level 2 Audit Cost & NIST SP 800-171 SPRS Score Calculator",
+                "slug": "dod-nist-800-171-compliance-audit-cost-calculator",
+                "query": "dod nist 800-171 compliance audit cost calculator",
+                "title": "DoD NIST SP 800-171 Readiness & Defense Contractor Audit Cost Calculator",
                 "search_volume": 3600,
                 "cpc_usd": 24.80,
                 "keyword_difficulty": 15.0,
@@ -1091,9 +1091,9 @@ GREENFIELD_VERTICAL_CATALOG: Dict[str, Dict[str, Any]] = {
                 "jev_score": 1.89,
                 "durable_prob": 0.95,
                 "historical_stability": 0.91,
-                "formula_summary": "SPRS_Score = 110 - sum(Unimplemented_Control_Weights_1_3_or_5); Score_Range = [-203, 110]",
-                "statutory_or_industry_authority": "32 CFR Part 170 (DoD CMMC 2.0 Final Rule) & NIST SP 800-171 DoD Assessment Methodology",
-                "serp_vulnerability_note": "Defense contractors must submit an exact [-203 to +110] SPRS score to win DoD contracts; SERP has PDFs but no interactive 110-control scorer.",
+                "formula_summary": "Total_Audit_Cost = Assessment_Fee + Enclave_Licensing + (Remediation_Hours * Loaded_Hourly_Rate)",
+                "statutory_or_industry_authority": "32 CFR Part 170 & NIST SP 800-171 DoD Assessment Methodology",
+                "serp_vulnerability_note": "Defense contractors must quantify NIST SP 800-171 remediation and assessment costs to win DoD contracts; SERP has PDFs but no interactive 110-control cost estimator.",
             },
             {
                 "slug": "soc-2-type-2-audit-cost-estimator-by-employee-headcount",
@@ -1589,6 +1589,8 @@ DECISION_URGENCY_SIGNALS: Dict[str, float] = {
     "markup vs margin": 11.0,
     "cmmc": 12.0,
     "sprs": 12.0,
+    "nist 800-171": 12.0,
+    "800-171": 10.0,
     "soc 2": 12.0,
     "soc2": 12.0,
     "hipaa": 11.0,
@@ -1636,6 +1638,7 @@ B2B_ENTITY_SIGNALS: Dict[str, float] = {
     "audit": 9.0,
     "dod": 9.0,
     "cmmc": 8.0,
+    "nist 800-171": 8.0,
     "soc 2": 8.0,
     "iso 27001": 8.0,
     "hipaa": 8.0,
@@ -2229,6 +2232,17 @@ class MarketIntelligenceEngine:
             except Exception:
                 pass
 
+        scan_targets: List[str] = ["profithelm", "prexvo"]
+        try:
+            from pseofactory.truth_pack import load_all_truth_packs
+
+            for active_pid in sorted(load_all_truth_packs(allow_expired=True).keys()):
+                if active_pid not in scan_targets:
+                    scan_targets.append(active_pid)
+        except Exception:
+            if "gainhelm" not in scan_targets:
+                scan_targets.append("gainhelm")
+
         evaluations: List[TenantCandidateEvaluation] = []
 
         for vertical_id, v_data in GREENFIELD_VERTICAL_CATALOG.items():
@@ -2266,13 +2280,11 @@ class MarketIntelligenceEngine:
                 dur_val = float(tool.get("durable_prob", 0.92))
                 stab_val = float(tool.get("historical_stability", 0.90))
 
-                # Verify zero cross-tenant contamination against ProfitHelm, Prexvo, and GainHelm
-                if (
-                    scanner.scan_text(q, "profithelm")
-                    or scanner.scan_text(q, "prexvo")
-                    or (tenant_id != "gainhelm" and scanner.scan_text(q, "gainhelm"))
-                ):
-                    isolation_ok = False
+                # Verify zero cross-tenant contamination dynamically across all active TruthPack properties
+                for target_pid in scan_targets:
+                    if target_pid != tenant_id and scanner.scan_text(q, target_pid):
+                        isolation_ok = False
+                        break
 
                 if q.lower() in observed_queries:
                     live_db_hits += observed_queries[q.lower()]

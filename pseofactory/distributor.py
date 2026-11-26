@@ -768,9 +768,11 @@ _TRAILING_DANGLING_TOKENS = (
 def _truncate_at_word_boundary(text: str, max_len: int, suffix: str = "") -> str:
     """
     Truncates text at a clean word boundary <= max_len characters without slicing mid-word
-    or leaving dangling prepositions/abbreviations (e.g., 'St', 'Re', 'Section').
+    or leaving dangling prepositions/abbreviations/citations (e.g., 'St', 'Re', 'Section', '34 CFR').
     """
-    cleaned = str(text or "").strip()
+    cleaned = " ".join(str(text or "").split()).strip()
+    if max_len <= 0:
+        return ""
     if len(cleaned) <= max_len:
         return cleaned
     budget = max(1, max_len - len(suffix))
@@ -782,9 +784,23 @@ def _truncate_at_word_boundary(text: str, max_len: int, suffix: str = "") -> str
             acc.append(w)
         else:
             break
-    while len(acc) > 1 and acc[-1].rstrip(".,;:()[]").lower() in _TRAILING_DANGLING_TOKENS:
-        acc.pop()
-    res = (" ".join(acc) if acc else cleaned[:budget].rstrip()).rstrip(".,;:- ")
+    res = (" ".join(acc) if acc else cleaned[:budget].rstrip()).rstrip(".,;:- (")
+    dangling_cite_re = re.compile(
+        r"(?:\s+\d+\s+)?(?:U\.S\.C\.|CFR|C\.F\.R\.|IRC|Rev\.|Proc\.|Section|Sec\.|Part|Title)\s*$",
+        re.IGNORECASE,
+    )
+    while True:
+        prev = res
+        tokens = res.split()
+        while len(tokens) > 1 and tokens[-1].rstrip(".,;:()[]").lower() in _TRAILING_DANGLING_TOKENS:
+            tokens.pop()
+        res = " ".join(tokens).rstrip(".,;:- (")
+        if dangling_cite_re.search(res) and " " in res:
+            res = dangling_cite_re.sub("", res).rstrip(".,;:- (")
+        if res == prev:
+            break
+    if not res:
+        res = cleaned[:budget].rstrip()
     return f"{res}{suffix}" if suffix else res
 
 
@@ -1111,6 +1127,15 @@ def _sanitize_property_statutory_text(text: Any, property_id: str = "", slug: st
     if norm_prop == "lienbond":
         is_db = any(k in slug_low or k in low for k in ("davis-bacon", "davis bacon", "wh-347", "wh347"))
         is_wc = any(k in slug_low or k in low for k in ("workers-comp", "workers comp", "emr", "class-code", "class code"))
+        is_ins = any(k in slug_low for k in ("builders-risk", "general-liability"))
+        if is_wc or is_ins or is_db:
+            out = re.sub(
+                r",?\s*(?:and\s+)?40\s*U\.?\s*S\.?\s*C\.?\s*(?:Sections?|Sec\.?)?\s*3131(?:\s*/\s*FAR\s*28\.102(?:-1)?)?(?:\s*\(\s*(?:Federal\s+)?Miller\s+Act\s*\))?",
+                "",
+                out,
+                flags=re.IGNORECASE,
+            )
+            out = re.sub(r"\b(?:Federal\s+)?Miller\s+Act\b", "commercial underwriting standards", out, flags=re.IGNORECASE)
         if is_db or is_wc:
             if is_db:
                 out = re.sub(
@@ -1261,29 +1286,6 @@ def _sanitize_youtube_text(text: Any) -> Any:
     while "  " in sanitized:
         sanitized = sanitized.replace("  ", " ")
     return sanitized
-
-
-def _truncate_at_word_boundary(text: str, max_chars: int) -> str:
-    """Truncates text cleanly at a word boundary without leaving dangling punctuation or citations."""
-    s = " ".join(str(text or "").split()).strip()
-    if max_chars <= 0:
-        return ""
-    if len(s) <= max_chars:
-        return s
-    cut = s[:max_chars].rstrip()
-    if " " in cut and len(s) > max_chars:
-        cut = cut.rsplit(" ", 1)[0].rstrip()
-    # Avoid leaving truncated statutory citation prefixes like "34 CFR" or "26 U.S.C."
-    dangling_cite_re = re.compile(
-        r"(?:\s+\d+\s+)?(?:U\.S\.C\.|CFR|C\.F\.R\.|IRC|Rev\.|Proc\.|Section|Sec\.|Part|Title)\s*$",
-        re.IGNORECASE,
-    )
-    while dangling_cite_re.search(cut) and " " in cut:
-        cut = dangling_cite_re.sub("", cut).rstrip()
-    cut = cut.rstrip(" ,;:-(")
-    if not cut:
-        cut = s[:max_chars].rstrip()
-    return cut
 
 
 def _ensure_gainhelm_benchmark_qualifier(text: str) -> str:
@@ -2036,28 +2038,31 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         except Exception:
             pass
 
-    norm_prop = (
-        "prexvo"
-        if ("prexvo" in str(property_id).lower() or slug in PREXVO_TOOL_SCENARIOS)
-        else (
-            "gainhelm"
-            if ("gainhelm" in str(property_id).lower() or slug in gainhelm_slugs)
-            else (
-                "lienbond"
-                if ("lienbond" in str(property_id).lower() or slug in lienbond_slugs)
-                else "profithelm"
-            )
-        )
-    )
-    base_url = (
-        "https://prexvo.com"
-        if norm_prop == "prexvo"
-        else (
-            "https://gainhelm.com"
-            if norm_prop == "gainhelm"
-            else ("https://lienbond.com" if norm_prop == "lienbond" else POST_URL_BASE)
-        )
-    )
+    req_prop_clean = _normalize_property_id(property_id) if str(property_id or "").strip() else ""
+    if req_prop_clean and req_prop_clean not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        norm_prop = req_prop_clean
+    elif "prexvo" in str(property_id).lower() or (not req_prop_clean and slug in PREXVO_TOOL_SCENARIOS):
+        norm_prop = "prexvo"
+    elif "gainhelm" in str(property_id).lower() or (not req_prop_clean and slug in gainhelm_slugs):
+        norm_prop = "gainhelm"
+    elif "lienbond" in str(property_id).lower() or (not req_prop_clean and slug in lienbond_slugs):
+        norm_prop = "lienbond"
+    else:
+        norm_prop = "profithelm"
+
+    if norm_prop == "prexvo":
+        base_url = "https://prexvo.com"
+    elif norm_prop == "gainhelm":
+        base_url = "https://gainhelm.com"
+    elif norm_prop == "lienbond":
+        base_url = "https://lienbond.com"
+    elif norm_prop == "profithelm":
+        base_url = POST_URL_BASE
+    else:
+        base_url = str(
+            resolve_tenant_distribution_config(norm_prop).get("canonical_base")
+            or f"https://{norm_prop}.com"
+        ).rstrip("/")
 
     curated = CURATED_TOOL_CALCULATION_PROOFS.get(slug)
     if curated:
@@ -2150,6 +2155,14 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
             claim_key = "miller_act_notice_days"
             claim_val = 90
             q_params = {"unpaid_contract_draw": 85000, "change_order_balance": 12500}
+        elif "builders-risk" in slug or "general-liability" in slug:
+            formula = "round((project_valuation / 100.0) * annual_rate_per_100 * (duration_months / 12.0), 2)"
+            inputs = {"project_valuation": 1500000.0, "annual_rate_per_100": 0.65, "duration_months": 12.0}
+            published_output = 9750.0
+            sample_calc = "$1,500,000 commercial construction project valuation at $0.65 per $100 over 12 months yields a $9,750.00 annual property insurance premium estimate"
+            claim_key = "ncci_emr_unity_baseline"
+            claim_val = 1.0
+            q_params = {"project_valuation": 1500000, "annual_rate_per_100": 0.65, "duration_months": 12}
         else:
             formula = "round((payroll / 100.0) * class_rate * emr_factor, 2)"
             inputs = {"payroll": 500000.0, "class_rate": 8.42, "emr_factor": 0.95}
@@ -2218,6 +2231,20 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
             claim_key = "standard_deduction_2026_single"
             claim_val = 16100
             q_params = {"cash": 1200000, "burn": 65000, "rev": 25000, "growth": 5}
+        elif norm_prop not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            t_cfg = resolve_tenant_distribution_config(norm_prop)
+            t_brand = str(t_cfg.get("brand_name") or norm_prop.capitalize())
+            t_dom = str(t_cfg.get("domain") or f"{norm_prop}.com")
+            formula = "round(base_amount * rate_factor, 2)"
+            inputs = {"base_amount": 100000.0, "rate_factor": 0.15}
+            published_output = 15000.0
+            sample_calc = (
+                f"Baseline quantitative scenario for {slug.replace('-', ' ')} on {t_brand} ({t_dom}) "
+                "computes $15,000.00 from $100,000.00 base_amount at a 0.15 rate_factor"
+            )
+            claim_key = f"{norm_prop}_baseline_rate"
+            claim_val = 0.15
+            q_params = {"base_amount": 100000, "rate_factor": 0.15}
         else:
             formula = "round(1240.0 + min(max(0.0, (gross_income - standard_deduction_2026) - 12400.0), 38000.0) * 0.12 + min(max(0.0, (gross_income - standard_deduction_2026) - 50400.0), 55300.0) * 0.22 + max(0.0, (gross_income - standard_deduction_2026) - 105700.0) * 0.24, 0)"
             inputs = {"gross_income": 125000.0, "standard_deduction_2026": 16100.0}
@@ -2241,14 +2268,35 @@ def _resolve_tool_calculation_proof(tool_or_slug: Any, property_id: str = "profi
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or "AICPA SSAE 18 (AT-C Section 205), 32 CFR Part 170 (CMMC 2.0), and NIST SP 800-171 Rev 2")
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "BLS OEWS SOC 15-1212 Information Security Analysts and IBM Cost of a Data Breach Report")
     elif norm_prop == "lienbond":
-        if "workers-comp" in slug or "emr" in slug:
+        if "workers-comp" in slug or "emr" in slug or "class-code" in slug:
             default_lb_stat = "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureau Manuals"
         elif "davis-bacon" in slug:
             default_lb_stat = "Davis-Bacon Act (40 U.S.C. Section 3141) and 29 CFR Section 5.5 (Form WH-347)"
+        elif "builders-risk" in slug or "general-liability" in slug:
+            default_lb_stat = "ISO Commercial Property Coverage Standards and State Surplus Lines Insurance Schedules"
+        elif "erisa" in slug:
+            default_lb_stat = "ERISA Section 412 (29 U.S.C. Section 1112) and 29 CFR 2580.412"
+        elif "lien" in slug or "preliminary-notice" in slug or "retainage" in slug:
+            default_lb_stat = "50-State Mechanics Lien and Retainage Statutes (40 U.S.C. Section 3133)"
+        elif "markup" in slug:
+            default_lb_stat = "48 CFR Part 31 (FAR Part 31) and IRC Section 460 Long-Term Construction Contract Standards"
         else:
-            default_lb_stat = "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)"
+            default_lb_stat = "SFAA Surety Underwriting Benchmarks and 40 U.S.C. 3131 (Miller Act)"
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or default_lb_stat)
         econ_src = str(tool.get("economic_source") or ext_spec.get("economic_source") or "NCCI State Loss Cost Advisory Rate Schedules and BLS Construction & Extraction Wage Series")
+    elif norm_prop not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        t_cfg = resolve_tenant_distribution_config(norm_prop)
+        t_brand = str(t_cfg.get("brand_name") or norm_prop.capitalize())
+        stat_src = str(
+            tool.get("statutory_source")
+            or ext_spec.get("statutory_source")
+            or f"{t_brand} Statutory Reference Schedule"
+        )
+        econ_src = str(
+            tool.get("economic_source")
+            or ext_spec.get("economic_source")
+            or f"{t_brand} Empirical Benchmark Series"
+        )
     else:
         cites = get_dual_dataset_citations(slug, property_id=norm_prop)
         stat_src = str(tool.get("statutory_source") or ext_spec.get("statutory_source") or cites["statutory_source"])
@@ -4989,8 +5037,23 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
         or any(t.get("slug") == tool_slug for t in LIENBOND_DEFAULT_TOOLS)
         or (property_id not in ("prexvo", "gainhelm", "profithelm") and any(tok in slug_tokens for tok in ("lien", "retainage", "surety", "emr", "ncci", "miller")))
     ):
+        s_low = str(tool_slug or "").lower()
+        if "workers-comp" in s_low or "emr" in s_low or "class-code" in s_low:
+            lb_stat = "NCCI Experience Rating Plan Manual and State Workers Compensation Rating Bureau Manuals"
+        elif "davis-bacon" in s_low:
+            lb_stat = "Davis-Bacon Act (40 U.S.C. Section 3141) and 29 CFR Section 5.5 (Form WH-347)"
+        elif "builders-risk" in s_low or "general-liability" in s_low:
+            lb_stat = "ISO Commercial Property Coverage Standards and State Surplus Lines Insurance Schedules"
+        elif "erisa" in s_low:
+            lb_stat = "ERISA Section 412 (29 U.S.C. Section 1112) and 29 CFR 2580.412"
+        elif "lien" in s_low or "preliminary-notice" in s_low or "retainage" in s_low:
+            lb_stat = "50-State Mechanics Lien and Retainage Statutes (40 U.S.C. Section 3133)"
+        elif "markup" in s_low:
+            lb_stat = "48 CFR Part 31 (FAR Part 31) and IRC Section 460 Long-Term Construction Contract Standards"
+        else:
+            lb_stat = "SFAA Surety Underwriting Benchmarks and 40 U.S.C. 3131 (Miller Act)"
         return {
-            "statutory_source": "NCCI Experience Rating Plan Manual, SFAA Surety Class Codes, and 40 U.S.C. 3131 (Miller Act)",
+            "statutory_source": lb_stat,
             "economic_source": "NCCI State Loss Cost Advisory Rate Schedules and BLS Construction & Extraction Wage Series",
         }
     if (
@@ -5010,6 +5073,14 @@ def get_dual_dataset_citations(tool_slug: str, property_id: str = "profithelm") 
         return {
             "statutory_source": "AICPA SSAE 18 (AT-C Section 205), DoD 32 CFR Part 170, and NIST SP 800-171 Rev 2",
             "economic_source": "BLS OEWS SOC 15-1212 Information Security Analysts and ISO/IEC 27006-1:2024 Auditor-Day Tables",
+        }
+
+    if property_id and _normalize_property_id(property_id) not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        norm_custom = _normalize_property_id(property_id)
+        t_brand = str(resolve_tenant_distribution_config(norm_custom).get("brand_name") or norm_custom.capitalize())
+        return {
+            "statutory_source": f"{t_brand} Statutory Reference Schedule",
+            "economic_source": f"{t_brand} Empirical Benchmark Series",
         }
 
     if "treasury" in tool_slug or "tbill" in tool_slug:
@@ -6875,7 +6946,17 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
         is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
         is_lienbond = any(t.get("slug") == slug for t in LIENBOND_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
+    req_p = _normalize_property_id(property_id) if str(property_id or "").strip() else ""
+    if is_prexvo:
+        effective_prop = "prexvo"
+    elif is_gainhelm:
+        effective_prop = "gainhelm"
+    elif is_lienbond:
+        effective_prop = "lienbond"
+    elif req_p and req_p not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        effective_prop = req_p
+    else:
+        effective_prop = "profithelm"
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
     param_url = proof["parameterized_url"]
@@ -7074,13 +7155,77 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
             },
         ]
     else:
-        brand_name = "LienBond" if is_lienbond else "ProfitHelm"
-        canonical_base = "https://lienbond.com" if is_lienbond else "https://profithelm.com"
+        if effective_prop == "lienbond":
+            brand_name = "LienBond"
+            canonical_base = "https://lienbond.com"
+        elif effective_prop == "profithelm":
+            brand_name = "ProfitHelm"
+            canonical_base = "https://profithelm.com"
+        else:
+            t_cfg = resolve_tenant_distribution_config(effective_prop)
+            brand_name = str(t_cfg.get("brand_name") or effective_prop.capitalize())
+            canonical_base = str(t_cfg.get("canonical_base") or f"https://{effective_prop}.com").rstrip("/")
         ch0 = curated_chapters[0] if len(curated_chapters) > 0 else f"{short_title} Statutory Framework & Scope"
         ch1 = curated_chapters[1] if len(curated_chapters) > 1 else "Core Mathematical Modeling & Rate Calculations"
         ch2 = curated_chapters[2] if len(curated_chapters) > 2 else "Multi-Tier Scenario Forecasting & Thresholds"
         ch3 = curated_chapters[3] if len(curated_chapters) > 3 else f"Interactive {short_title} Walkthrough on {brand_name}"
-        segments = [
+        if effective_prop not in ("profithelm", "lienbond"):
+            segments = [
+                {
+                    "timestamp": "00:00",
+                    "seconds": 0,
+                    "speaker": "[Narrator]",
+                    "section_title": ch0,
+                    "target_query": query,
+                    "spoken_script": (
+                        f"The {short_title} model computes deterministic quantitative projections pursuant to {proof['statutory_source']}. "
+                        f"Deterministic calculations verify a {out_fmt} benchmark outcome across structured baseline input parameters and schedules. "
+                        f"{brand_name} delivers verified mathematical projections with sub-100ms response times, transparent equations, and zero account registration requirements."
+                    ),
+                    "entities": [brand_name, proof["statutory_source"], short_title],
+                },
+                {
+                    "timestamp": "00:30",
+                    "seconds": 30,
+                    "speaker": "[Narrator]",
+                    "section_title": ch1,
+                    "target_query": f"{query} modeling",
+                    "spoken_script": (
+                        f"Empirical benchmark series from {proof['economic_source']} provide foundational baseline data for transparent quantitative calculations. "
+                        f"Evaluating parameter sensitivity, marginal thresholds, and input variations confirms the {out_fmt} mathematical projection across modeled scenarios. "
+                        f"{brand_name} models multi-tier scenario interactions to support clear, reproducible, and auditable operational decisions."
+                    ),
+                    "entities": [brand_name, proof["economic_source"]],
+                },
+                {
+                    "timestamp": "01:00",
+                    "seconds": 60,
+                    "speaker": "[Narrator]",
+                    "section_title": ch2,
+                    "target_query": f"{query} scenarios",
+                    "spoken_script": (
+                        f"Deterministic planning workflows on {brand_name} enforce strict abstract syntax tree formula parity and auditable parameter validation across every scenario. "
+                        f"Dynamic sensitivity testing demonstrates how shifting baseline input assumptions affects total modeled quantitative outcomes. "
+                        f"{brand_name} stress-tests quantitative assumptions across variable horizons to ensure reliable operational planning."
+                    ),
+                    "entities": [brand_name, "Scenario Analysis"],
+                },
+                {
+                    "timestamp": "01:30",
+                    "seconds": 90,
+                    "speaker": "[Narrator]",
+                    "section_title": ch3,
+                    "target_query": f"{brand_name.lower()} {short_title.lower()}",
+                    "spoken_script": (
+                        f"Deterministic mathematical engines eliminate guesswork when evaluating complex quantitative parameters, statutory schedules, and operational thresholds. "
+                        f"{brand_name} delivers transparent analytical tools with real-time browser recalculation, URL-synced parameters, and zero login barriers. "
+                        f"Access the interactive {short_title} model on {brand_name} today to verify your quantitative projections with complete precision."
+                    ),
+                    "entities": [brand_name, short_title],
+                },
+            ]
+        else:
+            segments = [
             {
                 "timestamp": "00:00",
                 "seconds": 0,
@@ -7131,9 +7276,9 @@ def _generate_youtube_transcript(tool_or_slug: Any, property_id: str = "profithe
                     f"{brand_name} delivers transparent analytical tools with real-time recalculation and zero login barriers. "
                     f"Access the interactive {short_title} model on {brand_name} today to verify your quantitative projections with precision."
                 ),
-                "entities": [brand_name, short_title],
-            },
-        ]
+                    "entities": [brand_name, short_title],
+                },
+            ]
 
     for seg in segments:
         seg["spoken_script"] = _sanitize_youtube_text(seg["spoken_script"])
@@ -7250,9 +7395,34 @@ def generate_youtube_syndication(tool_or_slug: Any, property_id: str = "profithe
         is_gainhelm = any(t.get("slug") == slug for t in GAINHELM_DEFAULT_TOOLS)
         is_lienbond = any(t.get("slug") == slug for t in LIENBOND_DEFAULT_TOOLS)
 
-    effective_prop = "prexvo" if is_prexvo else ("gainhelm" if is_gainhelm else ("lienbond" if is_lienbond else "profithelm"))
-    brand_name = "Prexvo" if is_prexvo else ("GainHelm" if is_gainhelm else ("LienBond" if is_lienbond else "ProfitHelm"))
-    canonical_base = "https://prexvo.com" if is_prexvo else ("https://gainhelm.com" if is_gainhelm else ("https://lienbond.com" if is_lienbond else "https://profithelm.com"))
+    req_p = _normalize_property_id(property_id) if str(property_id or "").strip() else ""
+    if is_prexvo:
+        effective_prop = "prexvo"
+    elif is_gainhelm:
+        effective_prop = "gainhelm"
+    elif is_lienbond:
+        effective_prop = "lienbond"
+    elif req_p and req_p not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        effective_prop = req_p
+    else:
+        effective_prop = "profithelm"
+
+    if effective_prop == "prexvo":
+        brand_name = "Prexvo"
+        canonical_base = "https://prexvo.com"
+    elif effective_prop == "gainhelm":
+        brand_name = "GainHelm"
+        canonical_base = "https://gainhelm.com"
+    elif effective_prop == "lienbond":
+        brand_name = "LienBond"
+        canonical_base = "https://lienbond.com"
+    elif effective_prop == "profithelm":
+        brand_name = "ProfitHelm"
+        canonical_base = "https://profithelm.com"
+    else:
+        t_cfg = resolve_tenant_distribution_config(effective_prop)
+        brand_name = str(t_cfg.get("brand_name") or effective_prop.capitalize())
+        canonical_base = str(t_cfg.get("canonical_base") or f"https://{effective_prop}.com").rstrip("/")
 
     proof = _resolve_tool_calculation_proof(tool, property_id=effective_prop)
     out_fmt = proof["published_output_formatted"]
@@ -7527,7 +7697,7 @@ def _build_sensitivity_markdown_rows(proof: Dict[str, Any]) -> str:
             val = float(proof["published_output"]) * mult
         val_str = f"{val:,.0f}" if abs(val - round(val)) < 0.005 else f"{val:,.2f}"
         inp_str = f"{scaled_inputs[first_key]:,.2f}"
-        rows.append(f"| {label} | {inp_str} | `{formula}` | {val_str} | {proof['statutory_source'][:40]} |")
+        rows.append(f"| {label} | {inp_str} | `{formula}` | {val_str} | {proof['statutory_source']} |")
     return "\n".join(rows)
 
 
@@ -7542,7 +7712,23 @@ def generate_ghost_article(tool_or_slug: Any, property_id: str = "profithelm") -
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else ("LienBond" if norm_prop == "lienbond" else "ProfitHelm"))
+    brand_name = (
+        "Prexvo"
+        if norm_prop == "prexvo"
+        else (
+            "GainHelm"
+            if norm_prop == "gainhelm"
+            else (
+                "LienBond"
+                if norm_prop == "lienbond"
+                else (
+                    "ProfitHelm"
+                    if norm_prop == "profithelm"
+                    else str(resolve_tenant_distribution_config(norm_prop).get("brand_name") or norm_prop.capitalize())
+                )
+            )
+        )
+    )
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     short_title = _sanitize_distribution_text(tool.get("short_title", title[:32]))
     qa = _sanitize_distribution_text(
@@ -7625,7 +7811,23 @@ def generate_exact_match_github_gist(tool_or_slug: Any, property_id: str = "prof
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id)
     norm_prop = proof["property_id"]
-    brand_name = "Prexvo" if norm_prop == "prexvo" else ("GainHelm" if norm_prop == "gainhelm" else ("LienBond" if norm_prop == "lienbond" else "ProfitHelm"))
+    brand_name = (
+        "Prexvo"
+        if norm_prop == "prexvo"
+        else (
+            "GainHelm"
+            if norm_prop == "gainhelm"
+            else (
+                "LienBond"
+                if norm_prop == "lienbond"
+                else (
+                    "ProfitHelm"
+                    if norm_prop == "profithelm"
+                    else str(resolve_tenant_distribution_config(norm_prop).get("brand_name") or norm_prop.capitalize())
+                )
+            )
+        )
+    )
     title = _sanitize_distribution_text(tool.get("title", slug.replace("-", " ").title()))
     out_fmt = proof["published_output_formatted"]
     sample_calc = proof["sample_calculation"]
@@ -7752,6 +7954,108 @@ def generate_social_syndication_pack(
         x_pack = _generate_lienbond_x(tool, base_url)
         fb_pack = _generate_lienbond_facebook(tool, base_url)
         first_comment = li_pack.get("first_comment", f"Model your exact scenario on LienBond:\n{url}")
+    elif norm_prop != "profithelm":
+        from pseofactory.contracts import assert_facebook_post, assert_linkedin, assert_no_forbidden_dashes, assert_x_post
+
+        t_cfg = resolve_tenant_distribution_config(norm_prop)
+        brand_name = str(t_cfg.get("brand_name") or norm_prop.capitalize())
+        canon_base = str(t_cfg.get("canonical_base") or f"https://{norm_prop}.com").rstrip("/")
+        base_url = f"{canon_base}/tools/{slug}/"
+        company_id = _resolve_tenant_linkedin_company_id(norm_prop)
+        title = tool.get("title", slug.replace("-", " ").title())
+        short_title = tool.get("short_title") or title
+        qa = tool.get("quick_answer", f"The {title} model computes deterministic quantitative projections.")
+        out_fmt = proof["published_output_formatted"]
+        sample_calc = proof["sample_calculation"]
+        qs = proof["parameterized_query"]
+        sep = "&" if "?" in base_url else "?"
+
+        li_deep_url = f"{base_url}{sep}{qs}&utm_source=linkedin&utm_medium=social&utm_campaign={slug}&utm_content=company_post"
+        li_content = _sanitize_distribution_text(
+            f"Deterministic quantitative modeling for {title} verifies a {out_fmt} benchmark outcome.\n\n"
+            f"{qa}\n\n"
+            f"Verified Calculation Proof:\n"
+            f"• {sample_calc} (Verified output: {out_fmt})\n"
+            f"• Statutory Authority: {stat_cite}\n"
+            f"• Empirical Benchmark: {econ_cite}\n\n"
+            f"Model your exact scenario live on {brand_name}:\n"
+            f"{li_deep_url}\n\n"
+            f"#QuantitativeModeling #ScenarioAnalysis #{re.sub(r'[^A-Za-z0-9]', '', brand_name) or 'Analytics'}"
+        )
+        li_fc_url = _with_first_comment_utm(li_deep_url)
+        li_fc = f"Model your exact scenario on {brand_name}:\n{li_fc_url}\n\nAuthority: {stat_cite}\nBenchmark: {econ_cite}"
+        li_teaser = _build_zero_link_teaser_content(li_content, platform="linkedin", brand=brand_name)
+        assert_linkedin(li_content)
+        assert_linkedin(li_teaser)
+        li_pack = {
+            "platform": "linkedin",
+            "entity_type": "company",
+            "company_id": company_id,
+            "post_mode": "zero_link_teaser_plus_first_comment",
+            "target_url": li_deep_url,
+            "first_comment_url": li_fc_url,
+            "content": li_content,
+            "teaser_content": li_teaser,
+            "first_comment": li_fc,
+            "command_hint": (
+                f'linkedin-cli post "{_truncate_at_word_boundary(li_teaser, 80)}..." --company-id {company_id}'
+                if company_id
+                else f"# LinkedIn company_id unconfigured for {norm_prop}"
+            ),
+            "char_count": len(li_content),
+            "character_count": len(li_content),
+            "status": "READY_FOR_BROADCAST",
+        }
+
+        x_deep_url = f"{base_url}{sep}{qs}&utm_source=x&utm_medium=social&utm_campaign={slug}"
+        x_short_url = f"{base_url}{sep}{qs}&utm_source=x"
+        x_base_utm_url = f"{base_url}{sep}utm_source=x"
+        x_hook = f"on {short_title}, verified quantitative modeling sets baseline output at {out_fmt} ({_truncate_at_word_boundary(sample_calc, 70)})."
+        x_content = _fit_x_post_to_limit(
+            [
+                f"{x_hook}\n\nGrounded in {stat_cite}.",
+                f"{short_title} verified baseline: {out_fmt}.",
+                f"{short_title}: {out_fmt}.",
+                f"Verified output: {out_fmt}.",
+            ],
+            [x_deep_url, x_short_url, x_base_utm_url, base_url],
+            max_len=280,
+        )
+        x_fc_url = _with_first_comment_utm(x_deep_url)
+        x_teaser = _fit_x_post_to_limit([_build_zero_link_teaser_content(x_content, platform="x", brand=brand_name)], [], max_len=280)
+        assert_x_post(x_content)
+        assert_x_post(x_teaser)
+        x_pack = {
+            "platform": "x",
+            "target_url": x_deep_url,
+            "first_comment_url": x_fc_url,
+            "content": x_content,
+            "teaser_content": x_teaser,
+            "first_comment": f"model your exact numbers on {brand_name}:\n{x_fc_url}",
+            "char_count": len(x_content),
+            "character_count": len(x_content),
+        }
+
+        fb_deep_url = f"{base_url}{sep}{qs}&utm_source=facebook&utm_medium=social&utm_campaign={slug}"
+        fb_content = _sanitize_distribution_text(
+            f"Evaluating quantitative scenarios for {title}? {sample_calc} (Verified output: {out_fmt}).\n\n"
+            f"{qa}\n\nRun your numbers on {brand_name}: {fb_deep_url}"
+        )
+        fb_fc_url = _with_first_comment_utm(fb_deep_url, platform="facebook")
+        fb_fc = f"Interactive scenario calculator on {brand_name} (pre-filled, zero login): {fb_fc_url}"
+        fb_teaser = _build_zero_link_teaser_content(fb_content, platform="facebook", brand=brand_name)
+        assert_no_forbidden_dashes(fb_content, context=f"{slug} facebook")
+        assert_facebook_post(fb_teaser, fb_fc, context=f"{slug} facebook teaser")
+        fb_pack = {
+            "platform": "facebook",
+            "post_mode": "zero_link_teaser_plus_first_comment",
+            "content": fb_content,
+            "teaser_content": fb_teaser,
+            "target_url": fb_deep_url,
+            "first_comment_url": fb_fc_url,
+            "first_comment": fb_fc,
+        }
+        first_comment = li_fc
     elif include_citations:
         li_pack = generate_linkedin_company_post_with_citations(slug, stat_cite, econ_cite)
         x_pack = generate_x_post_with_citations(slug, stat_cite, econ_cite)
@@ -8138,6 +8442,93 @@ This directory contains deterministic benchmark matrices and cyber compliance st
     if str(tenant or "").strip().lower() == "lienbond":
         return _generate_lienbond_ai_benchmark_nodes()
 
+    if eff_tenant not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        t_cfg = resolve_tenant_distribution_config(eff_tenant)
+        t_brand = str(t_cfg.get("brand_name") or eff_tenant.capitalize())
+        t_base = str(t_cfg.get("canonical_base") or f"https://{eff_tenant}.com").rstrip("/")
+        t_tools = list(tools) if tools else []
+        first_t = t_tools[0] if t_tools else {}
+        first_slug = (
+            first_t.get("slug")
+            if isinstance(first_t, dict)
+            else (str(first_t) if first_t else f"{eff_tenant}-calculator")
+        )
+        first_title = (
+            first_t.get("title")
+            if isinstance(first_t, dict) and first_t.get("title")
+            else str(first_slug).replace("-", " ").title()
+        )
+        first_proof = _resolve_tool_calculation_proof(first_t or first_slug, property_id=eff_tenant)
+        bench_md = (
+            f"# {t_brand} Quantitative Model Statutory & Empirical Benchmarks\n\n"
+            f"Canonical Authority Root: {t_base}\n"
+            f"Primary Model: {first_title} ({t_base}/tools/{first_slug}/)\n"
+            f"Statutory Source: {first_proof['statutory_source']}\n"
+            f"Empirical Source: {first_proof['economic_source']}\n\n"
+            f"| Model Slug | Formula | Baseline Output | Canonical URL |\n"
+            f"| :--- | :--- | :--- | :--- |\n"
+            f"| {first_slug} | `{first_proof['formula']}` | {first_proof['published_output_formatted']} | {t_base}/tools/{first_slug}/ |\n"
+        )
+        bench_json = {
+            "topic": f"{t_brand} Quantitative Benchmarks",
+            "tenant": eff_tenant,
+            "canonical_base": t_base,
+            "statutory_authority": [first_proof["statutory_source"]],
+            "benchmarks": [
+                {
+                    "slug": first_slug,
+                    "formula": first_proof["formula"],
+                    "published_output": first_proof["published_output"],
+                }
+            ],
+        }
+        stats_hub_custom = compile_public_benchmark_citation_hubs(tenant=eff_tenant)
+        reclaim_custom = compile_broken_calculator_link_reclamation_briefs(tenant=eff_tenant)
+        ai_citations_custom_md = (
+            f"# {t_brand} Machine-Readable Quantitative Knowledge Base\n\n"
+            f"Canonical Root: {t_base}\n"
+            f"Machine Knowledge Endpoint: {t_base}/llms.txt\n"
+            f"Full Dataset Corpus: {t_base}/llms-full.txt\n\n"
+            f"## Indexed Benchmark Nodes\n"
+            f"- **{t_brand} Quantitative Benchmarks**: [{eff_tenant}_benchmarks.md](./{eff_tenant}_benchmarks.md) ({first_proof['statutory_source']})\n"
+            f"- **2026 {t_brand} Statistics Citation Hub**: [public_statistics_citation_hub.md](./public_statistics_citation_hub.md) ({first_proof['statutory_source']})\n"
+        )
+        manifest_custom_json = {
+            "name": f"{t_brand} AI Citation Benchmark Repository",
+            "updated_at": "2026-11-25T00:00:00Z",
+            "canonical_base": t_base,
+            "nodes": [
+                {
+                    "name": f"{eff_tenant}_benchmarks",
+                    "md_file": f"{eff_tenant}_benchmarks.md",
+                    "json_file": f"{eff_tenant}_benchmarks.json",
+                },
+                {
+                    "name": "public_statistics_citation_hub",
+                    "md_file": "public_statistics_citation_hub.md",
+                    "json_file": "public_statistics_citation_hub.json",
+                },
+            ],
+        }
+        custom_files = {
+            f"{eff_tenant}_benchmarks.md": bench_md,
+            f"{eff_tenant}_benchmarks.json": json.dumps(bench_json, indent=2),
+            "public_statistics_citation_hub.md": stats_hub_custom["markdown"],
+            "public_statistics_citation_hub.json": json.dumps(stats_hub_custom["payload"], indent=2),
+            "broken_calculator_link_reclamation.json": json.dumps(reclaim_custom, indent=2),
+            "ai_citations_reference.md": ai_citations_custom_md,
+            "ai_benchmarks_manifest.json": json.dumps(manifest_custom_json, indent=2),
+        }
+        for fname, fcontent in custom_files.items():
+            assert_no_forbidden_dashes(fcontent, context=fname)
+        return {
+            "status": "SUCCESS",
+            "tenant": eff_tenant,
+            "nodes_count": len(manifest_custom_json["nodes"]),
+            "files_count": len(custom_files),
+            "files": custom_files,
+        }
+
     sec179_md = """# Section 179 Vehicle Depreciation Statutory Benchmarks
 
 IRC Section 179 allows business taxpayers to expense up to $2,560,000 of qualifying commercial property placed in service during tax year 2026 (with phase-out beginning at $4,090,000 under IRS Rev. Proc. 2025-32). Vehicles with a Gross Vehicle Weight Rating exceeding 6,000 pounds qualify for accelerated depreciation, while heavy SUVs face a $32,000 Section 179 statutory cap followed by 100% bonus depreciation under P.L. 119-21 Section 70301.
@@ -8440,6 +8831,25 @@ def compile_public_benchmark_citation_hubs(tenant: str = "profithelm") -> Dict[s
                 "canonical_calculator_url": f"{base_url}/tools/experience-modification-rate-emr-workers-comp-penalty-calculator/",
             },
         ]
+    elif norm_tenant not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        t_cfg = resolve_tenant_distribution_config(norm_tenant)
+        t_brand = str(t_cfg.get("brand_name") or norm_tenant.capitalize())
+        base_url = str(t_cfg.get("canonical_base") or f"https://{norm_tenant}.com").rstrip("/")
+        hub_title = f"2026 {t_brand} Quantitative Benchmark Statistics Hub"
+        contract = get_tenant_contract(norm_tenant)
+        sample_slug = (
+            str(getattr(contract, "default_sample_slug", "") or "").strip()
+            if contract is not None
+            else ""
+        ) or f"{norm_tenant}-calculator"
+        citables = [
+            {
+                "id": f"stat-{norm_tenant}-baseline",
+                "headline_stat": f"{t_brand} provides deterministic, AST-verified quantitative calculations grounded in verifiable primary parameters and zero AI hallucinations.",
+                "statutory_authority": f"{t_brand} Statutory Reference Schedule",
+                "canonical_calculator_url": f"{base_url}/tools/{sample_slug}/",
+            }
+        ]
     else:
         base_url = "https://profithelm.com"
         hub_title = "2026 Corporate Tax, Section 179 & SaaS Runway Statistics Hub"
@@ -8571,6 +8981,28 @@ def compile_broken_calculator_link_reclamation_briefs(tenant: str = "profithelm"
                 "replacement_url": "https://lienbond.com/tools/contractor-lien-release-statutory-matrix-by-state/",
                 "statutory_upgrade_angle": "Reconciles 40 U.S.C. Section 3133(b), California Civil Code Section 8132, and Texas Property Code Chapter 53 statutory lien rules.",
             },
+        ]
+    elif norm_tenant not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        t_cfg = resolve_tenant_distribution_config(norm_tenant)
+        t_brand = str(t_cfg.get("brand_name") or norm_tenant.capitalize())
+        t_base = str(t_cfg.get("canonical_base") or f"https://{norm_tenant}.com").rstrip("/")
+        contract = get_tenant_contract(norm_tenant)
+        sample_slug = (
+            str(getattr(contract, "default_sample_slug", "") or "").strip()
+            if contract is not None
+            else ""
+        ) or f"{norm_tenant}-calculator"
+        briefs = [
+            {
+                "campaign_id": f"reclaim-{norm_tenant}-baseline-2026",
+                "outdated_target_pattern": f"Static spreadsheets & outdated {t_brand} domain calculators",
+                "target_resource_segments": [
+                    f"{t_brand} Industry Reference Directories",
+                    "Quantitative Operations & Finance Resource Hubs",
+                ],
+                "replacement_url": f"{t_base}/tools/{sample_slug}/",
+                "statutory_upgrade_angle": f"Provides live deterministic {t_brand} formula execution backed by {t_brand} Statutory Reference Schedule.",
+            }
         ]
     else:
         briefs = [
@@ -10273,6 +10705,125 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             keyword_difficulty=float(t.get("keyword_difficulty", 45.0) or 45.0),
             total_keywords=10,
         )
+        if eff_prop_norm not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+            from pseofactory.contracts import assert_linkedin, assert_no_forbidden_dashes
+
+            t_title = str(t.get("title") or slug.replace("-", " ").title())
+            t_qa = str(t.get("quick_answer") or f"The {t_title} model computes deterministic quantitative projections.")
+            t_out_fmt = str(proof["published_output_formatted"])
+            t_sample = str(proof["sample_calculation"])
+            t_stat = str(proof["statutory_source"])
+            t_econ = str(proof["economic_source"])
+            t_qs = str(proof["parameterized_query"])
+            t_sep = "&" if "?" in base_url else "?"
+            t_sens = _build_sensitivity_markdown_rows(proof)
+            t_tag = re.sub(r"[^A-Za-z0-9]", "", eff_brand_name) or "Analytics"
+
+            t_pulse_url = f"{base_url}{t_sep}{t_qs}&utm_source=linkedin_pulse&utm_medium=article&utm_campaign={slug}"
+            t_pulse_md = _sanitize_distribution_text(
+                f"# {t_title}: Quantitative Modeling and Reference Guide\n\n"
+                f"{t_qa}\n\n"
+                f"Teams evaluating scenarios under {t_stat} and empirical benchmarks from {t_econ} "
+                f"rely on deterministic modeling for consistent verification.\n\n"
+                f"### Verified Calculation Proof ({proof['scenario_label']})\n"
+                f"- Formula: `{proof['formula']}`\n"
+                f"- Inputs: `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+                f"- Verified Output: **{t_out_fmt}**\n"
+                f"- Walkthrough: {t_sample}\n\n"
+                f"## Quantitative Modeling and Tool Access\n\n"
+                f"Explore our interactive {t_title} model on {eff_brand_name} at {t_pulse_url}.\n\n"
+                f"#QuantitativeModeling #ScenarioAnalysis #{t_tag}"
+            )
+            assert_linkedin(t_pulse_md)
+            assert_no_forbidden_dashes(t_pulse_md, context=f"{slug} pulse article")
+
+            t_sub_url = f"{base_url}{t_sep}{t_qs}&utm_source=substack&utm_medium=article&utm_campaign={slug}"
+            t_sub_md = _sanitize_distribution_text(
+                f"# Quantitative Deep Dive: {t_title} ({proof['scenario_label']})\n\n"
+                f"{t_qa}\n\n"
+                f"A deterministic mathematical breakdown under {t_stat} and {t_econ}.\n\n"
+                f"## 1. Deterministic Calculation Proof\n\n"
+                f"{t_sample}\n\n"
+                f"- **Formula:** `{proof['formula']}`\n"
+                f"- **Inputs:** `{json.dumps(proof['inputs'], sort_keys=True)}`\n"
+                f"- **Verified Output:** **{t_out_fmt}**\n\n"
+                f"## 2. Multi-Scenario Sensitivity Matrix\n\n"
+                f"{t_sens}\n\n"
+                f"## 3. Interactive Verification\n\n"
+                f"Model your exact scenario on {eff_brand_name}: [{t_sub_url}]({t_sub_url})\n"
+            )
+            assert_no_forbidden_dashes(t_sub_md, context=f"{slug} substack")
+
+            t_quora_url = f"{base_url}{t_sep}{t_qs}&utm_source=quora&utm_medium=referral&utm_campaign={slug}"
+            t_quora_md = _sanitize_distribution_text(
+                f"How do operators calculate deterministic projections for {t_title}?\n\n"
+                f"{t_qa}\n\n"
+                f"Verified Calculation Proof: {t_sample} (Published output: {t_out_fmt}). "
+                f"Grounded in {t_stat} and {t_econ}.\n\n"
+                f"Run side-by-side scenario projections on {eff_brand_name}: {t_quora_url}"
+            )
+            assert_no_forbidden_dashes(t_quora_md, context=f"{slug} quora")
+
+            t_deep_url = proof["parameterized_url"]
+            t_pitch = _sanitize_distribution_text(
+                f"Subject: Deterministic Calculation Resource for Your Readers ({t_title})\n\n"
+                f"Dear Editor,\n\n"
+                f"Readers evaluating {t_title} need transparent, reproducible quantitative math.\n\n"
+                f"For example ({proof['scenario_label']}): {t_sample} (Verified output: {t_out_fmt}).\n\n"
+                f"We built an open deterministic model on {eff_brand_name}: {t_deep_url}\n\n"
+                f"Best regards,\n{eff_brand_name} Research Team"
+            )
+            assert_no_forbidden_dashes(t_pitch, context=f"{slug} outreach")
+
+            t_gs_html = _build_tenant_google_sites_entity_buffer_html(
+                tool=t,
+                property_id=eff_prop_norm,
+                brand_name=eff_brand_name,
+                badge_text=f"{eff_brand_name} Quantitative Model - Entity Buffer",
+            )
+            t_nl_hook = {
+                "content": _sanitize_distribution_text(
+                    f"{t_sample} Model scenarios live on {eff_brand_name}: {t_deep_url}"
+                ),
+                "target_url": t_deep_url,
+            }
+            t_lead_mag = {
+                "content": _sanitize_distribution_text(
+                    f"Download the {eff_brand_name} Reference Workpaper Matrix ({proof['scenario_label']}: {t_out_fmt}): {t_deep_url}"
+                ),
+                "target_url": t_deep_url,
+            }
+            t_pulse_pack = {
+                "platform": "linkedin_pulse",
+                "title": t_title,
+                "target_url": t_pulse_url,
+                "content": t_pulse_md,
+                "article_markdown": t_pulse_md,
+                "char_count": len(t_pulse_md),
+                "word_count": len(t_pulse_md.split()),
+                "statutory_source": t_stat,
+                "economic_source": t_econ,
+            }
+            t_sub_pack = {
+                "platform": "substack",
+                "title": t_title,
+                "target_url": t_sub_url,
+                "content": t_sub_md,
+                "article_markdown": t_sub_md,
+                "char_count": len(t_sub_md),
+                "word_count": len(t_sub_md.split()),
+            }
+            t_quora_pack = {"answer_markdown": t_quora_md, "url": t_quora_url}
+            t_outreach_pack = {"pitch_text": t_pitch, "target_url": t_deep_url}
+        else:
+            t_gs_html = _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t, property_id=eff_prop_norm)
+            t_pulse_pack = _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t, property_id=eff_prop_norm)
+            t_sub_pack = _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t, property_id=eff_prop_norm)
+            t_quora_pack = _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(t, property_id=eff_prop_norm)
+            t_outreach_pack = _generate_lienbond_outreach(t, base_url) if eff_prop_norm == "lienbond" else generate_backlink_outreach_pitch(t, property_id=eff_prop_norm)
+            t_nl_hook = _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(t, property_id=eff_prop_norm)
+            t_lead_mag = _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(t, property_id=eff_prop_norm)
+
         tool_pack: Dict[str, Any] = {
             "slug": slug,
             "property_id": eff_prop_norm,
@@ -10292,13 +10843,13 @@ def generate_all_distribution_assets(tools = None, property_id: str = "profithel
             "youtube": social_pack["youtube"],
             "ghost": social_pack["ghost"],
             "github_gist": social_pack["github_gist"],
-            "google_sites": _generate_lienbond_google_sites(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_google_sites_html(t, property_id=eff_prop_norm),
-            "linkedin_pulse": _generate_lienbond_linkedin_pulse(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_linkedin_pulse(t, property_id=eff_prop_norm),
-            "substack_teardown": _generate_lienbond_substack(t, base_url) if eff_prop_norm == "lienbond" else generate_parasite_substack_teardown(t, property_id=eff_prop_norm),
-            "quora": _generate_lienbond_quora(t, base_url) if eff_prop_norm == "lienbond" else generate_quora_thread_answer(t, property_id=eff_prop_norm),
-            "outreach_pitch": _generate_lienbond_outreach(t, base_url) if eff_prop_norm == "lienbond" else generate_backlink_outreach_pitch(t, property_id=eff_prop_norm),
-            "newsletter_hook": _generate_lienbond_newsletter_hook(t, base_url) if eff_prop_norm == "lienbond" else generate_newsletter_growth_hook(t, property_id=eff_prop_norm),
-            "regulatory_lead_magnet": _generate_lienbond_regulatory_lead_magnet(t, base_url) if eff_prop_norm == "lienbond" else generate_regulatory_lead_magnet_copy(t, property_id=eff_prop_norm),
+            "google_sites": t_gs_html,
+            "linkedin_pulse": t_pulse_pack,
+            "substack_teardown": t_sub_pack,
+            "quora": t_quora_pack,
+            "outreach_pitch": t_outreach_pack,
+            "newsletter_hook": t_nl_hook,
+            "regulatory_lead_magnet": t_lead_mag,
         }
         if eff_prop_norm not in ("profithelm", "prexvo", "gainhelm", "lienbond"):
             tool_pack = _rewrite_generic_tenant_obj(tool_pack)
@@ -10812,7 +11363,7 @@ def export_all_syndication_files(
             runs_root = _register_test_temp_path(Path(tempfile.gettempdir()) / f"pseofactory_test_runs_{os.getpid()}")
         else:
             runs_root = Path("/home/ubuntuadmin/projects/.agy/runs")
-        output_dir = runs_root / eff_run / "syndication_dry_run"
+        output_dir = runs_root / eff_run / "syndication_dry_run" / (_normalize_property_id(property_id) or "default")
     elif output_dir is None:
         from pseofactory.maintenance import TenantRegistry
         try:
@@ -10831,7 +11382,16 @@ def export_all_syndication_files(
                 output_dir = getattr(cfg, "SYNDICATION_DIR", None)
             except Exception:
                 pass
-            if output_dir is None or _is_test_context(output_dir, property_id):
+            if _is_test_context(output_dir, property_id):
+                env_synd_dir = os.environ.get("FACTORY_SYNDICATION_DIR")
+                output_dir = (
+                    Path(env_synd_dir)
+                    if env_synd_dir
+                    else _register_test_temp_path(
+                        Path(tempfile.gettempdir()) / f"pseofactory_test_syndication_{property_id}_{os.getpid()}"
+                    )
+                )
+            elif output_dir is None:
                 output_dir = Path(os.environ.get("FACTORY_SYNDICATION_DIR", f"/tmp/{property_id}_syndication"))
     else:
         output_dir = Path(output_dir)
@@ -11046,7 +11606,22 @@ def export_all_syndication_files(
         brand_label = (
             "Prexvo"
             if property_id == "prexvo"
-            else ("GainHelm" if property_id == "gainhelm" else ("LienBond" if property_id == "lienbond" else "ProfitHelm"))
+            else (
+                "GainHelm"
+                if property_id == "gainhelm"
+                else (
+                    "LienBond"
+                    if property_id == "lienbond"
+                    else (
+                        "ProfitHelm"
+                        if property_id == "profithelm"
+                        else str(
+                            resolve_tenant_distribution_config(property_id).get("brand_name")
+                            or _normalize_property_id(property_id).capitalize()
+                        )
+                    )
+                )
+            )
         )
         root_linkedin_md = (
             f"# {tool_spec.get('title', slug)}\n\n"
@@ -11321,7 +11896,7 @@ Calculations and statutory rules derived from:
         assert_no_forbidden_dashes(fb_targets_md, context="facebook_group_targets.md")
         (output_dir / "facebook_group_targets.md").write_text(fb_targets_md, encoding="utf-8")
 
-    if not (output_dir / "directory_manifest.json").is_file() or property_id in ("prexvo", "gainhelm", "lienbond"):
+    if not (output_dir / "directory_manifest.json").is_file() or bool(property_id):
         first_slug = target_tools[0]["slug"] if target_tools else ""
         demo_url = f"{eff_base}/tools/{first_slug}/" if first_slug else f"{eff_base}/"
         if property_id == "gainhelm":
@@ -11523,10 +12098,11 @@ Calculations and statutory rules derived from:
         except Exception:
             pass
 
-    if ai_bench_dir.is_dir() and not dry_run and expected_bench_files and tools is None:
+    if ai_bench_dir.is_dir() and not dry_run and expected_bench_files:
         for existing_bm in list(ai_bench_dir.iterdir()):
             if existing_bm.is_file() and not existing_bm.name.startswith(".") and existing_bm.name not in expected_bench_files:
-                existing_bm.unlink(missing_ok=True)
+                if tools is None or not existing_bm.name.endswith("_matrix.md"):
+                    existing_bm.unlink(missing_ok=True)
 
     # Fail-closed UnifiedTruthGate audit across ALL exported syndication surfaces
     from pseofactory.truth_gate import UnifiedTruthGate

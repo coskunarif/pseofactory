@@ -60,11 +60,13 @@ _LIENBOND_WC_REPLACEMENT_AUTHORITY = (
     "and State Workers Compensation Rating Bureaus"
 )
 
+_LIENBOND_WC_CONCISE_AUTHORITY = "NCCI Basic Manual"
+
 _LIENBOND_WC_FORBIDDEN_CITATION_RE = re.compile(
     r"(?:"
     r"(?:IRC|26\s*U\.S\.C\.?)\s*(?:Section|Sec\.?)?\s*3111\b"
     r"|40\s*U\.S\.C\.?\s*(?:Section|Sec\.?)?\s*3131(?:-\d+)?\b"
-    r"|40\s*U\.S\.C\.?\s*(?:Section|Sec\.?)?\s*3133(?:\([a-zA-Z0-9]+\))?\b"
+    r"|40\s*U\.S\.C\.?\s*(?:Section|Sec\.?)?\s*3133\b(?:\([a-zA-Z0-9]+\))?"
     r"|29\s*CFR\s*(?:Part\s*)?1904\b"
     r"|FAR\s*28\.102(?:-2|-1)?\b"
     r"|FAR\s*28\.101\b"
@@ -80,16 +82,25 @@ def _is_lienbond_wc_slug(slug: str) -> bool:
     return any(tok in s_low for tok in ("workers-comp", "emr", "class-code"))
 
 
-def _scrub_lienbond_wc_citations(val: Any) -> Any:
+def _scrub_lienbond_wc_citations(val: Any, *, key_name: str = "") -> Any:
     """Recursively scrubs non-NCCI citations from LienBond workers-comp/EMR specs and overlays."""
     if isinstance(val, str):
+        if key_name in ("href", "target_url", "slug", "canonical_url", "url", "anchor"):
+            return val
         if _LIENBOND_WC_FORBIDDEN_CITATION_RE.search(val):
+            if key_name in ("meta_description", "description"):
+                scrubbed = _LIENBOND_WC_FORBIDDEN_CITATION_RE.sub(_LIENBOND_WC_CONCISE_AUTHORITY, val)
+                if len(scrubbed) > 155:
+                    scrubbed = _LIENBOND_WC_FORBIDDEN_CITATION_RE.sub("NCCI rules", val)
+                if len(scrubbed) > 155:
+                    scrubbed = scrubbed[:152].rsplit(" ", 1)[0].rstrip(".,;:") + "."
+                return scrubbed
             return _LIENBOND_WC_FORBIDDEN_CITATION_RE.sub(_LIENBOND_WC_REPLACEMENT_AUTHORITY, val)
         return val
     if isinstance(val, list):
-        return [_scrub_lienbond_wc_citations(item) for item in val]
+        return [_scrub_lienbond_wc_citations(item, key_name=key_name) for item in val]
     if isinstance(val, dict):
-        return {k: _scrub_lienbond_wc_citations(v) for k, v in val.items()}
+        return {k: _scrub_lienbond_wc_citations(v, key_name=k) for k, v in val.items()}
     return val
 
 
@@ -1409,6 +1420,25 @@ def sanitize_tenant_overlays(
                 ov_file.unlink(missing_ok=True)
                 continue
 
+            ov_status = str(ov_data.get("status") or "").strip().upper()
+            is_rollback_tombstone = (
+                ov_status in {"DEGRADED_ROLLED_BACK", "ROLLED_BACK", "EXPIRED", "REVERTED"}
+                or bool(ov_data.get("rolled_back"))
+                or any(
+                    bool(ov_data.get(k))
+                    for k in (
+                        "rolled_back_at",
+                        "rolled_back_title_rewrite",
+                        "rolled_back_modifier",
+                        "rolled_back_secondary_title_modifier",
+                        "rollback_reason",
+                    )
+                )
+                or any(str(k).startswith("rolled_back_") and bool(ov_data.get(k)) for k in ov_data)
+            )
+            if is_rollback_tombstone:
+                continue
+
             cleaned = ov_data
             if is_gainhelm:
                 cleaned = strip_cross_framework_leaks_from_overlay(cleaned, ov_file.stem)
@@ -1431,7 +1461,7 @@ def sanitize_tenant_overlays(
                 cleaned = reconciled
 
             has_content = any(bool(cleaned.get(k)) for k in _OVERLAY_CONTENT_KEYS)
-            if not has_content:
+            if not has_content and not is_rollback_tombstone:
                 ov_file.unlink(missing_ok=True)
             elif cleaned != ov_data:
                 out_text = json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n"

@@ -170,7 +170,7 @@ def test_prexvo_compound_modifier_qualified_anchors_and_cannibalization():
         slug="section-179-calculator/bmw-x5-xdrive40i",
         canonical_url="https://profithelm.com/tools/section-179-calculator/bmw-x5-xdrive40i/",
     )
-    assert RetroReflectionEngine.audit_html_mechanics(retro_veh) == []
+    assert RetroReflectionEngine.audit_html_mechanics(retro_veh, property_id="profithelm") == []
 
 
 def test_visual_primitives_preserves_and_heals_inline_flex_and_padding():
@@ -295,7 +295,6 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
     expected_profithelm_roots = [
         "irs-2027-tax-brackets",
         "section-179-calculator",
-        "section-1031-calculator",
         "s-corp-reasonable-salary-tax-calculator",
         "tcja-sunset-capital-gains",
         "crypto-tax-calculator",
@@ -303,7 +302,6 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
         "equipment-lease-vs-buy-section-179-calculator",
         "equipment-lease-tax-deduction",
         "invoice-factoring-vs-business-line-of-credit-calculator",
-        "saas-runway-calculator",
         "saas-runway-calculator",
         "prediction-market-odds",
         "prediction-market-tax",
@@ -318,6 +316,7 @@ def test_vehicle_spoke_ring_and_non_state_cluster_completeness():
     ]
     for root_slug in expected_profithelm_roots:
         assert f"/tools/{root_slug}/" in cluster_html, f"Missing ProfitHelm root tool {root_slug} in cluster nav"
+    assert "/tools/section-1031-calculator/" not in cluster_html
     assert "/tools/saas-burn-multiple-benchmarks-2026/" not in cluster_html
 
     px_blocks = render_competitor_winning_pattern_blocks(
@@ -364,7 +363,7 @@ def test_audit_html_mechanics_passes_on_sentinel_cluster_pages_without_self_link
             slug=slug,
             canonical_url=f"https://profithelm.com/tools/{slug}/",
         )
-        assert RetroReflectionEngine.audit_html_mechanics(retro_html) == []
+        assert RetroReflectionEngine.audit_html_mechanics(retro_html, property_id="profithelm") == []
 
     for px_slug in ("paye-sunset-calculator", "tiered-standard-calculator"):
         raw_px = f"""<!DOCTYPE html><html lang="en" data-theme="porcelain"><head>
@@ -377,7 +376,7 @@ def test_audit_html_mechanics_passes_on_sentinel_cluster_pages_without_self_link
             slug=px_slug,
             canonical_url=f"https://prexvo.com/tools/{px_slug}/",
         )
-        assert RetroReflectionEngine.audit_html_mechanics(retro_px) == []
+        assert RetroReflectionEngine.audit_html_mechanics(retro_px, property_id="prexvo") == []
 
 
 def test_overlay_re_injection_faq_entity_and_sidecar_manifest_idempotency(tmp_path: Path):
@@ -453,7 +452,7 @@ def test_overlay_re_injection_faq_entity_and_sidecar_manifest_idempotency(tmp_pa
 
     h3 = inject_overlay_into_html(h2, overlay_spec)
     assert h3 == h2
-    assert RetroReflectionEngine.audit_html_mechanics(h3) == []
+    assert RetroReflectionEngine.audit_html_mechanics(h3, property_id="profithelm") == []
 
     # Verify duplicate unprefixed vehicle overlay consolidation
     agy_ov = tmp_path / ".agy" / "overlays"

@@ -2672,9 +2672,20 @@ def get_gainhelm_compliance_strip_text(slug: str = "") -> str:
     )
 
 
+_GAINHELM_NON_ATTESTATION_CLAUSE = (
+    "GainHelm is not a licensed CPA/C3PAO/QSA; these figures are a planning estimate."
+)
+
+
 def get_gainhelm_statutory_disclaimer(slug: str = "") -> str:
     """Returns the framework-specific GainHelm statutory disclaimer for a calculator slug."""
-    return str(get_gainhelm_framework_profile(slug=slug).get("statutory_disclaimer", ""))
+    base = str(get_gainhelm_framework_profile(slug=slug).get("statutory_disclaimer", "")).strip()
+    if not base:
+        return _GAINHELM_NON_ATTESTATION_CLAUSE
+    if "gainhelm is not a licensed cpa/c3pao/qsa; these figures are a planning estimate" in base.lower():
+        return base
+    sep = "" if base.endswith((".", "!", "?")) else "."
+    return f"{base}{sep} {_GAINHELM_NON_ATTESTATION_CLAUSE}"
 
 
 def has_gainhelm_cross_framework_leak(
@@ -2697,11 +2708,13 @@ def has_gainhelm_cross_framework_leak(
     # Extract non-SKU data-vertical attributes too so soc2_grc_automation leaks are flagged
     vertical_vals = " ".join(re.findall(r'data-vertical=["\']([^"\']+)["\']', cleaned, flags=re.I))
     visible = html_lib.unescape(re.sub(r"<[^>]+>", " ", cleaned))
-    combined = f"{visible} {vertical_vals}".lower()
+    combined = re.sub(r"\s+", " ", f"{visible} {vertical_vals}".lower())
     for sku_tok in (
         "gh_soc2_cmmc_audit_workpapers",
         "gh_hipaa_iso27001_governance_kit",
         "gh_instant_compliance_worksheet_19",
+        "gainhelm is not a licensed cpa/c3pao/qsa",
+        "not a licensed cpa/c3pao/qsa",
     ):
         combined = combined.replace(sku_tok, " ")
     return any(tok in combined for tok in forbidden)

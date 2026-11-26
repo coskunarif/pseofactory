@@ -6643,7 +6643,11 @@ def _has_lienbond_poisoned_meta(
     if not md_low:
         return False
 
-    if "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131" in md_low:
+    if (
+        "premiums, ncci class code rates, and statutory deadlines under 40 u.s.c. section 3131" in md_low
+        or "premiums, ncci class code rates, and statutory deadlines under" in md_low
+        or ", ncci manuals, and 50-state." in md_low
+    ):
         return True
 
     if is_non_tool:
@@ -8103,15 +8107,38 @@ def _normalize_page_structure_and_geo_parity(
         import html as _html_mod
         raw_d = _html_mod.unescape(desc_m.group(2)).strip()
         if len(raw_d) < 70 or len(raw_d) > 160:
-            if property_id.lower() == "prexvo":
+            prop_low = property_id.lower()
+            if prop_low == "prexvo":
                 norm_d = (
                     f"Calculate statutory Title IV options for {topic_label} under 34 CFR 685.209 "
                     f"with verified repayment and forgiveness math."
                 )
-            else:
+            elif prop_low == "profithelm":
                 norm_d = (
                     f"Calculate statutory options for {topic_label} with verified IRS compliance, "
                     f"cash flow sensitivity, and scenario math."
+                )
+            elif prop_low == "lienbond":
+                norm_d = (
+                    f"Calculate statutory options for {topic_label} with verified surety and statutory math."
+                )
+                if len(norm_d) < 120:
+                    ext = f"{norm_d} Compare rate tiers and scenario benchmarks."
+                    if len(ext) <= 155:
+                        norm_d = ext
+                    else:
+                        ext_short = f"{norm_d} Compare scenario benchmarks."
+                        if len(ext_short) <= 155:
+                            norm_d = ext_short
+            elif prop_low == "gainhelm":
+                norm_d = (
+                    f"Calculate compliance budgets for {topic_label} with verified audit framework "
+                    f"benchmarks, control scope sensitivity, and scenario math."
+                )
+            else:
+                norm_d = (
+                    f"Calculate statutory options for {topic_label} with verified domain baselines, "
+                    f"parameter sensitivity, and scenario math."
                 )
             if len(norm_d) > 155:
                 norm_d = norm_d[:152].rsplit(" ", 1)[0].rstrip(".,;:") + "."
@@ -9973,6 +10000,17 @@ def _build_runner_dist_map() -> Dict[Path, Path]:
     return mapping
 
 
+def _load_prexvo_rap_formula_spec() -> Tuple[str, Dict[str, Any], float]:
+    """Loads the canonical P.L. 119-21 Section 82001 tiered RAP formula from Prexvo TruthPack."""
+    from pseofactory.truth_pack import load_truth_pack
+
+    spec = load_truth_pack("prexvo", allow_expired=True).formulas["rap_monthly_payment"]
+    return str(spec.expression), dict(spec.variables), float(spec.expected_baseline_output)
+
+
+_PREXVO_RAP_FORMULA, _PREXVO_RAP_INPUTS, _PREXVO_RAP_PUBLISHED_OUTPUT = _load_prexvo_rap_formula_spec()
+
+
 class RetroReflectionEngine:
     """
     Autonomous Retro-Reflection Engine for pseofactory.
@@ -10007,18 +10045,18 @@ class RetroReflectionEngine:
     PREXVO_FALLBACK_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "rap-payment-calculator": {
             "model_name": "Repayment Assistance Plan (RAP) Monthly Payment Model",
-            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
-            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
-            "published_output": 325.0,
+            "formula": _PREXVO_RAP_FORMULA,
+            "inputs": dict(_PREXVO_RAP_INPUTS),
+            "published_output": _PREXVO_RAP_PUBLISHED_OUTPUT,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (P.L. 119-21 Section 82001)",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
             "sample_calculation": "Under P.L. 119-21 Section 82001, a single borrower with $65,000 AGI and 0 dependents falls in the 6% AGI tier ($325.00/mo) with 100% unpaid interest subsidy and 360 qualifying monthly payments.",
         },
         "rap-vs-ibr-calculator": {
             "model_name": "RAP vs IBR Repayment Comparison Model",
-            "formula": "round(max(10.0, agi * rap_rate / 12.0 - dependents * 50.0), 2)",
-            "inputs": {"agi": 65000.0, "rap_rate": 0.06, "dependents": 0.0},
-            "published_output": 325.0,
+            "formula": _PREXVO_RAP_FORMULA,
+            "inputs": dict(_PREXVO_RAP_INPUTS),
+            "published_output": _PREXVO_RAP_PUBLISHED_OUTPUT,
             "statutory_authority": "Higher Education Act Title IV (20 U.S.C. 1070 et seq.); 34 CFR Part 685; One Big Beautiful Bill Act (P.L. 119-21 Section 82001)",
             "economic_dataset": "Federal Reserve G.19 Consumer Credit Series and BLS Consumer Price Index (CPI-U)",
             "sample_calculation": "For $65,000 AGI under P.L. 119-21 Section 82001, monthly RAP payment is $325.00 vs $342.17 Post-2014 New IBR (150% of $15,960 2026 HHS Poverty Guideline).",
@@ -13948,6 +13986,14 @@ class RetroReflectionEngine:
                                 tenant=property_id,
                                 slug=ov_s,
                             )
+                            if property_id.lower() == "lienbond":
+                                from pseofactory.estate_common import (
+                                    _is_lienbond_wc_slug,
+                                    _scrub_lienbond_wc_citations,
+                                )
+
+                                if _is_lienbond_wc_slug(ov_s):
+                                    raw_ov = _scrub_lienbond_wc_citations(raw_ov)
                             ov_path.write_text(json.dumps(raw_ov, indent=2), encoding="utf-8")
 
                         if property_id.lower() != "prexvo":
@@ -14770,6 +14816,18 @@ class RetroReflectionEngine:
                     if len(comp_tools) < 2:
                         for p_s, p_lbl in default_comp_peers:
                             if p_s != s_key and (dist_dir / "tools" / p_s / "index.html").is_file() and all(c["slug"] != p_s for c in comp_tools):
+                                comp_tools.append(
+                                    {
+                                        "slug": p_s,
+                                        "title": p_lbl,
+                                        "url": f"{canon}/tools/{p_s}/",
+                                    }
+                                )
+                            if len(comp_tools) >= 2:
+                                break
+                    if not comp_tools:
+                        for p_s, p_lbl in default_comp_peers:
+                            if p_s != s_key and all(c["slug"] != p_s for c in comp_tools):
                                 comp_tools.append(
                                     {
                                         "slug": p_s,

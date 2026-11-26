@@ -2650,8 +2650,9 @@ def test_crypto_tax_sibling_slugs_receive_distinct_meta_descriptions() -> None:
 
 def test_profithelm_surety_bond_meta_avoids_irc_statutory_and_heals_stale_spec() -> None:
     """
-    Verifies ProfitHelm surety/bond slugs generate federal Miller Act / Treasury Circular 570
-    meta descriptions (never IRC statutory / IRS / tax brackets) and heal stale specs.
+    Verifies ProfitHelm surety/bond slugs generate IRC Section 162(a) deductibility
+    meta descriptions (never generic IRC statutory / tax brackets or LienBond 40 U.S.C. Section 3131)
+    and heal stale specs.
     """
     from pseofactory.gsc_remediation import _normalize_meta_120_155, compile_remediation_overlay_spec
 
@@ -2666,7 +2667,8 @@ def test_profithelm_surety_bond_meta_avoids_irc_statutory_and_heals_stale_spec()
         slug="contractor-surety-bond-cost-calculator",
     )
     assert 120 <= len(healed) <= 155
-    assert "40 U.S.C. Section 3131" in healed
+    assert "IRC Section 162(a)" in healed
+    assert "40 u.s.c. section 3131" not in healed.lower()
     for forbidden in ("irc statutory", "irs", "tax brackets", "(irc rules)"):
         assert forbidden not in healed.lower()
     assert_no_forbidden_dashes(healed, context="profithelm surety meta")

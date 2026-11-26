@@ -412,6 +412,7 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     </div>
     <form class="calculator-form" aria-label="Discretionary income inputs">
       <input id="balance" name="balance" type="number" value="45000" />
+      <input id="weighted_rate" name="weighted_rate" type="number" value="6.5" />
     </form>
     <div class="result-box">
       <p>Verified baseline model calculation output: <strong class="output-value" data-baseline-output="248.23">248.23</strong>. Select a parameterized preset below:</p>
@@ -430,6 +431,15 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     <script>
       const readout = document.createElement("span");
       readout.className = "output-value calc-metric-value overlay-preset-readout";
+      function recomputeDiscretionary() {{
+        const bal = Number(document.getElementById("balance").value || 0);
+        const rate = Number(document.getElementById("weighted_rate").value || 0);
+        const out = bal * (rate / 100.0);
+        const outEl = document.querySelector(".output-value");
+        if (outEl) {{ outEl.textContent = String(Math.round(out * 100) / 100); }}
+      }}
+      document.querySelector(".calculator-form").addEventListener("input", recomputeDiscretionary);
+      document.addEventListener("DOMContentLoaded", recomputeDiscretionary);
     </script>
   </main>
 </body>
@@ -440,7 +450,7 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
         "</head>",
         f'<script id="calculation-manifest" type="application/json">{json.dumps(sidecar_manifest)}</script></head>',
     )
-    drift_flagged = RetroReflectionEngine.audit_html_mechanics(embedded_2925_html)
+    drift_flagged = RetroReflectionEngine.audit_html_mechanics(embedded_2925_html, property_id="prexvo")
     assert "output_value" in drift_flagged
     assert "deep_link_scenario_presets" in drift_flagged
     assert "server_rendered_sensitivity_grid" in drift_flagged
@@ -468,7 +478,7 @@ def test_dynamic_void_manifest_and_ssr_output_parity_retro_reflection(tmp_path):
     # JS template string inside <script> must remain untouched
     assert 'readout.className = "output-value calc-metric-value overlay-preset-readout";' in healed_html
 
-    post_missing = RetroReflectionEngine.audit_html_mechanics(healed_html)
+    post_missing = RetroReflectionEngine.audit_html_mechanics(healed_html, property_id="prexvo")
     assert post_missing == []
 
     stage = ContentAccuracyAuditStage(tolerance=0.01, strict=False)

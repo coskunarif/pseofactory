@@ -1031,10 +1031,12 @@
       ],
       "allowed_slug_patterns": [
         ".*s-corp.*",
-        ".*payroll.*",
-        ".*salary.*"
+        ".*reasonable-salary.*"
       ],
-      "forbidden_slug_patterns": [],
+      "forbidden_slug_patterns": [
+        ".*workers-comp.*",
+        ".*payroll-burden.*"
+      ],
       "output_selectors": [
         "#fica-tax-savings",
         "[data-output='fica_savings']"

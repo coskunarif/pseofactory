@@ -19,6 +19,7 @@ Zero em-dashes. Zero en-dashes.
 """
 
 from pathlib import Path
+import re
 import pytest
 
 from pseofactory.audit import (
@@ -43,13 +44,28 @@ def profithelm_spec():
         "query": "section 179 equipment expense tax deduction calculator",
         "slug": "section-179-equipment-expense-tax-deduction-calculator",
         "tenant": "profithelm",
-        "statutory_authority": "IRC Section 179(b)(1)",
+        "statutory_authority": "IRC Section 179(b)(1), IRC Section 179(b)(5), and P.L. 119-21 Section 70301",
         "economic_dataset": "FRED CPILFESL Series",
-        "model_name": "Section 179 Grounded Model",
-        "formula": "min(cost, cap)",
-        "inputs": {"cost": 400000, "cap": 1220000},
-        "published_output": 400000.0,
-        "sample_calculation": "Cost 400,000 under cap 1,220,000 gives 400,000 deduction",
+        "model_name": "2026 Section 179 (with $32,000 Heavy SUV Cap) + 100% Bonus Depreciation",
+        "formula_id": "section_179_heavy_suv_plus_bonus_2026",
+        "formula": (
+            "round(min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0))) + "
+            "max(0.0, equipment_cost * business_use_pct - min(equipment_cost * business_use_pct, "
+            "32000.0 if is_heavy_suv == 1 else max(0.0, 2560000.0 - max(0.0, equipment_cost - 4090000.0)))) * "
+            "(bonus_pct / 100.0), 2)"
+        ),
+        "inputs": {
+            "equipment_cost": 85000.0,
+            "business_use_pct": 0.8,
+            "is_heavy_suv": 1,
+            "bonus_pct": 100.0,
+        },
+        "published_output": 68000.0,
+        "sample_calculation": (
+            "Heavy SUV equipment cost 85,000 at 80 percent business use with 32,000 Section 179 cap "
+            "and 100 percent bonus depreciation yields 68,000 deduction under 2,560,000 cap"
+        ),
         "canonical_base": "https://profithelm.com",
     }
 
@@ -137,8 +153,8 @@ def test_audit_stage_clean_profithelm_asset(profithelm_spec):
     )
     assert report.passed is True
     assert len(report.violations) == 0
-    assert report.evaluated_output == pytest.approx(400000.0, rel=1e-4)
-    assert report.published_output == pytest.approx(400000.0, rel=1e-4)
+    assert report.evaluated_output == pytest.approx(68000.0, rel=1e-4)
+    assert report.published_output == pytest.approx(68000.0, rel=1e-4)
 
     expected_gates = [
         "title_h1_parity",
@@ -263,7 +279,7 @@ def test_audit_gate_5_formula_output_mismatch(profithelm_spec):
     """Mathematical mismatch between AST evaluation and published output triggers Gate 5."""
     res = compile_high_effort_page(profithelm_spec)
     tampered_html = res["html"].replace(
-        '<strong class="output-value">400,000</strong>',
+        '<strong class="output-value">68,000</strong>',
         '<strong class="output-value">999,999</strong>',
     )
 
@@ -276,7 +292,7 @@ def test_audit_gate_5_formula_output_mismatch(profithelm_spec):
 def test_audit_gate_6_table_cell_synthetic_mock_marker(profithelm_spec):
     """Synthetic mock/dummy markers or illegal NaN/null in data table trigger Gate 6."""
     res = compile_high_effort_page(profithelm_spec)
-    tampered_html = res["html"].replace("<td>Cost</td>", "<td>mock data point</td>")
+    tampered_html = res["html"].replace("<td>Equipment Cost</td>", "<td>mock data point</td>")
 
     report = audit_rendered_asset(tampered_html, profithelm_spec, "profithelm")
     assert report.passed is False
@@ -320,7 +336,8 @@ def test_audit_gate_9_corrupted_schema_jsonld(profithelm_spec):
 def test_audit_gate_10_anti_slop_forbidden_dashes(profithelm_spec):
     """Forbidden em-dash or en-dash in rendered HTML triggers Gate 10."""
     res = compile_high_effort_page(profithelm_spec)
-    tampered_html = res["html"].replace("Executive", "Executive \u2014 Direct Answer")
+    tampered_html = res["html"].replace("<p>", "<p>Analysis \u2014 ", 1)
+    assert tampered_html != res["html"]
 
     report = audit_rendered_asset(tampered_html, profithelm_spec, "profithelm")
     assert report.passed is False
@@ -373,8 +390,8 @@ def test_pipeline_fail_closed_tampered_statutory_authority_zero_disk(tmp_path, m
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
-    assert len(result.aborted_opportunities[0].foreign_tokens) > 0
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 3 (Statutory Authority)" in result.aborted_opportunities[0].reason
 
     # Strict invariant: zero disk persistence
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
@@ -384,14 +401,16 @@ def test_pipeline_fail_closed_tampered_statutory_authority_zero_disk(tmp_path, m
 
 def test_pipeline_fail_closed_formula_mismatch_zero_disk(tmp_path, monkeypatch):
     """
-    Formula / published output mismatch in compiled HTML triggers AUDIT_STAGE_FAILED
+    Formula / published output mismatch in compiled HTML triggers fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
         res = compile_high_effort_page(spec)
-        bad_html = res["html"].replace(
-            '<strong class="output-value">400,000</strong>',
-            '<strong class="output-value">888,888</strong>',
+        bad_html = re.sub(
+            r'(<strong class="output-value">)[^<]+(</strong>)',
+            r"\g<1>888,888\g<2>",
+            res["html"],
+            count=1,
         )
         return dict(res, html=bad_html)
 
@@ -412,7 +431,8 @@ def test_pipeline_fail_closed_formula_mismatch_zero_disk(tmp_path, monkeypatch):
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 5 (Formula Parity)" in result.aborted_opportunities[0].reason
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -420,7 +440,7 @@ def test_pipeline_fail_closed_formula_mismatch_zero_disk(tmp_path, monkeypatch):
 
 def test_pipeline_fail_closed_template_leakage_zero_disk(tmp_path, monkeypatch):
     """
-    Template variable leakage ({undefined_variable}) triggers AUDIT_STAGE_FAILED
+    Template variable leakage ({undefined_variable}) triggers fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
@@ -445,7 +465,11 @@ def test_pipeline_fail_closed_template_leakage_zero_disk(tmp_path, monkeypatch):
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert (
+        "Gate 7 (Template Leakage)" in result.aborted_opportunities[0].reason
+        or "Gate 1 (Title & H1 Parity)" in result.aborted_opportunities[0].reason
+    )
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -453,12 +477,17 @@ def test_pipeline_fail_closed_template_leakage_zero_disk(tmp_path, monkeypatch):
 
 def test_pipeline_fail_closed_synthetic_mock_table_zero_disk(tmp_path, monkeypatch):
     """
-    Synthetic mock tokens in calculation table trigger AUDIT_STAGE_FAILED
+    Synthetic mock tokens in calculation table trigger fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
         res = compile_high_effort_page(spec)
-        bad_html = res["html"].replace("<td>Cost</td>", "<td>mock dataset parameter</td>")
+        bad_html = re.sub(
+            r"<td>(?:Cost|Equipment Cost)</td>",
+            "<td>mock dataset parameter</td>",
+            res["html"],
+            count=1,
+        )
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
@@ -478,7 +507,8 @@ def test_pipeline_fail_closed_synthetic_mock_table_zero_disk(tmp_path, monkeypat
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 6 (Table Cells)" in result.aborted_opportunities[0].reason
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -486,7 +516,7 @@ def test_pipeline_fail_closed_synthetic_mock_table_zero_disk(tmp_path, monkeypat
 
 def test_pipeline_fail_closed_corrupted_schema_jsonld_zero_disk(tmp_path, monkeypatch):
     """
-    Corrupted Schema.org JSON-LD triggers AUDIT_STAGE_FAILED
+    Corrupted Schema.org JSON-LD triggers fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
@@ -511,7 +541,8 @@ def test_pipeline_fail_closed_corrupted_schema_jsonld_zero_disk(tmp_path, monkey
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 9 (Schema.org)" in result.aborted_opportunities[0].reason
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -519,14 +550,15 @@ def test_pipeline_fail_closed_corrupted_schema_jsonld_zero_disk(tmp_path, monkey
 
 def test_pipeline_fail_closed_anti_slop_dashes_zero_disk(tmp_path, monkeypatch):
     """
-    Anti-slop forbidden dashes in compiled HTML trigger AUDIT_STAGE_FAILED
+    Anti-slop forbidden dashes in compiled HTML trigger fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
         res = compile_high_effort_page(spec)
         # Note: compile_high_effort_page asserts clean dashes, so bypass compiler self-check
         # by tampering returned dict html directly
-        bad_html = res["html"].replace("Executive", "Executive \u2014 Analysis")
+        bad_html = res["html"].replace("<p>", "<p>Analysis \u2014 ", 1)
+        assert bad_html != res["html"]
         return dict(res, html=bad_html)
 
     monkeypatch.setattr("pseofactory.pipeline.compile_high_effort_page", _corrupted_compile)
@@ -546,7 +578,8 @@ def test_pipeline_fail_closed_anti_slop_dashes_zero_disk(tmp_path, monkeypatch):
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 10 (Anti-Slop)" in result.aborted_opportunities[0].reason
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -554,7 +587,7 @@ def test_pipeline_fail_closed_anti_slop_dashes_zero_disk(tmp_path, monkeypatch):
 
 def test_pipeline_fail_closed_corrupted_touch_target_zero_disk(tmp_path, monkeypatch):
     """
-    Corrupted touch target (< 44px) triggers AUDIT_STAGE_FAILED
+    Corrupted touch target (< 44px) triggers fail-closed COMPILATION_FAILED
     and guarantees zero disk persistence.
     """
     def _corrupted_compile(spec):
@@ -582,7 +615,8 @@ def test_pipeline_fail_closed_corrupted_touch_target_zero_disk(tmp_path, monkeyp
 
     assert result.compiled_count == 0
     assert result.aborted_count == 1
-    assert result.aborted_opportunities[0].reason == RejectionReason.AUDIT_STAGE_FAILED
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 10 (Touch Target)" in result.aborted_opportunities[0].reason
 
     target_tool_dir = out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator"
     assert not target_tool_dir.exists()
@@ -592,16 +626,18 @@ def test_pipeline_fail_closed_corrupted_touch_target_zero_disk(tmp_path, monkeyp
 # Non-Strict Advisory Audit & Class Exceptions
 # =====================================================================
 
-def test_pipeline_non_strict_advisory_mode(tmp_path, monkeypatch):
+def test_pipeline_non_strict_advisory_mode(tmp_path, monkeypatch, profithelm_spec):
     """
-    When strict_audit=False, audit failure does NOT block disk write,
-    but records audit_passed=False and audit_report in CompiledAssetResult.
+    Verifies zero-bypass fail-closed pipeline enforcement even when PipelineConfig(strict_audit=False),
+    while ContentAccuracyAuditStage(strict=False) still returns a non-raising advisory report.
     """
     def _corrupted_compile(spec):
         res = compile_high_effort_page(spec)
-        bad_html = res["html"].replace(
-            '<strong class="output-value">400,000</strong>',
-            '<strong class="output-value">999,999</strong>',
+        bad_html = re.sub(
+            r'(<strong class="output-value">)[^<]+(</strong>)',
+            r"\g<1>999,999\g<2>",
+            res["html"],
+            count=1,
         )
         return dict(res, html=bad_html)
 
@@ -615,18 +651,26 @@ def test_pipeline_non_strict_advisory_mode(tmp_path, monkeypatch):
         spike_id="spike-advisory-01",
         query="section 179 equipment expense tax deduction calculator",
         tenant="profithelm",
+        candidate_spec=dict(profithelm_spec),
     )
     out_dir = tmp_path / "dist"
     pipeline = FactoryPipeline(config=PipelineConfig(strict_audit=False))
     result = pipeline.execute([spike], output_dir=out_dir)
 
-    assert result.compiled_count == 1
-    assert result.aborted_count == 0
-    ca = result.compiled_assets[0]
-    assert ca.audit_passed is False
-    assert ca.audit_report is not None
-    assert ca.audit_report["passed"] is False
-    assert (out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator" / "index.html").exists()
+    # Zero-bypass hardening: pipeline always fails closed and never writes flawed assets to disk
+    assert result.compiled_count == 0
+    assert result.aborted_count == 1
+    assert result.aborted_opportunities[0].reason.startswith(RejectionReason.COMPILATION_FAILED)
+    assert "Gate 5 (Formula Parity)" in result.aborted_opportunities[0].reason
+    assert not (out_dir / "profithelm" / "tools" / "section-179-equipment-expense-tax-deduction-calculator" / "index.html").exists()
+
+    # ContentAccuracyAuditStage(strict=False) directly returns non-raising advisory report
+    corrupted = _corrupted_compile(profithelm_spec)
+    advisory_report = ContentAccuracyAuditStage(strict=False).audit(
+        corrupted["html"], profithelm_spec, "profithelm"
+    )
+    assert advisory_report.passed is False
+    assert any("Gate 5 (Formula Parity)" in v for v in advisory_report.violations)
 
 
 def test_content_accuracy_audit_stage_strict_raises_error(profithelm_spec):
@@ -829,7 +873,7 @@ def test_statutory_tamper_auto_reconciliation_and_fail_closed(tmp_path):
 
     truth_engine = LiveTruthAuditEngine()
 
-    # 1. Inject wrong Section 179 vehicle cap ($2,560,000 instead of $30,500) into HTML page
+    # 1. Inject wrong Section 179 vehicle cap ($2,560,000 instead of $32,000) into HTML page
     html_f = tools / "index.html"
     bad_html = (
         '<!doctype html><html><head>'
@@ -847,7 +891,7 @@ def test_statutory_tamper_auto_reconciliation_and_fail_closed(tmp_path):
     repaired = TruthReconciliationEngine.reconcile_estate_assets(dist_dir=dist, property_id="profithelm", repo_root=tmp_path)
     assert str(html_f) in repaired
     fixed_html = html_f.read_text(encoding="utf-8")
-    assert "$30,500" in fixed_html or "$31,300" in fixed_html
+    assert "$32,000" in fixed_html
     assert "$2,560,000 Section 179 vehicle deduction" not in fixed_html
     viols_after = truth_engine.audit_file(html_f, property_id="profithelm")
     assert not any("Erroneous Section 179 vehicle cap" in v for v in viols_after)
