@@ -359,3 +359,113 @@ def test_market_intel_four_active_tenants_zero_hibernated_reserve_domains(tmp_pa
         "gainhelm.com",
         "lienbond.com",
     }
+
+
+def test_protected_core_route_partners_overlay_blocked_on_compile_persist_eval_and_inject(tmp_path: Path) -> None:
+    """
+    Even if .agy/overlays/partners.json already exists on disk, overlay evaluation,
+    compilation, persistence, feedback_loop HTML repair, and inject_overlay_into_html
+    must skip dist/partners/index.html and leave its <title> and HTML 100% untouched.
+    """
+    from unittest.mock import MagicMock
+
+    from pseofactory.gsc_remediation import (
+        compile_remediation_overlay_spec,
+        evaluate_expired_overlays,
+        inject_overlay_into_html,
+        is_non_tool_overlay_target,
+        persist_overlay_respecting_lock,
+    )
+    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+
+    repo_root = tmp_path / "prexvo"
+    dist_dir = repo_root / "dist"
+    partners_dir = dist_dir / "partners"
+    partners_dir.mkdir(parents=True, exist_ok=True)
+    partners_file = partners_dir / "index.html"
+    original_partners_html = (
+        '<!DOCTYPE html><html lang="en"><head>'
+        "<title>Partners &amp; Editorial Disclosure | Prexvo</title>"
+        '<meta name="description" content="Partner directory and disclosures for Prexvo.">'
+        '<link rel="canonical" href="https://prexvo.com/partners/">'
+        "</head><body><main><h1>Partners</h1><p>Disclosure info.</p></main></body></html>"
+    )
+    partners_file.write_text(original_partners_html, encoding="utf-8")
+
+    # Seed legacy polluted .agy/overlays/partners.json on disk
+    ov_dir = repo_root / ".agy" / "overlays"
+    ov_dir.mkdir(parents=True, exist_ok=True)
+    legacy_ov = {
+        "slug": "partners",
+        "tenant_id": "prexvo",
+        "property_id": "prexvo",
+        "target_url": "https://prexvo.com/partners/",
+        "query": "partners",
+        "title_rewrite": "Partners 2026 Calculator (Title IV Rules) | Prexvo",
+        "quick_answer": "Should never be injected onto partners.",
+        "h2_headings": ["Partners 2026 Calculator"],
+        "status": "ACTIVE_LOCKED",
+        "created_at": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+        "locked_until": (datetime.now(timezone.utc) - timedelta(days=10)).isoformat(),
+        "measurement_lock_days": 28,
+        "baseline_position": 12.0,
+        "baseline_impressions": 20,
+    }
+    legacy_ov_file = ov_dir / "partners.json"
+    legacy_ov_file.write_text(json.dumps(legacy_ov, indent=2), encoding="utf-8")
+
+    assert is_non_tool_overlay_target(html=original_partners_html, overlay_data=legacy_ov, slug="partners") is True
+
+    # 1. inject_overlay_into_html must leave dist/partners/index.html untouched
+    assert inject_overlay_into_html(original_partners_html, legacy_ov) == original_partners_html
+
+    # 2. evaluate_expired_overlays must never touch dist/partners/index.html and prunes stale partners.json
+    eval_res = evaluate_expired_overlays(
+        site_url="sc-domain:prexvo.com",
+        base_dir=repo_root,
+        persist=True,
+        live_queries=[],
+    )
+    assert eval_res["total_evaluated"] == 0
+    assert partners_file.read_text(encoding="utf-8") == original_partners_html
+    assert not legacy_ov_file.exists()
+
+    # 3. compile_remediation_overlay_spec + persist_overlay_respecting_lock refuse core routes
+    compiled = compile_remediation_overlay_spec(
+        {
+            "slug": "partners",
+            "tenant_id": "prexvo",
+            "target_url": "https://prexvo.com/partners/",
+            "query": "partners",
+            "impressions": 40,
+            "position": 10.0,
+        },
+        tenant_id="prexvo",
+    )
+    assert compiled["blocked_protected_core_route"] is True
+    assert compiled["skip_overlay"] is True
+    assert compiled["overlay_allowed"] is False
+    assert compiled["title_rewrite"] == ""
+    assert compiled["h2_headings"] == []
+
+    _, written = persist_overlay_respecting_lock(legacy_ov_file, legacy_ov)
+    assert written is False
+    assert not legacy_ov_file.exists()
+
+    # 4. IndexingFeedbackLoop._apply_html_repairs_for_slug refuses protected core routes
+    loop = IndexingFeedbackLoop(
+        property_id="prexvo",
+        domain="prexvo.com",
+        canonical_base="https://prexvo.com",
+        base_dir=repo_root,
+        dist_dir=dist_dir,
+        indexer=MagicMock(),
+        inspector=MagicMock(),
+        preflight_engine=MagicMock(),
+        milestone_tracker=MagicMock(event_log=[]),
+        telemetry_logger=MagicMock(),
+    )
+    assert loop._is_protected_hub_route("partners", "https://prexvo.com/partners/") is True
+    assert loop._apply_html_repairs_for_slug("partners", "https://prexvo.com/partners/", legacy_ov) is False
+    assert partners_file.read_text(encoding="utf-8") == original_partners_html
+

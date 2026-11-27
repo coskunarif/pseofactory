@@ -3567,6 +3567,9 @@ def cmd_weekly_seo_tune(args: argparse.Namespace) -> int:
         if dry_run:
             if is_git_repo and not agy_gitignored:
                 _cleanup_unignored_agy_artifacts(repo_dir, pre_agy_files, agy_existed_before)
+            if dist_changed:
+                changed_tenants_count += 1
+                total_changed_files += changed_count
             tenant_results[p_id] = {
                 "status": "DRY_RUN",
                 "repo_root": str(repo_dir),

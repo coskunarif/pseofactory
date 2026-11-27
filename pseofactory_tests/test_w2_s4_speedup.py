@@ -168,6 +168,8 @@ def test_partner_tracker_lazy_monetization_bootstrap_no_import_side_effect() -> 
 
 
 def test_email_ingest_sync_all_parallel_five_folders_and_single_state_write(tmp_path: Path) -> None:
+    import threading
+
     cache_path = tmp_path / "email_cache.json"
     state_path = tmp_path / "email_state.json"
     engine = EmailIngestionEngine(
@@ -177,48 +179,59 @@ def test_email_ingest_sync_all_parallel_five_folders_and_single_state_write(tmp_
     )
 
     polled_folders: List[str] = []
-    delay_s = 0.15
+    delay_s = 0.25
+    concurrency_lock = threading.Lock()
+    concurrency_stats = {"in_flight": 0, "max_in_flight": 0}
 
     def fake_himalaya(args: List[str]) -> Tuple[int, str, str]:
         if args[:2] == ["envelope", "list"]:
-            time.sleep(delay_s)
-            folder = args[args.index("-m") + 1]
-            polled_folders.append(folder)
-            if folder == "Inbox":
-                return 0, json.dumps({
-                    "envelopes": [{
-                        "id": "101",
-                        "message_id": "<in-101@gusto.com>",
-                        "date": "2026-11-20T10:00:00Z",
-                        "subject": "Gusto Partner Application",
-                        "from": [{"name": "Gusto Team", "email": "noelle.hyra@gusto.com"}],
-                        "flags": [],
-                    }]
-                }), ""
-            if folder == "Sent":
-                return 0, json.dumps({
-                    "envelopes": [{
-                        "id": "201",
-                        "message_id": "<sent-201@profithelm.com>",
-                        "date": "2026-11-20T11:00:00Z",
-                        "subject": "Mercury Partnership Followup",
-                        "from": [{"name": "Arif Coskun", "email": "arif.coskun@profithelm.com"}],
-                        "to": [{"name": "Mercury", "email": "partnerships@mercury.com"}],
-                        "flags": [],
-                    }]
-                }), ""
-            if folder == "Notification":
-                return 0, json.dumps({
-                    "envelopes": [{
-                        "id": "301",
-                        "message_id": "<notif-301@cj.com>",
-                        "date": "2026-11-20T12:00:00Z",
-                        "subject": "FreeTaxUSA Affiliate Program Approved",
-                        "from": [{"name": "CJ Affiliate", "email": "affiliates@freetaxusa.com"}],
-                        "flags": [],
-                    }]
-                }), ""
-            return 0, json.dumps({"envelopes": []}), ""
+            with concurrency_lock:
+                concurrency_stats["in_flight"] += 1
+                if concurrency_stats["in_flight"] > concurrency_stats["max_in_flight"]:
+                    concurrency_stats["max_in_flight"] = concurrency_stats["in_flight"]
+            try:
+                time.sleep(delay_s)
+                folder = args[args.index("-m") + 1]
+                with concurrency_lock:
+                    polled_folders.append(folder)
+                if folder == "Inbox":
+                    return 0, json.dumps({
+                        "envelopes": [{
+                            "id": "101",
+                            "message_id": "<in-101@gusto.com>",
+                            "date": "2026-11-20T10:00:00Z",
+                            "subject": "Gusto Partner Application",
+                            "from": [{"name": "Gusto Team", "email": "noelle.hyra@gusto.com"}],
+                            "flags": [],
+                        }]
+                    }), ""
+                if folder == "Sent":
+                    return 0, json.dumps({
+                        "envelopes": [{
+                            "id": "201",
+                            "message_id": "<sent-201@profithelm.com>",
+                            "date": "2026-11-20T11:00:00Z",
+                            "subject": "Mercury Partnership Followup",
+                            "from": [{"name": "Arif Coskun", "email": "arif.coskun@profithelm.com"}],
+                            "to": [{"name": "Mercury", "email": "partnerships@mercury.com"}],
+                            "flags": [],
+                        }]
+                    }), ""
+                if folder == "Notification":
+                    return 0, json.dumps({
+                        "envelopes": [{
+                            "id": "301",
+                            "message_id": "<notif-301@cj.com>",
+                            "date": "2026-11-20T12:00:00Z",
+                            "subject": "FreeTaxUSA Affiliate Program Approved",
+                            "from": [{"name": "CJ Affiliate", "email": "affiliates@freetaxusa.com"}],
+                            "flags": [],
+                        }]
+                    }), ""
+                return 0, json.dumps({"envelopes": []}), ""
+            finally:
+                with concurrency_lock:
+                    concurrency_stats["in_flight"] -= 1
         if args[:2] == ["message", "read"]:
             return 0, "Partner details confirmed.", ""
         return 1, "", "unexpected"
@@ -239,8 +252,9 @@ def test_email_ingest_sync_all_parallel_five_folders_and_single_state_write(tmp_
 
     assert set(polled_folders) == set(ZOHO_POLL_MAILBOXES)
     assert len(polled_folders) == 5
-    # 5 parallel fetches at 0.15s each must complete well below 5 * 0.15s = 0.75s
-    assert elapsed < 0.45, f"Expected parallel ~1x latency (<0.45s), got {elapsed:.3f}s"
+    # Deterministic concurrency proof + generous upper bound well below sequential 5 * 0.25s = 1.25s
+    assert concurrency_stats["max_in_flight"] >= 3, f"Expected >=3 concurrent folder fetches, got {concurrency_stats['max_in_flight']}"
+    assert elapsed < 1.0, f"Expected parallel execution (<1.0s vs 1.25s sequential), got {elapsed:.3f}s"
     # Coalesced into a single atomic save_state write instead of 5 sequential writes
     assert save_state_calls["n"] == 1
     assert len(msgs) == 3

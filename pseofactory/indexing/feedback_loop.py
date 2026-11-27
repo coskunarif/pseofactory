@@ -35,6 +35,13 @@ from pseofactory.indexing.milestones import (
 from pseofactory.indexing.preflight import IndexingPreflightEngine, PreflightReport
 from pseofactory.telemetry import AtomicTelemetryLogger, TelemetryEvent
 
+
+def _is_protected_core_route(value: str) -> bool:
+    """Lazy-import wrapper around seo_growth_loops._is_protected_core_route to avoid circular imports."""
+    from pseofactory.seo_growth_loops import _is_protected_core_route as _impl
+
+    return _impl(value)
+
 if TYPE_CHECKING:
     from pseofactory.indexing_inspector import DailyIndexingInspector
     from pseofactory.maintenance import (
@@ -1523,6 +1530,8 @@ class IndexingFeedbackLoop:
         u_clean = str(target_url or "").strip().lower()
         if s_clean in self._PROTECTED_HUB_SLUGS:
             return True
+        if _is_protected_core_route(s_clean) or _is_protected_core_route(u_clean):
+            return True
         if s_clean == "statutory-calculator" and "/tools/statutory-calculator" not in u_clean:
             return True
         return False
@@ -1575,7 +1584,7 @@ class IndexingFeedbackLoop:
             return False
         try:
             rel_check = target_file.relative_to(self.dist_dir).as_posix()
-            if rel_check in self._PROTECTED_HUB_REL_PATHS:
+            if rel_check in self._PROTECTED_HUB_REL_PATHS or _is_protected_core_route(rel_check):
                 return False
         except Exception:
             pass
@@ -1652,6 +1661,7 @@ class IndexingFeedbackLoop:
             rel_target = target_file.relative_to(self.dist_dir).as_posix()
             is_hub_or_fallback = (
                 rel_target in ("index.html", "tools/index.html")
+                or _is_protected_core_route(rel_target)
                 or slug in ("statutory-calculator", "index", "tools")
             )
             if not is_hub_or_fallback:
@@ -2362,6 +2372,9 @@ class IndexingFeedbackLoop:
                     target_url=str(cand.get("target_url") or ""),
                     query=str(cand.get("query") or ""),
                 )
+                pre_t_url = str(cand.get("target_url") or "")
+                if self._is_protected_hub_route(c_slug, pre_t_url):
+                    continue
                 spec = cand.get("overlay_spec")
                 if not isinstance(spec, dict) or "title_rewrite" not in spec:
                     spec = compile_remediation_overlay_spec(cand, tenant_id=self.property_id)
@@ -2948,6 +2961,12 @@ class IndexingFeedbackLoop:
         def _remediation_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             t_slug = str(task.get("slug") or "")
             t_url = str(task.get("target_url") or "")
+            if self._is_protected_hub_route(t_slug, t_url):
+                return {
+                    "status": "SKIPPED_PROTECTED_CORE_ROUTE",
+                    "slug": t_slug,
+                    "html_repaired": False,
+                }
             spec = task.get("overlay_spec")
             if not isinstance(spec, dict) or "title_rewrite" not in spec:
                 live_task = (

@@ -465,10 +465,38 @@ def test_cli_weekly_seo_tune_discovery_dry_run_no_delta_and_ship(tmp_path: Path,
     dry_out = json.loads(capsys.readouterr().out)
     assert dry_out["status"] == "DRY_RUN"
     assert dry_out["tenants_discovered"] == ["alpha", "beta"]
+    assert dry_out["changed_tenants_count"] == 0
+    assert dry_out["total_changed_files"] == 0
     assert dry_out["properties"]["alpha"]["status"] == "DRY_RUN"
     assert dry_out["properties"]["beta"]["status"] == "DRY_RUN"
     assert len(maint_calls) == 0
     assert all(c["apply_overlays"] is False for c in workflow_calls)
+
+    # 1b. Dry-run with an existing dist/ change must accurately count changed_tenants_count and total_changed_files
+    orig_alpha_index = (alpha_root / "dist" / "index.html").read_text(encoding="utf-8")
+    (alpha_root / "dist" / "index.html").write_text("<html><body><h1>Dirty Alpha</h1></body></html>", encoding="utf-8")
+    rc_dry_dirty = cli.main(
+        [
+            "weekly-seo-tune",
+            "--property",
+            "all",
+            "--dry-run",
+            "--json",
+            "--workspace-root",
+            str(ws_root),
+            "--ledger-path",
+            str(ledger_path),
+        ]
+    )
+    assert rc_dry_dirty == 0
+    dry_dirty_out = json.loads(capsys.readouterr().out)
+    assert dry_dirty_out["status"] == "DRY_RUN"
+    assert dry_dirty_out["properties"]["alpha"]["dist_changed"] is True
+    assert dry_dirty_out["properties"]["alpha"]["changed_files_count"] == 1
+    assert dry_dirty_out["changed_tenants_count"] == 1
+    assert dry_dirty_out["total_changed_files"] == 1
+    assert len(maint_calls) == 0
+    (alpha_root / "dist" / "index.html").write_text(orig_alpha_index, encoding="utf-8")
 
     # 2. Live run with --skip-browser-audit: alpha dist/ changes -> ships; beta has no dist delta -> NO_DIST_DELTA + clean git
     workflow_calls.clear()

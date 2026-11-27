@@ -23,6 +23,13 @@ from pathlib import Path
 from typing import Any, Callable, Collection, Dict, List, Optional, Set, Tuple, Union
 
 from pseofactory.contracts import is_non_tool_or_governance_route
+
+
+def _is_protected_core_route(value: str) -> bool:
+    """Lazy-import wrapper around seo_growth_loops._is_protected_core_route to avoid circular imports."""
+    from pseofactory.seo_growth_loops import _is_protected_core_route as _impl
+
+    return _impl(value)
 from pseofactory.tenant_facts import (
     TENANT_DEFAULT_CPC_USD,
     TENANT_DEFAULT_ERPM_USD,
@@ -5183,8 +5190,82 @@ def compile_remediation_overlay_spec(
         query=raw_query,
         default_slug=str(candidate.get("slug") or ""),
     )
+    is_protected_core = bool(
+        _is_protected_core_route(target_url)
+        or _is_protected_core_route(slug)
+        or is_non_tool_or_governance_route(target_url)
+        or is_non_tool_or_governance_route(slug)
+    )
     if not target_url:
-        target_url = f"https://{domain}/tools/{slug}/"
+        target_url = f"https://{domain}/tools/{slug}/" if not is_protected_core else f"https://{domain}/"
+    if is_protected_core:
+        from pseofactory.indexer import classify_url_template_section
+
+        sec_info_prot = classify_url_template_section(
+            target_url,
+            metadata=candidate,
+            canonical_base=f"https://{domain}",
+        )
+        sec_name_prot = str(candidate.get("section") or candidate.get("template_section") or sec_info_prot["section"])
+        child_sm_prot = str(candidate.get("child_sitemap") or sec_info_prot["child_sitemap"])
+        child_sm_url_prot = str(candidate.get("child_sitemap_url") or f"https://{domain}/{child_sm_prot}")
+        intent_info_prot = _classify_asset_intent_class(
+            slug=slug,
+            target_url=target_url,
+            query=raw_query or slug.replace("-", " "),
+            section=sec_name_prot,
+        )
+        mon_info_prot = _resolve_partner_offer_and_manual_gate(
+            tenant_id=resolved_tenant,
+            slug=slug,
+            query=raw_query or slug.replace("-", " "),
+            value_tier=intent_info_prot["value_tier"],
+            candidate=candidate,
+        )
+        now_prot = datetime.now(timezone.utc)
+        return {
+            "slug": slug,
+            "property_id": resolved_tenant,
+            "tenant_id": resolved_tenant,
+            "target_url": target_url,
+            "query": _strip_forbidden_dashes(raw_query or slug.replace("-", " ")),
+            "section": sec_name_prot,
+            "template_section": sec_name_prot,
+            "child_sitemap": child_sm_prot,
+            "child_sitemap_url": child_sm_url_prot,
+            "submitted_pages_only_scope": f"Submitted pages only ({child_sm_prot})",
+            "intent_class": intent_info_prot["intent_class"],
+            "is_high_intent_calculator_or_guide": False,
+            "restricted_public_service": mon_info_prot["restricted_public_service"],
+            "commercial_offers_allowed": False,
+            "partner_offer": None,
+            "manual_requirement_detected": False,
+            "manual_requirement": None,
+            "anomaly_type": str(candidate.get("anomaly_type") or "PROTECTED_CORE_ROUTE"),
+            "action": "SKIP_PROTECTED_CORE_ROUTE",
+            "action_type": "SKIP_PROTECTED_CORE_ROUTE",
+            "status": "BLOCKED_PROTECTED_CORE_ROUTE",
+            "blocked_protected_core_route": True,
+            "skip_overlay": True,
+            "overlay_allowed": False,
+            "measurement_lock_days": int(lock_days),
+            "lock_days": int(lock_days),
+            "created_at": now_prot.isoformat(),
+            "title_rewrite": "",
+            "title": "",
+            "meta_description": "",
+            "description": "",
+            "quick_answer": "",
+            "autonomous_citation_assertions": [],
+            "ai_mode_decision_matrix": [],
+            "h2_headings": [],
+            "preset_scenarios": [],
+            "comparison_rows": [],
+            "faq_entries": [],
+            "faq_additions": [],
+            "faq_schema": {},
+            "hub_links": [],
+        }
 
     from pseofactory.competitor import PROFITHELM_SECTION_179_VEHICLES, _format_safe_heading_topic
 
@@ -7913,6 +7994,8 @@ def persist_overlay_respecting_lock(overlay_file: Union[str, Path], spec: Dict[s
     Zero em-dashes. Zero en-dashes.
     """
     path = Path(overlay_file)
+    if is_non_tool_overlay_target(overlay_data=spec, slug=path.stem):
+        return dict(spec), False
     from pseofactory.maintenance import _is_live_repo_mutation_blocked
 
     if _is_live_repo_mutation_blocked(path):
@@ -8523,10 +8606,12 @@ def is_non_tool_overlay_target(
     slug: str = "",
     target_url: str = "",
 ) -> bool:
-    """Returns True when an HTML document or overlay spec targets a non-tool governance/utility route."""
+    """Returns True when an HTML document or overlay spec targets a protected core or non-tool route."""
     ov = overlay_data if isinstance(overlay_data, dict) else {}
+    if ov.get("blocked_protected_core_route") or ov.get("skip_overlay") or ov.get("overlay_allowed") is False:
+        return True
     for candidate in (slug, str(ov.get("slug") or ""), target_url, str(ov.get("target_url") or "")):
-        if candidate and is_non_tool_or_governance_route(candidate):
+        if candidate and (_is_protected_core_route(candidate) or is_non_tool_or_governance_route(candidate)):
             return True
     if html:
         can_m = re.search(
@@ -8538,7 +8623,7 @@ def is_non_tool_overlay_target(
             html,
             re.IGNORECASE,
         )
-        if can_m and is_non_tool_or_governance_route(can_m.group(1)):
+        if can_m and (_is_protected_core_route(can_m.group(1)) or is_non_tool_or_governance_route(can_m.group(1))):
             return True
     return False
 
@@ -8582,7 +8667,7 @@ def _iter_overlay_target_html_paths(root: Path, slug: str) -> List[Path]:
     seen: Set[Path] = set()
     dist_dir = root / "dist"
     for cand in cands:
-        if is_non_tool_or_governance_route(cand):
+        if _is_protected_core_route(cand) or is_non_tool_or_governance_route(cand):
             continue
         for html_target in (
             dist_dir / "tools" / cand / "index.html",
@@ -8590,6 +8675,9 @@ def _iter_overlay_target_html_paths(root: Path, slug: str) -> List[Path]:
             dist_dir / cand / "index.html",
         ):
             if html_target not in seen and html_target.is_file():
+                rel_dist = html_target.relative_to(dist_dir).as_posix()
+                if _is_protected_core_route(rel_dist) or is_non_tool_or_governance_route(rel_dist):
+                    continue
                 seen.add(html_target)
                 out_paths.append(html_target)
     return out_paths
@@ -8808,6 +8896,7 @@ def evaluate_expired_overlays(
         if (
             is_retired_or_consolidated_slug(slug, prop)
             or is_non_tool_overlay_target(overlay_data=overlay_data, slug=slug)
+            or _is_protected_core_route(stem_slug)
             or is_non_tool_or_governance_route(stem_slug)
         ):
             if persist and not live_blocked:
