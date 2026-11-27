@@ -3235,15 +3235,63 @@ def sync_h1_to_title_core_coverage(
     matched = [tok for tok in h1_core if tok in title_tokens]
     coverage = len(matched) / float(len(h1_core))
     eff_min_cov = min_coverage if is_calc_leaf else min(min_coverage, 0.30)
-    if coverage >= eff_min_cov:
-        return html_content
-
     core_title = _extract_clean_core_title(title_text, brand_name=brand_name)
-    if not core_title or core_title == h1_text:
-        return html_content
 
-    escaped_h1 = html.escape(core_title, quote=False)
-    return html_content[: h1_m.start(2)] + escaped_h1 + html_content[h1_m.end(2) :]
+    updated_html = html_content
+    final_h1_text = h1_text
+    if coverage < eff_min_cov and core_title and core_title != h1_text:
+        escaped_h1 = html.escape(core_title, quote=False)
+        updated_html = html_content[: h1_m.start(2)] + escaped_h1 + html_content[h1_m.end(2) :]
+        final_h1_text = core_title
+
+    # Keep JSON-LD WebApplication / SoftwareApplication name aligned with clean core title / H1
+    # so Gate 9 (Schema.org) never drifts when an overlay title_rewrite updates <title> and <h1>.
+    if core_title and "<script" in updated_html and "application/ld+json" in updated_html.lower():
+        ref_tokens = set(re.findall(r"[a-z0-9]{2,}", f"{core_title} {final_h1_text}".lower())) - _TITLE_CORE_STOPWORDS
+        if ref_tokens:
+            def _sync_app_name_in_jsonld(match_obj: re.Match[str]) -> str:
+                raw_block = match_obj.group(0)
+                body = match_obj.group(2)
+                try:
+                    parsed = json.loads(body)
+                except Exception:
+                    return raw_block
+                changed = False
+
+                def _walk_nodes(node: Any) -> None:
+                    nonlocal changed
+                    if isinstance(node, list):
+                        for item in node:
+                            _walk_nodes(item)
+                        return
+                    if not isinstance(node, dict):
+                        return
+                    ntype = node.get("@type")
+                    ntypes = ntype if isinstance(ntype, list) else ([ntype] if ntype else [])
+                    if any(str(t) in ("WebApplication", "SoftwareApplication") for t in ntypes):
+                        cur_name = str(node.get("name") or "").strip()
+                        if cur_name:
+                            cur_toks = set(re.findall(r"[a-z0-9]{2,}", cur_name.lower())) - _TITLE_CORE_STOPWORDS
+                            overlap = (len(cur_toks & ref_tokens) / float(len(cur_toks))) if cur_toks else 1.0
+                            if overlap < 0.60 and cur_name != core_title:
+                                node["name"] = core_title
+                                changed = True
+                    if "@graph" in node:
+                        _walk_nodes(node["@graph"])
+
+                _walk_nodes(parsed)
+                if not changed:
+                    return raw_block
+                return f"{match_obj.group(1)}{json.dumps(parsed, ensure_ascii=False)}{match_obj.group(3)}"
+
+            updated_html = re.sub(
+                r'(<script\b[^>]*type=["\']application/ld\+json["\'][^>]*>)([\s\S]*?)(</script>)',
+                _sync_app_name_in_jsonld,
+                updated_html,
+                flags=re.IGNORECASE,
+            )
+
+    return updated_html
 
 
 _PROFITHELM_GONE_TOOL_SLUG_RE = re.compile(

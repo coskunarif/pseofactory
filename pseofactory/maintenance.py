@@ -4164,6 +4164,8 @@ class AssetIntegrityEvaluator:
             for s_item in sorted(synd_dir_cand.iterdir()):
                 if s_item.name.startswith("."):
                     continue
+                if s_item.name == "github_repo_bundle" and s_item.is_dir():
+                    continue
                 if s_item.name == "ai_benchmarks" and s_item.is_dir():
                     for b_file in sorted(s_item.iterdir()):
                         if b_file.is_file() and b_file.name.endswith("_matrix.md"):
@@ -15769,6 +15771,8 @@ class RetroReflectionEngine:
             )
             for s_item in sorted(synd_dir.iterdir()):
                 if s_item.name.startswith("."):
+                    continue
+                if s_item.name == "github_repo_bundle" and s_item.is_dir():
                     continue
                 if s_item.name == "ai_benchmarks" and s_item.is_dir():
                     for b_file in sorted(s_item.iterdir()):
