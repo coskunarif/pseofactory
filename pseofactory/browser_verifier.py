@@ -3236,7 +3236,7 @@ class UnifiedBrowserAuditor:
             if (!rawH || rawH === '#') return false;
             const cs = window.getComputedStyle(a);
             if (cs.display === 'none' || cs.visibility === 'hidden') return false;
-            if (rawH.startsWith('#')) return rawH.length > 1;
+            if (rawH.startsWith('#')) return rawH.length > 1 && !rawH.includes('=') && !rawH.startsWith('#:~:');
             if (!rawH.includes('#')) return false;
             try {
                 const pu = new URL(rawH, window.location.origin);
@@ -3244,7 +3244,9 @@ class UnifiedBrowserAuditor:
                     pu.origin === window.location.origin &&
                     normHashPagePath(pu.pathname) === curNormHashPath &&
                     !pu.search &&
-                    pu.hash.length > 1
+                    pu.hash.length > 1 &&
+                    !pu.hash.includes('=') &&
+                    !pu.hash.startsWith('#:~:')
                 );
             } catch (e) {
                 return false;
@@ -4076,7 +4078,7 @@ class UnifiedBrowserAuditor:
                 invalid.append(raw_href)
                 continue
             frag = (parsed.fragment or "").strip()
-            if frag and target_file.suffix.lower() == ".html":
+            if frag and "=" not in frag and not frag.startswith(":~:") and target_file.suffix.lower() == ".html":
                 target_ids = self._get_ids_in_html_file(target_file)
                 if frag not in target_ids:
                     invalid.append(raw_href)

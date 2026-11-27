@@ -176,7 +176,7 @@ def test_compiler_sub1_4decimal_parity_and_no_bare_load_replacestate() -> None:
     assert "0.0385" in html_text
 
     scripts = re.findall(r"<script(?:\s+[^>]*)?>(.*?)</script>", html_text, flags=re.DOTALL | re.IGNORECASE)
-    calc_js = [s for s in scripts if "updateQueryParams" in s and "handleRecompute" in s][-1]
+    calc_js = [s for s in scripts if "updateHashParams" in s and "handleRecompute" in s][-1]
 
     node_harness = (
         "const vm = require('vm');\n"
@@ -195,13 +195,14 @@ def test_compiler_sub1_4decimal_parity_and_no_bare_load_replacestate() -> None:
         "  setTimeout: (fn, ms) => { const item = { id: scheduled.length + 1, fn, ms, cleared: false }; scheduled.push(item); return item.id; },\n"
         "  clearTimeout: (id) => { const item = scheduled.find((x) => x.id === id); if (item) item.cleared = true; },\n"
         "  window: {\n"
-        "    location: { href: 'https://profithelm.com/tools/sub-one-effective-rate-calculator/', search: '' },\n"
+        "    location: { href: 'https://profithelm.com/tools/sub-one-effective-rate-calculator/', search: '', hash: '' },\n"
         "    history: { replaceState: (_s, _t, u) => { replaceCalls.push(u); } },\n"
         "    addEventListener: () => {},\n"
         "  },\n"
         "  document: {\n"
         "    getElementById: (id) => (id.endsWith('-calculator') ? form : null),\n"
         "    querySelector: (sel) => (sel === '.output-value' ? outputElem : null),\n"
+        "    querySelectorAll: () => [],\n"
         "  },\n"
         "};\n"
         f"vm.runInNewContext({json.dumps(calc_js)}, sandbox);\n"
@@ -222,7 +223,7 @@ def test_compiler_sub1_4decimal_parity_and_no_bare_load_replacestate() -> None:
     assert out["inputScheduledCount"] == 1
     assert out["afterInputOutput"] == "0.0412"
     assert len(out["replaceCalls"]) == 1
-    assert "rate=0.0412" in out["replaceCalls"][0]
+    assert "#rate=0.0412" in out["replaceCalls"][0] or ("#" in out["replaceCalls"][0] and "rate=0.0412" in out["replaceCalls"][0])
 
 
 def test_compiler_html_escapes_meta_attribute_values() -> None:
@@ -388,7 +389,8 @@ def test_sync_sitemaps_headers_merges_duplicate_route_blocks(tmp_path: Path) -> 
     merged_txt = headers_file.read_text(encoding="utf-8")
     assert merged_txt.count("/tools/custom-calc/\n") == 1
     assert merged_txt.count("/about/\n") == 1
-    assert 'Link: <https://profithelm.com/tools/custom-calc/>; rel="canonical"' in merged_txt
+    assert 'Link: <https://profithelm.com/tools/custom-calc/>; rel="canonical"' not in merged_txt
+    assert "Content-Signal:" in merged_txt
     assert "X-Robots-Tag: index, follow" in merged_txt
     assert "X-Custom-Merge: preserved" in merged_txt
     assert "X-First-About: one" in merged_txt

@@ -202,21 +202,21 @@ def test_live_gsc_page_and_page_device_harvest_rescues_anonymized_pages_and_pres
             "<body><main><h1>Bonus Depreciation Calculator</h1></main></body></html>"
         ),
         # Parent hub + healthy spoke + zero-traffic sibling spoke
-        "tools/irs-2027-tax-brackets/index.html": (
-            "<html><head><title>IRS 2027 Tax Brackets | ProfitHelm</title>"
+        "tools/irs-tax-brackets/index.html": (
+            "<html><head><title>IRS Federal Tax Brackets | ProfitHelm</title>"
             "<script type='application/ld+json'>{\"datePublished\": \"2026-07-10\"}</script></head>"
-            "<body><main><a href='/tools/irs-2027-tax-brackets/california/'>CA</a>"
-            "<a href='/tools/irs-2027-tax-brackets/montana/'>MT</a></main></body></html>"
+            "<body><main><a href='/tools/irs-tax-brackets/california/'>CA</a>"
+            "<a href='/tools/irs-tax-brackets/montana/'>MT</a></main></body></html>"
         ),
-        "tools/irs-2027-tax-brackets/california/index.html": (
-            "<html><head><title>California 2027 Tax Brackets | ProfitHelm</title>"
+        "tools/irs-tax-brackets/california/index.html": (
+            "<html><head><title>California Tax Brackets | ProfitHelm</title>"
             "<script type='application/ld+json'>{\"datePublished\": \"2026-07-10\"}</script></head>"
-            "<body><main><h1>California 2027 Tax Brackets</h1></main></body></html>"
+            "<body><main><h1>California Tax Brackets</h1></main></body></html>"
         ),
-        "tools/irs-2027-tax-brackets/montana/index.html": (
-            "<html><head><title>Montana 2027 Tax Brackets | ProfitHelm</title>"
+        "tools/irs-tax-brackets/montana/index.html": (
+            "<html><head><title>Montana Tax Brackets | ProfitHelm</title>"
             "<script type='application/ld+json'>{\"datePublished\": \"2026-07-10\"}</script></head>"
-            "<body><main><h1>Montana 2027 Tax Brackets</h1></main></body></html>"
+            "<body><main><h1>Montana Tax Brackets</h1></main></body></html>"
         ),
     }
     for rel_p, body in pages_html.items():
@@ -331,7 +331,7 @@ def test_live_gsc_page_and_page_device_harvest_rescues_anonymized_pages_and_pres
                         "position": 6.9,
                     },
                     {
-                        "keys": ["https://profithelm.com/tools/irs-2027-tax-brackets/california/"],
+                        "keys": ["https://profithelm.com/tools/irs-tax-brackets/california/"],
                         "clicks": 21,
                         "impressions": 254,
                         "ctr": 0.0827,
@@ -370,7 +370,7 @@ def test_live_gsc_page_and_page_device_harvest_rescues_anonymized_pages_and_pres
                     "position": 8.8,
                 },
                 {
-                    "keys": ["https://profithelm.com/tools/irs-2027-tax-brackets/california/"],
+                    "keys": ["https://profithelm.com/tools/irs-tax-brackets/california/"],
                     "clicks": 9 * mult,
                     "impressions": 190 * mult,
                     "ctr": 0.0474,
@@ -426,10 +426,10 @@ def test_live_gsc_page_and_page_device_harvest_rescues_anonymized_pages_and_pres
     assert impr_by_path["/tools/bonus-depreciation-calculator"] == 70
     assert clicks_by_path["/tools/bonus-depreciation-calculator"] == 6
     # Parent hub inherits spoke traffic, while sibling spoke montana stays strictly at 0!
-    assert impr_by_path["/tools/irs-2027-tax-brackets"] >= 380
-    assert impr_by_path.get("/tools/irs-2027-tax-brackets/montana", 0) == 0
+    assert impr_by_path["/tools/irs-tax-brackets"] >= 380
+    assert impr_by_path.get("/tools/irs-tax-brackets/montana", 0) == 0
 
-    # Verify portfolio decisions rescue anonymized Page-1 / striking-distance pages and prune ONLY montana
+    # Verify portfolio decisions rescue anonymized Page-1 / striking-distance pages and consolidate ONLY montana
     port_rep = evaluate_content_portfolio_decisions(
         property_id="profithelm",
         repo_root=repo_root,
@@ -443,9 +443,9 @@ def test_live_gsc_page_and_page_device_harvest_rescues_anonymized_pages_and_pres
     assert decisions_by_path["/tools/s-corp-tax-calculator"]["best_position"] == pytest.approx(6.4, abs=0.05)
     assert decisions_by_path["/tools/bonus-depreciation-calculator"]["portfolio_action"] == "SCALE_EXPAND"
     assert decisions_by_path["/tools/crypto-tax-calculator"]["portfolio_action"] == "OPTIMIZE_STRIKING_DISTANCE"
-    assert decisions_by_path["/tools/irs-2027-tax-brackets/california"]["portfolio_action"] == "SCALE_EXPAND"
-    assert decisions_by_path["/tools/irs-2027-tax-brackets"]["portfolio_action"] == "SCALE_EXPAND"
-    assert decisions_by_path["/tools/irs-2027-tax-brackets/montana"]["portfolio_action"] == "PRUNE_NOINDEX"
+    assert decisions_by_path["/tools/irs-tax-brackets/california"]["portfolio_action"] == "SCALE_EXPAND"
+    assert decisions_by_path["/tools/irs-tax-brackets"]["portfolio_action"] == "SCALE_EXPAND"
+    assert decisions_by_path["/tools/irs-tax-brackets/montana"]["portfolio_action"] == "CONSOLIDATE_301"
 
     # Verify internal linking opportunities surface orphaned high-impression anonymized pages
     link_rep = discover_internal_linking_opportunities(

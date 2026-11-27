@@ -2006,6 +2006,95 @@ def test_naic_plma_sec13_unlicensed_insurance_and_cfpb_2024_01_neutral_sorting()
     assert card_html.find("Sponsored Placement") < card_html.find('href="/r/')
 
 
+def test_cfpb_unlabeled_objective_click_ranking_and_zero_payout_tiebreak():
+    """
+    Verifies CFPB Circular 2024-01 objective engagement ranking when sponsored_placement_labeled=False:
+    1. More outbound user clicks always wins over fewer clicks even when the lower-click partner has a higher payout or CTR.
+    2. Equal outbound user clicks never break ties by payout or revenue yield (deterministic catalog order only).
+    """
+    from pseofactory.affiliates import (
+        PREXVO_AFFILIATES,
+        aggregate_outbound_partner_engagement,
+        score_partner_yield,
+        select_conversion_slot_plan,
+    )
+    from pseofactory.prexvo_estate import (
+        build_partners_matrix_section,
+        build_refinance_partner_cta,
+    )
+
+    slug = "student-loan-repayment-calculator"
+    low_payout_partner = {**PREXVO_AFFILIATES["sofi"].to_dict(), "status": "live", "bounty_est": "$50 CPA"}
+    high_payout_partner = {**PREXVO_AFFILIATES["earnest"].to_dict(), "status": "live", "bounty_est": "$500 CPA"}
+
+    # 1. More clicks (5 clicks, $50 payout) beats fewer clicks (1 click, $500 payout), even with higher CTR on fewer clicks
+    eng_more_clicks = {
+        "by_slug": {
+            slug: {
+                "partners": {
+                    "sofi": {"outbound_clicks": 5, "views_exposed": 100, "cta_ctr": 0.05, "estimated_revenue_yield_usd": 250.0},
+                    "earnest": {"outbound_clicks": 1, "views_exposed": 1, "cta_ctr": 1.0, "estimated_revenue_yield_usd": 500.0},
+                }
+            }
+        }
+    }
+    assert score_partner_yield(low_payout_partner, slug=slug, engagement_metrics=eng_more_clicks, sponsored_placement_labeled=False) > score_partner_yield(
+        high_payout_partner, slug=slug, engagement_metrics=eng_more_clicks, sponsored_placement_labeled=False
+    )
+
+    catalog_high_first = {"earnest": high_payout_partner, "sofi": low_payout_partner}
+    cta_more_clicks = build_refinance_partner_cta(slug=slug, engagement_metrics=eng_more_clicks, partner_catalog=catalog_high_first)
+    assert 'data-partner="sofi"' in cta_more_clicks
+    matrix_more_clicks = build_partners_matrix_section(partner_catalog=catalog_high_first, engagement_metrics=eng_more_clicks, slug=slug)
+    assert matrix_more_clicks.index("/r/sofi") < matrix_more_clicks.index("/r/earnest")
+
+    plan_more_clicks = select_conversion_slot_plan(
+        "prexvo",
+        slug,
+        [
+            {"partner_key": "earnest", "partner_name": "Earnest", "status": "live", "bounty_est": "$500 CPA", "cta_text": "Check"},
+            {"partner_key": "sofi", "partner_name": "SoFi", "status": "live", "bounty_est": "$50 CPA", "cta_text": "Check"},
+        ],
+        vertical_family="consumer_student_debt_refinancing",
+        engagement_metrics=eng_more_clicks,
+        sponsored_placement_labeled=False,
+    )
+    assert plan_more_clicks["promoted_partner_key"] == "sofi"
+
+    # 2. Equal clicks (2 vs 2) with $80 vs $180 payout: zero payout tie-breaking
+    equal_events = [
+        {"event_type": "page_view", "slug": slug, "property_id": "prexvo"},
+        {"event_type": "affiliate_click", "slug": slug, "partner_key": "sofi", "payout_usd": 80.0, "property_id": "prexvo"},
+        {"event_type": "affiliate_click", "slug": slug, "partner_key": "sofi", "payout_usd": 80.0, "property_id": "prexvo"},
+        {"event_type": "affiliate_click", "slug": slug, "partner_key": "earnest", "payout_usd": 180.0, "property_id": "prexvo"},
+        {"event_type": "affiliate_click", "slug": slug, "partner_key": "earnest", "payout_usd": 180.0, "property_id": "prexvo"},
+    ]
+    agg_equal = aggregate_outbound_partner_engagement(equal_events, property_id="prexvo")
+    assert score_partner_yield(low_payout_partner, slug=slug, engagement_metrics=agg_equal, sponsored_placement_labeled=False) == score_partner_yield(
+        high_payout_partner, slug=slug, engagement_metrics=agg_equal, sponsored_placement_labeled=False
+    )
+
+    catalog_low_first = {"sofi": low_payout_partner, "earnest": high_payout_partner}
+    cta_equal = build_refinance_partner_cta(slug=slug, engagement_metrics=agg_equal, partner_catalog=catalog_low_first)
+    assert 'data-partner="sofi"' in cta_equal
+    matrix_equal = build_partners_matrix_section(partner_catalog=catalog_low_first, engagement_metrics=agg_equal, slug=slug)
+    assert matrix_equal.index("/r/sofi") < matrix_equal.index("/r/earnest")
+
+    plan_equal = select_conversion_slot_plan(
+        "prexvo",
+        slug,
+        [
+            {"partner_key": "sofi", "partner_name": "SoFi", "status": "live", "bounty_est": "$80 CPA", "cta_text": "Check"},
+            {"partner_key": "earnest", "partner_name": "Earnest", "status": "live", "bounty_est": "$180 CPA", "cta_text": "Check"},
+        ],
+        vertical_family="consumer_student_debt_refinancing",
+        engagement_metrics=agg_equal,
+        sponsored_placement_labeled=False,
+    )
+    assert plan_equal["promoted_partner_key"] == "sofi"
+
+
+
 
 
 

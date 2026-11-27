@@ -4710,6 +4710,80 @@ def _resolve_query_family_gsc_target(
     return None
 
 
+def _finalize_gsc_target_against_compiled_dist(
+    res: Dict[str, Any],
+    repo_root: Optional[Union[str, Path]],
+    fallback_domain: str = "profithelm.com",
+) -> Dict[str, Any]:
+    """
+    Reconciles resolved GSC tool targets against the compiled dist/tools/ estate when
+    repo_root contains a built site, rolling collapsed leaf spokes into surviving
+    canonical parents and marking retired/410-decommissioned routes as off-topic sinks.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not res or res.get("is_off_topic_sink") or repo_root is None:
+        return res
+    dist_tools_dir = Path(repo_root) / "dist" / "tools"
+    if not dist_tools_dir.is_dir():
+        return res
+    if not any(p.parent != dist_tools_dir for p in dist_tools_dir.rglob("index.html")):
+        return res
+
+    c_path = str(res.get("canonical_path") or "").strip()
+    c_parts = [p for p in c_path.split("/") if p]
+    if len(c_parts) < 2 or c_parts[0] != "tools":
+        return res
+
+    rel_tool = "/".join(c_parts[1:])
+    if (dist_tools_dir / rel_tool / "index.html").is_file():
+        return res
+
+    domain = fallback_domain
+    raw_c_url = str(res.get("canonical_url") or "")
+    if "://" in raw_c_url:
+        domain = raw_c_url.split("://", 1)[1].split("/", 1)[0] or fallback_domain
+
+    if c_parts[1] == "irs-2027-tax-brackets" and (dist_tools_dir / "irs-tax-brackets" / "index.html").is_file():
+        parent_s = "irs-tax-brackets"
+        parent_path = f"/tools/{parent_s}/"
+        return {
+            **res,
+            "is_redirected": True,
+            "is_off_topic_sink": False,
+            "canonical_path": parent_path,
+            "canonical_url": f"https://{domain}{parent_path}",
+            "canonical_slug": parent_s,
+            "leaf_overlay_slug": parent_s,
+            "resolved_via": "collapsed_hub_redirect",
+        }
+
+    if len(c_parts) >= 3 and (dist_tools_dir / c_parts[1] / "index.html").is_file():
+        parent_s = c_parts[1]
+        parent_path = f"/tools/{parent_s}/"
+        return {
+            **res,
+            "is_redirected": True,
+            "is_off_topic_sink": False,
+            "canonical_path": parent_path,
+            "canonical_url": f"https://{domain}{parent_path}",
+            "canonical_slug": parent_s,
+            "leaf_overlay_slug": parent_s,
+            "resolved_via": "collapsed_spoke_parent_redirect",
+        }
+
+    return {
+        **res,
+        "is_redirected": True,
+        "is_off_topic_sink": True,
+        "ignored_off_topic": True,
+        "canonical_path": "/tools/",
+        "canonical_url": f"https://{domain}/tools/",
+        "canonical_slug": "",
+        "leaf_overlay_slug": "",
+        "resolved_via": "decommissioned_or_missing_dist_route",
+    }
+
+
 def resolve_redirected_gsc_target(
     target_url: Union[str, Dict[str, Any]] = "",
     slug: str = "",
@@ -4725,6 +4799,33 @@ def resolve_redirected_gsc_target(
     target page and parent tool slug.
     Zero em-dashes. Zero en-dashes.
     """
+    res = _resolve_redirected_gsc_target_impl(
+        target_url=target_url,
+        slug=slug,
+        query=query,
+        property_id=property_id,
+        repo_root=repo_root,
+        existing_tools=existing_tools,
+        page_url=page_url,
+    )
+    contract = get_tenant_contract(resolve_canonical_property_id(property_id, default="profithelm"))
+    fallback_dom = contract.domain if contract is not None else "profithelm.com"
+    return _finalize_gsc_target_against_compiled_dist(
+        res,
+        repo_root=repo_root,
+        fallback_domain=fallback_dom,
+    )
+
+
+def _resolve_redirected_gsc_target_impl(
+    target_url: Union[str, Dict[str, Any]] = "",
+    slug: str = "",
+    query: str = "",
+    property_id: str = "profithelm",
+    repo_root: Optional[Union[str, Path]] = None,
+    existing_tools: Optional[List[Dict[str, Any]]] = None,
+    page_url: str = "",
+) -> Dict[str, Any]:
     import urllib.parse
 
     if isinstance(target_url, dict):

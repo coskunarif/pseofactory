@@ -6155,7 +6155,7 @@ def _enforce_calculator_leaf_slot_order(
             )
     else:
         h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", work, flags=re.IGNORECASE)
-        h1_plain = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else "Calculator"
+        h1_plain = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip() if h1_m else "Calculator"
         breadcrumb_html = (
             '<nav class="breadcrumbs" aria-label="Breadcrumb">'
             '<a href="/" class="touch-target">Home</a><span>/</span>'
@@ -6341,7 +6341,7 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
     work = _strip_legacy_disclaimer_clutter(work, _LEGACY_CLUTTER_CLASSES)
 
     h1_m = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", work, flags=re.IGNORECASE)
-    h1_plain = re.sub(r"<[^>]+>", "", h1_m.group(1)).strip() if h1_m else (
+    h1_plain = html_lib.unescape(re.sub(r"<[^>]+>", "", h1_m.group(1))).strip() if h1_m else (
         "Comparison" if blueprint == "comparison_leaf" else "Guide"
     )
 
@@ -6449,33 +6449,6 @@ def _enforce_editorial_or_comparison_leaf_slot_order(
             compliance_html,
             work.strip(),
         ]
-    )
-
-
-def _is_official_primary_source_url_porcelain(url: str) -> bool:
-    """Returns True when URL points to an official .gov, .mil, state .us legislature, eur-lex.europa.eu, or pcisecuritystandards.org host."""
-    import urllib.parse
-
-    raw = str(url or "").strip()
-    if not raw.startswith(("http://", "https://")):
-        return False
-    try:
-        host = (urllib.parse.urlparse(raw).hostname or "").strip().lower()
-    except ValueError:
-        return False
-    if not host:
-        return False
-    return (
-        host.endswith(".gov")
-        or host.endswith(".mil")
-        or host == "leg.state.fl.us"
-        or bool(re.search(r"(?:^|\.)state\.[a-z]{2}\.us$", host))
-        or host == "eur-lex.europa.eu"
-        or host.endswith(".eur-lex.europa.eu")
-        or host == "pcisecuritystandards.org"
-        or host.endswith(".pcisecuritystandards.org")
-        or host == "fred.stlouisfed.org"
-        or host.endswith(".fred.stlouisfed.org")
     )
 
 
@@ -6989,9 +6962,10 @@ def resolve_statutory_sources_for_calculator(
 
     selected: List[Tuple[str, str, str, int, str]] = []
     seen_urls: Set[str] = set()
+    from pseofactory.compiler import _is_official_primary_source_url
 
     def _add_source(url: str, cit: str, pub: str, ey: int, va: str) -> None:
-        if not url or url in seen_urls or not _is_official_primary_source_url_porcelain(url):
+        if not url or url in seen_urls or not _is_official_primary_source_url(url):
             return
         seen_urls.add(url)
         clean_cit = re.sub(r"\s+-\s+", ", ", str(cit or "").replace("\u2014", "-").replace("\u2013", "-")).strip()
@@ -7046,7 +7020,7 @@ def resolve_statutory_sources_for_calculator(
                 if not overlap:
                     continue
                 score = len(overlap) * 20
-                if _is_official_primary_source_url_porcelain(str(getattr(entry, "primary_source_url", "") or "").strip()):
+                if _is_official_primary_source_url(str(getattr(entry, "primary_source_url", "") or "").strip()):
                     score += 20
                 if str(getattr(entry, "claim_class", "") or "").lower() == "enacted_law":
                     score += 10
@@ -7062,6 +7036,30 @@ def resolve_statutory_sources_for_calculator(
                     int(getattr(entry, "effective_year", 2026) or 2026),
                     str(getattr(entry, "verified_at", "") or "2026-11-24").strip(),
                 )
+            if len(selected) < 4:
+                scored_arch: List[Tuple[int, int, Tuple[Tuple[str, str, str, int, str], ...]]] = []
+                for idx_arch, (_pats, arch_sources) in enumerate(_ARCHETYPE_OFFICIAL_PRIMARY_SOURCES):
+                    arch_codes: Set[str] = set()
+                    for _au, a_cit, _apub, _aey, _ava in arch_sources:
+                        arch_codes |= _extract_exact_statute_codes(a_cit)
+                    overlap = auth_codes & arch_codes
+                    if not overlap:
+                        continue
+                    arch_score = sum(
+                        10 if not code.startswith(("REV PROC ", "PL ")) else 1
+                        for code in overlap
+                    )
+                    scored_arch.append((arch_score, idx_arch, arch_sources))
+                if scored_arch:
+                    scored_arch.sort(key=lambda item: (-item[0], item[1]))
+                    best_score = scored_arch[0][0]
+                    for sc_val, _idx_arch, arch_sources in scored_arch:
+                        if sc_val < best_score or len(selected) >= 4:
+                            break
+                        for src_tuple in arch_sources:
+                            if len(selected) >= 4:
+                                break
+                            _add_source(*src_tuple)
 
     return selected, statute_eff_date
 
@@ -8947,6 +8945,19 @@ def _build_partners_governance_spec(
 ) -> Dict[str, str]:
     brand = html_lib.escape(str(profile["brand_name"]))
     auth = html_lib.escape(str(profile["primary_statutory_authority"]))
+    raw_prop_id = str(profile.get("property_id") or "").strip().lower()
+    table_stat_auth_raw = str(profile["primary_statutory_authority"])
+    if raw_prop_id:
+        try:
+            from pseofactory.tenant_facts import TenantFactStore, resolve_canonical_property_id
+
+            t_norm = resolve_canonical_property_id(raw_prop_id, default=raw_prop_id)
+            st_truth = TenantFactStore.get_statutory_truth(t_norm)
+            if getattr(st_truth, "controlling_statute", ""):
+                table_stat_auth_raw = str(st_truth.controlling_statute)
+        except Exception:
+            pass
+    table_stat_auth = html_lib.escape(table_stat_auth_raw)
     ds = html_lib.escape(str(profile["economic_dataset_label"]))
     prop_id = html_lib.escape(str(profile.get("property_id") or "profithelm").strip().lower())
     topic = html_lib.escape(str(profile.get("tools_directory_topic_label") or f"{profile['brand_name']} Calculators"))
@@ -9029,7 +9040,7 @@ def _build_partners_governance_spec(
           <div><dt>Firewall Standard</dt><dd>FTC 16 CFR Part 255 math isolation</dd></div>
         </dl>
         <div class="table-wrap pseo-table-wrap">
-          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+          <table data-statutory-source="{table_stat_auth}" data-economic-source="{ds}">
             <thead>
               <tr><th scope="col">Telemetry Dimension</th><th scope="col">Verified Parameter</th></tr>
             </thead>
@@ -9107,7 +9118,7 @@ def _build_partners_governance_spec(
           <li><strong>Compliance Lock:</strong> FTC 16 CFR Part 255 disclosure separation.</li>
         </ol>
         <div class="table-wrap pseo-table-wrap">
-          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+          <table data-statutory-source="{table_stat_auth}" data-economic-source="{ds}">
             <thead>
               <tr><th scope="col">Cohort Control</th><th scope="col">Operational Threshold</th></tr>
             </thead>
@@ -9145,7 +9156,7 @@ def _build_partners_governance_spec(
           <p><strong>${partner_price_int} USD ({sku_esc}):</strong> One contextual slot per tool route, routed via <code>/r/</code> with <code>source_tool</code> and <code>subid</code>, strictly governed by FTC 16 CFR Part 255.</p>
         </div>
         <div class="table-wrap pseo-table-wrap">
-          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+          <table data-statutory-source="{table_stat_auth}" data-economic-source="{ds}">
             <thead>
               <tr><th scope="col">Charter Requirement</th><th scope="col">Enforced Baseline</th></tr>
             </thead>
@@ -9223,7 +9234,7 @@ def _build_partners_governance_spec(
           <li><strong>Compliance Lock:</strong> FTC 16 CFR Part 255 separation</li>
         </ul>
         <div class="table-wrap pseo-table-wrap">
-          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+          <table data-statutory-source="{table_stat_auth}" data-economic-source="{ds}">
             <thead>
               <tr><th scope="col">Protocol Check</th><th scope="col">Verification Rule</th></tr>
             </thead>
@@ -9264,7 +9275,7 @@ def _build_partners_governance_spec(
           <div><dt>Disclosure</dt><dd>FTC 16 CFR Part 255 compliant</dd></div>
         </dl>
         <div class="table-wrap pseo-table-wrap">
-          <table data-statutory-source="{auth}" data-economic-source="{ds}">
+          <table data-statutory-source="{table_stat_auth}" data-economic-source="{ds}">
             <thead>
               <tr><th scope="col">Listing Detail</th><th scope="col">Included Value</th></tr>
             </thead>

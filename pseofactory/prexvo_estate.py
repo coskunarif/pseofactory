@@ -2331,6 +2331,7 @@ def build_partners_matrix_section(
     partner_catalog: Optional[Dict[str, Any]] = None,
     engagement_metrics: Optional[Dict[str, Any]] = None,
     slug: str = "",
+    sponsored_placement_labeled: bool = False,
 ) -> str:
     """Renders private refinance partner matrix section, suppressing commercial links unless live."""
     catalog = partner_catalog or {k: v.to_dict() for k, v in PREXVO_AFFILIATES.items()}
@@ -2345,7 +2346,9 @@ def build_partners_matrix_section(
                 key=lambda item: -score_partner_yield(
                     {**item[1], "key": item[0]},
                     slug=slug,
+                    property_id="prexvo",
                     engagement_metrics=engagement_metrics,
+                    sponsored_placement_labeled=sponsored_placement_labeled,
                 )
             )
         except Exception:
@@ -2396,6 +2399,7 @@ def build_refinance_partner_cta(
     slug: str = "",
     engagement_metrics: Optional[Dict[str, Any]] = None,
     partner_catalog: Optional[Dict[str, Any]] = None,
+    sponsored_placement_labeled: bool = False,
 ) -> str:
     """Renders contextual featured partner CTA or educational notice adhering to YMYL public-service guardrails."""
     restricted_ps = is_restricted_public_service_slug(slug) if slug else False
@@ -2425,7 +2429,13 @@ def build_refinance_partner_cta(
                 live_candidates = [{**p_info, "key": p_id} for p_id, p_info in catalog.items()]
             if live_candidates:
                 live_candidates.sort(
-                    key=lambda p: -score_partner_yield(p, slug=slug, engagement_metrics=engagement_metrics)
+                    key=lambda p: -score_partner_yield(
+                        p,
+                        slug=slug,
+                        property_id="prexvo",
+                        engagement_metrics=engagement_metrics,
+                        sponsored_placement_labeled=sponsored_placement_labeled,
+                    )
                 )
                 ref_partner = live_candidates[0]
         except Exception:

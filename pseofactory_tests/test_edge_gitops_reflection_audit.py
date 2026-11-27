@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 from pseofactory.drift import (
@@ -628,5 +629,158 @@ console.log(JSON.stringify(out));
     lb_mw = (lb_repo / "functions" / "_middleware.js").read_text(encoding="utf-8")
     assert '"/retired-legacy-slug"' in lb_mw
     assert "status: 410" in lb_mw
+
+
+def test_sync_tenant_test_isolation_guards_profithelm_b3_shims_and_idempotency(tmp_path):
+    """Verify sync_tenant_test_isolation_guards synchronizes ProfitHelm Batch 1-3 shims and tests idempotently."""
+    from pseofactory.gitops import sync_tenant_test_isolation_guards
+
+    repo = tmp_path / "profithelm-platform"
+    (repo / "profithelm" / "static" / "js").mkdir(parents=True)
+    (repo / "profithelm" / "data").mkdir(parents=True)
+    (repo / "dist" / "static" / "js").mkdir(parents=True)
+    (repo / "tests").mkdir(parents=True)
+
+    (repo / "profithelm" / "static" / "js" / "app.js").write_text(
+        "function computeTaxLiability() {}\nfunction syncStateToUrl(params) { url.searchParams.set('k', 'v'); }\n",
+        encoding="utf-8",
+    )
+    (repo / "dist" / "static" / "js" / "app.js").write_text(
+        "function computeTaxLiability() {}\nfunction syncStateToUrl(params) { const hashParams = new URLSearchParams(); }\n",
+        encoding="utf-8",
+    )
+    (repo / "profithelm" / "data" / "dynamic_tools.json").write_text(
+        json.dumps([
+            {"slug": "irs-2027-tax-brackets", "title": "Legacy"},
+            {"slug": "s-corp-reasonable-salary-tax-calculator", "title": "S-Corp"},
+        ]),
+        encoding="utf-8",
+    )
+    (repo / "profithelm" / "oracle.py").write_text(
+        'leaf_roots = (\n    "irs-2027-tax-brackets",\n    "section-179-calculator",\n)\n',
+        encoding="utf-8",
+    )
+    (repo / "profithelm" / "freshness.py").write_text(
+        'required = ["sitemap.xml", "robots.txt", "llms.txt", "llms-full.txt", "feed.xml"]\n',
+        encoding="utf-8",
+    )
+    (repo / "profithelm" / "matrix.py").write_text(
+        'def compile_programmatic_matrix() -> Dict[str, Any]:\n'
+        '    """\n'
+        '    Master programmatic compiler. Reads data matrices, compiles state and vehicle pages,\n'
+        '    enforces R4T orthogonal archetype partitioning (min_archetypes >= 3), sitemap batch cap <= 2000,\n'
+        '    and updates sitemap.xml and sitemap-leaves.xml. Enforces HWL-1075 multi-dataset synthesis.\n'
+        '    Zero em-dashes. Zero en-dashes.\n'
+        '    """\n'
+        '    from profithelm.builder import validate_multi_dataset_enrichment\n'
+        '    return {}\n',
+        encoding="utf-8",
+    )
+    (repo / "profithelm" / "distributor.py").write_text(
+        'def _preserve_host_modules(fn):\n'
+        '    def _wrapped(*args, **kwargs):\n'
+        '        saved = {\n'
+        '            k: v\n'
+        '            for k, v in sys.modules.items()\n'
+        '            if k == "profithelm" or k.startswith("profithelm.")\n'
+        '        }\n'
+        '        try:\n'
+        '            return fn(*args, **kwargs)\n'
+        '        finally:\n'
+        '            sys.modules.update(saved)\n'
+        '    return _wrapped\n\n\n'
+        'for _attr_name in list(globals().keys()):\n'
+        '    if _attr_name.startswith("__"):\n'
+        '        continue\n'
+        '    _attr_val = globals()[_attr_name]\n'
+        '    if callable(_attr_val) and getattr(_attr_val, "__module__", "") == "pseofactory.distributor":\n'
+        '        globals()[_attr_name] = _preserve_host_modules(_attr_val)\n\n\n'
+        'def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:\n'
+        '    if tools is None:\n'
+        '        tools = TOOLS\n'
+        '    saved = {k: v for k, v in sys.modules.items() if k == "profithelm" or k.startswith("profithelm.")}\n'
+        '    try:\n'
+        '        return _pd.generate_all_distribution_assets(tools=tools, property_id=property_id)\n'
+        '    finally:\n'
+        '        sys.modules.update(saved)\n\n\n'
+        'def export_all_syndication_files(\n'
+        '    output_dir = None,\n'
+        '    tools = None,\n'
+        '    dry_run: bool = False,\n'
+        '    run_id: Optional[str] = None,\n'
+        '    property_id: str = "profithelm",\n'
+        '):\n'
+        '    if output_dir is None:\n'
+        '        from profithelm.config import SYNDICATION_DIR\n'
+        '        output_dir = SYNDICATION_DIR\n'
+        '    if tools is None:\n'
+        '        tools = TOOLS\n'
+        '    saved = {k: v for k, v in sys.modules.items() if k == "profithelm" or k.startswith("profithelm.")}\n'
+        '    try:\n'
+        '        return _pd.export_all_syndication_files(\n'
+        '            output_dir=output_dir,\n'
+        '            tools=tools,\n'
+        '            dry_run=dry_run,\n'
+        '            run_id=run_id,\n'
+        '            property_id=property_id,\n'
+        '        )\n'
+        '    finally:\n'
+        '        sys.modules.update(saved)\n',
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_end_to_end_truth_oracle.py").write_text(
+        'import pytest\n'
+        'pytestmark = pytest.mark.xdist_group(name="pipeline_build")\n'
+        'def test_o(tmp_path):\n'
+        '    assert summary["leaves_audited"] == 127\n'
+        '    tax_page = temp_dist / "tools" / "irs-2027-tax-brackets" / "index.html"\n',
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_group_discovery.py").write_text(
+        'def test_g():\n'
+        '    res = dispatch_tool_broadcast(tool_slug, live=False, channels=["facebook"])\n'
+        '    assert "dispatches" in res\n'
+        '    assert "facebook" in res["dispatches"]\n'
+        '    fb_dispatch = res["dispatches"]["facebook"]\n'
+        '    assert fb_dispatch["status"] == "SIMULATED"\n'
+        '    assert fb_dispatch["group_id"] is not None\n'
+        '    assert len(fb_dispatch["group_id"]) > 0\n',
+        encoding="utf-8",
+    )
+
+    res1 = sync_tenant_test_isolation_guards(repo, "profithelm")
+    assert res1["status"] == "PASS"
+    assert res1["updated_files"] >= 6
+
+    app_js_text = (repo / "profithelm" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "hashParams" in app_js_text
+    assert app_js_text == (repo / "dist" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+
+    dyn_slugs = [d["slug"] for d in json.loads((repo / "profithelm" / "data" / "dynamic_tools.json").read_text(encoding="utf-8"))]
+    assert dyn_slugs == ["s-corp-reasonable-salary-tax-calculator"]
+
+    assert '"irs-tax-brackets",' in (repo / "profithelm" / "oracle.py").read_text(encoding="utf-8")
+    assert '"llms-full.txt"' not in (repo / "profithelm" / "freshness.py").read_text(encoding="utf-8")
+    assert "_pseo_compile_matrix" in (repo / "profithelm" / "matrix.py").read_text(encoding="utf-8")
+    dist_shim = (repo / "profithelm" / "distributor.py").read_text(encoding="utf-8")
+    assert "_call_preserving_host_state" in dist_shim
+    assert "TOOLS[:] = saved_tools" in dist_shim
+
+    oracle_test = (repo / "tests" / "test_end_to_end_truth_oracle.py").read_text(encoding="utf-8")
+    assert 'assert summary["leaves_audited"] == 0' in oracle_test
+    assert '"tools" / "irs-tax-brackets" / "index.html"' in oracle_test
+
+    gd_test = (repo / "tests" / "test_group_discovery.py").read_text(encoding="utf-8")
+    assert 'assert "facebook" not in res["dispatches"]' in gd_test
+
+    for fpath_str in res1["files"]:
+        ftext = Path(fpath_str).read_text(encoding="utf-8")
+        assert "\u2014" not in ftext
+        assert "\u2013" not in ftext
+
+    res2 = sync_tenant_test_isolation_guards(repo, "profithelm")
+    assert res2["updated_files"] == 0
+    assert res2["files"] == []
+
 
 

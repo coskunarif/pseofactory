@@ -18886,12 +18886,14 @@ def sync_tenant_edge_redirect_function(
                     dist_needs_update = True
             except Exception:
                 pass
+        pre_compact_gone_paths: List[str] = []
         redirects_file = dist_dir / "_redirects"
         if redirects_file.is_file():
             try:
                 orig_redirects = redirects_file.read_text(encoding="utf-8")
                 with_gone = ensure_gone_rules_in_redirects(orig_redirects)
                 known_gone_for_redirects = _collect_tenant_middleware_gone_paths(repo=repo, dist_dir=dist_dir)
+                pre_compact_gone_paths = list(known_gone_for_redirects)
                 mw_probe_file = repo / "functions" / "_middleware.js"
                 if mw_probe_file.is_file():
                     mw_probe_txt = mw_probe_file.read_text(encoding="utf-8", errors="ignore")
@@ -18907,6 +18909,8 @@ def sync_tenant_edge_redirect_function(
                     dist_needs_update = True
             except Exception:
                 pass
+    else:
+        pre_compact_gone_paths = []
 
     # Ensure functions/_middleware.js enforces www->apex 301 redirects, legacy GSC 301 redirects,
     # 410 Gone for retired endpoints, and non-apex noindex lockdown (never HTML Link canonical headers).
@@ -18991,10 +18995,13 @@ def sync_tenant_edge_redirect_function(
                     f'const isApex = hostname === "{apex_domain}";',
                 )
 
-            extra_gone_paths = _collect_tenant_middleware_gone_paths(
+            extra_gone_paths = list(pre_compact_gone_paths)
+            for gp in _collect_tenant_middleware_gone_paths(
                 repo=repo,
                 dist_dir=dist_dir,
-            )
+            ):
+                if gp not in extra_gone_paths:
+                    extra_gone_paths.append(gp)
             if prop_clean == "gainhelm":
                 for gh_slug in _GAINHELM_LEGACY_GONE_SLUGS:
                     if not (dist_dir / gh_slug.lstrip("/") / "index.html").is_file():

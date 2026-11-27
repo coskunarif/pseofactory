@@ -663,11 +663,17 @@ def test_revenue_truth_session_expired_snapshots_coinledger_37_and_falsifier(tmp
         "firstpromoter_xendoo",
         "koinly_native",
         "sovrn_commerce",
-        "cj_affiliate",
-        "impact",
     ):
         assert portals[gated_key]["auth_status"] == "SESSION_EXPIRED_CACHED_SNAPSHOT"
         assert portals[gated_key]["is_authenticated_and_syncing"] is False
+
+    for api_key in ("cj_affiliate", "impact"):
+        if portals[api_key].get("live_api_polled_in_current_run"):
+            assert portals[api_key]["auth_status"] == "AUTHENTICATED_SYNCING"
+            assert portals[api_key]["is_authenticated_and_syncing"] is True
+        else:
+            assert portals[api_key]["auth_status"] == "SESSION_EXPIRED_CACHED_SNAPSHOT"
+            assert portals[api_key]["is_authenticated_and_syncing"] is False
 
     assert portals["firstpromoter_coinledger"]["portal_verified_clicks"] == 37
     cl_rec = ledger["partners"]["coinledger"]
@@ -680,13 +686,32 @@ def test_revenue_truth_session_expired_snapshots_coinledger_37_and_falsifier(tmp
         "firstpromoter_xendoo",
         "koinly_native",
         "sovrn_commerce",
-        "cj_affiliate",
-        "impact",
     ):
         assert truth["affiliate_networks"][gated_key]["status"] == "SESSION_EXPIRED_CACHED_SNAPSHOT"
         assert truth["affiliate_networks"][gated_key]["is_authenticated_and_syncing"] is False
+    for api_key in ("cj_affiliate", "impact"):
+        if portals[api_key].get("live_api_polled_in_current_run"):
+            assert truth["affiliate_networks"][api_key]["status"] == "AUTHENTICATED_SYNCING"
+            assert truth["affiliate_networks"][api_key]["is_authenticated_and_syncing"] is True
+        else:
+            assert truth["affiliate_networks"][api_key]["status"] == "SESSION_EXPIRED_CACHED_SNAPSHOT"
+            assert truth["affiliate_networks"][api_key]["is_authenticated_and_syncing"] is False
     assert truth["affiliate_networks"]["firstpromoter_coinledger"]["clicks"] == 37
     assert set(truth["properties"].keys()) == {"profithelm", "prexvo", "gainhelm", "lienbond"}
+
+    # Falsifier: when live_api_polled_in_current_run is False, even cj_affiliate and impact must fail closed to SESSION_EXPIRED_CACHED_SNAPSHOT.
+    stale_root = tmp_path / "stale_ledger_pkg"
+    (stale_root / ".agy").mkdir(parents=True, exist_ok=True)
+    stale_ledger = json.loads(json.dumps(ledger))
+    for k in ("cj_affiliate", "impact"):
+        stale_ledger["portals"][k]["live_api_polled_in_current_run"] = False
+    (stale_root / ".agy" / "partner_earnings_ledger.json").write_text(
+        json.dumps(stale_ledger), encoding="utf-8"
+    )
+    stale_truth = collect_pseofactory_truth(package_root=stale_root, live_network=False)
+    for k in ("cj_affiliate", "impact"):
+        assert stale_truth["affiliate_networks"][k]["status"] == "SESSION_EXPIRED_CACHED_SNAPSHOT"
+        assert stale_truth["affiliate_networks"][k]["is_authenticated_and_syncing"] is False
 
     # Falsifier report contains no false hardcoded claims about live-authenticated portals or stale Oct 27 bounces
     tracker, _, _ = _make_isolated_tracker(tmp_path)

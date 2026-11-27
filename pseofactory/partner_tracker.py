@@ -1383,8 +1383,13 @@ class PartnerTrackingEngine:
             if has_skus
             else readiness_score
         )
-        prod_ready = len(pending_ranked_items) == 0 and has_skus and live_count > 0
-        if len(pending_ranked_items) > 0:
+        pending_monetization_items = [
+            it
+            for it in pending_ranked_items
+            if not str(it.partner_key or "").endswith(("_syndication_gate", "_indexing_preflight_gate"))
+        ]
+        prod_ready = len(pending_monetization_items) == 0 and has_skus and live_count > 0
+        if len(pending_monetization_items) > 0:
             auto_mode_status = "AWAITING_OPERATOR_ACTION"
         elif prod_ready:
             auto_mode_status = "AUTONOMOUS_PRODUCTION_READY"

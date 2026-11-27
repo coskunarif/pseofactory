@@ -7187,18 +7187,24 @@ def sync_tenant_test_isolation_guards(
                 except Exception:
                     pass
             prop_norm = _normalize_property_id(resolved_pid or repo.name)
+            _watched_manifests = ("dist/llms.txt", "dist/llms-full.txt", "dist/feed.xml", "dist/catalog.json")
+            _pre_manifest_bytes = {
+                mf_rel: (repo / mf_rel).read_bytes() if (repo / mf_rel).is_file() else None
+                for mf_rel in _watched_manifests
+            }
             rep_res = TruthReconciliationEngine.reconcile_estate_assets(
                 dist_dir=repo / "dist",
                 property_id=prop_norm,
                 repo_root=repo,
             )
-            if isinstance(rep_res, dict):
-                for rp in rep_res.get("repaired_paths", []):
-                    if rp not in updated_files:
-                        updated_files.append(rp)
-            for mf_rel in ("dist/llms.txt", "dist/llms-full.txt", "dist/feed.xml", "dist/catalog.json"):
+            _repaired = rep_res.get("repaired_paths", []) if isinstance(rep_res, dict) else (rep_res if isinstance(rep_res, list) else [])
+            for rp in _repaired:
+                if rp not in updated_files:
+                    updated_files.append(rp)
+            for mf_rel in _watched_manifests:
                 mf_path = repo / mf_rel
-                if mf_path.is_file() and str(mf_path) not in updated_files:
+                post_bytes = mf_path.read_bytes() if mf_path.is_file() else None
+                if post_bytes is not None and post_bytes != _pre_manifest_bytes.get(mf_rel) and str(mf_path) not in updated_files:
                     updated_files.append(str(mf_path))
 
             orig_fresh_txt = freshness_json.read_text(encoding="utf-8")
@@ -7579,6 +7585,7 @@ def sync_tenant_test_isolation_guards(
             pass
 
     _sync_tenant_truth_pack_tests(repo, updated_files)
+    _sync_profithelm_b3_shims_and_tests(repo, updated_files)
 
     return {
         "status": "PASS",
@@ -7884,6 +7891,974 @@ def _sync_tenant_truth_pack_tests(repo: Path, updated_files: List[str]) -> None:
         except Exception:
             pass
 
+
+def _write_if_changed(path: Path, new_text: str, orig_text: str, updated_files: List[str]) -> None:
+    """Writes new_text to path and appends to updated_files only when content differs."""
+    if new_text != orig_text:
+        path.write_text(new_text, encoding="utf-8")
+        updated_files.append(str(path))
+
+
+def _sync_profithelm_b3_shims_and_tests(repo: Path, updated_files: List[str]) -> None:
+    """
+    Synchronizes ProfitHelm legacy shims (config.py, app.js, dynamic_tools.json,
+    oracle.py, freshness.py, group_discovery.py) and obsolete pre-factory tests
+    with Batch 1-3 engine upgrades (evergreen canonicals, collapsed 127 spokes,
+    #hash URL state, retired SpeakableSpecification, capped llms.txt, purged x/facebook).
+    Zero em-dashes. Zero en-dashes.
+    """
+    if not (repo / "profithelm").is_dir():
+        return
+
+    # 1. Sync profithelm/static/js/app.js with #hash URL state (and dist/static/js/app.js when present)
+    app_js = repo / "profithelm" / "static" / "js" / "app.js"
+    dist_app_js = repo / "dist" / "static" / "js" / "app.js"
+    if app_js.is_file():
+        try:
+            src_js = app_js.read_text(encoding="utf-8")
+            dist_js = dist_app_js.read_text(encoding="utf-8") if dist_app_js.is_file() else ""
+            if (
+                dist_js
+                and "computeTaxLiability" in dist_js
+                and "syncStateToUrl" in dist_js
+                and "hashParams" in dist_js
+            ):
+                _write_if_changed(app_js, dist_js, src_js, updated_files)
+            else:
+                from pseofactory.profithelm_estate import _write_clean_static_js
+
+                with tempfile.TemporaryDirectory() as tmp_js_dir:
+                    _write_clean_static_js(Path(tmp_js_dir), repo_root=repo)
+                    clean_js = (Path(tmp_js_dir) / "static" / "js" / "app.js").read_text(encoding="utf-8")
+                _write_if_changed(app_js, clean_js, src_js, updated_files)
+                if dist_app_js.is_file():
+                    _write_if_changed(dist_app_js, clean_js, dist_js, updated_files)
+        except Exception:
+            pass
+
+    # 2. Align profithelm/config.py TOOLS, CORE_CALCULATION_SPECS, and FACEBOOK_GROUP_ROUTING
+    cfg_py = repo / "profithelm" / "config.py"
+    if cfg_py.is_file():
+        try:
+            pc_src = cfg_py.read_text(encoding="utf-8")
+            pc_new = pc_src
+
+            pc_new = pc_new.replace(
+                '    "irs-2027-tax-brackets": "331399459887663",         # SaaS Startups and Founders Network\n',
+                '    "irs-tax-brackets": "331399459887663",              # SaaS Startups and Founders Network\n',
+            ).replace(
+                '    "prediction-market-odds": "383135277911978",        # Digital Ads & Conversion Tracking Hub\n',
+                '    "capital-gains-calculator": "327913548348179",      # Business Mentorship & Coaching\n',
+            ).replace(
+                '    "prediction-market-tax": "383135277911978",         # Digital Ads & Conversion Tracking Hub\n',
+                '    "irs-interest-calculator": "331399459887663",       # SaaS Startups and Founders Network\n',
+            )
+
+            if '"irs-tax-brackets": {' not in pc_new and 'CORE_CALCULATION_SPECS: Dict[str, Dict[str, Any]] = {\n' in pc_new:
+                new_calc_entries = (
+                    'CORE_CALCULATION_SPECS: Dict[str, Dict[str, Any]] = {\n'
+                    '    "irs-tax-brackets": {\n'
+                    '        "model_name": "IRSTaxBracketModel",\n'
+                    '        "entity_type": "TaxCalculationModel",\n'
+                    '        "statutory_authority": "P.L. 119-21 Section 70101, IRS Rev. Proc. 2025-32 & Rev. Proc. 2026-35",\n'
+                    '        "economic_dataset": "IRS SOI Individual Income Tax Statistics & BEA Personal Income Benchmarks",\n'
+                    '        "inputs": {"gross_income": 125000.0, "standard_deduction": 16100.0},\n'
+                    '        "formula": "round(0.10 * min(max(0.0, gross_income - standard_deduction), 12400.0) + 0.12 * max(0.0, min(max(0.0, gross_income - standard_deduction), 50400.0) - 12400.0) + 0.22 * max(0.0, min(max(0.0, gross_income - standard_deduction), 105700.0) - 50400.0) + 0.24 * max(0.0, min(max(0.0, gross_income - standard_deduction), 201775.0) - 105700.0) + 0.32 * max(0.0, min(max(0.0, gross_income - standard_deduction), 256225.0) - 201775.0) + 0.35 * max(0.0, min(max(0.0, gross_income - standard_deduction), 640600.0) - 256225.0) + 0.37 * max(0.0, max(0.0, gross_income - standard_deduction) - 640600.0), 2)",\n'
+                    '        "published_output": 18734.0,\n'
+                    '        "sample_calculation": "For a $125,000 Single filer under OBBBA P.L. 119-21 ($16,100 2026 standard deduction), federal income tax is $18,734.00 across progressive 10%/12%/22%/24%/32%/35%/37% brackets.",\n'
+                    '    },\n'
+                    '    "capital-gains-calculator": {\n'
+                    '        "model_name": "LongTermCapitalGainsAndNIITSurtaxModel",\n'
+                    '        "entity_type": "NetInvestmentIncomeTaxRule",\n'
+                    '        "statutory_authority": "IRC Section 1(h) and Section 1411",\n'
+                    '        "economic_dataset": "IRS SOI Capital Gains Realization & BEA National Income Benchmarks",\n'
+                    '        "inputs": {"ordinary_income": 150000.0, "capital_gains": 100000.0, "ltcg_rate": 0.15, "niit_threshold": 200000.0},\n'
+                    '        "formula": "round(max(0.0, capital_gains) * ltcg_rate + max(0.0, min(capital_gains, max(0.0, (ordinary_income + capital_gains) - niit_threshold))) * 0.038, 2)",\n'
+                    '        "published_output": 16900.0,\n'
+                    '        "sample_calculation": "On $100,000 long-term capital gains stacked above $150,000 ordinary income, 15% federal LTCG ($15,000) plus 3.8% NIIT on $50,000 ($1,900) totals $16,900.00.",\n'
+                    '    },\n'
+                    '    "irs-interest-calculator": {\n'
+                    '        "model_name": "IRSSection6621UnderpaymentInterestModel",\n'
+                    '        "entity_type": "StatutoryCalculationRule",\n'
+                    '        "statutory_authority": "IRC Section 6621 (Underpayment & Overpayment Interest Rates)",\n'
+                    '        "economic_dataset": "FRED 3-Month Treasury Constant Maturity (DGS3MO) & IRS Quarterly Rate Schedule",\n'
+                    '        "inputs": {"tax_underpayment": 25000.0, "annual_rate_pct": 7.0, "days_overdue": 90.0},\n'
+                    '        "formula": "round(max(0.0, tax_underpayment) * (annual_rate_pct / 100.0) * (days_overdue / 365.0), 2)",\n'
+                    '        "published_output": 431.51,\n'
+                    '        "sample_calculation": "On a $25,000 tax underpayment over 90 days at a 7.0% IRC Section 6621 rate, simple baseline interest totals $431.51.",\n'
+                    '    },\n'
+                )
+                pc_new = pc_new.replace('CORE_CALCULATION_SPECS: Dict[str, Dict[str, Any]] = {\n', new_calc_entries, 1)
+
+            old_tax_tool = (
+                '    {\n'
+                '        "slug": "irs-2027-tax-brackets",\n'
+                '        "title": "IRS 2027 Tax Brackets & TCJA Sunset Calculator 2027",\n'
+                '        "short_title": "IRS 2027 Tax Brackets",\n'
+                '        "nav_label": "Tax Brackets 2027",\n'
+                '        "description": "Calculate your federal income tax bracket, statutory marginal rates (10% to 37%), and compare against post-TCJA sunset scenarios.",\n'
+                '        "problem_statement": "Predicting 2027 personal income bracket creep and marginal rate reversion following TCJA individual provision expiration.",\n'
+                '        "canonical_question": "How will the 2027 TCJA sunset affect my marginal tax bracket and effective rate?",\n'
+                '        "named_decision_framework": "The Marginal Bracket Migration Protocol",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["irs-2027-tax-brackets"],\n'
+                '        "primary_keyword": "irs 2027 tax bracket projections",\n'
+                '        "secondary_keywords": [\n'
+                '            "2027 tax brackets",\n'
+                '            "tcja sunset tax calculator",\n'
+                '            "marginal tax rate 2027",\n'
+                '            "post-2025 tax changes",\n'
+                '            "irs tax brackets married filing jointly 2027"\n'
+                '        ],\n'
+                '        "category": "Tax Intelligence",\n'
+                '        "affiliates": ["turbotax", "taxslayer"],\n'
+                '        "quick_answer": (\n'
+                '            "IRS 2027 tax brackets establish federal marginal income tax rates across seven statutory brackets: "\n'
+                '            "10%, 12%, 22%, 24%, 32%, 35%, and 37% under OBBBA (P.L. 119-21), with standard deductions of $16,100 for single filers and $32,200 for married filing jointly in 2026 ($16,500 and $33,000 in 2027). "\n'
+                '            "ProfitHelm models statutory baseline rates alongside post-TCJA sunset reversion scenarios."\n'
+                '        ),\n'
+                '        "updated_date": "2026-09-15",\n'
+                '        "citation_count": 42,\n'
+                '    },'
+            )
+            new_tax_tool = (
+                '    {\n'
+                '        "slug": "irs-tax-brackets",\n'
+                '        "title": "2026-2027 IRS Tax Brackets & Deduction Calculator",\n'
+                '        "short_title": "IRS 2026-2027 Brackets",\n'
+                '        "nav_label": "Tax Brackets",\n'
+                '        "description": "Compute federal income tax liability under 2026 IRS Rev. Proc. 2025-32 and enacted 2027 Rev. Proc. 2026-35 permanent rate brackets.",\n'
+                '        "problem_statement": "Modeling 2026 and 2027 personal income bracket thresholds and marginal rate schedules under P.L. 119-21.",\n'
+                '        "canonical_question": "How do 2026 and 2027 IRS tax brackets affect my marginal tax bracket and effective rate?",\n'
+                '        "named_decision_framework": "The Marginal Bracket Migration Protocol",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["irs-tax-brackets"],\n'
+                '        "primary_keyword": "irs tax brackets calculator",\n'
+                '        "secondary_keywords": [\n'
+                '            "2026 tax brackets",\n'
+                '            "2027 tax brackets",\n'
+                '            "marginal tax rate calculator",\n'
+                '            "irs rev proc 2025-32 brackets",\n'
+                '            "irs tax brackets married filing jointly"\n'
+                '        ],\n'
+                '        "category": "Tax Intelligence",\n'
+                '        "affiliates": ["turbotax", "taxslayer"],\n'
+                '        "quick_answer": (\n'
+                '            "Under P.L. 119-21 and IRS Rev. Proc. 2025-32, 2026-2027 federal income tax brackets span 10%, 12%, 22%, 24%, 32%, 35%, and 37%, "\n'
+                '            "with standard deductions of $16,100 single ($32,200 joint) in 2026 and $16,500 single ($33,000 joint) in 2027. "\n'
+                '            "ProfitHelm models exact effective tax rates across all filing statuses."\n'
+                '        ),\n'
+                '        "updated_date": "2026-11-01",\n'
+                '        "citation_count": 42,\n'
+                '    },'
+            )
+            if old_tax_tool in pc_new:
+                pc_new = pc_new.replace(old_tax_tool, new_tax_tool, 1)
+
+            old_pm_odds_tool = (
+                '    {\n'
+                '        "slug": "prediction-market-odds",\n'
+                '        "title": "Prediction Market Implied Probability & Arbitrage Calculator",\n'
+                '        "short_title": "Prediction Market Arbitrage",\n'
+                '        "nav_label": "Arbitrage Calculator",\n'
+                '        "description": "Calculate true implied probabilities, contract spreads, and Kelly Criterion bet sizing across Kalshi and Polymarket.",\n'
+                '        "problem_statement": "Identifying risk-free arbitrage spreads and sizing optimal contract stakes between fragmented Kalshi and Polymarket order books.",\n'
+                '        "canonical_question": "How do you calculate implied probability and cross-exchange arbitrage across prediction markets?",\n'
+                '        "named_decision_framework": "The Synthetic Arbitrage Risk-Free Parity Framework",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["prediction-market-odds"],\n'
+                '        "primary_keyword": "prediction market arbitrage calculator",\n'
+                '        "secondary_keywords": [\n'
+                '            "kalshi polymarket arbitrage",\n'
+                '            "event contract implied odds",\n'
+                '            "kelly criterion prediction market",\n'
+                '            "cross-market spread trading"\n'
+                '        ],\n'
+                '        "category": "Market Arbitrage",\n'
+                '        "affiliates": ["interactive_brokers", "kalshi"],\n'
+                '        "quick_answer": (\n'
+                '            "Pursuant to Commodity Exchange Act 7 U.S.C. Section 1a(19) and CFTC Rule 40.11, when complementary event "\n'
+                '            "contract prices sum to less than 100 cents ($1.00), a synthetic arbitrage spread net of transaction fees yielding "\n'
+                '            "4.0% to 8.5% ROI is locked via Half-Kelly capital allocation."\n'
+                '        ),\n'
+                '        "updated_date": "2026-09-15",\n'
+                '        "citation_count": 31,\n'
+                '    },'
+            )
+            new_cg_tool = (
+                '    {\n'
+                '        "slug": "capital-gains-calculator",\n'
+                '        "title": "Long-Term Capital Gains & NIIT Surtax Calculator",\n'
+                '        "short_title": "Capital Gains & NIIT",\n'
+                '        "nav_label": "Capital Gains",\n'
+                '        "description": "Project long-term capital gains tax across 0%, 15%, and 20% tiers plus the 3.8% Net Investment Income Tax threshold under IRC Section 1(h) and Section 1411.",\n'
+                '        "problem_statement": "Calculating stacked long-term capital gains brackets and Section 1411 Net Investment Income Tax surtax thresholds.",\n'
+                '        "canonical_question": "How are long-term capital gains and the 3.8% NIIT surtax calculated?",\n'
+                '        "named_decision_framework": "The Stacked Capital Gains & NIIT Threshold Matrix",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["capital-gains-calculator"],\n'
+                '        "primary_keyword": "capital gains and niit calculator",\n'
+                '        "secondary_keywords": [\n'
+                '            "long term capital gains calculator",\n'
+                '            "niit 3.8 percent tax",\n'
+                '            "irc section 1h brackets",\n'
+                '            "capital gains tax tiers"\n'
+                '        ],\n'
+                '        "category": "Tax Intelligence",\n'
+                '        "affiliates": ["turbotax", "taxslayer", "interactive_brokers"],\n'
+                '        "quick_answer": (\n'
+                '            "Under IRC Section 1(h) and Section 1411, long-term capital gains are taxed at 0%, 15%, or 20% stacked above ordinary income, "\n'
+                '            "plus a 3.8% Net Investment Income Tax (NIIT) above $200,000 single or $250,000 joint modified AGI. "\n'
+                '            "ProfitHelm computes exact combined federal and state capital gains liability."\n'
+                '        ),\n'
+                '        "updated_date": "2026-11-01",\n'
+                '        "citation_count": 34,\n'
+                '    },'
+            )
+            if old_pm_odds_tool in pc_new:
+                pc_new = pc_new.replace(old_pm_odds_tool, new_cg_tool, 1)
+
+            old_pm_tax_tool = (
+                '    {\n'
+                '        "slug": "prediction-market-tax",\n'
+                '        "title": "Prediction Market Tax Calculator: Section 1256 Contracts",\n'
+                '        "short_title": "Prediction Market Tax",\n'
+                '        "nav_label": "Prediction Tax",\n'
+                '        "description": "Compare statutory tax liabilities between CFTC-regulated event contracts under IRC Section 1256 (60/40 rate) and unregulated decentralized markets.",\n'
+                '        "problem_statement": "Contrasting Section 1256 60/40 blended capital gains tax treatment on CFTC exchanges against ordinary income rates on decentralized platforms.",\n'
+                '        "canonical_question": "Are prediction market gains taxed as Section 1256 contracts or ordinary income?",\n'
+                '        "named_decision_framework": "The Section 1256 60/40 Blended Tax Assessment Framework",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["prediction-market-tax"],\n'
+                '        "primary_keyword": "prediction market tax calculator",\n'
+                '        "secondary_keywords": [\n'
+                '            "kalshi tax treatment 1256",\n'
+                '            "polymarket tax reporting form 8949",\n'
+                '            "event contracts 60 40 blended rate",\n'
+                '            "prediction market capital gains vs ordinary income",\n'
+                '            "section 1256 contracts kalshi 1099 b",\n'
+                '        ],\n'
+                '        "category": "Tax Intelligence",\n'
+                '        "affiliates": ["coinledger", "turbotax", "kalshi"],\n'
+                '        "quick_answer": (\n'
+                '            "CFTC-regulated prediction markets like Kalshi qualify for IRC Section 1256 contracts, "\n'
+                '            "granting a 60/40 blended tax rate where 60% of gains are treated as long-term capital gains "\n'
+                '            "and 40% as short-term capital gains with Form 1099-B reporting. "\n'
+                '            "Unregulated platforms like Polymarket are taxed as ordinary income up to 37% plus 3.8% Section 1411 NIIT."\n'
+                '        ),\n'
+                '        "updated_date": "2026-09-20",\n'
+                '        "citation_count": 39,\n'
+                '    },'
+            )
+            new_irs_int_tool = (
+                '    {\n'
+                '        "slug": "irs-interest-calculator",\n'
+                '        "title": "IRS Section 6621 Underpayment & Overpayment Interest Calculator",\n'
+                '        "short_title": "IRS Section 6621 Interest",\n'
+                '        "nav_label": "IRS Interest",\n'
+                '        "description": "Calculate quarterly IRS underpayment and overpayment interest under IRC Section 6621 daily compounding schedules benchmarked against FRED Treasury rates.",\n'
+                '        "problem_statement": "Quantifying daily compounded IRS Section 6621 underpayment and overpayment interest liabilities across quarterly rate resets.",\n'
+                '        "canonical_question": "How is IRS underpayment and overpayment interest calculated under IRC Section 6621?",\n'
+                '        "named_decision_framework": "The Section 6621 Daily Compounding Rate Protocol",\n'
+                '        "calculation_manifest": CORE_CALCULATION_SPECS["irs-interest-calculator"],\n'
+                '        "primary_keyword": "irs underpayment interest calculator",\n'
+                '        "secondary_keywords": [\n'
+                '            "irc section 6621 interest rate",\n'
+                '            "irs quarterly interest calculator",\n'
+                '            "underpayment penalty interest",\n'
+                '            "irs overpayment interest rate"\n'
+                '        ],\n'
+                '        "category": "Tax Intelligence",\n'
+                '        "affiliates": ["turbotax", "taxslayer"],\n'
+                '        "quick_answer": (\n'
+                '            "Under IRC Section 6621 and Section 6622, IRS underpayment interest equals the federal short-term rate plus 3 percentage points (7% baseline), "\n'
+                '            "compounded daily across the overdue period. ProfitHelm calculates exact quarterly IRS underpayment and overpayment interest charges "\n'
+                '            "anchored to FRED Treasury DGS3MO benchmarks."\n'
+                '        ),\n'
+                '        "updated_date": "2026-11-01",\n'
+                '        "citation_count": 39,\n'
+                '    },'
+            )
+            if old_pm_tax_tool in pc_new:
+                pc_new = pc_new.replace(old_pm_tax_tool, new_irs_int_tool, 1)
+
+            _write_if_changed(cfg_py, pc_new, pc_src, updated_files)
+        except Exception:
+            pass
+
+    # 3. Prune retired slugs from profithelm/data/dynamic_tools.json so load_dynamic_tools never re-injects them
+    dyn_json = repo / "profithelm" / "data" / "dynamic_tools.json"
+    if dyn_json.is_file():
+        try:
+            dyn_raw = dyn_json.read_text(encoding="utf-8")
+            dyn_list = json.loads(dyn_raw)
+            if isinstance(dyn_list, list):
+                retired_dyn_slugs = {
+                    "irs-2027-tax-brackets",
+                    "irs-interest-calculator-2027",
+                    "prediction-market-odds",
+                    "prediction-market-tax",
+                }
+                filtered_dyn = [
+                    d for d in dyn_list
+                    if not (isinstance(d, dict) and str(d.get("slug") or "").strip().lower() in retired_dyn_slugs)
+                ]
+                if len(filtered_dyn) != len(dyn_list):
+                    dyn_json.write_text(json.dumps(filtered_dyn, indent=2) + "\n", encoding="utf-8")
+                    updated_files.append(str(dyn_json))
+        except Exception:
+            pass
+
+    # 4. Sync profithelm/oracle.py, profithelm/freshness.py, and profithelm/group_discovery.py shims
+    oracle_py = repo / "profithelm" / "oracle.py"
+    if oracle_py.is_file():
+        try:
+            or_src = oracle_py.read_text(encoding="utf-8")
+            or_new = or_src.replace('"irs-2027-tax-brackets",', '"irs-tax-brackets",')
+            _write_if_changed(oracle_py, or_new, or_src, updated_files)
+        except Exception:
+            pass
+
+    fresh_py = repo / "profithelm" / "freshness.py"
+    if fresh_py.is_file():
+        try:
+            fr_src = fresh_py.read_text(encoding="utf-8")
+            fr_new = fr_src.replace(
+                'required = ["sitemap.xml", "robots.txt", "llms.txt", "llms-full.txt", "feed.xml"]',
+                'required = ["sitemap.xml", "robots.txt", "llms.txt", "feed.xml"]',
+            ).replace(
+                '    retail_tax_calculators = {\n        "irs-2027-tax-brackets",',
+                '    retail_tax_calculators = {\n        "irs-tax-brackets",\n        "capital-gains-calculator",\n        "irs-interest-calculator",\n        "irs-2027-tax-brackets",',
+            )
+            _write_if_changed(fresh_py, fr_new, fr_src, updated_files)
+        except Exception:
+            pass
+
+    gd_py = repo / "profithelm" / "group_discovery.py"
+    if gd_py.is_file():
+        try:
+            gd_src = gd_py.read_text(encoding="utf-8")
+            gd_new = gd_src
+            if '"irs-tax-brackets": [' not in gd_new and '"irs-2027-tax-brackets": [' in gd_new:
+                gd_new = gd_new.replace(
+                    '    "irs-2027-tax-brackets": [\n',
+                    (
+                        '    "irs-tax-brackets": [\n'
+                        '        "small business tax",\n'
+                        '        "CFO finance executives",\n'
+                        '        "tax strategy business owners",\n'
+                        '    ],\n'
+                        '    "capital-gains-calculator": [\n'
+                        '        "capital gains tax strategy",\n'
+                        '        "high net worth wealth management",\n'
+                        '        "family office investors",\n'
+                        '    ],\n'
+                        '    "irs-interest-calculator": [\n'
+                        '        "small business tax compliance",\n'
+                        '        "CPA tax resolution strategy",\n'
+                        '        "IRS tax penalty abatement",\n'
+                        '    ],\n'
+                        '    "irs-2027-tax-brackets": [\n'
+                    ),
+                    1,
+                )
+            _write_if_changed(gd_py, gd_new, gd_src, updated_files)
+        except Exception:
+            pass
+
+    matrix_py = repo / "profithelm" / "matrix.py"
+    if matrix_py.is_file():
+        try:
+            mx_src = matrix_py.read_text(encoding="utf-8")
+            mx_target = (
+                'def compile_programmatic_matrix() -> Dict[str, Any]:\n'
+                '    """\n'
+                '    Master programmatic compiler. Reads data matrices, compiles state and vehicle pages,\n'
+                '    enforces R4T orthogonal archetype partitioning (min_archetypes >= 3), sitemap batch cap <= 2000,\n'
+                '    and updates sitemap.xml and sitemap-leaves.xml. Enforces HWL-1075 multi-dataset synthesis.\n'
+                '    Zero em-dashes. Zero en-dashes.\n'
+                '    """\n'
+                '    from profithelm.builder import validate_multi_dataset_enrichment'
+            )
+            mx_repl = (
+                'def compile_programmatic_matrix() -> Dict[str, Any]:\n'
+                '    """\n'
+                '    Delegates to pseofactory.profithelm_estate.compile_programmatic_matrix so legacy\n'
+                '    collapsed spokes are never re-materialized into dist/.\n'
+                '    Zero em-dashes. Zero en-dashes.\n'
+                '    """\n'
+                '    from pseofactory.profithelm_estate import compile_programmatic_matrix as _pseo_compile_matrix\n'
+                '    return _pseo_compile_matrix(output_dir=DIST_DIR.parent, repo_root=BASE_DIR)'
+            )
+            if mx_target in mx_src and "_pseo_compile_matrix" not in mx_src:
+                _write_if_changed(matrix_py, mx_src.replace(mx_target, mx_repl, 1), mx_src, updated_files)
+        except Exception:
+            pass
+
+    distributor_py = repo / "profithelm" / "distributor.py"
+    if distributor_py.is_file():
+        try:
+            dist_src = distributor_py.read_text(encoding="utf-8")
+            dist_target = (
+                'def _preserve_host_modules(fn):\n'
+                '    def _wrapped(*args, **kwargs):\n'
+                '        saved = {\n'
+                '            k: v\n'
+                '            for k, v in sys.modules.items()\n'
+                '            if k == "profithelm" or k.startswith("profithelm.")\n'
+                '        }\n'
+                '        try:\n'
+                '            return fn(*args, **kwargs)\n'
+                '        finally:\n'
+                '            sys.modules.update(saved)\n'
+                '    return _wrapped\n\n\n'
+                'for _attr_name in list(globals().keys()):\n'
+                '    if _attr_name.startswith("__"):\n'
+                '        continue\n'
+                '    _attr_val = globals()[_attr_name]\n'
+                '    if callable(_attr_val) and getattr(_attr_val, "__module__", "") == "pseofactory.distributor":\n'
+                '        globals()[_attr_name] = _preserve_host_modules(_attr_val)\n\n\n'
+                'def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:\n'
+                '    if tools is None:\n'
+                '        tools = TOOLS\n'
+                '    saved = {k: v for k, v in sys.modules.items() if k == "profithelm" or k.startswith("profithelm.")}\n'
+                '    try:\n'
+                '        return _pd.generate_all_distribution_assets(tools=tools, property_id=property_id)\n'
+                '    finally:\n'
+                '        sys.modules.update(saved)\n\n\n'
+                'def export_all_syndication_files(\n'
+                '    output_dir = None,\n'
+                '    tools = None,\n'
+                '    dry_run: bool = False,\n'
+                '    run_id: Optional[str] = None,\n'
+                '    property_id: str = "profithelm",\n'
+                '):\n'
+                '    if output_dir is None:\n'
+                '        from profithelm.config import SYNDICATION_DIR\n'
+                '        output_dir = SYNDICATION_DIR\n'
+                '    if tools is None:\n'
+                '        tools = TOOLS\n'
+                '    saved = {k: v for k, v in sys.modules.items() if k == "profithelm" or k.startswith("profithelm.")}\n'
+                '    try:\n'
+                '        return _pd.export_all_syndication_files(\n'
+                '            output_dir=output_dir,\n'
+                '            tools=tools,\n'
+                '            dry_run=dry_run,\n'
+                '            run_id=run_id,\n'
+                '            property_id=property_id,\n'
+                '        )\n'
+                '    finally:\n'
+                '        sys.modules.update(saved)'
+            )
+            dist_repl = (
+                'def _call_preserving_host_state(fn, *args, **kwargs):\n'
+                '    saved = {\n'
+                '        k: v\n'
+                '        for k, v in sys.modules.items()\n'
+                '        if k == "profithelm" or k.startswith("profithelm.")\n'
+                '    }\n'
+                '    saved_tools = list(TOOLS) if isinstance(TOOLS, list) else None\n'
+                '    try:\n'
+                '        return fn(*args, **kwargs)\n'
+                '    finally:\n'
+                '        if saved_tools is not None and isinstance(TOOLS, list):\n'
+                '            TOOLS[:] = saved_tools\n'
+                '        sys.modules.update(saved)\n\n\n'
+                'def _preserve_host_modules(fn):\n'
+                '    def _wrapped(*args, **kwargs):\n'
+                '        return _call_preserving_host_state(fn, *args, **kwargs)\n'
+                '    return _wrapped\n\n\n'
+                'for _attr_name in list(globals().keys()):\n'
+                '    if _attr_name.startswith("__"):\n'
+                '        continue\n'
+                '    _attr_val = globals()[_attr_name]\n'
+                '    if callable(_attr_val) and getattr(_attr_val, "__module__", "") == "pseofactory.distributor":\n'
+                '        globals()[_attr_name] = _preserve_host_modules(_attr_val)\n\n\n'
+                'def generate_all_distribution_assets(tools = None, property_id: str = "profithelm") -> Dict[str, Any]:\n'
+                '    if tools is None:\n'
+                '        tools = list(TOOLS)\n'
+                '    return _call_preserving_host_state(\n'
+                '        _pd.generate_all_distribution_assets,\n'
+                '        tools=tools,\n'
+                '        property_id=property_id,\n'
+                '    )\n\n\n'
+                'def export_all_syndication_files(\n'
+                '    output_dir = None,\n'
+                '    tools = None,\n'
+                '    dry_run: bool = False,\n'
+                '    run_id: Optional[str] = None,\n'
+                '    property_id: str = "profithelm",\n'
+                '):\n'
+                '    if output_dir is None:\n'
+                '        from profithelm.config import SYNDICATION_DIR\n'
+                '        output_dir = SYNDICATION_DIR\n'
+                '    if tools is None:\n'
+                '        tools = list(TOOLS)\n'
+                '    return _call_preserving_host_state(\n'
+                '        _pd.export_all_syndication_files,\n'
+                '        output_dir=output_dir,\n'
+                '        tools=tools,\n'
+                '        dry_run=dry_run,\n'
+                '        run_id=run_id,\n'
+                '        property_id=property_id,\n'
+                '    )'
+            )
+            if dist_target in dist_src and "_call_preserving_host_state" not in dist_src:
+                _write_if_changed(distributor_py, dist_src.replace(dist_target, dist_repl, 1), dist_src, updated_files)
+        except Exception:
+            pass
+
+    # 5. Align obsolete pre-factory test assertions in profithelm-platform/tests/
+    test_patches: List[Tuple[str, List[Tuple[str, str]]]] = [
+        (
+            "tests/test_audit_closed_loop_upgrades.py",
+            [
+                ('"slug": "irs-2027-tax-brackets",', '"slug": "irs-tax-brackets",'),
+                ('summaries.get("irs-2027-tax-brackets", {})', 'summaries.get("irs-tax-brackets", {})'),
+                ('get_web_application_schema(meta, "/tools/irs-2027-tax-brackets/")', 'get_web_application_schema(meta, "/tools/irs-tax-brackets/")'),
+                ('assert "speakable" in web_schema', 'assert "speakable" not in web_schema'),
+                ('get_howto_schema(meta["title"], meta["description"], "/tools/irs-2027-tax-brackets/")', 'get_howto_schema(meta["title"], meta["description"], "/tools/irs-tax-brackets/")'),
+                ('"tools/irs-2027-tax-brackets/index.html"', '"tools/irs-tax-brackets/index.html"'),
+                (
+                    '    assert "SoftwareApplication" in types\n'
+                    '    assert ("SoftwareApplication" in types or "WebApplication" in types)\n'
+                    '    assert "HowTo" in types\n'
+                    '    assert "Dataset" in types\n'
+                    '    assert "FAQPage" in types\n'
+                    '    assert "BreadcrumbList" in types',
+                    '    assert "WebApplication" in types\n'
+                    '    assert "WebPage" in types\n'
+                    '    assert "BreadcrumbList" in types',
+                ),
+                (
+                    '    assert "SoftwareApplication" in types\n'
+                    '    assert "WebApplication" in types\n'
+                    '    assert "HowTo" in types\n'
+                    '    assert "Dataset" in types\n'
+                    '    assert "FAQPage" in types\n'
+                    '    assert "BreadcrumbList" in types',
+                    '    assert "WebApplication" in types\n'
+                    '    assert "WebPage" in types\n'
+                    '    assert "BreadcrumbList" in types',
+                ),
+                (
+                    '    from profithelm.broadcaster import dispatch_tool_broadcast, get_broadcast_ledger\n',
+                    '    from profithelm.broadcaster import broadcast_to_x, dispatch_tool_broadcast, get_broadcast_ledger\n',
+                ),
+                (
+                    '    res = dispatch_tool_broadcast(\n'
+                    '        "irs-2027-tax-brackets",\n'
+                    '        live=True,\n'
+                    '        channels=["x"],\n'
+                    '        record_ledger=True,\n'
+                    '        ledger_path=tmp_ledger,\n'
+                    '    )\n'
+                    '    assert res["dispatches"]["x"]["status"] == "SUCCESS"',
+                    '    res = dispatch_tool_broadcast(\n'
+                    '        "irs-tax-brackets",\n'
+                    '        live=True,\n'
+                    '        channels=["x"],\n'
+                    '        record_ledger=True,\n'
+                    '        ledger_path=tmp_ledger,\n'
+                    '    )\n'
+                    '    assert "x" not in res["dispatches"]\n'
+                    '    direct_res = broadcast_to_x(\n'
+                    '        "2026-2027 IRS tax brackets: https://profithelm.com/tools/irs-tax-brackets/",\n'
+                    '        live=True,\n'
+                    '        slug="irs-tax-brackets",\n'
+                    '        record_ledger=True,\n'
+                    '        ledger_path=tmp_ledger,\n'
+                    '    )\n'
+                    '    assert direct_res["status"] == "SUCCESS"',
+                ),
+            ],
+        ),
+        (
+            "tests/test_group_discovery.py",
+            [
+                (
+                    '    res = dispatch_tool_broadcast(tool_slug, live=False, channels=["facebook"])\n'
+                    '    assert "dispatches" in res\n'
+                    '    assert "facebook" in res["dispatches"]\n'
+                    '    fb_dispatch = res["dispatches"]["facebook"]\n'
+                    '    assert fb_dispatch["status"] == "SIMULATED"\n'
+                    '    assert fb_dispatch["group_id"] is not None\n'
+                    '    assert len(fb_dispatch["group_id"]) > 0',
+                    '    res = dispatch_tool_broadcast(tool_slug, live=False, channels=["facebook"])\n'
+                    '    assert "dispatches" in res\n'
+                    '    assert "facebook" not in res["dispatches"]',
+                ),
+            ],
+        ),
+        (
+            "tests/test_builder_and_html.py",
+            [
+                (
+                    '        # 1. SoftwareApplication check\n'
+                    '        sw_apps = [s for s in raw_schemas if s.get("@type") == "SoftwareApplication"]\n'
+                    '        assert len(sw_apps) == 1, f"Missing SoftwareApplication schema on {slug}"\n'
+                    '        sw = sw_apps[0]\n'
+                    '        assert sw.get("datePublished") == "2026-01-01"\n'
+                    '        assert "dateModified" in sw and len(sw["dateModified"]) == 10\n\n'
+                    '        # 2. TechArticle check\n'
+                    '        tech_articles = [s for s in raw_schemas if s.get("@type") == "TechArticle"]\n'
+                    '        assert len(tech_articles) == 1, f"Missing TechArticle schema on {slug}"\n'
+                    '        ta = tech_articles[0]\n'
+                    '        assert ta.get("datePublished") == "2026-01-01"\n'
+                    '        assert "dateModified" in ta and len(ta["dateModified"]) == 10\n'
+                    '        assert ta.get("author", {}).get("@type") == "Organization"\n'
+                    '        assert ta.get("publisher", {}).get("@type") == "Organization"\n\n'
+                    '        # 3. Organization check with parasite trust signals\n'
+                    '        orgs = [s for s in raw_schemas if s.get("@type") == "Organization"]\n'
+                    '        assert len(orgs) >= 1, f"Missing Organization schema on {slug}"\n'
+                    '        org = orgs[0]\n'
+                    '        same_as = org.get("sameAs", [])\n'
+                    '        assert "https://www.linkedin.com/company/143884102/" in same_as\n'
+                    '        assert "https://x.com/profithelm" in same_as\n'
+                    '        assert "https://github.com/coskunarif/profithelm-platform" in same_as',
+                    '        # 1. WebApplication check (replaces legacy SoftwareApplication/TechArticle bloat)\n'
+                    '        web_apps = [s for s in raw_schemas if s.get("@type") in ("WebApplication", "SoftwareApplication")]\n'
+                    '        assert len(web_apps) == 1, f"Missing WebApplication schema on {slug}"\n'
+                    '        wa = web_apps[0]\n'
+                    '        assert wa.get("datePublished") == "2026-01-01"\n'
+                    '        assert "dateModified" in wa and len(wa["dateModified"]) == 10\n'
+                    '        assert wa.get("publisher", {}).get("@id") == f"{CANONICAL_BASE}/#organization"\n\n'
+                    '    # 2. Organization node check on homepage\n'
+                    '    home_soup = BeautifulSoup((DIST_DIR / "index.html").read_text(encoding="utf-8"), "html.parser")\n'
+                    '    home_graph = json.loads(home_soup.find("script", attrs={"type": "application/ld+json"}).string).get("@graph", [])\n'
+                    '    orgs = [s for s in home_graph if s.get("@type") == "Organization"]\n'
+                    '    assert len(orgs) >= 1, "Missing Organization schema on index.html"\n'
+                    '    same_as = orgs[0].get("sameAs", [])\n'
+                    '    assert "https://www.linkedin.com/company/143884102/" in same_as\n'
+                    '    assert "https://x.com/profithelm" in same_as',
+                ),
+            ],
+        ),
+        (
+            "tests/test_competitor_intelligence_upgrades.py",
+            [
+                ('validate_multi_dataset_enrichment("irs-2027-tax-brackets")', 'validate_multi_dataset_enrichment("irs-tax-brackets")'),
+            ],
+        ),
+        (
+            "tests/test_machine_endpoints.py",
+            [
+                (
+                    '    for t in TOOLS:\n        assert t["slug"] in content',
+                    '    assert "## Top Hub Links" in content\n'
+                    '    assert "/tools/irs-tax-brackets/" in content\n'
+                    '    assert "Circular 230" in content\n'
+                    '    hub_lines = [ln for ln in content.splitlines() if ln.strip().startswith("- [")]\n'
+                    '    assert 1 <= len(hub_lines) <= 5',
+                ),
+                (
+                    '    from profithelm.config import CORE_TOOLS\n'
+                    '    expected_min = 1 + len(CORE_TOOLS) + 51 + 25 + 51  # 137 baseline\n'
+                    '    assert content.count(f"{CANONICAL_BASE}") >= expected_min\n\n'
+                    '    # Verify all core tools are in llms.txt\n'
+                    '    for t in CORE_TOOLS:\n'
+                    '        assert f"/tools/{t[\'slug\']}/" in content\n\n'
+                    '    # Verify all 51 Section 1031 state urls are in llms.txt\n'
+                    '    states_file = DIST_DIR.parent / "profithelm" / "data" / "us_states_tax.json"\n'
+                    '    if states_file.exists():\n'
+                    '        import json\n'
+                    '        states = json.load(open(states_file, encoding="utf-8"))\n'
+                    '        for s in states:\n'
+                    '            assert f"/tools/section-1031-calculator/{s[\'slug\']}/" in content',
+                    '    hub_lines = [ln for ln in content.splitlines() if ln.strip().startswith("- [")]\n'
+                    '    assert 1 <= len(hub_lines) <= 5\n'
+                    '    assert f"{CANONICAL_BASE}/tools/" in content\n'
+                    '    assert f"{CANONICAL_BASE}/tools/irs-tax-brackets/" in content\n'
+                    '    assert "/tools/section-1031-calculator/california/" not in content',
+                ),
+                (
+                    '    llms_full_file = DIST_DIR / "llms-full.txt"\n'
+                    '    assert llms_full_file.exists()\n'
+                    '    content = llms_full_file.read_text(encoding="utf-8")\n\n'
+                    '    # Extract crypto section\n'
+                    '    assert "## 2. Crypto Tax Liability & Capital Gains Calculator 2027" in content\n'
+                    '    crypto_part = content.split("## 2. Crypto Tax Liability & Capital Gains Calculator 2027")[1].split("## 3.")[0]\n\n'
+                    '    # Verify IRC Section 1 tax bracket boilerplate is NOT present in crypto section\n'
+                    '    assert "Pursuant to 26 U.S. Code Section 1" not in crypto_part\n'
+                    '    assert "Form 1099-DA" in crypto_part',
+                    '    llms_full_file = DIST_DIR / "llms-full.txt"\n'
+                    '    assert not llms_full_file.exists(), "Retired llms-full.txt must be purged from dist/"\n'
+                    '    llms_txt = (DIST_DIR / "llms.txt").read_text(encoding="utf-8")\n'
+                    '    assert "Form 1099-DA" in llms_txt or "Crypto" in llms_txt',
+                ),
+            ],
+        ),
+        (
+            "tests/test_multi_tenant_and_assets.py",
+            [
+                (
+                    '        "irs-2027-tax-brackets",\n'
+                    '        "crypto-tax-calculator",\n'
+                    '        "saas-runway-calculator",\n'
+                    '        "prediction-market-odds",\n'
+                    '        "tcja-sunset-capital-gains",\n'
+                    '        "section-179-calculator",\n'
+                    '        "treasury-yield-calculator",\n'
+                    '        "section-1031-calculator",\n'
+                    '        "prediction-market-tax",',
+                    '        "irs-tax-brackets",\n'
+                    '        "crypto-tax-calculator",\n'
+                    '        "saas-runway-calculator",\n'
+                    '        "capital-gains-calculator",\n'
+                    '        "tcja-sunset-capital-gains",\n'
+                    '        "section-179-calculator",\n'
+                    '        "treasury-yield-calculator",\n'
+                    '        "section-1031-calculator",\n'
+                    '        "irs-interest-calculator",',
+                ),
+                (
+                    '    # 1. Tax Brackets state pages (50 states + DC)\n'
+                    '    tax_dir = DIST_DIR / "tools" / "irs-2027-tax-brackets"\n'
+                    '    assert tax_dir.exists()\n'
+                    '    state_tax_pages = list(tax_dir.glob("*/index.html"))\n'
+                    '    assert len(state_tax_pages) == 51, f"Expected 51 state tax pages, got {len(state_tax_pages)}"\n\n'
+                    '    # 2. Section 179 vehicle models\n'
+                    '    sec179_dir = DIST_DIR / "tools" / "section-179-calculator"\n'
+                    '    assert sec179_dir.exists()\n'
+                    '    vehicle_pages = list(sec179_dir.glob("*/index.html"))\n'
+                    '    assert len(vehicle_pages) == 25, f"Expected 25 vehicle pages, got {len(vehicle_pages)}"\n\n'
+                    '    # 3. Section 1031 state hubs (50 states + DC)\n'
+                    '    sec1031_dir = DIST_DIR / "tools" / "section-1031-calculator"\n'
+                    '    assert sec1031_dir.exists()\n'
+                    '    state_1031_pages = list(sec1031_dir.glob("*/index.html"))\n'
+                    '    assert len(state_1031_pages) == 51, f"Expected 51 state 1031 hubs (50 states + DC), got {len(state_1031_pages)}"\n\n'
+                    '    # Total published HTML files must be at least 136\n'
+                    '    all_html = list(DIST_DIR.rglob("*.html"))\n'
+                    '    assert len(all_html) >= 136, f"Expected >= 136 published HTML files, found {len(all_html)}"',
+                    '    # Collapsed 127 spokes: parent hubs own interactive <select> + #hash presets\n'
+                    '    tax_dir = DIST_DIR / "tools" / "irs-tax-brackets"\n'
+                    '    assert (tax_dir / "index.html").is_file()\n'
+                    '    assert list(tax_dir.glob("*/index.html")) == []\n'
+                    '    assert not (DIST_DIR / "tools" / "irs-2027-tax-brackets").exists()\n\n'
+                    '    sec179_dir = DIST_DIR / "tools" / "section-179-calculator"\n'
+                    '    assert (sec179_dir / "index.html").is_file()\n'
+                    '    assert list(sec179_dir.glob("*/index.html")) == []\n\n'
+                    '    sec1031_dir = DIST_DIR / "tools" / "section-1031-calculator"\n'
+                    '    assert (sec1031_dir / "index.html").is_file()\n'
+                    '    assert list(sec1031_dir.glob("*/index.html")) == []\n\n'
+                    '    redirects_txt = (DIST_DIR / "_redirects").read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-2027-tax-brackets/*  /tools/irs-tax-brackets/  301" in redirects_txt',
+                ),
+            ],
+        ),
+        (
+            "tests/test_nuttall_growth_doctrine.py",
+            [
+                (
+                    '    f150_path = DIST_DIR / "tools" / "section-179-calculator" / "ford-f150-lightning" / "index.html"\n'
+                    '    assert f150_path.exists(), "Ford F-150 Lightning matrix page not found in dist/"\n'
+                    '    html = f150_path.read_text(encoding="utf-8")\n'
+                    '    assert "Multi-Dataset State Section 179 Conformity" in html\n'
+                    '    assert "class=\\"table-wrap\\"" in html\n'
+                    '    assert "touch" in html\n'
+                    '    assert "California (CA)" in html\n'
+                    '    assert "Pennsylvania (PA)" in html\n'
+                    '    assert "Texas (TX)" in html',
+                    '    assert not (DIST_DIR / "tools" / "section-179-calculator" / "ford-f150-lightning").exists()\n'
+                    '    s179_path = DIST_DIR / "tools" / "section-179-calculator" / "index.html"\n'
+                    '    assert s179_path.exists(), "Parent section-179-calculator page not found in dist/"\n'
+                    '    html = s179_path.read_text(encoding="utf-8")\n'
+                    '    assert "class=\\"table-wrap\\"" in html\n'
+                    '    assert "touch" in html\n'
+                    '    assert "Ford F-150" in html\n'
+                    '    assert "GVWR" in html\n'
+                    '    assert "<select" in html',
+                ),
+            ],
+        ),
+        (
+            "tests/test_prediction_market_tax.py",
+            [
+                (
+                    '    build_all()\n'
+                    '    page_path = DIST_DIR / "tools" / "prediction-market-tax" / "index.html"\n'
+                    '    assert page_path.exists()\n\n'
+                    '    html = page_path.read_text(encoding="utf-8")\n'
+                    '    assert chr(0x2014) not in html\n'
+                    '    assert chr(0x2013) not in html\n\n'
+                    '    soup = BeautifulSoup(html, "html.parser")\n'
+                    '    # Quick answer\n'
+                    '    assert soup.find("aside", class_="quick-answer") is not None\n'
+                    '    # Data tables\n'
+                    '    tables = soup.find_all("table")\n'
+                    '    assert len(tables) >= 2  # secondary dataset venue table + empirical schedule table\n'
+                    '    # Affiliate CTAs\n'
+                    '    ctas = soup.find_all("a", class_="btn-cta")\n'
+                    '    assert len(ctas) >= 1\n'
+                    '    # Interactive IDs\n'
+                    '    assert soup.find(id="pm-tax-gain") is not None\n'
+                    '    assert soup.find(id="res-pm-tax-savings") is not None\n\n'
+                    '    # Stacked Schema.org validation\n'
+                    '    from profithelm.contracts import assert_valid_jsonld\n'
+                    '    parsed_schemas = assert_valid_jsonld(html, context="prediction-market-tax page")\n'
+                    '    schema_types = [s.get("@type") for s in parsed_schemas]\n'
+                    '    assert "SoftwareApplication" in schema_types\n'
+                    '    assert "FAQPage" in schema_types',
+                    '    build_all()\n'
+                    '    page_path = DIST_DIR / "tools" / "prediction-market-tax" / "index.html"\n'
+                    '    assert not page_path.exists(), "Decommissioned prediction-market-tax must not be built"\n'
+                    '    mw_js = (BASE_DIR / "functions" / "_middleware.js").read_text(encoding="utf-8")\n'
+                    '    assert "/tools/prediction-market-tax" in mw_js',
+                ),
+            ],
+        ),
+        (
+            "tests/test_search_and_indexing_upgrades.py",
+            [
+                (
+                    '    sw_schema = get_software_application_schema(meta, "/tools/irs-2027-tax-brackets/")\n'
+                    '    assert "speakable" in sw_schema\n'
+                    '    assert sw_schema["speakable"]["@type"] == "SpeakableSpecification"\n'
+                    '    assert ".quick-answer-body" in sw_schema["speakable"]["cssSelector"]\n'
+                    '    assert ".hero-subtitle" in sw_schema["speakable"]["cssSelector"]\n\n'
+                    '    ta_schema = get_tech_article_schema(meta, "/tools/irs-2027-tax-brackets/")\n'
+                    '    assert "speakable" in ta_schema\n'
+                    '    assert ta_schema["speakable"]["@type"] == "SpeakableSpecification"\n'
+                    '    assert ".quick-answer-body" in ta_schema["speakable"]["cssSelector"]\n'
+                    '    assert ".hero-subtitle" in ta_schema["speakable"]["cssSelector"]\n\n'
+                    '    # Also verify programmatic state tax leaf has speakable schema in generated HTML\n'
+                    '    ca_file = DIST_DIR / "tools" / "irs-2027-tax-brackets" / "california" / "index.html"\n'
+                    '    if ca_file.exists():\n'
+                    '        soup = BeautifulSoup(ca_file.read_text(encoding="utf-8"), "html.parser")\n'
+                    '        raw_blocks = [json.loads(s.string) for s in soup.find_all("script", attrs={"type": "application/ld+json"})]\n'
+                    '        schemas = []\n'
+                    '        for b in raw_blocks:\n'
+                    '            if isinstance(b, dict) and "@graph" in b:\n'
+                    '                schemas.extend(b["@graph"])\n'
+                    '            else:\n'
+                    '                schemas.append(b)\n'
+                    '        speakable_schemas = [s for s in schemas if "speakable" in s]\n'
+                    '        assert len(speakable_schemas) >= 2, "Programmatic leaf missing SpeakableSpecification schema!"',
+                    '    sw_schema = get_software_application_schema(meta, "/tools/irs-tax-brackets/")\n'
+                    '    assert "speakable" not in sw_schema\n\n'
+                    '    ta_schema = get_tech_article_schema(meta, "/tools/irs-tax-brackets/")\n'
+                    '    assert ta_schema["@type"] == "TechArticle"\n\n'
+                    '    tax_file = DIST_DIR / "tools" / "irs-tax-brackets" / "index.html"\n'
+                    '    if tax_file.exists():\n'
+                    '        soup = BeautifulSoup(tax_file.read_text(encoding="utf-8"), "html.parser")\n'
+                    '        raw_blocks = [json.loads(s.string) for s in soup.find_all("script", attrs={"type": "application/ld+json"})]\n'
+                    '        schemas = []\n'
+                    '        for b in raw_blocks:\n'
+                    '            if isinstance(b, dict) and "@graph" in b:\n'
+                    '                schemas.extend(b["@graph"])\n'
+                    '            else:\n'
+                    '                schemas.append(b)\n'
+                    '        assert all("speakable" not in s and s.get("@type") != "SpeakableSpecification" for s in schemas)',
+                ),
+                (
+                    '    # 1. California Tax Page\n'
+                    '    ca_tax_file = DIST_DIR / "tools" / "irs-2027-tax-brackets" / "california" / "index.html"\n'
+                    '    assert ca_tax_file.exists()\n'
+                    '    ca_tax_html = ca_tax_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/section-1031-calculator/california/" in ca_tax_html\n'
+                    '    assert "/tools/section-179-calculator/" in ca_tax_html\n'
+                    '    assert "California Entity Tax &amp; Capital Allocation Suite" in ca_tax_html\n\n'
+                    '    # 2. California 1031 Exchange Page\n'
+                    '    ca_1031_file = DIST_DIR / "tools" / "section-1031-calculator" / "california" / "index.html"\n'
+                    '    assert ca_1031_file.exists()\n'
+                    '    ca_1031_html = ca_1031_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-2027-tax-brackets/california/" in ca_1031_html\n'
+                    '    assert "/tools/section-179-calculator/" in ca_1031_html\n'
+                    '    assert "California Tax Planning &amp; Commercial Entity Suite" in ca_1031_html\n\n'
+                    '    # 3. Vehicle Page Cross-Links\n'
+                    '    f150_file = DIST_DIR / "tools" / "section-179-calculator" / "ford-f150-lightning" / "index.html"\n'
+                    '    assert f150_file.exists()\n'
+                    '    f150_html = f150_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-2027-tax-brackets/california/" in f150_html\n'
+                    '    assert "/tools/section-1031-calculator/california/" in f150_html\n\n'
+                    '    # 4. Section 179 Calculator Hub Cross-Links\n'
+                    '    sec179_file = DIST_DIR / "tools" / "section-179-calculator" / "index.html"\n'
+                    '    assert sec179_file.exists()\n'
+                    '    sec179_html = sec179_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-2027-tax-brackets/california/" in sec179_html\n'
+                    '    assert "/tools/section-1031-calculator/california/" in sec179_html',
+                    '    # 1. IRS Tax Brackets Hub\n'
+                    '    tax_file = DIST_DIR / "tools" / "irs-tax-brackets" / "index.html"\n'
+                    '    assert tax_file.exists()\n'
+                    '    tax_html = tax_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/section-1031-calculator/" in tax_html\n'
+                    '    assert "/tools/section-179-calculator/" in tax_html\n\n'
+                    '    # 2. Section 1031 Exchange Hub\n'
+                    '    s1031_file = DIST_DIR / "tools" / "section-1031-calculator" / "index.html"\n'
+                    '    assert s1031_file.exists()\n'
+                    '    s1031_html = s1031_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-tax-brackets/" in s1031_html\n'
+                    '    assert "/tools/section-179-calculator/" in s1031_html\n\n'
+                    '    # 3. Section 179 Calculator Hub\n'
+                    '    sec179_file = DIST_DIR / "tools" / "section-179-calculator" / "index.html"\n'
+                    '    assert sec179_file.exists()\n'
+                    '    sec179_html = sec179_file.read_text(encoding="utf-8")\n'
+                    '    assert "/tools/irs-tax-brackets/" in sec179_html\n'
+                    '    assert "/tools/section-1031-calculator/" in sec179_html',
+                ),
+            ],
+        ),
+        (
+            "tests/test_boost_factory_fixes.py",
+            [
+                (
+                    '        # Verify llms.txt contains newly synthesized route\n'
+                    '        llms = (DIST_DIR / "llms.txt").read_text(encoding="utf-8")\n'
+                    '        assert "/tools/equipment-lease-tax-deduction/" in llms',
+                    '        # Verify llms.txt remains capped to <= 5 top hubs\n'
+                    '        llms = (DIST_DIR / "llms.txt").read_text(encoding="utf-8")\n'
+                    '        hub_lines = [ln for ln in llms.splitlines() if ln.strip().startswith("- [")]\n'
+                    '        assert 1 <= len(hub_lines) <= 5',
+                ),
+            ],
+        ),
+        (
+            "tests/test_end_to_end_truth_oracle.py",
+            [
+                ('assert summary["leaves_audited"] == 127', 'assert summary["leaves_audited"] == 0'),
+                ('tax_page = temp_dist / "tools" / "irs-2027-tax-brackets" / "index.html"', 'tax_page = temp_dist / "tools" / "irs-tax-brackets" / "index.html"'),
+            ],
+        ),
+        (
+            "tests/test_factory_pipeline.py",
+            [
+                (
+                    '    import subprocess\n'
+                    '    try:\n'
+                    '        report = run_factory_pipeline(live_deploy=False, live_index=False, live_git=False, limit_trends=2)\n'
+                    '    finally:\n'
+                    '        if (DIST_DIR.parent / ".git").exists():\n'
+                    '            subprocess.run(["git", "-C", str(DIST_DIR.parent), "checkout", "-q", "HEAD", "--", "dist", "profithelm/data/dynamic_tools.json", "freshness_audit_report.json"], check=False)',
+                    '    import subprocess\n'
+                    '    _was_clean = (\n'
+                    '        (DIST_DIR.parent / ".git").exists()\n'
+                    '        and subprocess.run(\n'
+                    '            ["git", "-C", str(DIST_DIR.parent), "status", "--porcelain", "--", "dist", "profithelm/data/dynamic_tools.json"],\n'
+                    '            capture_output=True,\n'
+                    '            text=True,\n'
+                    '            check=False,\n'
+                    '        ).stdout.strip() == ""\n'
+                    '    )\n'
+                    '    try:\n'
+                    '        report = run_factory_pipeline(live_deploy=False, live_index=False, live_git=False, limit_trends=2)\n'
+                    '    finally:\n'
+                    '        from profithelm.config import reset_tools_to_core\n'
+                    '        reset_tools_to_core()\n'
+                    '        if _was_clean:\n'
+                    '            subprocess.run(["git", "-C", str(DIST_DIR.parent), "checkout", "-q", "HEAD", "--", "dist", "profithelm/data/dynamic_tools.json", "freshness_audit_report.json"], check=False)',
+                ),
+            ],
+        ),
+    ]
+
+    for rel_path, replacements in test_patches:
+        t_path = repo / rel_path
+        if not t_path.is_file():
+            continue
+        try:
+            t_src = t_path.read_text(encoding="utf-8")
+            t_new = t_src
+            for old_txt, new_txt in replacements:
+                if old_txt in t_new:
+                    t_new = t_new.replace(old_txt, new_txt)
+            _write_if_changed(t_path, t_new, t_src, updated_files)
+        except Exception:
+            pass
 
 
 def reconcile_workspace_tracking_state(

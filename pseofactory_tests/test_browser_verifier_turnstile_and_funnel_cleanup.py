@@ -399,14 +399,21 @@ async function runScenario({ protocol, synthetic, exercise, forceCfg, attachSlot
   const localRes = await runScenario({ protocol: 'http:', synthetic: false, exercise: false, forceCfg: false, attachSlot: true, throwOnRender: false });
   assert.strictEqual(localRes.fetchUrls.filter(u => u.includes('config=1')).length, 0);
 
-  // 2. Synthetic B4 exercise mounts stub turnstile without touching challenges.cloudflare.com
+  // 2. Synthetic B4 exercise on local preview mounts stub turnstile without hitting config=1 or challenges.cloudflare.com
   const b4Res = await runScenario({ protocol: 'http:', synthetic: true, exercise: true, forceCfg: true, attachSlot: true, throwOnRender: false });
-  assert.strictEqual(b4Res.fetchUrls.filter(u => u.includes('config=1')).length >= 1, true);
+  assert.strictEqual(b4Res.fetchUrls.filter(u => u.includes('config=1')).length, 0);
   assert.strictEqual(b4Res.mountedAttr, '1');
   assert.strictEqual(b4Res.mountCalls.length, 1);
   assert.strictEqual(b4Res.mountCalls[0].inBody, true);
   assert.strictEqual(b4Res.appendedScripts.length, 0);
   assert.strictEqual(b4Res.mountErr, '');
+
+  // 2b. Non-local https: preview with exercise=true still fetches config=1 and mounts stub turnstile cleanly
+  const httpsRes = await runScenario({ protocol: 'https:', synthetic: true, exercise: true, forceCfg: true, attachSlot: true, throwOnRender: false });
+  assert.strictEqual(httpsRes.fetchUrls.filter(u => u.includes('config=1')).length >= 1, true);
+  assert.strictEqual(httpsRes.mountedAttr, '1');
+  assert.strictEqual(httpsRes.mountCalls.length, 1);
+  assert.strictEqual(httpsRes.mountErr, '');
 
   // 3. Broken render throws and is captured cleanly instead of passing silently
   const errRes = await runScenario({ protocol: 'http:', synthetic: true, exercise: true, forceCfg: true, attachSlot: true, throwOnRender: true });

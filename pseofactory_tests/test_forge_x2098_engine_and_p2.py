@@ -222,7 +222,7 @@ def test_p2_autonomous_daily_trend_page_build_and_supervisor_integration(tmp_pat
             "query": "existing tool calculator",
             "slug": "existing-tool-calculator",
             "tenant": "profithelm",
-            "statutory_authority": "IRC Section 179(b)(1)",
+            "statutory_authority": "IRC Section 168(k)",
             "economic_dataset": "FRED CPILFESL Series",
             "model_name": "ProfitHelm Existing Tool Baseline Model",
             "formula": "round(amount * 0.25, 2)",

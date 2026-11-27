@@ -203,7 +203,7 @@ def test_gsc_remediation_internal_links_and_competing_url_consolidation():
     signals = [
         {
             "query": "ca tax brackets 2026",
-            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "target_url": "https://profithelm.com/tools/irs-tax-brackets/",
             "impressions": 420,
             "position": 8.4,
             "ctr": 0.012,
@@ -217,7 +217,7 @@ def test_gsc_remediation_internal_links_and_competing_url_consolidation():
         },
         {
             "query": "california married filing jointly tax brackets 2026",
-            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "target_url": "https://profithelm.com/tools/irs-tax-brackets/",
             "impressions": 180,
             "position": 10.1,
             "ctr": 0.015,
@@ -225,12 +225,12 @@ def test_gsc_remediation_internal_links_and_competing_url_consolidation():
     ]
     prioritized = prioritize_gsc_signals(signals, tenant_id="profithelm")
     ca_canonical_recs = [
-        r for r in prioritized if r["target_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+        r for r in prioritized if r["target_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
     ]
     assert len(ca_canonical_recs) == 2
     competing_rec = [r for r in ca_canonical_recs if r["query"] == "ca tax brackets 2026"][0]
     assert competing_rec.get("consolidation_needed") is True
-    assert competing_rec["canonical_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert competing_rec["canonical_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
     assert "https://profithelm.com/tools/ca-tax-brackets-2026/" in competing_rec["redirect_candidates"]
     assert set(competing_rec["grouped_queries"]) == {
         "ca tax brackets 2026",
@@ -659,7 +659,7 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
         },
         {
             "query": "2027 california tax brackets",
-            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "target_url": "https://profithelm.com/tools/irs-tax-brackets/",
             "impressions": 50,
             "clicks": 1,
             "ctr": 0.02,
@@ -677,8 +677,8 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     prioritized = prioritize_gsc_signals(signals, tenant_id="profithelm")
     assert len(prioritized) == 1
     can_cand = prioritized[0]
-    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
-    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
+    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
     assert can_cand["impressions"] == 350
     assert can_cand["direct_impressions"] == 50
     assert can_cand["redirected_impressions"] == 300
@@ -723,7 +723,7 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
             "position": 8.42,
         },
         {
-            "page": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "page": "https://profithelm.com/tools/irs-tax-brackets/",
             "query": "2027 california tax brackets",
             "impressions": 19,
             "clicks": 0,
@@ -750,13 +750,11 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     assert rollup["rolled_up_clicks"] == 4
     assert rollup["ignored_off_topic_rows_count"] == 1
     assert rollup["ignored_off_topic_impressions"] == 11
-    # Both the state leaf and parent tool hub are credited in impressions_by_path
-    assert rollup["impressions_by_path"]["/tools/irs-2027-tax-brackets/california"] == 92
-    assert rollup["impressions_by_path"]["/tools/irs-2027-tax-brackets"] == 92
+    assert rollup["impressions_by_path"]["/tools/irs-tax-brackets"] == 92
     assert rollup["impressions_by_path"]["/tools/prediction-market-odds"] == 9
     assert "/tools/shopify-profit-margin-calculator" not in rollup["impressions_by_path"]
 
-    ca_row = [r for r in rollup["rows"] if r["canonical_path"] == "/tools/irs-2027-tax-brackets/california/"][0]
+    ca_row = [r for r in rollup["rows"] if r["canonical_path"] == "/tools/irs-tax-brackets/"][0]
     assert ca_row["impressions"] == 92
     assert ca_row["clicks"] == 4
     assert ca_row["direct_impressions"] == 19
@@ -770,12 +768,12 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     assert rollup_second_pass["rolled_up_impressions"] == 82
     assert rollup_second_pass["rolled_up_clicks"] == 4
     assert (
-        rollup_second_pass["canonical_targets_summary"]["/tools/irs-2027-tax-brackets/california/"]["redirected_impressions"]
+        rollup_second_pass["canonical_targets_summary"]["/tools/irs-tax-brackets/"]["redirected_impressions"]
         == 73
     )
 
     nj_res = resolve_redirected_gsc_target(query="nj tax bracket", property_id="profithelm")
-    assert nj_res["canonical_path"] == "/tools/irs-2027-tax-brackets/new-jersey/"
+    assert nj_res["canonical_path"] == "/tools/irs-tax-brackets/new-jersey/"
     crypto_res = resolve_redirected_gsc_target(query="calculate crypto taxes", property_id="profithelm")
     assert crypto_res["canonical_path"] == "/tools/crypto-tax-calculator/"
 
@@ -791,7 +789,7 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
         },
         {
             "query": "2027 california tax brackets",
-            "target_url": "https://profithelm.com/tools/irs-2027-tax-brackets/california/",
+            "target_url": "https://profithelm.com/tools/irs-tax-brackets/",
             "impressions": 50,
             "clicks": 1,
             "ctr": 0.02,
@@ -809,8 +807,8 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     prioritized = prioritize_gsc_signals(signals, tenant_id="profithelm")
     assert len(prioritized) == 1
     can_cand = prioritized[0]
-    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
-    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-2027-tax-brackets/california/"
+    assert can_cand["target_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
+    assert can_cand["canonical_url"] == "https://profithelm.com/tools/irs-tax-brackets/"
     assert can_cand["impressions"] == 350
     assert can_cand["direct_impressions"] == 50
     assert can_cand["redirected_impressions"] == 300
@@ -820,17 +818,17 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
 
     # 3. Verify execute_engine_repairs remaps retired slugs to canonical target and never writes retired overlays
     dist_dir = tmp_path / "dist"
-    ca_leaf_dir = dist_dir / "tools" / "irs-2027-tax-brackets" / "california"
+    ca_leaf_dir = dist_dir / "tools" / "irs-tax-brackets"
     ca_leaf_dir.mkdir(parents=True)
     ca_leaf_html = ca_leaf_dir / "index.html"
     ca_leaf_html.write_text(
-        '<!DOCTYPE html><html><head><title>CA Tax Brackets</title>'
-        '<link rel="canonical" href="https://profithelm.com/tools/irs-2027-tax-brackets/california/"></head>'
-        '<body><main><h1>California Tax Brackets</h1>'
+        '<!DOCTYPE html><html><head><title>IRS Federal Tax Brackets</title>'
+        '<link rel="canonical" href="https://profithelm.com/tools/irs-tax-brackets/"></head>'
+        '<body><main><h1>IRS Federal Tax Brackets</h1>'
         '<aside class="quick-answer"><div class="quick-answer-title">Statutory Summary</div>'
-        '<p>Under IRC Section 1 and California Revenue and Taxation Code Section 17041, single and married '
-        'taxpayers calculate marginal state income tax rates across nine progressive brackets ranging from '
-        '1 percent to 13.3 percent with statutory inflation indexing.</p></aside>'
+        '<p>Under IRC Section 1(j) and Rev. Proc. 2025-32, single and married '
+        'taxpayers calculate marginal federal income tax rates across seven progressive brackets ranging from '
+        '10 percent to 37 percent with statutory inflation indexing.</p></aside>'
         '</main></body></html>',
         encoding="utf-8",
     )
@@ -862,8 +860,8 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     )
     assert not (tmp_path / "content" / "overlays" / "ca-tax-brackets-2026.json").exists()
     assert not (tmp_path / "content" / "overlays" / "shopify-profit-margin-calculator.json").exists()
-    assert (tmp_path / "content" / "overlays" / "irs-2027-tax-brackets-california.json").is_file()
-    assert "irs-2027-tax-brackets/california" in repair_res["repaired_slugs"]
+    assert (tmp_path / "content" / "overlays" / "irs-tax-brackets.json").is_file()
+    assert "irs-tax-brackets" in repair_res["repaired_slugs"]
 
     # 4. Verify reconcile_metric_recovery_ledger & reconcile_factory_execution_log
     agy_dir = tmp_path / ".agy"
@@ -897,8 +895,8 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     m_after = json.loads((agy_dir / "metric_recovery_ledger.json").read_text(encoding="utf-8"))
     assert "ca-tax-brackets-2026" not in m_after["snapshots"]
     assert "shopify-profit-margin-calculator" not in m_after["snapshots"]
-    assert "irs-2027-tax-brackets" in m_after["snapshots"]
-    assert "ca-tax-brackets-2026" in m_after["snapshots"]["irs-2027-tax-brackets"]["rolled_up_redirected_slugs"]
+    assert "irs-tax-brackets" in m_after["snapshots"]
+    assert "ca-tax-brackets-2026" in m_after["snapshots"]["irs-tax-brackets"]["rolled_up_redirected_slugs"]
 
     (agy_dir / "factory_execution_log.json").write_text(
         json.dumps({
@@ -923,8 +921,8 @@ def test_redirected_search_signal_rollup_and_audit_reconciliation(tmp_path):
     assert f_rec["queries_resolved"] == 1
     f_after = json.loads((agy_dir / "factory_execution_log.json").read_text(encoding="utf-8"))
     item_after = f_after["stages"]["1_scan"]["sc_performance_audit"]["audit_items"][0]
-    assert item_after["matching_tool"] == "irs-2027-tax-brackets"
-    assert item_after["canonical_target"] == "/tools/irs-2027-tax-brackets/california/"
+    assert item_after["matching_tool"] == "irs-tax-brackets"
+    assert item_after["canonical_target"] == "/tools/irs-tax-brackets/"
 
     # 5. Verify check_snippet_gate & check_no_js_rendering_gate accurately parse <aside class="quick-answer"> with inner <div>
     from pseofactory.verifier import MasterSEOVerifier
@@ -1016,7 +1014,7 @@ def test_striking_distance_4_15_duplicate_suppression_title_protection_and_subin
     )
     assert mod_me["decision"] == "EXPAND_EXISTING_PAGE"
     assert mod_me["action"] == "REFACTOR_PAGE"
-    assert mod_me["target_subroute"] == "/tools/section-1031-calculator/maine/"
+    assert mod_me["target_subroute"] == "/tools/capital-gains-calculator/maine/"
 
     mod_boot = evaluate_query_modifier_expansion_vs_distinct_tool(
         "partial 1031 exchange boot calculator",
@@ -1121,10 +1119,10 @@ def test_striking_distance_4_15_duplicate_suppression_title_protection_and_subin
     assert any("RAP Tiered AGI Schedule" in h for h in spec_tightened["h2_headings"])
 
     # 4. Internal link anchor reinforcement for striking-distance pages
-    ph_links = _resolve_contextual_internal_links("profithelm", "irs-2027-tax-brackets", "2027 tax brackets")
+    ph_links = _resolve_contextual_internal_links("profithelm", "irs-tax-brackets", "tax brackets")
     ph_by_href = {item["href"]: item["anchor"] for item in ph_links}
-    assert "/tools/irs-2027-tax-brackets/california/" in ph_by_href
-    assert "CA Tax Brackets" in ph_by_href["/tools/irs-2027-tax-brackets/california/"]
+    assert "/tools/tcja-sunset-capital-gains/" in ph_by_href
+    assert "Capital Gains" in ph_by_href["/tools/tcja-sunset-capital-gains/"]
 
     # 5. Brief compilation separates pos 4-15 queries from pos 90+ noise and drops site: queries
     brief_rep = compile_search_opportunity_briefs(

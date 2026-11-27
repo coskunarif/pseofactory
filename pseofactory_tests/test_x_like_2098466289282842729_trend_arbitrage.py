@@ -337,7 +337,7 @@ def test_closed_loop_inflection_signal_routing_existing_vs_new(tmp_path: Path):
 @pytest.mark.host_estate
 def test_code_slop_ratchet_and_zero_forbidden_dashes():
     """Verifies AST slop ratchet (0 duplicate AST blocks and <=450 lines on all new/modified functions) and zero forbidden dashes."""
-    repo_root = Path("/home/ubuntuadmin/projects/pseofactory")
+    repo_root = Path(__file__).resolve().parents[1]
     slop_report = audit_code_slop_ratchet(repo_root / "pseofactory")
     assert slop_report["duplicate_ast_blocks"] == 0, f"Duplicate AST blocks found: {slop_report['duplicate_functions']}"
     oversized_names = {

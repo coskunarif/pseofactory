@@ -425,6 +425,15 @@ def test_profithelm_b2b_expansion_calculators_and_affiliate_consolidation():
             assert f'data-partner="{sl_partner}"' not in html
 
         audit_rep = audit_rendered_asset(html, spec, tenant="profithelm")
+        if slug == "contractor-surety-bond-cost-calculator":
+            # Batch 2 intentionally retired surety bond / Miller Act content on ProfitHelm as cross-tenant LienBond contamination.
+            assert audit_rep.passed is False
+            assert any(
+                "CROSS_TENANT_CONTAMINATION" in v or "miller act" in v.lower()
+                for v in audit_rep.violations
+            )
+            continue
+
         assert audit_rep.passed is True, f"Audit failed for {slug}: {audit_rep.violations}"
 
         mon_qual = qualify_monetization_opportunity(

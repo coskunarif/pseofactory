@@ -4179,21 +4179,30 @@ def score_partner_yield(
         vertical_family=str(vertical_family or ""),
     )
     if is_finance_loan and not sponsored_placement_labeled:
-        # CFPB Circular 2024-01: objective status + product-fit only (zero bounty/payout weighting)
+        # CFPB Circular 2024-01: objective status and non-payout user engagement only
+        # (zero bounty/payout/revenue weighting).
         base_objective = round(weight * 100.0, 4)
         if not engagement_metrics:
             return base_objective
         emp = _extract_partner_engagement_record(p_key, engagement_metrics, slug=slug)
         if not isinstance(emp, dict):
             return base_objective
-        outbound_clicks = int(float(emp.get("outbound_clicks", emp.get("affiliate_clicks", emp.get("clicks", 0))) or 0))
-        calc_interactions = int(float(emp.get("calculator_interactions", emp.get("interactions", emp.get("calculations", 0))) or 0))
-        views = int(float(emp.get("views_exposed", emp.get("page_views", emp.get("impressions", 0))) or 0))
-        cta_ctr = float(emp.get("cta_ctr", emp.get("conversion_rate", emp.get("ctr", 0.0))) or 0.0)
+        outbound_clicks = max(0, int(float(emp.get("outbound_clicks", emp.get("affiliate_clicks", emp.get("clicks", 0))) or 0)))
+        calc_interactions = max(0, int(float(emp.get("calculator_interactions", emp.get("interactions", emp.get("calculations", 0))) or 0)))
+        views = max(0, int(float(emp.get("views_exposed", emp.get("page_views", emp.get("impressions", 0))) or 0)))
+        cta_ctr = max(0.0, float(emp.get("cta_ctr", emp.get("conversion_rate", emp.get("ctr", 0.0))) or 0.0))
         traffic_basis = max(1, views, calc_interactions, outbound_clicks)
         if cta_ctr <= 0.0 and outbound_clicks > 0:
             cta_ctr = outbound_clicks / float(traffic_basis)
-        return round(base_objective * (1.0 + min(0.5, cta_ctr * 5.0)), 4)
+        if outbound_clicks == 0 and cta_ctr <= 0.0:
+            return base_objective
+        # Strictly monotonic in outbound_clicks so more clicks always beat fewer clicks
+        # regardless of CTR or payout; cta_ctr only breaks equal-click ties within one click step.
+        click_k = 20.0
+        click_component = outbound_clicks / (outbound_clicks + click_k)
+        ctr_step_cap = click_k / ((outbound_clicks + click_k) * (outbound_clicks + 1.0 + click_k))
+        ctr_component = 0.5 * min(1.0, cta_ctr) * ctr_step_cap
+        return round(base_objective * (1.0 + 0.5 * (click_component + ctr_component)), 6)
 
     base_score = round(midpoint * weight, 4)
 
@@ -10481,7 +10490,7 @@ def select_conversion_slot_plan(
     )
     allow_payout_sort = (not is_finance_loan) or bool(sponsored_placement_labeled)
 
-    def _objective_engagement_score(off: Dict[str, Any]) -> Tuple[float, int, int]:
+    def _objective_engagement_score(off: Dict[str, Any]) -> Tuple[int, float]:
         pk_o = str(off.get("partner_key") or "").strip().lower()
         e_ctr = float(off.get("empirical_cta_ctr", off.get("cta_ctr", 0.0)) or 0.0)
         e_clicks = int(off.get("outbound_clicks", 0) or 0)
@@ -10493,8 +10502,7 @@ def select_conversion_slot_plan(
                 if e_ctr <= 0.0 and e_clicks > 0:
                     e_views = int(float(emp_o.get("views_exposed", emp_o.get("page_views", emp_o.get("impressions", 0))) or 0))
                     e_ctr = e_clicks / float(max(1, e_views, e_clicks))
-        is_top_conv = 1 if (top_conv_pk and pk_o == top_conv_pk) else 0
-        return (e_ctr, e_clicks, is_top_conv)
+        return (e_clicks, e_ctr)
 
     highest_engagement_pk = ""
     if not allow_payout_sort:
@@ -11771,11 +11779,10 @@ def reposition_affiliate_placements_from_gsc_signals(
                 )
 
     # 2. Inject or update comparison_table_cta when active in slot_plan (skip on 3-step #workpaper-unlock-card pages
-    #    or when a consolidated .contextual-referral-card already carries comparison_table_cta)
+    #    or when a consolidated .contextual-referral-card is already present on the page)
     has_existing_table_cta = bool(_COMPARISON_TABLE_CTA_BAR_RE.search(updated))
-    has_consolidated_table_cta = (
-        'class="contextual-referral-card' in updated
-        and ('data-cta-slot="comparison_table_cta"' in updated or "data-cta-slot='comparison_table_cta'" in updated)
+    has_consolidated_table_cta = bool(
+        re.search(r'class=["\'][^"\']*\bcontextual-referral-card\b', updated, flags=re.IGNORECASE)
     )
     if 'id="workpaper-unlock-card"' in updated or has_consolidated_table_cta:
         if has_existing_table_cta:
@@ -12139,6 +12146,12 @@ def reposition_affiliate_placements_from_gsc_signals(
             f'</section>'
         )
         updated = _ov_partner_sec_re.sub(ov_markup, updated, count=1)
+
+    if (
+        ('id="workpaper-unlock-card"' in updated or re.search(r'class=["\'][^"\']*\bcontextual-referral-card\b', updated, flags=re.IGNORECASE))
+        and _COMPARISON_TABLE_CTA_BAR_RE.search(updated)
+    ):
+        updated = _COMPARISON_TABLE_CTA_BAR_STRIP_RE.sub("", updated)
 
     has_unapproved_r_in_dom = any(
         m.group(1).strip().lower().replace("-", "_") not in live_vault_keys

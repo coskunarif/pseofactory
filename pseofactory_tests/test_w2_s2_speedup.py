@@ -79,6 +79,13 @@ def _build_minimal_dist(root: Path, prop: str = "profithelm", domain: str = "pro
         count=1,
         flags=re.IGNORECASE,
     )
+    sample_html = re.sub(
+        r"<h1>[\s\S]*?</h1>",
+        "<h1>Section 179 Deduction Calculator</h1>",
+        sample_html,
+        count=1,
+        flags=re.IGNORECASE,
+    )
     if 'name="google-site-verification"' not in sample_html:
         sample_html = sample_html.replace(
             "</head>",

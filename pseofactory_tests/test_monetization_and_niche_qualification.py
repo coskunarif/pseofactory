@@ -354,13 +354,21 @@ def test_pre_treg_noise_and_cannibalization_filtering_across_substrate_and_tenan
     assert res_cann["action"] == "REJECTED"
     assert prexvo_treg_calls == []
 
-    # Valid unserved Title IV student loan void -> 1 treg call and BUILD_IMMEDIATE_ASSET
-    res_valid_px = px_validator.validate_serp_opportunity(
+    # Year-stamped new tool slug on Prexvo -> rejected by evergreen slug policy with 0 treg calls
+    res_year_px = px_validator.validate_serp_opportunity(
         "parent plus double consolidation loophole 2026 calculator",
         existing_tools=existing_px_tools,
     )
+    assert res_year_px["action"] == "REJECTED"
+    assert prexvo_treg_calls == []
+
+    # Valid unserved evergreen Title IV student loan void -> 1 treg call and BUILD_IMMEDIATE_ASSET
+    res_valid_px = px_validator.validate_serp_opportunity(
+        "parent plus double consolidation loophole calculator",
+        existing_tools=existing_px_tools,
+    )
     assert res_valid_px["action"] == "BUILD_IMMEDIATE_ASSET"
-    assert prexvo_treg_calls == ["parent plus double consolidation loophole 2026 calculator"]
+    assert prexvo_treg_calls == ["parent plus double consolidation loophole calculator"]
 
     # 3. ProfitHelm scan_breakout_opportunities pre-intake gate
     import profithelm.scanner as ph_scanner

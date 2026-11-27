@@ -409,6 +409,15 @@ def test_receipt_invalidation_same_size_corrupt_png_and_deleted_llms_txt(tmp_pat
         "<body><main><h1>Tools</h1><p>Directory of deterministic models.</p></main></body></html>",
         encoding="utf-8",
     )
+    (dist_dir / "tools" / "sample-model").mkdir(parents=True, exist_ok=True)
+    (dist_dir / "tools" / "sample-model" / "index.html").write_text(
+        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+        "<meta name='description' content='Sample deterministic model.'>"
+        "<title>Sample Model | ProfitHelm</title></head>"
+        "<body><main><h1>Sample Model</h1><p>Statutory calculation reference.</p></main></body></html>",
+        encoding="utf-8",
+    )
     compile_tenant_porcelain_estate(dist_dir, "profithelm")
 
     receipt_file = tmp_path / "receipts" / "asset_inval.json"

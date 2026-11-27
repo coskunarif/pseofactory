@@ -22,6 +22,8 @@ import json
 import re
 import ast
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_CEILING
+import math
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -766,9 +768,15 @@ def _format_plain_prose_formula(formula_str: str, readable_formula: str, input_k
 
 
 def _format_clean_input_val(val: Any) -> str:
-    """Formats integer-like floats without a trailing .0 for clean HTML input values."""
+    """Formats integer-like floats and Decimals without trailing zeros for clean HTML input values."""
     if isinstance(val, bool):
         return str(val)
+    if isinstance(val, Decimal):
+        f = float(val)
+        if abs(f - round(f)) < 1e-9:
+            return str(int(round(f)))
+        s = format(val.normalize(), "f")
+        return s.rstrip("0").rstrip(".") if "." in s else s
     if isinstance(val, (int, float)):
         f = float(val)
         return str(int(round(f))) if abs(f - round(f)) < 1e-9 else str(f)
@@ -776,27 +784,103 @@ def _format_clean_input_val(val: Any) -> str:
 
 
 def _compute_proportional_range_step(val_num: float, max_num: float, is_float_val: bool) -> str:
-    """Computes a proportional slider step so large-scale sliders never step by 0.01."""
-    if abs(val_num - round(val_num)) > 1e-6:
-        if abs(val_num * 10.0 - round(val_num * 10.0)) <= 1e-6 and max_num <= 1000.0:
-            return "0.1"
-        if abs(val_num * 100.0 - round(val_num * 100.0)) <= 1e-6 and max_num <= 1000.0:
+    """Computes a proportional slider step so sliders stay <= 2000 steps while preserving float precision."""
+    span = max(0.0, float(max_num))
+    if is_float_val and abs(val_num - round(val_num)) > 1e-6:
+        if max_num <= 20.0:
+            if abs(val_num * 100.0 - round(val_num * 100.0)) <= 1e-6:
+                if abs(val_num * 10.0 - round(val_num * 10.0)) <= 1e-6 and max_num > 10.0 and not (0.0 < val_num <= 10.0):
+                    return "0.1"
+                return "0.01"
+            if max_num <= 2.0:
+                if abs(val_num * 1000.0 - round(val_num * 1000.0)) <= 1e-6 and (span / 0.001) <= 2000:
+                    return "0.001"
+                if (span / 0.0005) <= 2000 and abs(val_num * 2000.0 - round(val_num * 2000.0)) <= 1e-6:
+                    return "0.0005"
+                if (span / 0.001) <= 2000:
+                    return "0.001"
+            if (span / 0.01) <= 2000:
+                return "0.01"
+        if max_num <= 200.0 and (span / 0.1) <= 2000:
+            if abs(val_num * 10.0 - round(val_num * 10.0)) <= 1e-6:
+                return "0.1"
+    if span <= 0.0:
+        return "1"
+    if max_num < 100.0:
+        if max_num <= 20.0 and is_float_val:
             return "0.01"
-        if max_num <= 1000.0:
-            return "0.001"
-    if max_num >= 1_000_000.0:
-        return "10000"
-    if max_num >= 100_000.0:
-        return "1000"
-    if max_num >= 10_000.0:
-        return "100"
-    if max_num >= 1_000.0:
-        return "10"
-    if max_num >= 100.0:
-        if is_float_val and 0.0 < val_num < 10.0:
+        return "0.1" if is_float_val else "1"
+    if max_num < 1000.0:
+        if is_float_val and 0.0 < val_num < 10.0 and (span / 0.1) <= 2000:
             return "0.1"
         return "1"
-    return "0.01" if is_float_val else "1"
+    exp = max(1, int(math.floor(math.log10(span))) - 2)
+    base_step = 10 ** exp
+    while (span / base_step) > 2000:
+        base_step *= 10
+    val_d = Decimal(str(round(val_num, 8)))
+    for div in (5, 2):
+        if base_step % div == 0:
+            cand = base_step // div
+            if cand >= 1 and (span / cand) <= 2000 and (val_d % Decimal(cand)) == 0:
+                return str(cand)
+    return str(base_step)
+
+
+def _compute_range_slider_spec(var_name: str, var_val: Any) -> Tuple[str, str, str, str]:
+    """
+    Computes (value, min, max, step) strings for an HTML5 range slider with:
+    - realistic domain bounds for factors/ratios, 2-decimal percentages, sub-1 rates, and integer counts
+    - <= 2000 steps across (max - min) / step
+    - exact step alignment from min so the baseline value never snaps in HTML5.
+    """
+    val_num = float(var_val) if isinstance(var_val, (int, float)) and not isinstance(var_val, bool) else 0.0
+    tokens = set(re.split(r"[^a-z0-9]+", var_name.lower()))
+    is_pct_token = bool(tokens & {"pct", "percent", "percentage"})
+    is_factor_token = bool(tokens & {"factor", "multiplier", "ratio", "emr", "mod", "modifier", "modification"})
+    is_rate_token = bool(tokens & {"rate", "share", "ratio", "apr"})
+    is_integer_baseline = abs(val_num - round(val_num)) <= 1e-6
+    is_2dec_pct = (
+        is_pct_token
+        and 0.0 < val_num <= 20.0
+        and abs(val_num * 10.0 - round(val_num * 10.0)) > 1e-6
+        and abs(val_num * 100.0 - round(val_num * 100.0)) <= 1e-6
+    )
+
+    if 0.0 < val_num < 1.0 and is_rate_token and not is_pct_token:
+        raw_max = 1.0
+        eff_float = True
+    elif is_factor_token and not is_pct_token and 0.0 < val_num <= 10.0:
+        raw_max = max(3.0, round(val_num * 2.5, 2))
+        eff_float = True
+    elif is_2dec_pct:
+        raw_max = min(20.0, max(10.0, float(math.ceil(val_num * 5.0))))
+        eff_float = True
+    else:
+        raw_max = max(100.0, val_num * 2.0 if val_num > 0 else 100.0)
+        eff_float = (not is_integer_baseline) and isinstance(var_val, float)
+
+    step_str = _compute_proportional_range_step(val_num, raw_max, eff_float)
+    step_d = Decimal(step_str)
+    val_d = Decimal(str(round(val_num, 8)))
+    raw_max_d = Decimal(str(round(raw_max, 8)))
+    if val_d < 0:
+        min_d = val_d
+    else:
+        rem = val_d % step_d
+        min_d = rem if rem != 0 else Decimal("0")
+    steps_needed = int(((raw_max_d - min_d) / step_d).to_integral_value(rounding=ROUND_CEILING))
+    while steps_needed > 2000:
+        step_d *= Decimal("10")
+        step_str = _format_clean_input_val(step_d)
+        if val_d < 0:
+            min_d = val_d
+        else:
+            rem = val_d % step_d
+            min_d = rem if rem != 0 else Decimal("0")
+        steps_needed = int(((raw_max_d - min_d) / step_d).to_integral_value(rounding=ROUND_CEILING))
+    max_d = min_d + (step_d * steps_needed)
+    return _format_clean_input_val(val_d), _format_clean_input_val(min_d), _format_clean_input_val(max_d), step_str
 
 
 def _sanitize_visible_sample_calculation(sample_calc: str) -> str:
@@ -2705,17 +2789,13 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     table_rows_html = []
     for var_name, var_val in clamped_inputs.items():
         label_text = var_name.replace("_", " ").title()
-        val_num = float(var_val) if isinstance(var_val, (int, float)) else 0.0
-        max_num = max(100.0, val_num * 2.0 if val_num > 0 else 100.0)
-        clean_val_str = _format_clean_input_val(var_val)
-        clean_max_str = _format_clean_input_val(max_num)
-        step_attr = _compute_proportional_range_step(val_num, max_num, isinstance(var_val, float))
+        clean_val_str, clean_min_str, clean_max_str, step_attr = _compute_range_slider_spec(var_name, var_val)
         form_inputs_html.append(
             f'        <div class="form-group" style="margin-bottom: 16px;">\n'
             f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
             f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
             f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
-            f'          <input type="range" min="0" max="{clean_max_str}" step="{step_attr}" id="range-{var_name}" '
+            f'          <input type="range" min="{clean_min_str}" max="{clean_max_str}" step="{step_attr}" id="range-{var_name}" '
             f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
             f'        </div>'
         )

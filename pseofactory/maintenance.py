@@ -17259,9 +17259,40 @@ class RetroReflectionEngine:
                     compile_always=True,
                 )
                 porcelain_compiled = True
+                porc_mutated_tools: List[Path] = []
                 for mut_rel in porc_res.get("mutated_paths", []):
                     if str(mut_rel).endswith(".html") and mut_rel not in retrofitted_paths:
                         retrofitted_paths.append(mut_rel)
+                    if str(mut_rel).startswith("tools/") and str(mut_rel).endswith("/index.html") and str(mut_rel).count("/") >= 2:
+                        porc_mutated_tools.append(d / str(mut_rel))
+                if porc_mutated_tools:
+                    renorm_after_porc: List[Path] = []
+                    for tool_p in porc_mutated_tools:
+                        if not tool_p.is_file():
+                            continue
+                        rel_t = tool_p.relative_to(d).as_posix()
+                        t_slug = "/".join(rel_t.split("/")[1:-1])
+                        rb_ov_t = degraded_overlays.get(t_slug)
+                        rb_forb_t = (
+                            [str(rb_ov_t.get("rolled_back_title_rewrite") or "").strip()]
+                            if (isinstance(rb_ov_t, dict) and rb_ov_t.get("rolled_back_title_rewrite"))
+                            else None
+                        )
+                        raw_t_html = tool_p.read_text(encoding="utf-8", errors="ignore")
+                        ret_t_html, _ = cls.retrofit_html(
+                            raw_t_html,
+                            property_id=property_id,
+                            slug=t_slug,
+                            dist_dir=d,
+                            preserve_title=(rb_ov_t is not None),
+                            forbidden_titles=rb_forb_t,
+                            runtime_sync_asset_written=True,
+                        )
+                        if ret_t_html != raw_t_html:
+                            _atomic_write_text(tool_p, ret_t_html, encoding="utf-8")
+                            renorm_after_porc.append(tool_p)
+                    if renorm_after_porc:
+                        _renormalize_html_paths_to_porcelain(d, property_id, renorm_after_porc)
                 if porc_res.get("governance_written"):
                     try:
                         from pseofactory.tenant_facts import TruthReconciliationEngine

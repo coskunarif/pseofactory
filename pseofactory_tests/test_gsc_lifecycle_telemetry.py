@@ -346,7 +346,7 @@ def test_multidimensional_harvest_enriches_consolidated_rows_decay_and_cannibali
     split_item = cann_audit["cross_device_splits"][0]
     assert split_item["cross_device_split_detected"] is True
     assert "irs-2027-tax-brackets/california" in split_item["mobile_leader_url"]
-    assert split_item["desktop_leader_url"].rstrip("/").endswith("/tools/irs-2027-tax-brackets")
+    assert split_item["desktop_leader_url"].rstrip("/").endswith("/tools/irs-tax-brackets")
 
 
 def test_cross_device_cannibalization_split_even_above_aggregate_dominance_threshold() -> None:

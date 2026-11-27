@@ -1017,33 +1017,7 @@ class IndexingPreflightEngine:
         dom_key = str(self.domain or "").strip().lower().removeprefix("www.")
         ws_root = self.workspace_root or Path("/home/ubuntuadmin/projects")
 
-        if ws_root.is_dir():
-            try:
-                from pseofactory.impact_planner import discover_active_tenants
-
-                for tid, repo_dir in discover_active_tenants(ws_root):
-                    if pid_key and tid.strip().lower() == pid_key and repo_dir.is_dir():
-                        return repo_dir
-                    if dom_key:
-                        cfg_file = repo_dir / ".pseofactory.json"
-                        if cfg_file.is_file():
-                            try:
-                                cfg_data = json.loads(cfg_file.read_text(encoding="utf-8"))
-                                cfg_dom = str(cfg_data.get("domain") or "").strip().lower().removeprefix("www.")
-                                if cfg_dom == dom_key and repo_dir.is_dir():
-                                    return repo_dir
-                            except Exception:
-                                pass
-            except Exception:
-                pass
-
-            if pid_key:
-                for cand_name in (pid_key, f"{pid_key}-platform"):
-                    cand_dir = ws_root / cand_name
-                    if cand_dir.is_dir() and ((cand_dir / ".pseofactory.json").is_file() or (cand_dir / ".git").exists()):
-                        return cand_dir
-
-        if self.workspace_root is None:
+        if self.workspace_root is None and pid_key:
             try:
                 from pseofactory.tenant_facts import (
                     CANONICAL_TENANT_DECLARATIONS,
@@ -1076,6 +1050,32 @@ class IndexingPreflightEngine:
                             return cand_repo
             except Exception:
                 pass
+
+        if ws_root.is_dir():
+            try:
+                from pseofactory.impact_planner import discover_active_tenants
+
+                for tid, repo_dir in discover_active_tenants(ws_root):
+                    if pid_key and tid.strip().lower() == pid_key and repo_dir.is_dir():
+                        return repo_dir
+                    if dom_key:
+                        cfg_file = repo_dir / ".pseofactory.json"
+                        if cfg_file.is_file():
+                            try:
+                                cfg_data = json.loads(cfg_file.read_text(encoding="utf-8"))
+                                cfg_dom = str(cfg_data.get("domain") or "").strip().lower().removeprefix("www.")
+                                if cfg_dom == dom_key and repo_dir.is_dir():
+                                    return repo_dir
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+            if pid_key:
+                for cand_name in (pid_key, f"{pid_key}-platform"):
+                    cand_dir = ws_root / cand_name
+                    if cand_dir.is_dir() and ((cand_dir / ".pseofactory.json").is_file() or (cand_dir / ".git").exists()):
+                        return cand_dir
 
         return None
 

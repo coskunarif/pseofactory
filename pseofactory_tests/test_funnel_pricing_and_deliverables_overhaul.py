@@ -724,7 +724,7 @@ def test_browser_verifier_probe_edge_cases_and_dead_input_detection(tmp_path: Pa
     <input type="number" id="input-forfeit_rate" value="1250" min="0" step="10">
     <input type="number" id="input-volume" value="50000000" min="0" step="any">
   </form>
-  <a class="scenario-preset-link" href="/tools/other/?income=450000">Parent Preset</a>
+  <a class="scenario-preset-link" href="/tools/other/#income=450000">Parent Preset</a>
   <div class="result-box"><strong class="output-value" id="out-val">$50,000,000</strong></div>
 </main>
 <script>
@@ -741,11 +741,14 @@ document.querySelectorAll('input').forEach(el => {
   el.addEventListener('input', recalc);
   el.addEventListener('change', recalc);
 });
-window.addEventListener('popstate', () => {
-  const sp = new URLSearchParams(window.location.search);
+function hydrateFromUrl() {
+  const raw = (window.location.hash || '').replace(/^#/, '') || window.location.search;
+  const sp = new URLSearchParams(raw);
   if (sp.has('late_days')) document.getElementById('input-late_days').value = sp.get('late_days');
   recalc();
-});
+}
+window.addEventListener('hashchange', hydrateFromUrl);
+window.addEventListener('popstate', hydrateFromUrl);
 recalc();
 </script></body></html>"""
 

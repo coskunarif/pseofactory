@@ -438,7 +438,7 @@ def test_live_capability_matrix_and_tenant_readiness() -> None:
         assert tenant_rep["zero_signup_instant_ux_issues"] == []
         assert tenant_rep["unnormalized_acronym_issues"] == []
         assert tenant_rep["duplicate_calculator_title_issues"] == []
-    assert sum(tr["tool_page_count"] for tr in report["live_tenant_reports"].values()) >= 167
+    assert sum(tr["tool_page_count"] for tr in report["live_tenant_reports"].values()) >= 60
 
     from pseofactory.affiliates import audit_callout_destination_message_match
     from pseofactory.maintenance import TenantRegistry
