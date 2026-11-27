@@ -3597,15 +3597,10 @@ def build_machine_endpoints(
         static_patterns=["/static/*", "/css/*"],
         redirects_content=_build_profithelm_redirects_content(repo_root=repo_root),
     )
-    from pseofactory.edge import build_edge_routes_json
+    from pseofactory.edge import build_edge_routes_json_for_estate
 
     (dist / "_routes.json").write_text(
-        build_edge_routes_json(
-            extra_include=[
-                "/tools/section-1031-calculator/*",
-                "/tools/section-179-calculator/*",
-            ]
-        ),
+        build_edge_routes_json_for_estate(dist),
         encoding="utf-8",
     )
     # Remove stale legacy ai-benchmarks bundle

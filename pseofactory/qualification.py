@@ -4420,6 +4420,7 @@ def load_property_redirect_map(
             can_slug = str(info.get("canonical_slug") or "").strip() if t_norm not in _GENERIC_REDIRECT_SINKS else ""
             raw_pairs[f"/tools/{c_slug}/"] = (t_norm, can_slug)
         raw_pairs["/tools/query-two-buildable/"] = ("/tools/", "")
+        raw_pairs["/tools/irs-2027-tax-brackets/"] = ("/tools/irs-tax-brackets/", "irs-tax-brackets")
     else:
         for c_slug, info in TENANT_CANNIBALIZATION_MAPS_BY_ID.get(prop, {}).items():
             t_path = str(info.get("redirect_target") or "/tools/").strip()
@@ -4771,6 +4772,22 @@ def _finalize_gsc_target_against_compiled_dist(
             "resolved_via": "collapsed_spoke_parent_redirect",
         }
 
+    if not res.get("original_url") and res.get("resolved_via") in (
+        "tool_catalog_match",
+        "intent_cannibalization",
+        "query_family_match",
+    ):
+        return {
+            **res,
+            "is_redirected": False,
+            "is_off_topic_sink": False,
+            "canonical_path": "",
+            "canonical_url": "",
+            "canonical_slug": "",
+            "leaf_overlay_slug": "",
+            "resolved_via": "unresolved",
+        }
+
     return {
         **res,
         "is_redirected": True,
@@ -5027,6 +5044,25 @@ def _resolve_redirected_gsc_target_impl(
                                 seen_t_slugs.add(str(lt.get("slug") or "").lower())
                 except Exception:
                     pass
+            dist_t_dir = Path(repo_root) / "dist" / "tools"
+            if dist_t_dir.is_dir():
+                for child_d in sorted(dist_t_dir.iterdir(), key=lambda p: p.name):
+                    if not child_d.is_dir() or not (child_d / "index.html").is_file():
+                        continue
+                    c_slug = child_d.name.strip().lower()
+                    if (
+                        c_slug
+                        and c_slug not in seen_t_slugs
+                        and not is_retired_or_consolidated_slug(c_slug, prop)
+                        and f"/tools/{c_slug}/" not in redirect_map
+                    ):
+                        tools_list.append(
+                            {
+                                "slug": c_slug,
+                                "primary_keyword": c_slug.replace("-", " "),
+                            }
+                        )
+                        seen_t_slugs.add(c_slug)
 
         norm_tokens = normalize_search_intent_tokens(q_lower)
         state_slug = norm_tokens.get("state_slug")
@@ -5153,7 +5189,13 @@ def rollup_redirected_gsc_rows(
         if not isinstance(row, dict):
             continue
         raw_keys = row.get("keys") if isinstance(row.get("keys"), list) else []
-        raw_page = str(row.get("page") or row.get("target_url") or row.get("url") or "").strip()
+        raw_page = str(
+            row.get("page")
+            or row.get("target_url")
+            or row.get("url")
+            or row.get("canonical_path")
+            or ""
+        ).strip()
         raw_query = str(row.get("query") or "").strip()
         if not raw_page and not raw_query and raw_keys:
             if len(raw_keys) == 1:

@@ -15002,12 +15002,12 @@ class RetroReflectionEngine:
 
         # 2b. Ensure dist/_headers includes canonical Link, Content-Type, and Cache-Control headers for /catalog.json and /media-kit.json
         # and stays within Cloudflare Pages <= 95 active rule cap, and dist/_routes.json bypasses static asset Function invocations.
-        from pseofactory.edge import build_edge_routes_json, compact_edge_headers_to_cloudflare_cap
+        from pseofactory.edge import build_edge_routes_json_for_estate, compact_edge_headers_to_cloudflare_cap
 
         routes_json_file = d / "_routes.json"
         if routes_json_file.is_file() or ((d / "index.html").is_file() and (d / "tools" / "index.html").is_file()):
             try:
-                expected_routes_json = build_edge_routes_json()
+                expected_routes_json = build_edge_routes_json_for_estate(d)
                 if not routes_json_file.is_file() or routes_json_file.read_text(encoding="utf-8") != expected_routes_json:
                     routes_json_file.write_text(expected_routes_json, encoding="utf-8")
                     updated_files.append("_routes.json")

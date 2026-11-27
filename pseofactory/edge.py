@@ -112,6 +112,68 @@ def build_edge_routes_json(
     return content
 
 
+def build_edge_routes_json_for_estate(
+    dist_dir: Path,
+    mw_file: Optional[Path] = None,
+) -> str:
+    """
+    Builds deterministic Cloudflare Pages dist/_routes.json for an estate by combining
+    the base Function routes with dynamic edgeGone (410) and same-prefix
+    legacyPrefixTargets (301 child spokes with parent hub exclusions) parsed from
+    functions/_middleware.js, capped at <= 95 total rules.
+    """
+    dist_path = Path(dist_dir)
+    mw_path = Path(mw_file) if mw_file is not None else (dist_path.parent / "functions" / "_middleware.js")
+    include: List[str] = ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"]
+    exclude: List[str] = []
+    max_rules = 95
+
+    if mw_path.is_file():
+        mw_txt = mw_path.read_text(encoding="utf-8", errors="ignore")
+
+        same_prefix_bases: List[str] = []
+        for pm in re.finditer(r"const\s+legacyPrefixTargets\s*=\s*\[([\s\S]*?)\];", mw_txt):
+            for pair_m in re.finditer(r'\[\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*\]', pm.group(1)):
+                pk = pair_m.group(1).strip()
+                pv = pair_m.group(2).strip()
+                pk_base = pk.rstrip("/")
+                pv_base = pv.rstrip("/")
+                if pk_base and pk_base.startswith("/") and pk_base == pv_base and pk_base not in same_prefix_bases:
+                    same_prefix_bases.append(pk_base)
+
+        gone_bases: List[str] = []
+        for gm in re.finditer(r"const\s+edgeGone\s*=\s*new\s+Set\(\[([\s\S]*?)\]\);", mw_txt):
+            for sm in re.finditer(r'["\']([^"\']+)["\']', gm.group(1)):
+                raw_p = sm.group(1).strip()
+                if not raw_p or raw_p == "/":
+                    continue
+                p = raw_p.rstrip("/")
+                if not p or not p.startswith("/"):
+                    continue
+                if p == "/llms-full.txt" or p == "/ai-benchmarks" or p.startswith("/ai-benchmarks/"):
+                    continue
+                rel_p = p.lstrip("/")
+                if (dist_path / rel_p / "index.html").is_file() or (dist_path / rel_p).is_file():
+                    continue
+                if p not in gone_bases:
+                    gone_bases.append(p)
+
+        for base in same_prefix_bases:
+            inc_pat = f"{base}/*"
+            new_inc = [inc_pat] if inc_pat not in include else []
+            new_exc = [ep for ep in (base, f"{base}/") if ep not in exclude]
+            if len(include) + len(exclude) + len(new_inc) + len(new_exc) <= max_rules:
+                include.extend(new_inc)
+                exclude.extend(new_exc)
+
+        for p in gone_bases:
+            new_inc = [pat for pat in (p, f"{p}/*") if pat not in include]
+            if new_inc and len(include) + len(exclude) + len(new_inc) <= max_rules:
+                include.extend(new_inc)
+
+    return build_edge_routes_json(include=include, exclude=exclude)
+
+
 def build_edge_headers(
     canonical_base: str,
     routes: Optional[List[str]] = None,
@@ -19132,17 +19194,7 @@ def sync_tenant_edge_redirect_function(
 
     if dist_dir.is_dir():
         try:
-            same_prefix_routes: List[str] = []
-            if mw_file.is_file():
-                mw_final_txt = mw_file.read_text(encoding="utf-8", errors="ignore")
-                for pm in re.finditer(r"const legacyPrefixTargets = \[([\s\S]*?)\];", mw_final_txt):
-                    for pair_m in re.finditer(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]', pm.group(1)):
-                        pk, pv = pair_m.group(1), pair_m.group(2)
-                        if pk.rstrip("/") and pk.rstrip("/") == pv.rstrip("/"):
-                            pat = f"{pk.rstrip('/')}/*"
-                            if pat not in same_prefix_routes:
-                                same_prefix_routes.append(pat)
-            routes_json_content = build_edge_routes_json(extra_include=same_prefix_routes or None)
+            routes_json_content = build_edge_routes_json_for_estate(dist_dir, mw_file=mw_file)
             if not routes_json_file.is_file() or routes_json_file.read_text(encoding="utf-8") != routes_json_content:
                 routes_json_file.write_text(routes_json_content, encoding="utf-8")
                 dist_needs_update = True

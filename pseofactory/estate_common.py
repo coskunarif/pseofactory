@@ -778,7 +778,11 @@ def write_machine_endpoints_and_headers(
     redirects_content: Optional[str] = None,
 ) -> None:
     """Writes feed.xml, IndexNow key, lightweight catalog.json, media-kit.json, _routes.json, _headers, and _redirects."""
-    from pseofactory.edge import build_edge_headers, build_edge_routes_json, ensure_gone_rules_in_redirects
+    from pseofactory.edge import (
+        build_edge_headers,
+        build_edge_routes_json_for_estate,
+        ensure_gone_rules_in_redirects,
+    )
 
     base = canonical_base.rstrip("/")
     fallback_date = _resolve_truthpack_modified_date(property_id)
@@ -856,7 +860,7 @@ def write_machine_endpoints_and_headers(
     if static_patterns is not None:
         edge_kwargs["static_patterns"] = list(static_patterns)
     (dist / "_headers").write_text(build_edge_headers(base, **edge_kwargs), encoding="utf-8")
-    (dist / "_routes.json").write_text(build_edge_routes_json(), encoding="utf-8")
+    (dist / "_routes.json").write_text(build_edge_routes_json_for_estate(dist), encoding="utf-8")
 
     base_redirects = (
         redirects_content
@@ -1858,10 +1862,10 @@ def finalize_estate_build(
         shutil.rmtree(dist_ai_bench, ignore_errors=True)
     sanitize_public_catalog_file(dist, property_id=property_id)
     cap_llms_txt_file(dist, property_id=property_id, canonical_base=canonical_base)
-    from pseofactory.edge import build_edge_routes_json, ensure_gone_rules_in_redirects
+    from pseofactory.edge import build_edge_routes_json_for_estate, ensure_gone_rules_in_redirects
 
     routes_p = dist / "_routes.json"
-    expected_routes = build_edge_routes_json()
+    expected_routes = build_edge_routes_json_for_estate(dist)
     if not routes_p.is_file() or routes_p.read_text(encoding="utf-8", errors="ignore") != expected_routes:
         routes_p.write_text(expected_routes, encoding="utf-8")
     redirects_p = dist / "_redirects"

@@ -382,6 +382,22 @@ def discover_active_tenant_manifests(
             entry = dict(data)
             entry["_repo_dir"] = str(child)
             manifests.append(entry)
+    if not manifests and projects_root is None:
+        from pseofactory.tenant_facts import CANONICAL_TENANT_DECLARATIONS
+
+        for _pid, contract in sorted(CANONICAL_TENANT_DECLARATIONS.items()):
+            manifests.append(
+                {
+                    "property_id": contract.property_id,
+                    "domain": contract.domain,
+                    "canonical_base": contract.canonical_base,
+                    "brand_name": contract.brand_name,
+                    "package_name": contract.property_id,
+                    "dist_dir": contract.dist_dir,
+                    "_repo_dir": str(contract.repo_root_path),
+                    "_source": "canonical_tenant_declaration_fallback",
+                }
+            )
     return manifests
 
 

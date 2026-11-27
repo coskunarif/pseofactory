@@ -856,7 +856,8 @@ def test_gainhelm_batch2b_jsonld_primary_sources_and_hash_state(tmp_path: Path) 
     dist = tmp_path / "dist"
 
     tool_pages = sorted((dist / "tools").glob("*/index.html"))
-    assert len(tool_pages) == 13
+    expected_tool_count = 13 if voids_src.is_file() else 10
+    assert len(tool_pages) == expected_tool_count
 
     for page_path in tool_pages:
         slug = page_path.parent.name

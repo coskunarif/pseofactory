@@ -783,4 +783,113 @@ def test_sync_tenant_test_isolation_guards_profithelm_b3_shims_and_idempotency(t
     assert res2["files"] == []
 
 
+def test_build_edge_routes_json_for_estate_preserves_gone_and_same_prefix_excludes(tmp_path: Path):
+    """Verify build_edge_routes_json_for_estate extracts edgeGone + same-prefix exclusions and is never clobbered."""
+    from pseofactory.edge import build_edge_routes_json_for_estate
+    from pseofactory.estate_common import write_machine_endpoints_and_headers
+    from pseofactory.maintenance import RetroReflectionEngine
+
+    live_root = Path("/home/ubuntuadmin/projects/profithelm-platform")
+    live_dist = live_root / "dist"
+    live_mw = live_root / "functions" / "_middleware.js"
+    if live_dist.is_dir() and live_mw.is_file():
+        live_routes = json.loads(build_edge_routes_json_for_estate(live_dist))
+        assert live_routes["version"] == 1
+        assert len(live_routes["include"]) + len(live_routes["exclude"]) <= 95
+        for expected_inc in (
+            "/tools/prediction-market-tax",
+            "/tools/prediction-market-tax/*",
+            "/tools/contractor-surety-bond-cost-calculator",
+            "/tools/contractor-surety-bond-cost-calculator/*",
+            "/tools/section-1031-calculator/*",
+            "/tools/section-179-calculator/*",
+        ):
+            assert expected_inc in live_routes["include"], f"Missing include {expected_inc}"
+        for expected_exc in (
+            "/tools/section-1031-calculator",
+            "/tools/section-1031-calculator/",
+            "/tools/section-179-calculator",
+            "/tools/section-179-calculator/",
+        ):
+            assert expected_exc in live_routes["exclude"], f"Missing exclude {expected_exc}"
+        assert "/" not in live_routes["include"]
+        assert "/tools/irs-tax-brackets/" not in live_routes["include"]
+        assert "/tools/irs-tax-brackets" not in live_routes["include"]
+
+    # Isolated tmp_path regression: verify maintenance + estate_common preserve _routes.json (zero clobbering)
+    repo = tmp_path / "profithelm-sim"
+    dist = repo / "dist"
+    (repo / "functions").mkdir(parents=True)
+    for rel_dir in (
+        "",
+        "tools",
+        "tools/section-1031-calculator",
+        "tools/section-179-calculator",
+        "tools/irs-tax-brackets",
+    ):
+        target_dir = dist / rel_dir if rel_dir else dist
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "index.html").write_text("<html><head></head><body>ok</body></html>", encoding="utf-8")
+
+    (repo / "functions" / "_middleware.js").write_text(
+        'export async function onRequest(context) {\n'
+        '  const edgeGone = new Set([\n'
+        '    "/llms-full.txt",\n'
+        '    "/tools/contractor-surety-bond-cost-calculator",\n'
+        '    "/tools/contractor-surety-bond-cost-calculator/",\n'
+        '    "/tools/prediction-market-tax",\n'
+        '    "/tools/prediction-market-tax/",\n'
+        '  ]);\n'
+        '  const legacyPrefixTargets = [\n'
+        '    ["/tools/section-1031-calculator/", "/tools/section-1031-calculator/"],\n'
+        '    ["/tools/section-179-calculator/", "/tools/section-179-calculator/"],\n'
+        '    ["/tools/irs-2027-tax-brackets/", "/tools/irs-tax-brackets/"],\n'
+        '  ];\n'
+        '  return context.next();\n'
+        '}\n',
+        encoding="utf-8",
+    )
+
+    expected_raw = build_edge_routes_json_for_estate(dist)
+    expected_obj = json.loads(expected_raw)
+    assert len(expected_obj["include"]) + len(expected_obj["exclude"]) <= 95
+    assert "/tools/prediction-market-tax" in expected_obj["include"]
+    assert "/tools/prediction-market-tax/*" in expected_obj["include"]
+    assert "/tools/contractor-surety-bond-cost-calculator" in expected_obj["include"]
+    assert "/tools/contractor-surety-bond-cost-calculator/*" in expected_obj["include"]
+    assert "/tools/section-1031-calculator/*" in expected_obj["include"]
+    assert "/tools/section-179-calculator/*" in expected_obj["include"]
+    assert "/tools/section-1031-calculator/" in expected_obj["exclude"]
+    assert "/tools/section-179-calculator/" in expected_obj["exclude"]
+    assert "/" not in expected_obj["include"]
+    assert "/tools/irs-tax-brackets/" not in expected_obj["include"]
+
+    (dist / "_routes.json").write_text(expected_raw, encoding="utf-8")
+
+    # Maintenance pass must NOT clobber _routes.json
+    RetroReflectionEngine.sync_tenant_publisher_prerequisites(
+        dist,
+        "profithelm",
+        canonical_base="https://profithelm.com",
+    )
+    assert (dist / "_routes.json").read_text(encoding="utf-8") == expected_raw
+
+    # estate_common machine endpoint writer must NOT clobber _routes.json
+    write_machine_endpoints_and_headers(
+        dist=dist,
+        property_id="profithelm",
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        feed_title="ProfitHelm",
+        feed_description="Tax calculators",
+        feed_items=[],
+        indexnow_key="profithelm-indexnow-v2",
+        catalog_tools=[],
+        media_kit_payload={"property_id": "profithelm"},
+        header_routes=["/"],
+    )
+    assert (dist / "_routes.json").read_text(encoding="utf-8") == expected_raw
+
+
+
 
