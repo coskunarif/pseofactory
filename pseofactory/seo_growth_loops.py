@@ -8226,6 +8226,11 @@ def evaluate_closed_loop_cohort_reflection(
         canon_ov_slug = bare_vehicle_canonical_map.get(canon_ov_slug, canon_ov_slug)
         if is_non_tool_or_governance_route(canon_ov_slug):
             continue
+        _tools_dir_cand = (Path(dist_dir) if dist_dir is not None else (root / "dist")) / "tools"
+        if _tools_dir_cand.is_dir():
+            _ov_page_html = _tools_dir_cand / canon_ov_slug / "index.html"
+            if not _ov_page_html.is_file():
+                continue
         if canon_ov_slug in seen_canonical_ov_slugs:
             continue
         seen_canonical_ov_slugs.add(canon_ov_slug)

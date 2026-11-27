@@ -8584,6 +8584,15 @@ def verify_cohort_reflection_contract(
                 for rec in (c1_obj.get("records") or []):
                     if not isinstance(rec, dict):
                         continue
+                    rec_slug_clean = str(rec.get("slug") or "").strip().strip("/")
+                    _tools_root_v = d_dir / "tools" if isinstance(d_dir, Path) else None
+                    if (
+                        rec_slug_clean
+                        and _tools_root_v is not None
+                        and _tools_root_v.is_dir()
+                        and not (_tools_root_v / rec_slug_clean / "index.html").is_file()
+                    ):
+                        continue
                     i_base = int(rec.get("baseline_impressions", 0) or 0)
                     i_curr = int(rec.get("current_impressions", 0) or 0)
                     if i_base == 160 and i_curr == 0:
