@@ -6,6 +6,8 @@ Zero em-dashes. Zero en-dashes.
 """
 
 import json
+import logging
+import re
 import time
 import urllib.parse
 import urllib.request
@@ -18,6 +20,8 @@ from typing import List, Dict, Any, Optional
 from pseofactory.trends.models import FeedSpike
 from pseofactory.contracts import assert_no_forbidden_dashes
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = "pseofactory-trend-agent/1.0 (Linux; x86_64)"
 MAX_RETRIES = 2
@@ -47,10 +51,11 @@ def make_resilient_request(
         try:
             with urllib.request.urlopen(req, timeout=eff_timeout) as resp:
                 return resp.read()
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError):
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
             if attempt < eff_retries:
                 time.sleep(0.05 * (2 ** attempt))
             else:
+                logger.warning("HTTP request failed for %s after %d attempts: %s", url, eff_retries + 1, exc)
                 return None
     return None
 
@@ -123,6 +128,34 @@ class GoogleSuggestCollector(BaseSuggestCollector):
         return []
 
 
+def _parse_suggest_json_or_jsonp(raw_text: str) -> List[str]:
+    """
+    Parses Google/YouTube suggest payloads in either clean JSON (`client=firefox`)
+    or JSONP callback wrapper format (`window.google.ac.h([...])`).
+    """
+    payload_str = raw_text.strip()
+    if not payload_str:
+        return []
+    try:
+        parsed = json.loads(payload_str)
+    except json.JSONDecodeError:
+        # Unwrap JSONP function call such as window.google.ac.h([...])
+        match = re.match(r"^\s*[a-zA-Z0-9_$.]+\s*\((.*)\)\s*;?\s*$", payload_str, flags=re.DOTALL)
+        if not match:
+            raise
+        parsed = json.loads(match.group(1))
+
+    if isinstance(parsed, list) and len(parsed) >= 2 and isinstance(parsed[1], list):
+        suggestions: List[str] = []
+        for item in parsed[1]:
+            if isinstance(item, str) and item.strip():
+                suggestions.append(item)
+            elif isinstance(item, (list, tuple)) and item and isinstance(item[0], str) and item[0].strip():
+                suggestions.append(item[0])
+        return suggestions
+    return []
+
+
 class YouTubeSuggestCollector(BaseSuggestCollector):
     """Harvester for YouTube complete search suggestions."""
 
@@ -131,21 +164,20 @@ class YouTubeSuggestCollector(BaseSuggestCollector):
 
     def fetch_suggestions(self, query: str) -> List[str]:
         q_enc = urllib.parse.quote(query.strip())
-        url = f"https://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q={q_enc}"
+        url = f"https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={q_enc}"
         data = make_resilient_request(url, timeout=self.timeout, retries=self.retries)
         if not data:
+            logger.warning("YouTubeSuggestCollector received empty response for query=%r", query)
             return []
         try:
-            parsed = json.loads(data.decode("utf-8", errors="ignore"))
-            if isinstance(parsed, list) and len(parsed) >= 2 and isinstance(parsed[1], list):
-                return [str(s) for s in parsed[1] if s]
-        except Exception:
-            pass
-        return []
+            return _parse_suggest_json_or_jsonp(data.decode("utf-8", errors="ignore"))
+        except Exception as exc:
+            logger.warning("YouTubeSuggestCollector failed to parse response for query=%r: %s", query, exc)
+            return []
 
 
 class RedditSuggestCollector(BaseSuggestCollector):
-    """Harvester for Reddit subreddit and search autocomplete."""
+    """Harvester for Reddit subreddit and search autocomplete (retained for compatibility)."""
 
     def __init__(self, timeout: float = DEFAULT_TIMEOUT, retries: int = MAX_RETRIES):
         super().__init__("reddit_autocomplete", timeout=timeout, retries=retries)
@@ -153,9 +185,10 @@ class RedditSuggestCollector(BaseSuggestCollector):
     def fetch_suggestions(self, query: str) -> List[str]:
         q_enc = urllib.parse.quote(query.strip())
         url = f"https://www.reddit.com/api/subreddit_autocomplete_v2.json?query={q_enc}"
-        headers = {"User-Agent": "Mozilla/5.0 (Linux; pseofactory-reddit-bot/1.0)"}
+        headers = {"User-Agent": DEFAULT_USER_AGENT}
         data = make_resilient_request(url, headers=headers, timeout=self.timeout, retries=self.retries)
         if not data:
+            logger.warning("RedditSuggestCollector received empty/blocked response for query=%r", query)
             return []
         try:
             parsed = json.loads(data.decode("utf-8", errors="ignore"))
@@ -168,9 +201,57 @@ class RedditSuggestCollector(BaseSuggestCollector):
                     if title:
                         results.append(str(title).replace("r/", "").replace("_", " "))
             return results
-        except Exception:
-            pass
-        return []
+        except Exception as exc:
+            logger.warning("RedditSuggestCollector failed to parse response for query=%r: %s", query, exc)
+            return []
+
+
+class DuckDuckGoSuggestCollector(BaseSuggestCollector):
+    """Harvester for DuckDuckGo public autocomplete search suggestions."""
+
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT, retries: int = MAX_RETRIES):
+        super().__init__("duckduckgo_suggest", timeout=timeout, retries=retries)
+
+    def fetch_suggestions(self, query: str) -> List[str]:
+        q_enc = urllib.parse.quote(query.strip())
+        url = f"https://duckduckgo.com/ac/?q={q_enc}"
+        data = make_resilient_request(url, timeout=self.timeout, retries=self.retries)
+        if not data:
+            logger.warning("DuckDuckGoSuggestCollector received empty response for query=%r", query)
+            return []
+        try:
+            parsed = json.loads(data.decode("utf-8", errors="ignore"))
+            results: List[str] = []
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict) and item.get("phrase"):
+                        results.append(str(item["phrase"]))
+                    elif isinstance(item, str) and item.strip():
+                        results.append(item)
+            return results
+        except Exception as exc:
+            logger.warning("DuckDuckGoSuggestCollector failed to parse response for query=%r: %s", query, exc)
+            return []
+
+
+class BingSuggestCollector(BaseSuggestCollector):
+    """Harvester for Bing OpenSearch autocomplete suggestions."""
+
+    def __init__(self, timeout: float = DEFAULT_TIMEOUT, retries: int = MAX_RETRIES):
+        super().__init__("bing_suggest", timeout=timeout, retries=retries)
+
+    def fetch_suggestions(self, query: str) -> List[str]:
+        q_enc = urllib.parse.quote(query.strip())
+        url = f"https://api.bing.com/osjson.aspx?query={q_enc}"
+        data = make_resilient_request(url, timeout=self.timeout, retries=self.retries)
+        if not data:
+            logger.warning("BingSuggestCollector received empty response for query=%r", query)
+            return []
+        try:
+            return _parse_suggest_json_or_jsonp(data.decode("utf-8", errors="ignore"))
+        except Exception as exc:
+            logger.warning("BingSuggestCollector failed to parse response for query=%r: %s", query, exc)
+            return []
 
 
 class HackerNewsCollector(BaseSuggestCollector):
@@ -944,7 +1025,7 @@ class MultiSourceCollector:
             self.collectors = [
                 GoogleSuggestCollector(timeout=self.timeout, retries=self.retries),
                 YouTubeSuggestCollector(timeout=self.timeout, retries=self.retries),
-                RedditSuggestCollector(timeout=self.timeout, retries=self.retries),
+                DuckDuckGoSuggestCollector(timeout=self.timeout, retries=self.retries),
                 HackerNewsCollector(timeout=self.timeout, retries=self.retries),
                 GoogleTrendsRSSCollector(timeout=self.timeout, retries=self.retries),
                 StatutoryEconomicDatasetCollector(

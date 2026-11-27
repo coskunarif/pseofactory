@@ -54,6 +54,112 @@ def _clean_dashes(text: str) -> str:
     return str(text).replace("\u2014", "-").replace("\u2013", "-")
 
 
+PROTECTED_CORE_ROUTES: frozenset[str] = frozenset({
+    "index",
+    "root",
+    "tools",
+    "tools-directory",
+    "partners",
+    "about",
+    "contact",
+    "privacy",
+    "terms",
+    "methodology",
+    "editorial-policy",
+    "disclosure",
+    "disclaimer",
+    "disclaimers",
+    "legal",
+    "guides",
+    "categories",
+    "states",
+    "blog",
+    "resources",
+    "pricing",
+    "faq",
+    "robots.txt",
+    "llms.txt",
+    "catalog.json",
+    "404",
+    "404.html",
+    "signal",
+    "static",
+    "static/signal",
+})
+
+
+def _normalize_core_route_key(rel_path_or_url: str) -> str:
+    """Normalizes a URL, path, or relative file path into a lowercase route key."""
+    raw = str(rel_path_or_url or "").strip()
+    if not raw:
+        return ""
+    if "://" in raw or raw.startswith("//"):
+        path = urllib.parse.urlsplit(raw).path
+    else:
+        path = raw.split("?", 1)[0].split("#", 1)[0]
+    norm = path.strip().replace("\\", "/").lower().strip("/")
+    if norm.endswith("/index.html"):
+        norm = norm[: -len("/index.html")].strip("/")
+    if norm in ("", "index.html"):
+        return "index"
+    return norm
+
+
+def _is_protected_core_route(rel_path_or_url: str) -> bool:
+    """
+    Returns True for root, hub, governance, partner, feed, sitemap, and utility routes
+    that must never enter prune/410 queues or have internal links stripped.
+    Zero em-dashes. Zero en-dashes.
+    """
+    raw = str(rel_path_or_url or "").strip()
+    if not raw:
+        return False
+    norm = _normalize_core_route_key(raw)
+    if not norm or norm in ("index", "root", "index.html"):
+        return True
+    norm_stem = norm[:-5] if norm.endswith(".html") else norm
+    if norm in PROTECTED_CORE_ROUTES or norm_stem in PROTECTED_CORE_ROUTES:
+        return True
+    first_seg = norm.split("/", 1)[0]
+    first_stem = first_seg[:-5] if first_seg.endswith(".html") else first_seg
+    if first_seg.startswith(("sitemap", "feed", "404")) or first_stem.startswith(("sitemap", "feed", "404")):
+        return True
+    if norm.startswith(("sitemap", "feed", "404", "signal/", "static/")):
+        return True
+    if norm.endswith((".xml", ".txt")) or norm == "catalog.json":
+        return True
+    if first_seg in PROTECTED_CORE_ROUTES and first_seg != "tools":
+        return True
+    if norm.startswith("tools/"):
+        tail = norm[len("tools/"):].strip("/")
+        tail_stem = tail[:-5] if tail.endswith(".html") else tail
+        if (
+            not tail
+            or tail in PROTECTED_CORE_ROUTES
+            or tail_stem in PROTECTED_CORE_ROUTES
+            or tail.startswith(("sitemap", "feed", "404"))
+        ):
+            return True
+    if is_non_tool_or_governance_route(raw):
+        return True
+    return False
+
+
+def _is_prunable_tool_leaf_route(rel_path_or_url: str) -> bool:
+    """
+    Returns True ONLY for concrete non-protected tool/article leaf routes under tools/<slug>.
+    Protected core routes can never be evaluated as prune candidates.
+    Zero em-dashes. Zero en-dashes.
+    """
+    if _is_protected_core_route(rel_path_or_url):
+        return False
+    norm = _normalize_core_route_key(rel_path_or_url)
+    if not norm.startswith("tools/"):
+        return False
+    tail = norm[len("tools/"):].strip("/")
+    return bool(tail and tail not in PROTECTED_CORE_ROUTES)
+
+
 GSC_IMPRESSION_ANOMALY_WINDOW: Tuple[str, str] = ("2025-05-13", "2026-04-27")
 
 
@@ -4693,7 +4799,7 @@ def evaluate_content_portfolio_decisions(
             else:
                 site_p = "/" + str(rel).replace(".html", "")
             site_p = site_p.rstrip("/") or "/"
-            if is_non_tool_or_governance_route(site_p):
+            if _is_protected_core_route(site_p) or is_non_tool_or_governance_route(site_p):
                 continue
 
             raw_hf = ""
@@ -4775,7 +4881,7 @@ def evaluate_content_portfolio_decisions(
                         "window": list(GSC_IMPRESSION_ANOMALY_WINDOW),
                     }
                 )
-            elif impr == 0 and age_days >= eff_max_age:
+            elif impr == 0 and age_days >= eff_max_age and _is_prunable_tool_leaf_route(site_p):
                 has_semantic_parent = bool(parent_hub != "/" and dest_exists and len(path_parts) >= 3)
                 if has_semantic_parent:
                     action = "CONSOLIDATE_301"
@@ -4810,7 +4916,8 @@ def evaluate_content_portfolio_decisions(
                     matched_rule = "R8_PRUNE_410_GONE_STRIP_LINKS"
                     rationale = (
                         f"Zero impressions and zero 6-12mo clicks/conversions/backlinks after {age_days:.1f} days "
-                        f"with no semantic parent; return 410 Gone via edgeGone middleware and strip internal links."
+                        f"with no semantic parent; queued strictly as report-only 410 candidate pending explicit approval "
+                        f"(no auto-410 edge rule or internal link stripping executed)."
                     )
                     zero_candidates.append(
                         {
@@ -4825,8 +4932,11 @@ def evaluate_content_portfolio_decisions(
                             "coverage_state": cov_state or "Unknown",
                             "status": "PRUNE_410_GONE_STRIP_LINKS",
                             "http_status": 410,
-                            "strip_internal_links": True,
-                            "consolidation_queue_status": "EXECUTED_410_GONE_AND_LINK_STRIP",
+                            "strip_internal_links": False,
+                            "report_only": True,
+                            "approval_required": True,
+                            "execution_mode": "REPORT_ONLY",
+                            "consolidation_queue_status": "REPORT_ONLY_PENDING_APPROVAL",
                             "recommended_consolidation_target": "",
                             "noindex_applied": False,
                             "consolidation_executed": False,
@@ -4891,26 +5001,31 @@ def evaluate_content_portfolio_decisions(
 
             zero_click_triage_counts[zero_click_triage] = zero_click_triage_counts.get(zero_click_triage, 0) + 1
             counts_by_action[action] = counts_by_action.get(action, 0) + 1
-            decisions.append(
-                {
-                    "property_id": prop,
-                    "url_path": site_p,
-                    "canonical_path": site_p + "/",
-                    "target_url": f"https://{domain}{site_p}/",
-                    "age_days": age_days,
-                    "impressions": impr,
-                    "clicks": clicks,
-                    "best_position": round(best_pos, 2) if best_pos < 100.0 else None,
-                    "portfolio_action": action,
-                    "decision": decision_label,
-                    "matched_rule": matched_rule,
-                    "supporting_signals": supporting_signals,
-                    "conflicting_signals": conflicting_signals,
-                    "destination_validation": destination_validation,
-                    "zero_click_triage": zero_click_triage,
-                    "rationale": rationale,
-                }
-            )
+            decision_entry: Dict[str, Any] = {
+                "property_id": prop,
+                "url_path": site_p,
+                "canonical_path": site_p + "/",
+                "target_url": f"https://{domain}{site_p}/",
+                "age_days": age_days,
+                "impressions": impr,
+                "clicks": clicks,
+                "best_position": round(best_pos, 2) if best_pos < 100.0 else None,
+                "portfolio_action": action,
+                "decision": decision_label,
+                "matched_rule": matched_rule,
+                "supporting_signals": supporting_signals,
+                "conflicting_signals": conflicting_signals,
+                "destination_validation": destination_validation,
+                "zero_click_triage": zero_click_triage,
+                "rationale": rationale,
+            }
+            if action == "PRUNE_410_GONE":
+                decision_entry["report_only"] = True
+                decision_entry["approval_required"] = True
+                decision_entry["strip_internal_links"] = False
+                decision_entry["consolidation_executed"] = False
+                decision_entry["execution_mode"] = "REPORT_ONLY"
+            decisions.append(decision_entry)
 
     # Also record active 301 consolidated routes
     redirect_map = load_property_redirect_map(repo_root=root, property_id=prop)
@@ -5149,7 +5264,11 @@ def evaluate_content_portfolio_decisions(
                 "aged_zero_click_bleeder_candidates": aged_zero_click_bleeders,
                 "anomaly_quarantined_routes_count": len(anomaly_quarantined_routes),
                 "anomaly_quarantined_routes": anomaly_quarantined_routes,
-                "consolidation_executed": True,
+                "consolidation_executed": False,
+                "report_only": True,
+                "approval_required": True,
+                "strip_internal_links": False,
+                "execution_mode": "REPORT_ONLY",
                 "cluster_expansion_frozen": cluster_expansion_frozen,
                 "candidates": zero_candidates,
             },
@@ -6060,17 +6179,23 @@ def compile_ai_citation_digital_pr_queue(
         except Exception:
             pass
 
-    # 2. Ingest actual candidate queue (void_candidates.jsonl)
+    # 2. Ingest actual candidate queue (.agy/void_candidates.jsonl canonical source)
     candidate_queue_evaluated = 0
-    void_paths = [root / "void_candidates.jsonl", root / ".agy" / "void_candidates.jsonl"]
+    canonical_repo_void = Path(__file__).resolve().parents[1] / ".agy" / "void_candidates.jsonl"
+    local_agy_void = root / ".agy" / "void_candidates.jsonl"
+    void_paths: List[Path] = [local_agy_void]
     if str(root).startswith("/home/ubuntuadmin/projects/"):
         for central_void in (
-            Path("/home/ubuntuadmin/projects/pseofactory/void_candidates.jsonl"),
+            canonical_repo_void,
             Path("/home/ubuntuadmin/projects/pseofactory/.agy/void_candidates.jsonl"),
             Path("/home/ubuntuadmin/.local/share/vault/void_candidates.jsonl"),
         ):
             if central_void not in void_paths:
                 void_paths.append(central_void)
+    elif not local_agy_void.is_file():
+        local_fallback = root / "void_candidates.jsonl"
+        if local_fallback not in void_paths:
+            void_paths.append(local_fallback)
 
     from pseofactory.qualification import (
         is_retired_or_consolidated_slug,

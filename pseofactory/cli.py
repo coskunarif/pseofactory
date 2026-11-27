@@ -1589,10 +1589,13 @@ def cmd_trend_intake(args: argparse.Namespace) -> int:
     if args.source:
         spikes = [s for s in spikes if s.source == args.source]
 
+    from pseofactory.trends.cron import DEFAULT_VOID_CANDIDATES_SINK
+
     jev_engine = JevEngine(min_build_yield=float(args.min_yield))
+    eff_sink = getattr(args, "sink", None) or str(DEFAULT_VOID_CANDIDATES_SINK)
     result = run_trend_pipeline(
         spikes=spikes,
-        sink_path=args.sink,
+        sink_path=eff_sink,
         treg_checker=treg_checker,
         jev_engine=jev_engine,
         batch_size=args.batch_size,
@@ -1649,13 +1652,16 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
     Executes autonomous daily cron loop trend monitoring and longitudinal analysis.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.trends.cron import TrendCronRunner
+    from pseofactory.trends.cron import DEFAULT_VOID_CANDIDATES_SINK, TrendCronRunner
 
     try:
         runner = TrendCronRunner(
             db_path=args.db_path,
             min_yield=float(args.min_yield),
         )
+        eff_sink = getattr(args, "sink", None)
+        if eff_sink is None and not getattr(args, "fixture", None):
+            eff_sink = str(DEFAULT_VOID_CANDIDATES_SINK)
         result = runner.run_cycle(
             cycle_id=args.cycle_id,
             fixture_path=args.fixture,
@@ -1663,7 +1669,7 @@ def cmd_trend_cron(args: argparse.Namespace) -> int:
             property_filter=args.property,
             dry_run=args.dry_run,
             include_unassigned=getattr(args, "include_unassigned", False),
-            sink_path=getattr(args, "sink", None),
+            sink_path=eff_sink,
         )
         if args.json:
             print(json.dumps(result, indent=2))
@@ -2728,11 +2734,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_dlq.add_argument("--json", action="store_true", help="Output result as JSON")
 
     # trend-intake
+    from pseofactory.trends.cron import DEFAULT_VOID_CANDIDATES_SINK
     p_intake = subparsers.add_parser("trend-intake", help="Execute automated breakout trend intake and Jev decision pipeline")
     p_intake.add_argument("--fixture", type=str, default=None, help="Path to JSON fixture file containing raw spikes")
     p_intake.add_argument("--seeds", type=str, default=None, help="Comma-separated seed queries for live streaming intake")
     p_intake.add_argument("--source", type=str, default=None, help="Optional feed source filter (e.g. google_suggest)")
-    p_intake.add_argument("--sink", type=str, default="void_candidates.jsonl", help="Output path for JSONL candidates sink (default: void_candidates.jsonl)")
+    p_intake.add_argument(
+        "--sink",
+        type=str,
+        default=str(DEFAULT_VOID_CANDIDATES_SINK),
+        help="Output path for JSONL candidates sink (default: .agy/void_candidates.jsonl)",
+    )
     p_intake.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold (default: 60.0)")
     p_intake.add_argument("--batch-size", type=int, default=15, help="Maximum candidate spikes to evaluate per cycle (default: 15, ceiling: 25)")
     p_intake.add_argument("--cycle-budget", type=float, default=240.0, help="Cycle execution deadline budget in seconds before degradation (default: 240.0s)")
@@ -2769,7 +2781,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_cron.add_argument("--min-yield", type=float, default=60.0, help="Minimum composite profit yield threshold for asset build/refactor")
     p_cron.add_argument("--property", type=str, default=None, help="Optional tenant filter (profithelm, prexvo, gainhelm, unassigned)")
     p_cron.add_argument("--include-unassigned", action="store_true", help="Also evaluate unassigned greenfield clusters when --property is set")
-    p_cron.add_argument("--sink", type=str, default=None, help="Optional path for JSONL candidates sink (e.g. void_candidates.jsonl)")
+    p_cron.add_argument(
+        "--sink",
+        type=str,
+        default=None,
+        help="Optional path for JSONL candidates sink (default: .agy/void_candidates.jsonl for live cycles)",
+    )
     p_cron.add_argument("--json", action="store_true", help="Output machine-readable JSON cycle summary")
     p_cron.add_argument("--dry-run", action="store_true", help="Evaluate cycle without committing mutations to SQLite history")
 
@@ -3086,6 +3103,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_ca.add_argument("--base-url", type=str, default=None, help="Explicit live base URL override for single property")
     p_ca.add_argument("--json", action="store_true", help="Output machine-readable JSON commerce-audit report")
 
+    p_wst = subparsers.add_parser(
+        "weekly-seo-tune",
+        help="Run weekly autonomous SEO tuning across dynamically discovered tenants and ship only when dist/ changes",
+    )
+    p_wst.add_argument("--property", "--tenant", dest="property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_wst.add_argument("--dry-run", action="store_true", help="Evaluate SEO workflows without mutating dist/ or running GitOps")
+    p_wst.add_argument("--skip-browser-audit", action="store_true", help="Skip pre-deploy cached headless Chrome audit during MaintenanceLifecycle")
+    p_wst.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_wst.add_argument("--ledger-path", type=str, default=None, help="Optional summary ledger JSON output path override")
+    p_wst.add_argument("--json", action="store_true", help="Output weekly SEO tune summary ledger as JSON")
+
     return parser
 
 
@@ -3285,6 +3313,360 @@ def cmd_seo_workflows(args: argparse.Namespace) -> int:
     return 0
 
 
+def _snapshot_dist_file_hashes(dist_dir: Path) -> Dict[str, str]:
+    """Returns deterministic relative-path -> sha256 map for all files inside `dist_dir`."""
+    import hashlib
+
+    hashes: Dict[str, str] = {}
+    if not dist_dir.is_dir():
+        return hashes
+    for f_path in sorted(p for p in dist_dir.rglob("*") if p.is_file()):
+        rel = f_path.relative_to(dist_dir).as_posix()
+        try:
+            hashes[rel] = hashlib.sha256(f_path.read_bytes()).hexdigest()
+        except OSError:
+            pass
+    return hashes
+
+
+def _git_dirty_dist_files(repo_dir: Path, dist_dir: Path) -> List[str]:
+    """Returns git-modified/untracked relative paths inside `dist_dir`, or [] if not a git repo or clean."""
+    import subprocess
+
+    if not (repo_dir / ".git").exists():
+        return []
+    try:
+        rel_dist = dist_dir.resolve().relative_to(repo_dir.resolve()).as_posix()
+    except Exception:
+        rel_dist = "dist"
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_dir), "status", "--porcelain", "--", rel_dist],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if res.returncode != 0 or not res.stdout.strip():
+            return []
+        dirty: List[str] = []
+        prefix = "" if rel_dist in ("", ".") else f"{rel_dist.rstrip('/')}/"
+        for line in res.stdout.splitlines():
+            if len(line) >= 4:
+                path_part = line[3:].strip()
+                if " -> " in path_part:
+                    path_part = path_part.split(" -> ", 1)[1].strip()
+                if path_part:
+                    if prefix and path_part.startswith(prefix):
+                        path_part = path_part[len(prefix):]
+                    dirty.append(path_part)
+        return dirty
+    except Exception:
+        return []
+
+
+def _is_repo_path_gitignored(repo_dir: Path, rel_path: str) -> bool:
+    """Returns True if `rel_path` is ignored by git in `repo_dir`."""
+    import subprocess
+
+    if not (repo_dir / ".git").exists():
+        return True
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_dir), "check-ignore", "-q", rel_path],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def _cleanup_unignored_agy_artifacts(
+    repo_dir: Path,
+    pre_existing_files: set,
+    agy_existed_before: bool,
+) -> None:
+    """Removes newly created untracked files inside `repo_dir/.agy` when `.agy/` is not gitignored."""
+    agy_dir = repo_dir / ".agy"
+    if not agy_dir.is_dir():
+        return
+    for item in sorted(agy_dir.rglob("*"), reverse=True):
+        if item in pre_existing_files:
+            continue
+        try:
+            if item.is_file() or item.is_symlink():
+                item.unlink(missing_ok=True)
+            elif item.is_dir() and not any(item.iterdir()):
+                item.rmdir()
+        except OSError:
+            pass
+    if not agy_existed_before and agy_dir.is_dir():
+        try:
+            if not any(agy_dir.iterdir()):
+                agy_dir.rmdir()
+        except OSError:
+            pass
+
+
+def _resolve_weekly_tune_adapter(
+    p_id: str,
+    repo_dir: Path,
+    reg: TenantRegistry,
+) -> Any:
+    """Resolves a PropertyAdapter from TenantRegistry or `.pseofactory.json`."""
+    try:
+        return reg.get_adapter(p_id)
+    except KeyError:
+        pass
+    marker = repo_dir / ".pseofactory.json"
+    meta: Dict[str, Any] = {}
+    if marker.is_file():
+        try:
+            loaded = json.loads(marker.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                meta = loaded
+        except Exception:
+            pass
+    domain = str(meta.get("domain") or f"{p_id}.com").strip()
+    canonical_base = str(meta.get("canonical_base") or f"https://{domain}").strip().rstrip("/")
+    brand_name = str(meta.get("brand_name") or p_id.capitalize()).strip()
+    dist_rel = str(meta.get("dist_dir") or "dist").strip()
+    dist_dir = (repo_dir / dist_rel).resolve() if not Path(dist_rel).is_absolute() else Path(dist_rel).resolve()
+    return ConfigurablePropertyAdapter(
+        property_id=p_id,
+        brand_name=brand_name,
+        domain=domain,
+        canonical_base=canonical_base,
+        dist_dir=dist_dir,
+        repo_path=repo_dir,
+    )
+
+
+def _discover_weekly_seo_tenants(ws_root: Path, prop_filter: str) -> List[Tuple[str, Path]]:
+    """
+    Dynamically discovers tenants with `.pseofactory.json` under `ws_root`.
+    Never uses a hardcoded 4-site list when `.pseofactory.json` markers exist.
+    """
+    from pseofactory.impact_planner import discover_active_tenants
+
+    marker_tenants: List[Tuple[str, Path]] = []
+    if ws_root.is_dir():
+        discovered = discover_active_tenants(ws_root)
+        for pid, r_dir in discovered:
+            if (Path(r_dir) / ".pseofactory.json").is_file():
+                marker_tenants.append((pid, Path(r_dir)))
+        if not marker_tenants:
+            marker_tenants = [(pid, Path(r_dir)) for pid, r_dir in discovered]
+
+    if prop_filter == "all":
+        return marker_tenants
+
+    matched = [(pid, r_dir) for pid, r_dir in marker_tenants if pid.lower() == prop_filter]
+    if matched:
+        return matched
+    return [(prop_filter, (ws_root / prop_filter).resolve())]
+
+
+def cmd_weekly_seo_tune(args: argparse.Namespace) -> int:
+    """
+    Executes weekly autonomous SEO tuning across dynamically discovered tenants:
+    1. Runs `run_all_seo_growth_workflows` + `evaluate_closed_loop_cohort_reflection`
+    2. Checks whether `dist/` actually changed
+    3. If not `--dry-run` and `dist/` changed, ships via `MaintenanceLifecycle(enable_gitops=True)`
+    4. Leaves zero-delta tenants untouched (`NO_DIST_DELTA`) with clean git status
+    5. Writes summary ledger to `.agy/weekly_seo_tune_ledger.json`
+    Zero em-dashes. Zero en-dashes.
+    """
+    from datetime import datetime, timezone
+    from pseofactory.seo_growth_loops import (
+        evaluate_closed_loop_cohort_reflection,
+        run_all_seo_growth_workflows,
+    )
+
+    ws_root = Path(
+        getattr(args, "workspace_root", None)
+        or os.environ.get("WORKSPACE_ROOT")
+        or "/home/ubuntuadmin/projects"
+    ).resolve()
+    prop_arg = str(getattr(args, "property", "all") or "all").strip().lower()
+    dry_run = bool(getattr(args, "dry_run", False))
+    skip_browser_audit = bool(getattr(args, "skip_browser_audit", False))
+    as_json = bool(getattr(args, "json", False))
+    ledger_override = getattr(args, "ledger_path", None)
+    ledger_path = (
+        Path(ledger_override).resolve()
+        if ledger_override
+        else (Path(__file__).resolve().parents[1] / ".agy" / "weekly_seo_tune_ledger.json")
+    )
+
+    run_id = f"weekly_seo_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    tenants = _discover_weekly_seo_tenants(ws_root, prop_arg)
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    lifecycle = MaintenanceLifecycle(registry=reg)
+
+    tenant_results: Dict[str, Dict[str, Any]] = {}
+    hard_failure = False
+    total_changed_files = 0
+    changed_tenants_count = 0
+
+    for p_id, repo_dir in tenants:
+        adapter = _resolve_weekly_tune_adapter(p_id, repo_dir, reg)
+        dist_dir = Path(adapter.dist_dir).resolve()
+        is_git_repo = (repo_dir / ".git").exists()
+        agy_gitignored = _is_repo_path_gitignored(repo_dir, ".agy/") if is_git_repo else True
+        agy_dir = repo_dir / ".agy"
+        agy_existed_before = agy_dir.exists()
+        pre_agy_files = set(agy_dir.rglob("*")) if (is_git_repo and not agy_gitignored and agy_dir.is_dir()) else set()
+
+        pre_dist_hashes = _snapshot_dist_file_hashes(dist_dir)
+        pre_git_dirty = set(_git_dirty_dist_files(repo_dir, dist_dir))
+
+        try:
+            wf_report = run_all_seo_growth_workflows(
+                property_id=p_id,
+                repo_root=repo_dir,
+                dist_dir=dist_dir,
+                apply_overlays=not dry_run,
+                persist=not dry_run,
+            )
+            cohort_report = evaluate_closed_loop_cohort_reflection(
+                property_id=p_id,
+                repo_root=repo_dir,
+                dist_dir=dist_dir,
+                propagate_winning_patterns=not dry_run,
+                persist=not dry_run,
+            )
+        except Exception as wf_exc:
+            hard_failure = True
+            if is_git_repo and not agy_gitignored:
+                _cleanup_unignored_agy_artifacts(repo_dir, pre_agy_files, agy_existed_before)
+            tenant_results[p_id] = {
+                "status": "FAILED",
+                "repo_root": str(repo_dir),
+                "dist_dir": str(dist_dir),
+                "dist_changed": False,
+                "changed_files_count": 0,
+                "changed_files": [],
+                "error": str(wf_exc),
+            }
+            continue
+
+        post_dist_hashes = _snapshot_dist_file_hashes(dist_dir)
+        post_git_dirty = set(_git_dirty_dist_files(repo_dir, dist_dir))
+
+        diff_keys = set()
+        for k in set(pre_dist_hashes.keys()) | set(post_dist_hashes.keys()):
+            if pre_dist_hashes.get(k) != post_dist_hashes.get(k):
+                diff_keys.add(k)
+        changed_files = sorted(diff_keys | post_git_dirty | pre_git_dirty)
+        dist_changed = len(changed_files) > 0
+        changed_count = len(changed_files)
+
+        if dry_run:
+            if is_git_repo and not agy_gitignored:
+                _cleanup_unignored_agy_artifacts(repo_dir, pre_agy_files, agy_existed_before)
+            tenant_results[p_id] = {
+                "status": "DRY_RUN",
+                "repo_root": str(repo_dir),
+                "dist_dir": str(dist_dir),
+                "dist_changed": dist_changed,
+                "changed_files_count": changed_count,
+                "changed_files": changed_files[:100],
+                "workflows_status": wf_report.get("status", "PASS") if isinstance(wf_report, dict) else "PASS",
+                "cohort_status": cohort_report.get("status", "PASS") if isinstance(cohort_report, dict) else "PASS",
+            }
+            continue
+
+        if not dist_changed:
+            if is_git_repo and not agy_gitignored:
+                _cleanup_unignored_agy_artifacts(repo_dir, pre_agy_files, agy_existed_before)
+            tenant_results[p_id] = {
+                "status": "NO_DIST_DELTA",
+                "repo_root": str(repo_dir),
+                "dist_dir": str(dist_dir),
+                "dist_changed": False,
+                "changed_files_count": 0,
+                "changed_files": [],
+                "workflows_status": wf_report.get("status", "PASS") if isinstance(wf_report, dict) else "PASS",
+                "cohort_status": cohort_report.get("status", "PASS") if isinstance(cohort_report, dict) else "PASS",
+            }
+            continue
+
+        changed_tenants_count += 1
+        total_changed_files += changed_count
+        try:
+            maint_res = lifecycle.run(
+                adapter,
+                enable_gitops=True,
+                dry_run=False,
+                run_id=run_id,
+                enable_browser_audit=False if skip_browser_audit else None,
+            )
+            maint_ok = maint_res.status in ("SUCCESS", "DRY_RUN", "SKIPPED_NO_CHANGES", "PARTIAL")
+            if not maint_ok:
+                hard_failure = True
+            tenant_results[p_id] = {
+                "status": "SHIPPED" if maint_ok else "FAILED",
+                "repo_root": str(repo_dir),
+                "dist_dir": str(dist_dir),
+                "dist_changed": True,
+                "changed_files_count": changed_count,
+                "changed_files": changed_files[:100],
+                "maintenance_status": maint_res.status,
+                "browser_audit_status": maint_res.browser_audit_status,
+                "gitops_status": maint_res.gitops_status,
+                "failed_records": list(maint_res.failed_records or [])[:10],
+                "workflows_status": wf_report.get("status", "PASS") if isinstance(wf_report, dict) else "PASS",
+                "cohort_status": cohort_report.get("status", "PASS") if isinstance(cohort_report, dict) else "PASS",
+            }
+        except Exception as maint_exc:
+            hard_failure = True
+            tenant_results[p_id] = {
+                "status": "FAILED",
+                "repo_root": str(repo_dir),
+                "dist_dir": str(dist_dir),
+                "dist_changed": True,
+                "changed_files_count": changed_count,
+                "changed_files": changed_files[:100],
+                "error": str(maint_exc),
+            }
+
+    overall_status = "FAIL" if hard_failure else ("DRY_RUN" if dry_run else "PASS")
+    ledger = {
+        "run_id": run_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status": overall_status,
+        "dry_run": dry_run,
+        "skip_browser_audit": skip_browser_audit,
+        "workspace_root": str(ws_root),
+        "tenants_discovered": [pid for pid, _ in tenants],
+        "tenants_count": len(tenants),
+        "changed_tenants_count": changed_tenants_count,
+        "total_changed_files": total_changed_files,
+        "properties": tenant_results,
+    }
+
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_ledger = ledger_path.with_suffix(".json.tmp")
+    tmp_ledger.write_text(json.dumps(ledger, indent=2) + "\n", encoding="utf-8")
+    tmp_ledger.replace(ledger_path)
+
+    if as_json:
+        print(json.dumps(ledger, indent=2))
+    else:
+        for p_id, info in tenant_results.items():
+            print(
+                f"[{info['status']}] weekly-seo-tune ({p_id}): "
+                f"dist_changed={info['dist_changed']} | changed_files={info['changed_files_count']}"
+                + (f" | maint={info['maintenance_status']}" if info.get("maintenance_status") else "")
+                + (f" | browser={info['browser_audit_status']}" if info.get("browser_audit_status") else "")
+                + (f" | gitops={info['gitops_status']}" if info.get("gitops_status") else "")
+            )
+    return 1 if hard_failure else 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Main CLI entrypoint."""
     parser = build_parser()
@@ -3366,6 +3748,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_truth_audit(args)
     elif args.command == "commerce-audit":
         return cmd_commerce_audit(args)
+    elif args.command == "weekly-seo-tune":
+        return cmd_weekly_seo_tune(args)
     else:
         parser.print_help()
         return 1

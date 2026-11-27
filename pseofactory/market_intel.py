@@ -272,11 +272,10 @@ ACTIVE_REVENUE_TENANT_DOMAINS: Tuple[str, ...] = (
     "profithelm.com",
     "prexvo.com",
     "gainhelm.com",
+    "lienbond.com",
 )
 
-STAGED_RESERVE_DOMAINS: Tuple[str, ...] = (
-    "gainhelm.com",
-)
+STAGED_RESERVE_DOMAINS: Tuple[str, ...] = ()
 
 PERSONAL_INFRASTRUCTURE_DOMAINS: Tuple[str, ...] = (
     "arifcoskun.com",
@@ -293,34 +292,7 @@ NON_DEPLOYABLE_CANDIDATE_DOMAINS: Tuple[str, ...] = (
     PERSONAL_INFRASTRUCTURE_DOMAINS + DECOMMISSIONED_RETIRED_DOMAINS
 )
 
-STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {
-    "gainhelm.com": {
-        "domain": "gainhelm.com",
-        "tenant_id_candidate": "gainhelm",
-        "brand_name": "GainHelm",
-        "zone_id": "0a03264e19beb2cb17ba01860b701701",
-        "registry_object_id": "3041507860_DOMAIN_COM-VRSN",
-        "auto_renew": True,
-        "locked": True,
-        "privacy": True,
-        "privacy_mode": "redaction",
-        "registry_statuses": "clienttransferprohibited",
-        "registered_at": "2025-11-24T00:24:57.459Z",
-        "expires_at": "2026-11-24T00:24:57.000Z",
-        "renewal_fee_usd": 10.46,
-        "lifecycle_state": "HIBERNATED_RESERVE",
-        "active_tenant_profile_wired": False,
-        "routing_records_count": 0,
-        "gsc_property": "sc-domain:gainhelm.com",
-        "search_ownership_txt_preserved": True,
-        "eligible_for_third_tenant_promotion": True,
-        "architectural_boundary_note": (
-            "Registered in market-intelligence reserve metadata rather than active TenantFactStore "
-            "profiles while hibernated so empty-zone GSC sitemaps and unprovisioned Pages/KV edges "
-            "never trigger false infrastructure failures."
-        ),
-    }
-}
+STAGED_RESERVE_DOMAIN_METADATA: Dict[str, Dict[str, Any]] = {}
 
 
 MAX_ACTIVE_YMYL_DOMAINS: int = int(os.environ.get("PSEOFACTORY_MAX_ACTIVE_YMYL_DOMAINS", "4") or 4)
@@ -2234,7 +2206,7 @@ class MarketIntelligenceEngine:
 
         raw_rec_domain = v_match["recommended_domain"] if v_match else f"{slug.split('-')[0]}.com"
         if raw_rec_domain.strip().lower() in NON_DEPLOYABLE_CANDIDATE_DOMAINS:
-            rec_domain = "gainhelm.com"
+            rec_domain = STAGED_RESERVE_DOMAINS[0] if STAGED_RESERVE_DOMAINS else raw_rec_domain.strip().lower()
         else:
             rec_domain = assert_candidate_domain_eligible(raw_rec_domain, enforce_fortress_guard=False)
 
@@ -2255,7 +2227,7 @@ class MarketIntelligenceEngine:
             "recommended_domain": rec_domain,
             "domain_spawning_eligible": spawning_eligible,
             "domain_spawning_block_reason": spawning_block_reason,
-            "staged_reserve_domain": "gainhelm.com",
+            "staged_reserve_domain": STAGED_RESERVE_DOMAINS[0] if STAGED_RESERVE_DOMAINS else None,
             "search_volume": vol,
             "cpc_usd": round(cpc, 2),
             "keyword_difficulty": round(kd, 2),
@@ -2354,7 +2326,7 @@ class MarketIntelligenceEngine:
                 "tenant_id": q_eval["recommended_tenant_id"],
                 "brand_name": q_eval["recommended_brand_name"],
                 "recommended_domain": q_eval["recommended_domain"],
-                "staged_reserve_domain": "gainhelm.com",
+                "staged_reserve_domain": STAGED_RESERVE_DOMAINS[0] if STAGED_RESERVE_DOMAINS else None,
                 "vertical_id": q_eval["vertical_id"],
                 "scaffold_recommended": True,
                 "proposed_at": now_iso,
@@ -2405,8 +2377,9 @@ class MarketIntelligenceEngine:
                 if active_pid not in scan_targets:
                     scan_targets.append(active_pid)
         except Exception:
-            if "gainhelm" not in scan_targets:
-                scan_targets.append("gainhelm")
+            for fallback_pid in ("gainhelm", "lienbond"):
+                if fallback_pid not in scan_targets:
+                    scan_targets.append(fallback_pid)
 
         evaluations: List[TenantCandidateEvaluation] = []
 
@@ -2707,7 +2680,7 @@ class MarketIntelligenceEngine:
                 },
             ],
             "staged_reserve_domains": [
-                dict(STAGED_RESERVE_DOMAIN_METADATA["gainhelm.com"]),
+                dict(meta) for meta in STAGED_RESERVE_DOMAIN_METADATA.values()
             ],
             "decommissioned_domains": list(DECOMMISSIONED_RETIRED_DOMAINS),
             "personal_infrastructure_domains": list(PERSONAL_INFRASTRUCTURE_DOMAINS),

@@ -42,7 +42,13 @@ def calculate_intent_weight(intent_cluster: str, query: str) -> float:
         w in q_low
         for w in (
             "calculator",
+            "calculation",
+            "calculations",
+            "calculate",
             "estimator",
+            "estimate",
+            "estimating",
+            "estimation",
             "matrix",
             "amortization",
             "deduction",
@@ -66,7 +72,23 @@ def determine_target_asset_type(query: str, intent_cluster: str) -> str:
     q_low = query.lower()
     if "matrix" in q_low or "statutory" in q_low:
         return "statutory_matrix"
-    if "calculator" in q_low or "estimator" in q_low or "calc" in q_low or intent_cluster == "calculator":
+    if (
+        any(
+            w in q_low
+            for w in (
+                "calculator",
+                "calculation",
+                "calculations",
+                "calculate",
+                "estimator",
+                "estimate",
+                "estimating",
+                "estimation",
+                "calc",
+            )
+        )
+        or intent_cluster == "calculator"
+    ):
         return "interactive_calculator"
     if "vs" in q_low or "versus" in q_low or "comparison" in q_low or intent_cluster == "comparison":
         return "comparison_engine"
@@ -123,8 +145,14 @@ class JevEngine:
                 "section",
                 "deduction",
                 "calculator",
+                "calculation",
+                "calculations",
+                "calculate",
                 "matrix",
                 "estimator",
+                "estimate",
+                "estimating",
+                "estimation",
                 "amortization",
                 "compliance",
                 "forgiveness",

@@ -2017,12 +2017,10 @@ class GitOpsCoordinator:
         cand_paths: List[Path] = []
         if void_candidates_path:
             cand_paths.append(Path(void_candidates_path))
-        else:
+        elif _is_test_context(repo_path=rp, property_id=norm_prop):
             cand_paths.append(self.runs_base.parent / "void_candidates.jsonl")
-            if not _is_test_context(repo_path=rp, property_id=norm_prop):
-                default_vc = Path("/home/ubuntuadmin/projects/.agy/void_candidates.jsonl")
-                if default_vc not in cand_paths:
-                    cand_paths.append(default_vc)
+        else:
+            cand_paths.append(Path(__file__).resolve().parent.parent / ".agy" / "void_candidates.jsonl")
 
         marked_slugs: List[str] = []
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -9402,32 +9400,8 @@ def reconcile_workspace_tracking_state(
             continue
         repo_name = rp.name
         try:
-            if repo_name == "pseofactory":
-                vc_st = subprocess.run(
-                    ["git", "-C", str(rp), "status", "--porcelain", "--", "void_candidates.jsonl"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=5,
-                )
-                if vc_st.returncode == 0 and vc_st.stdout.strip():
-                    src_vc = rp / "void_candidates.jsonl"
-                    dst_vc = rp / ".agy" / "void_candidates.jsonl"
-                    if src_vc.is_file():
-                        try:
-                            dst_vc.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.copy2(src_vc, dst_vc)
-                        except OSError:
-                            pass
-                    subprocess.run(
-                        ["git", "-C", str(rp), "checkout", "HEAD", "--", "void_candidates.jsonl"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        timeout=5,
-                    )
-                    healed_tenant_trees += 1
-
+            # Canonical page queue lives strictly at <repo>/.agy/void_candidates.jsonl;
+            # never copy or overwrite it from any stale root void_candidates.jsonl file.
             resolved_tenant_pid: Optional[str] = None
             if repo_name != "pseofactory":
                 marker_file = rp / ".pseofactory.json"
@@ -9779,10 +9753,21 @@ def reconcile_workspace_tracking_state(
                             archive_path.write_text(json.dumps(existing_arch, indent=2) + "\n", encoding="utf-8")
                             dlq_json_path.write_text("[]\n", encoding="utf-8")
                             if reconciled_slugs and not in_test:
-                                vc_vault = Path.home() / ".local" / "share" / "vault" / "void_candidates.jsonl"
-                                if vc_vault.is_file():
+                                vc_targets: List[Path] = [rp / ".agy" / "void_candidates.jsonl"]
+                                if not _is_test_context():
+                                    vc_targets.append(Path(__file__).resolve().parent.parent / ".agy" / "void_candidates.jsonl")
+                                    vc_targets.append(Path.home() / ".local" / "share" / "vault" / "void_candidates.jsonl")
+                                seen_vc: Set[Path] = set()
+                                for vc_target in vc_targets:
                                     try:
-                                        vc_lines = vc_vault.read_text(encoding="utf-8").splitlines()
+                                        vc_resolved = vc_target.resolve()
+                                    except Exception:
+                                        vc_resolved = vc_target
+                                    if vc_resolved in seen_vc or not vc_target.is_file():
+                                        continue
+                                    seen_vc.add(vc_resolved)
+                                    try:
+                                        vc_lines = vc_target.read_text(encoding="utf-8").splitlines()
                                         new_vc_lines: List[str] = []
                                         vc_changed = False
                                         for vcl in vc_lines:
@@ -9802,7 +9787,7 @@ def reconcile_workspace_tracking_state(
                                             except Exception:
                                                 new_vc_lines.append(vcl)
                                         if vc_changed:
-                                            vc_vault.write_text("\n".join(new_vc_lines) + "\n", encoding="utf-8")
+                                            vc_target.write_text("\n".join(new_vc_lines) + "\n", encoding="utf-8")
                                     except Exception:
                                         pass
                 except Exception:

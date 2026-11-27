@@ -10,8 +10,9 @@ import time
 import json
 import fcntl
 import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union, Set
+from typing import List, Dict, Any, Optional, Union, Set, Tuple
 
 from pseofactory.contracts import (
     assert_no_forbidden_dashes,
@@ -424,6 +425,7 @@ class TrendPipeline:
         # 5. HWL-1253: Atomic file sink persistence under flock lock with composite idempotency deduplication
         if sink_path:
             deduplicated_sink_count = sink_records_to_jsonl(enriched_rankings, sink_path)
+            reconcile_superseded_pending_rows(sink_path, enriched_rankings)
 
         return {
             "status": "COMPLETED",
@@ -485,6 +487,88 @@ def sink_records_to_jsonl(
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
     return deduplicated_sink_count
+
+
+def reconcile_superseded_pending_rows(
+    sink_file: Union[str, Path],
+    sink_candidates: List[Dict[str, Any]],
+) -> int:
+    """
+    Reconciles older PENDING BUILD_PAGE rows in void_candidates.jsonl whenever a cycle
+    emits a superseding verdict (MONITOR, REJECT, REFACTOR_PAGE, or BUILT status) for the
+    same (property_id, slug) pair so stale PENDING rows cannot linger across cycles.
+    Returns count of rows updated. Zero em-dashes. Zero en-dashes.
+    """
+    target_path = Path(sink_file).expanduser().resolve()
+    if not target_path.is_file() or not sink_candidates:
+        return 0
+
+    superseded_targets: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for rec in sink_candidates:
+        if not isinstance(rec, dict):
+            continue
+        tenant = str(rec.get("property_id") or rec.get("tenant") or "unassigned").strip().lower()
+        slug = str(rec.get("slug") or "").strip().lower()
+        if not slug:
+            continue
+        action = str(rec.get("action") or "").strip().upper()
+        status = str(rec.get("status") or "").strip().upper()
+        if action in ("MONITOR", "REJECT", "REFACTOR_PAGE") or status in (
+            "BUILT",
+            "REJECTED",
+            "REFACTOR_PENDING",
+            "SUPERSEDED",
+            "ROLLED_BACK",
+        ):
+            superseded_targets[(tenant, slug)] = {
+                "action": action or status,
+                "status": "BUILT" if status == "BUILT" else "SUPERSEDED",
+                "evaluated_at": str(rec.get("evaluated_at") or datetime.now(timezone.utc).isoformat()),
+            }
+
+    if not superseded_targets:
+        return 0
+
+    updated_count = 0
+    with open(target_path, "r+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            raw_lines = f.readlines()
+            new_lines: List[str] = []
+            for raw_line in raw_lines:
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    row = json.loads(stripped)
+                except Exception:
+                    new_lines.append(stripped + "\n")
+                    continue
+                if not isinstance(row, dict):
+                    new_lines.append(stripped + "\n")
+                    continue
+                r_tenant = str(row.get("property_id") or row.get("tenant") or "unassigned").strip().lower()
+                r_slug = str(row.get("slug") or "").strip().lower()
+                r_action = str(row.get("action") or "").strip().upper()
+                r_status = str(row.get("status") or ("PENDING" if r_action == "BUILD_PAGE" else "")).strip().upper()
+                target_info = superseded_targets.get((r_tenant, r_slug))
+                if target_info and r_action == "BUILD_PAGE" and r_status == "PENDING":
+                    row["status"] = target_info["status"]
+                    row["superseded_by_action"] = target_info["action"]
+                    row["superseded_at"] = target_info["evaluated_at"]
+                    updated_count += 1
+                    new_lines.append(json.dumps(row) + "\n")
+                else:
+                    new_lines.append(stripped + "\n")
+
+            if updated_count > 0:
+                f.seek(0)
+                f.writelines(new_lines)
+                f.truncate()
+                f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    return updated_count
 
 
 def run_trend_pipeline(

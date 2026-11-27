@@ -1533,6 +1533,17 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
                 "crypto tax",
                 "treasury yield",
                 "financial simulation",
+                "1031 boot",
+                "1031",
+                "179 deduction",
+                "vehicle depreciation",
+                "irs vehicle",
+                "section 301",
+                "tariff",
+                "tax deduction",
+                "tax deductions",
+                "capital gains",
+                "r&d tax credit",
             ),
             own_boundary_tokens=(
                 "profithelm",
@@ -1682,6 +1693,15 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
                 "ibr vs",
                 "parent plus",
                 "section 108f",
+                "public service loan forgiveness",
+                "partial financial hardship",
+                "income driven repayment",
+                "income-driven repayment",
+                "loan payment calculator student",
+                "fafsa",
+                "pell grant",
+                "federal student aid",
+                "idr",
             ),
             own_boundary_tokens=(
                 "prexvo",
@@ -1840,6 +1860,14 @@ def _build_canonical_tenant_declarations() -> Dict[str, DeclarativeTenantContrac
                 "pci dss 4.0",
                 "penetration testing cost",
                 "cyber liability insurance",
+                "soc 2",
+                "soc2",
+                "cmmc",
+                "nist 800 171",
+                "sprs",
+                "fedramp",
+                "hipaa compliance",
+                "pci dss",
             ),
             own_boundary_tokens=(
                 "gainhelm",
@@ -2016,6 +2044,9 @@ LIENBOND_TENANT_CONTRACT: DeclarativeTenantContract = DeclarativeTenantContract(
         "prevailing wage",
         "wh-347",
         "contractor markup",
+        "notice to owner",
+        "workers compensation payroll",
+        "contractor license bond",
     ),
     own_boundary_tokens=(
         "lienbond",
@@ -2364,6 +2395,13 @@ def get_tenant_contract(
     raise KeyError(f"TRUTH_PACK_MISSING: Unknown tenant contract '{pid}' (no registration or Truth Pack found)")
 
 
+def _token_matches_query(tok: str, q_lower: str) -> bool:
+    """Matches statutory intent token against query using word boundaries for short or numeric tokens."""
+    if (len(tok) <= 3 and tok.isalnum()) or tok.isdigit():
+        return bool(re.search(rf"\b{re.escape(tok)}\b", q_lower))
+    return tok in q_lower
+
+
 def match_tenant_statutory_intent(query: str, include_spawned: bool = False) -> Dict[str, bool]:
     """
     Evaluates a search query against all registered tenants' statutory_intent_tokens
@@ -2372,14 +2410,14 @@ def match_tenant_statutory_intent(query: str, include_spawned: bool = False) -> 
     q_lower = (query or "").lower().strip()
     matched: Dict[str, bool] = {}
     for pid, tokens in TENANT_STATUTORY_INTENT_TOKENS.items():
-        hit = any(tok in q_lower for tok in tokens)
+        hit = any(_token_matches_query(tok, q_lower) for tok in tokens)
         if not hit and pid == "profithelm" and ("1031" in q_lower and "exchange" in q_lower):
             hit = True
         matched[pid] = hit
     if include_spawned:
         for pid, contract in SPAWNED_TENANT_DECLARATIONS.items():
             if pid not in matched:
-                matched[pid] = any(tok in q_lower for tok in contract.statutory_intent_tokens)
+                matched[pid] = any(_token_matches_query(tok, q_lower) for tok in contract.statutory_intent_tokens)
     return matched
 
 

@@ -454,15 +454,16 @@ def test_profithelm_b2b_expansion_calculators_and_affiliate_consolidation():
 
 def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
     """
-    Verifies the 8-domain lifecycle boundary across TenantFactStore and MarketIntelligenceEngine:
-    1. Active revenue tenants: profithelm.com and prexvo.com (wired in TenantFactStore._profiles).
-    2. Staged third-tenant reserve: gainhelm.com (registered in STAGED_RESERVE_DOMAIN_METADATA,
-       NOT prematurely wired as an active profile in TenantFactStore while hibernated).
+    Verifies the domain lifecycle boundary across TenantFactStore and MarketIntelligenceEngine:
+    1. Active revenue tenants: profithelm.com, prexvo.com, gainhelm.com, and lienbond.com
+       (all wired in TenantFactStore._profiles and ACTIVE_REVENUE_TENANT_DOMAINS).
+    2. Staged reserve domains: empty (0 hibernated reserve domains).
     3. Personal infrastructure: arifcoskun.com (rejected by assert_candidate_domain_eligible).
     4. Decommissioned retired domains: adspendguardian.com, heyjunto.com, thecoachloop.com,
        viraljacker.com (rejected by assert_candidate_domain_eligible).
     """
     from pseofactory.market_intel import (
+        ACTIVE_REVENUE_TENANT_DOMAINS,
         DECOMMISSIONED_RETIRED_DOMAINS,
         PERSONAL_INFRASTRUCTURE_DOMAINS,
         STAGED_RESERVE_DOMAIN_METADATA,
@@ -472,13 +473,14 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
     from pseofactory.tenant_facts import TenantFactStore
 
     store = TenantFactStore.get_instance()
-    assert store.get_profile("profithelm") is not None
-    assert store.get_profile("prexvo") is not None
-    assert store.get_profile("gainhelm") is not None
+    for pid in ("profithelm", "prexvo", "gainhelm", "lienbond"):
+        assert store.get_profile(pid) is not None
 
-    assert TenantFactStore.classify_domain_lifecycle("profithelm.com") == "ACTIVE_TENANT"
-    assert TenantFactStore.classify_domain_lifecycle("prexvo.com") == "ACTIVE_TENANT"
-    assert TenantFactStore.classify_domain_lifecycle("gainhelm.com") == "ACTIVE_TENANT"
+    for dom in ("profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"):
+        assert dom in ACTIVE_REVENUE_TENANT_DOMAINS
+        assert TenantFactStore.classify_domain_lifecycle(dom) == "ACTIVE_TENANT"
+        assert assert_candidate_domain_eligible(dom) == dom
+
     assert TenantFactStore.classify_domain_lifecycle("arifcoskun.com") == "PERSONAL_INFRA"
     for retired in DECOMMISSIONED_RETIRED_DOMAINS:
         assert TenantFactStore.classify_domain_lifecycle(retired) == "DECOMMISSIONED"
@@ -489,17 +491,14 @@ def test_domain_lifecycle_boundary_and_staged_reserve_gainhelm(tmp_path: Path):
         with pytest.raises(ValueError, match="Personal infrastructure domain"):
             assert_candidate_domain_eligible(personal)
 
-    assert assert_candidate_domain_eligible("gainhelm.com") == "gainhelm.com"
-    assert "gainhelm.com" in STAGED_RESERVE_DOMAINS
-    gh_meta = STAGED_RESERVE_DOMAIN_METADATA["gainhelm.com"]
-    assert gh_meta["zone_id"] == "0a03264e19beb2cb17ba01860b701701"
-    assert gh_meta["registry_object_id"] == "3041507860_DOMAIN_COM-VRSN"
-    assert gh_meta["lifecycle_state"] == "HIBERNATED_RESERVE"
-    assert gh_meta["routing_records_count"] == 0
+    assert STAGED_RESERVE_DOMAINS == ()
+    assert STAGED_RESERVE_DOMAIN_METADATA == {}
 
     engine = MarketIntelligenceEngine(db_path=tmp_path / "lifecycle_check.db")
     report = engine.run_workflow(sync_db=False, simulate_three_cycle_confirmation=False)
-    assert any(d["domain"] == "gainhelm.com" for d in report["staged_reserve_domains"])
+    assert report["staged_reserve_domains"] == []
+    existing_domains = {t["domain"] for t in report["existing_tenants"]}
+    assert existing_domains == {"profithelm.com", "prexvo.com", "gainhelm.com", "lienbond.com"}
     for retired in DECOMMISSIONED_RETIRED_DOMAINS:
         assert retired in report["decommissioned_domains"]
 

@@ -11,10 +11,11 @@ from __future__ import annotations
 import os
 import json
 import hashlib
+import re
 from contextlib import nullcontext
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional, Union, Set
+from typing import List, Dict, Any, Optional, Union, Set, Tuple
 
 from pseofactory.affiliates import qualify_monetization_opportunity
 from pseofactory.contracts import (
@@ -55,6 +56,7 @@ from pseofactory.trends.jev_engine import (
     MIN_JEV_SCORE,
     MIN_DURABLE_PROB,
 )
+from pseofactory.trends.pipeline import reconcile_superseded_pending_rows
 from pseofactory.trends.db import TrendHistoryDB, DEFAULT_DB_PATH
 
 
@@ -86,6 +88,149 @@ DEFAULT_CRON_SEEDS = (
     + ",".join(GREENFIELD_DISCOVERY_SEEDS)
 )
 
+DEFAULT_VOID_CANDIDATES_SINK: Path = Path(__file__).resolve().parents[2] / ".agy" / "void_candidates.jsonl"
+
+_DYNAMIC_SEED_MODIFIERS: Tuple[str, ...] = (
+    "calculator",
+    "estimator",
+    "schedule",
+    "deduction",
+    "rate",
+    "cost",
+)
+
+
+def _extract_tenant_core_phrases(tenant_id: str, contract: Any, pack: Any) -> List[str]:
+    """Extracts distinct, clean domain phrases from a tenant's TruthPack, tools, and statutory themes."""
+    phrases: List[str] = []
+    seen: Set[str] = set()
+    trailing_mod_re = re.compile(r"\s+(?:calculator|estimator|matrix|tool|guide)$", re.IGNORECASE)
+
+    def _add(raw_text: str) -> None:
+        cleaned = re.sub(r"[-_/]+", " ", str(raw_text or "").strip().lower())
+        cleaned = " ".join(cleaned.split())
+        cleaned = trailing_mod_re.sub("", cleaned).strip()
+        words = cleaned.split()
+        if len(words) < 2 or len(cleaned) < 5 or len(cleaned) > 48:
+            return
+        if any(bad in cleaned for bad in ("vs ", " vs", "test", "http", "www", ".com")):
+            return
+        try:
+            assert_no_forbidden_dashes(cleaned, "dynamic_seed")
+        except Exception:
+            return
+        if cleaned not in seen:
+            seen.add(cleaned)
+            phrases.append(cleaned)
+
+    if pack is not None:
+        for key, entry in (getattr(pack, "entries", None) or {}).items():
+            label = getattr(entry, "label", "") or getattr(entry, "topic", "") or str(key)
+            _add(str(label))
+        for fkey, fspec in (getattr(pack, "formulas", None) or {}).items():
+            fname = getattr(fspec, "name", "") or str(fkey)
+            _add(str(fname))
+
+    if contract is not None:
+        for tool in getattr(contract, "default_core_tools", ()) or ():
+            if isinstance(tool, dict):
+                _add(str(tool.get("primary_keyword") or tool.get("slug") or ""))
+        for _, cat_seeds in sorted((getattr(contract, "category_seed_taxonomy", None) or {}).items()):
+            for cs in cat_seeds or ():
+                _add(str(cs))
+        for tok in getattr(contract, "statutory_intent_tokens", ()) or ():
+            _add(str(tok))
+
+    return phrases
+
+
+def build_dynamic_cron_seeds(
+    cycle_index: Optional[int] = None,
+    max_dynamic: int = 20,
+    exclude_seeds: Optional[Set[str]] = None,
+) -> List[str]:
+    """
+    Dynamically synthesizes bounded rotating discovery seeds from discovered tenants'
+    TruthPacks, tool catalogs, and statutory themes combined with intent modifiers.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.tenant_facts import (
+        CANONICAL_TENANT_DECLARATIONS,
+        SPAWNED_TENANT_DECLARATIONS,
+    )
+
+    if max_dynamic <= 0:
+        return []
+
+    eff_index = (
+        int(cycle_index)
+        if cycle_index is not None
+        else datetime.now(timezone.utc).timetuple().tm_yday
+    )
+
+    excluded = {s.strip().lower() for s in (exclude_seeds or set()) if s and s.strip()}
+    for base_s in DEFAULT_CRON_SEEDS.split(","):
+        if base_s.strip():
+            excluded.add(base_s.strip().lower())
+
+    all_contracts = {**CANONICAL_TENANT_DECLARATIONS, **SPAWNED_TENANT_DECLARATIONS}
+    discovered_ids: List[str] = list(all_contracts.keys())
+    packs_by_id: Dict[str, Any] = {}
+    try:
+        from pseofactory.truth_pack import discover_truth_pack_ids, load_truth_pack
+
+        for tp_id in discover_truth_pack_ids():
+            if tp_id not in discovered_ids:
+                discovered_ids.append(tp_id)
+            try:
+                packs_by_id[tp_id] = load_truth_pack(tp_id)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    per_tenant_candidates: List[List[str]] = []
+    for pid in sorted(set(discovered_ids)):
+        contract = all_contracts.get(pid)
+        pack = packs_by_id.get(pid)
+        phrases = _extract_tenant_core_phrases(pid, contract, pack)
+        if not phrases:
+            continue
+        mod_offset = eff_index % len(_DYNAMIC_SEED_MODIFIERS)
+        rotated_mods = (
+            _DYNAMIC_SEED_MODIFIERS[mod_offset:] + _DYNAMIC_SEED_MODIFIERS[:mod_offset]
+        )
+        tenant_seeds: List[str] = []
+        phrase_offset = eff_index % len(phrases)
+        rotated_phrases = phrases[phrase_offset:] + phrases[:phrase_offset]
+        for idx, phrase in enumerate(rotated_phrases):
+            mod = rotated_mods[idx % len(rotated_mods)]
+            candidate_seed = phrase if mod in phrase else f"{phrase} {mod}"
+            if candidate_seed not in excluded and candidate_seed not in tenant_seeds:
+                tenant_seeds.append(candidate_seed)
+        if tenant_seeds:
+            per_tenant_candidates.append(tenant_seeds)
+
+    selected: List[str] = []
+    selected_set: Set[str] = set()
+    round_idx = 0
+    while len(selected) < max_dynamic and per_tenant_candidates:
+        progressed = False
+        for bucket in per_tenant_candidates:
+            if round_idx < len(bucket):
+                cand = bucket[round_idx]
+                if cand not in selected_set and cand not in excluded:
+                    selected.append(cand)
+                    selected_set.add(cand)
+                    if len(selected) >= max_dynamic:
+                        break
+                progressed = True
+        if not progressed:
+            break
+        round_idx += 1
+
+    return selected
+
 
 class TrendCronRunner:
     """
@@ -101,9 +246,11 @@ class TrendCronRunner:
         jev_engine: Optional[JevEngine] = None,
         noise_filter: Optional[NoiseFilter] = None,
         scanner: Optional[CrossPropertyContaminationScanner] = None,
+        default_sink_path: Optional[Union[str, Path]] = None,
     ):
         self.db_path = Path(db_path or DEFAULT_DB_PATH).resolve()
         self.min_yield = float(min_yield)
+        self.default_sink_path = Path(default_sink_path or DEFAULT_VOID_CANDIDATES_SINK).resolve()
         if treg_checker is not None:
             self.treg_checker = treg_checker
             if getattr(self.treg_checker, "db", None) is None:
@@ -276,6 +423,19 @@ class TrendCronRunner:
 
         if seeds is None:
             seed_list = [s.strip() for s in DEFAULT_CRON_SEEDS.split(",") if s.strip()]
+            if not fixture_path:
+                cycle_seed_idx = (
+                    int(hashlib.sha256(cycle_id.encode("utf-8")).hexdigest()[:8], 16)
+                    + now.timetuple().tm_yday
+                )
+                dynamic_seeds = build_dynamic_cron_seeds(
+                    cycle_index=cycle_seed_idx,
+                    max_dynamic=20,
+                    exclude_seeds=set(seed_list),
+                )
+                for ds in dynamic_seeds:
+                    if ds not in seed_list:
+                        seed_list.append(ds)
         elif isinstance(seeds, str):
             seed_list = [s.strip() for s in seeds.split(",") if s.strip()]
         else:
@@ -292,7 +452,7 @@ class TrendCronRunner:
             sources_crawled = [
                 "google_suggest",
                 "youtube_suggest",
-                "reddit_autocomplete",
+                "duckduckgo_suggest",
                 "hn_search",
                 "google_trends_rss",
                 "statutory_economic_feed",
@@ -841,7 +1001,9 @@ class TrendCronRunner:
                 # Step 4F: Evaluate Jev decision with closed-loop search and workbench telemetry
                 if cand.metadata is None:
                     cand.metadata = {}
-                cand.metadata.setdefault("property_id", assigned_property)
+                if "property_id" in cand.metadata and cand.metadata["property_id"] != assigned_property:
+                    cand.metadata.setdefault("source_property_id", cand.metadata["property_id"])
+                cand.metadata["property_id"] = assigned_property
                 if "gsc_telemetry" in raw_meta:
                     cand.metadata["gsc_telemetry"] = raw_meta["gsc_telemetry"]
                 if "closed_loop_feedback" in raw_meta:
@@ -1219,7 +1381,13 @@ class TrendCronRunner:
                     _ps_mod._TREND_DB_CACHE = None
                 except Exception:
                     pass
-                if sink_path:
+                effective_sink: Optional[Path] = None
+                if sink_path is not None:
+                    effective_sink = Path(sink_path)
+                elif not fixture_path or self.db_path == Path(DEFAULT_DB_PATH).resolve():
+                    effective_sink = self.default_sink_path
+
+                if effective_sink is not None:
                     from pseofactory.trends.pipeline import sink_records_to_jsonl
                     sink_candidates: List[Dict[str, Any]] = []
                     for ev in eval_records:
@@ -1242,13 +1410,15 @@ class TrendCronRunner:
                             "overlay_spec": spec_dict if ev.action == "REFACTOR_PAGE" else None,
                             "candidate_spec": spec_dict if ev.action == "BUILD_PAGE" else None,
                         })
-                    deduplicated_sink_count = sink_records_to_jsonl(sink_candidates, sink_path)
+                    deduplicated_sink_count = sink_records_to_jsonl(sink_candidates, effective_sink)
+                    reconcile_superseded_pending_rows(effective_sink, sink_candidates)
                     try:
-                        sink_resolved = Path(sink_path).resolve()
+                        sink_resolved = effective_sink.resolve()
                         repo_agy_sink = Path(__file__).resolve().parents[2] / ".agy" / "void_candidates.jsonl"
                         if str(sink_resolved).endswith("/vault/void_candidates.jsonl") and repo_agy_sink.parent.parent.is_dir():
                             repo_agy_sink.parent.mkdir(parents=True, exist_ok=True)
                             sink_records_to_jsonl(sink_candidates, repo_agy_sink)
+                            reconcile_superseded_pending_rows(repo_agy_sink, sink_candidates)
                     except Exception:
                         pass
 

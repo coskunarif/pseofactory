@@ -247,6 +247,22 @@ SYNTHETIC_CANDIDATE_PATTERNS = (
 
 US_STATUTORY_TENANTS = frozenset({"profithelm", "prexvo", "lienbond"})
 
+_US_STATE_FALSE_POSITIVE_PATTERNS: Tuple[str, ...] = (
+    r"\bnew\s+mexico\b",
+    r"\bnew\s+england\b",
+    r"\bnew\s+york\b",
+    r"\bnew\s+jersey\b",
+    r"(?<!republic of )(?<!country of )\bgeorgia\b",
+)
+
+
+def _mask_us_state_false_positives(text: str) -> str:
+    """Normalizes separators and masks US state/region phrases before non-US matching."""
+    unslug = " ".join(re.sub(r"[-_/]+", " ", str(text or "").strip().lower()).split())
+    for pat in _US_STATE_FALSE_POSITIVE_PATTERNS:
+        unslug = re.sub(pat, " ", unslug, flags=re.IGNORECASE)
+    return " ".join(unslug.split())
+
 NON_US_JURISDICTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     ("philippines", r"\b(?:philippines|philippine)\b"),
     ("india", r"\b(?:india|indian)\b"),
@@ -267,6 +283,7 @@ NON_US_JURISDICTION_PATTERNS: Tuple[Tuple[str, str], ...] = (
     ("saudi_arabia", r"\bsaudi\s+arabia\b"),
     ("mexico", r"\b(?:mexico|mexican)\b"),
     ("brazil", r"\b(?:brazil|brazilian)\b"),
+    ("georgia", r"\brepublic\s+of\s+georgia\b|\bcountry\s+of\s+georgia\b|\btbilisi\b"),
 )
 
 NON_PAGE_DISCOVERY_ARTIFACTS = frozenset({
@@ -356,7 +373,7 @@ def detect_non_us_jurisdiction(
     for text in candidates:
         if not text:
             continue
-        unslug = re.sub(r"[-_/]+", " ", text)
+        unslug = _mask_us_state_false_positives(text)
         for label, pat in NON_US_JURISDICTION_PATTERNS:
             if re.search(pat, unslug, flags=re.IGNORECASE):
                 return label
@@ -4354,7 +4371,7 @@ def reconcile_tenant_topical_authority_and_cannibalization(
     if "PYTEST_CURRENT_TEST" not in os.environ and str(root).startswith("/home/ubuntuadmin/projects/"):
         vc_candidates.extend([
             Path.home() / ".local" / "share" / "vault" / "void_candidates.jsonl",
-            Path(__file__).resolve().parent.parent / "void_candidates.jsonl",
+            Path(__file__).resolve().parent.parent / ".agy" / "void_candidates.jsonl",
         ])
     for vc_p in vc_candidates:
         summary["void_candidates_reconciled"] += reconcile_void_candidates_queue(vc_p)

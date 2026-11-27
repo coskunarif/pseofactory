@@ -310,6 +310,7 @@ class MaintenanceResult:
     indexing_status: Optional[str] = None
     trend_status: Optional[str] = None
     partner_readiness_status: Optional[str] = None
+    browser_audit_status: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -334,6 +335,8 @@ class MaintenanceResult:
             d["trend_status"] = self.trend_status
         if self.partner_readiness_status is not None:
             d["partner_readiness_status"] = self.partner_readiness_status
+        if self.browser_audit_status is not None:
+            d["browser_audit_status"] = self.browser_audit_status
         return d
 
 
@@ -5112,6 +5115,106 @@ class RefactorCascadeEngine:
         }
 
 
+def _compute_dist_tree_digest(dist_dir: Optional[Union[str, Path]]) -> str:
+    """Computes a deterministic SHA-256 digest of files inside `dist_dir`."""
+    if not dist_dir:
+        return ""
+    d_path = Path(dist_dir)
+    if not d_path.is_dir():
+        return ""
+    h = hashlib.sha256()
+    for f_path in sorted(p for p in d_path.rglob("*") if p.is_file()):
+        rel = f_path.relative_to(d_path).as_posix()
+        h.update(rel.encode("utf-8"))
+        h.update(b"\0")
+        try:
+            h.update(f_path.read_bytes())
+        except OSError:
+            pass
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def _has_git_dist_delta(adapter: PropertyAdapter) -> bool:
+    """Returns True if `dist_dir` has uncommitted or untracked changes in its git repo."""
+    dist_dir = getattr(adapter, "dist_dir", None)
+    if not dist_dir:
+        return False
+    d_path = Path(dist_dir)
+    repo_root = Path(getattr(adapter, "repo_path", None) or d_path.parent)
+    if not (repo_root / ".git").exists():
+        return False
+    try:
+        rel_dist = d_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except Exception:
+        rel_dist = "dist"
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain", "--", rel_dist],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        return res.returncode == 0 and bool(res.stdout.strip())
+    except Exception:
+        return False
+
+
+def _resolve_browser_adapter_for_maintenance(adapter: PropertyAdapter) -> Any:
+    """Resolves a TenantBrowserAdapter for `UnifiedBrowserAuditor` from any PropertyAdapter."""
+    from pseofactory.browser_verifier import (
+        DynamicTenantBrowserAdapter,
+        GainHelmBrowserAdapter,
+        LienBondBrowserAdapter,
+        PrexvoBrowserAdapter,
+        ProfitHelmBrowserAdapter,
+    )
+
+    prop_id = str(getattr(adapter, "property_id", "") or "").strip().lower()
+    canonical_map = {
+        "profithelm": ProfitHelmBrowserAdapter,
+        "prexvo": PrexvoBrowserAdapter,
+        "gainhelm": GainHelmBrowserAdapter,
+        "lienbond": LienBondBrowserAdapter,
+    }
+    if prop_id in canonical_map:
+        return canonical_map[prop_id]()
+    canon_base = str(
+        getattr(adapter, "canonical_base", "")
+        or (f"https://{getattr(adapter, 'domain', '')}" if getattr(adapter, "domain", None) else f"https://{prop_id}.com")
+    ).strip().rstrip("/")
+    return DynamicTenantBrowserAdapter(
+        tenant_id=prop_id or "custom",
+        dist_dir=adapter.dist_dir,
+        canonical_domain=canon_base,
+    )
+
+
+def _should_run_predeploy_browser_audit(
+    enable_gitops: bool,
+    dry_run: bool,
+    dist_has_delta: bool,
+    enable_browser_audit: Optional[bool],
+) -> Tuple[bool, str]:
+    """Determines whether the pre-deploy cached browser audit gate should run."""
+    if not enable_gitops:
+        return False, "SKIPPED"
+    if enable_browser_audit is False:
+        return False, "SKIPPED"
+    if not dist_has_delta:
+        return False, "SKIPPED_NO_DIST_DELTA"
+    if enable_browser_audit is True:
+        return True, "PENDING"
+    if dry_run:
+        return False, "SKIPPED_DRY_RUN"
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return False, "SKIPPED_TEST_ENV"
+    if os.environ.get("PSEOFACTORY_SKIP_DEFAULT_BROWSER_AUDIT") == "1":
+        return False, "SKIPPED"
+    return True, "PENDING"
+
+
 class MaintenanceLifecycle:
     """
     Closed-loop autonomous maintenance coordinator:
@@ -5188,6 +5291,7 @@ class MaintenanceLifecycle:
         edge_url: Optional[str] = None,
         abort_event: Optional[Any] = None,
         latch_workspace: bool = True,
+        enable_browser_audit: Optional[bool] = None,
     ) -> MaintenanceResult:
         """
         Executes single-tenant closed-loop maintenance lifecycle.
@@ -5272,14 +5376,18 @@ class MaintenanceLifecycle:
                 except Exception as recon_err:
                     print(f"Warning: Preflight truth reconciliation error for '{adapter.property_id}': {recon_err}")
 
+            pre_dist_digest = _compute_dist_tree_digest(adapter.dist_dir)
+
             # Stage 0: re-fetch tenant source datasets; rebuild whenever dist was not built from
             # the current data (persisted fingerprint, so a cycle that dies between refresh and
             # rebuild cannot leave fresh data behind stale pages)
+            synced_build = False
             if not dry_run and not (
                 "PYTEST_CURRENT_TEST" in os.environ
                 and str(Path(getattr(adapter, "repo_path", None) or "/").resolve()).startswith("/home/ubuntuadmin/projects/")
             ):
-                sync_tenant_data_and_build(adapter)
+                sync_res = sync_tenant_data_and_build(adapter)
+                synced_build = bool(isinstance(sync_res, dict) and sync_res.get("rebuilt"))
 
             # Stage 1: Preflight Asset Integrity Audit
             passed_s_file = Path(state_file).resolve() if state_file else None
@@ -5511,6 +5619,7 @@ class MaintenanceLifecycle:
                 and len(approved_build) == 0
                 and len(refactor_pages) == 0
                 and not _has_pending_downstream_work(adapter)
+                and not (enable_gitops and _has_git_dist_delta(adapter))
             ):
                 if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
                     try:
@@ -5835,6 +5944,92 @@ class MaintenanceLifecycle:
                         trend_status=trend_status_val,
                     )
 
+            # Stage 8.5: Pre-Deploy Cached Headless Chrome Gate (before GitOps shipper)
+            dist_has_delta = bool(
+                synced_build
+                or cascade_res.get("refactored", 0) > 0
+                or len(approved_build) > 0
+                or len(overlay_drifted) > 0
+                or _has_git_dist_delta(adapter)
+                or _compute_dist_tree_digest(adapter.dist_dir) != pre_dist_digest
+            )
+            should_browser_audit, browser_audit_status_val = _should_run_predeploy_browser_audit(
+                enable_gitops=enable_gitops,
+                dry_run=dry_run,
+                dist_has_delta=dist_has_delta,
+                enable_browser_audit=enable_browser_audit,
+            )
+            if should_browser_audit:
+                try:
+                    from pseofactory.browser_verifier import UnifiedBrowserAuditor
+
+                    browser_adapter = _resolve_browser_adapter_for_maintenance(adapter)
+                    browser_auditor = UnifiedBrowserAuditor(
+                        adapter=browser_adapter,
+                        dist_dir=adapter.dist_dir,
+                        property_id=adapter.property_id,
+                        fail_closed=True,
+                        no_verify_cache=False,
+                    )
+                    browser_report = browser_auditor.run_audit()
+                    b_passed = bool(isinstance(browser_report, dict) and browser_report.get("passed", False))
+                    b_failed_count = int(browser_report.get("failed_count", 0) or 0) if isinstance(browser_report, dict) else 1
+                    b_errors = int(browser_report.get("errors", 0) or 0) if isinstance(browser_report, dict) else 1
+                    b_status = str(browser_report.get("status") or ("PASS" if b_passed else "FAIL")).upper() if isinstance(browser_report, dict) else "FAIL"
+                    if (not b_passed) or b_failed_count > 0 or b_errors > 0 or b_status == "FAIL":
+                        failed_routes = list(browser_report.get("failed_routes") or []) if isinstance(browser_report, dict) else []
+                        findings = list(browser_report.get("findings") or []) if isinstance(browser_report, dict) else []
+                        fail_count = max(1, b_failed_count, b_errors, len(failed_routes))
+                        duration = time.time() - start_time
+                        return MaintenanceResult(
+                            property_id=adapter.property_id,
+                            status="FAILED",
+                            assets_audited=post_report.total_assets_checked,
+                            assets_drifted=fail_count,
+                            assets_refactored=cascade_res["refactored"],
+                            assets_failed=fail_count,
+                            failed_records=[
+                                {
+                                    "stage": "pre_deploy_browser_audit",
+                                    "failed_routes": failed_routes,
+                                    "errors": b_errors,
+                                    "browser_audit": browser_report if isinstance(browser_report, dict) else {"raw": str(browser_report)},
+                                    "failed_findings": [f for f in findings if isinstance(f, dict) and (f.get("error") or f.get("passed") is False)][:20],
+                                }
+                            ],
+                            engine_hash=None,
+                            duration_seconds=duration,
+                            gitops_status="ABORTED_BROWSER_AUDIT",
+                            distribution_status=dist_status_val,
+                            indexing_status=indexing_status_val,
+                            trend_status=trend_status_val,
+                            browser_audit_status="FAILED",
+                        )
+                    browser_audit_status_val = "PASS"
+                except Exception as browser_err:
+                    duration = time.time() - start_time
+                    return MaintenanceResult(
+                        property_id=adapter.property_id,
+                        status="FAILED",
+                        assets_audited=post_report.total_assets_checked,
+                        assets_drifted=1,
+                        assets_refactored=cascade_res["refactored"],
+                        assets_failed=1,
+                        failed_records=[
+                            {
+                                "stage": "pre_deploy_browser_audit",
+                                "error": str(browser_err),
+                            }
+                        ],
+                        engine_hash=None,
+                        duration_seconds=duration,
+                        gitops_status="ABORTED_BROWSER_AUDIT",
+                        distribution_status=dist_status_val,
+                        indexing_status=indexing_status_val,
+                        trend_status=trend_status_val,
+                        browser_audit_status="FAILED",
+                    )
+
             # Write tracked substrate_lock.json on real tenant repositories before GitOps stage
             substrate_lock_path: Optional[Path] = None
             prior_substrate_lock: Optional[str] = None
@@ -5912,6 +6107,7 @@ class MaintenanceLifecycle:
                         gitops_status="FAILED",
                         distribution_status=dist_status_val,
                         trend_status=trend_status_val,
+                        browser_audit_status=browser_audit_status_val,
                     )
 
             # Post-Deployment Push Indexing Dispatch (triggered after shipper edge verification passes)
@@ -6055,6 +6251,7 @@ class MaintenanceLifecycle:
                 indexing_status=indexing_status_val,
                 trend_status=trend_status_val,
                 partner_readiness_status=partner_readiness_status_val,
+                browser_audit_status=browser_audit_status_val,
             )
 
 
@@ -6082,6 +6279,7 @@ class FleetMaintenanceCoordinator:
         enable_distribution: bool = True,
         run_id: Optional[str] = None,
         skip_ci: bool = False,
+        enable_browser_audit: Optional[bool] = None,
     ) -> Dict[str, MaintenanceResult]:
         """
         Executes sequential maintenance across specified or all registered tenants.
@@ -6112,16 +6310,18 @@ class FleetMaintenanceCoordinator:
                 continue
 
             try:
-                res = self.lifecycle.run(
-                    adapter,
-                    force=force,
-                    enable_gitops=enable_gitops,
-                    enable_distribution=enable_distribution,
-                    run_id=run_id,
-                    dry_run=dry_run,
-                    skip_ci=skip_ci,
-                    latch_workspace=False,
-                )
+                run_kwargs: Dict[str, Any] = {
+                    "force": force,
+                    "enable_gitops": enable_gitops,
+                    "enable_distribution": enable_distribution,
+                    "run_id": run_id,
+                    "dry_run": dry_run,
+                    "skip_ci": skip_ci,
+                    "latch_workspace": False,
+                }
+                if enable_browser_audit is not None:
+                    run_kwargs["enable_browser_audit"] = enable_browser_audit
+                res = self.lifecycle.run(adapter, **run_kwargs)
                 results[p_id] = res
                 if (
                     not dry_run

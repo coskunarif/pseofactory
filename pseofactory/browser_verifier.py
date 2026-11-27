@@ -41,9 +41,14 @@ _CHROME_VERSION_LOCK = threading.Lock()
 _VERIFIER_DIGEST_CACHE: Dict[str, Tuple[Tuple[Tuple[str, int, int], ...], str]] = {}
 _VERIFIER_DIGEST_LOCK = threading.Lock()
 _ACTIVE_CHROME_INSTANCES: Dict[int, Tuple[int, str]] = {}
-_ACTIVE_CHROME_LOCK = threading.Lock()
+_ACTIVE_CHROME_LOCK = threading.RLock()
+_SIGNAL_GUARD_LOCK = threading.Lock()
+_SIGNAL_GUARD_DEPTH = 0
+_SIGNAL_PREV_HANDLERS: Dict[int, Any] = {}
 _DEFAULT_RECEIPTS_DIR = Path("/home/ubuntuadmin/projects/.agy/browser_verify_receipts")
 _MAX_FULL_HASH_ASSET_BYTES = 5 * 1024 * 1024
+_CDP_WORKER_TEMP_PREFIX = "pseofactory_cdp_worker_"
+_OWNER_PID_FILENAME = "pseofactory_owner.pid"
 
 
 def _build_restricted_ymyl_path_regex_json() -> str:
@@ -79,49 +84,356 @@ def _build_restricted_ymyl_path_regex_json() -> str:
     return json.dumps(r"(?:pslf|save-plan|save_plan|buyback|income-driven-forgiveness|ibr-hardship|hardship-cap)")
 
 
-def _atexit_cleanup_chrome_instances() -> None:
-    """Safety net ensuring no orphaned headless Chromium processes or temp profiles survive exit."""
-    with _ACTIVE_CHROME_LOCK:
-        items = list(_ACTIVE_CHROME_INSTANCES.items())
-        _ACTIVE_CHROME_INSTANCES.clear()
-    if not items:
-        return
-    for pid, (pgid, _tmp_dir) in items:
+def _is_pgid_alive(pgid: int) -> bool:
+    """Returns True if any process in process group `pgid` is still alive."""
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _force_kill_process_group(
+    pid: Optional[int],
+    pgid: Optional[int],
+    proc: Optional[subprocess.Popen] = None,
+) -> None:
+    """Sends SIGKILL to the process group and direct child, then reaps proc."""
+    if pgid is not None:
         try:
-            os.killpg(pgid, signal.SIGTERM)
+            os.killpg(pgid, signal.SIGKILL)
         except OSError:
+            pass
+    if proc is not None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    elif pid is not None:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+    if proc is not None:
+        try:
+            proc.wait(timeout=1.0)
+        except BaseException:
+            pass
+
+
+def _terminate_process_group(
+    pid: Optional[int],
+    pgid: Optional[int],
+    proc: Optional[subprocess.Popen] = None,
+    grace_seconds: float = 1.5,
+) -> None:
+    """
+    Deterministically terminates an entire Chromium process group:
+    SIGTERM -> short grace -> SIGKILL fallback, even if interrupted by BaseException.
+    """
+    if pid is None and pgid is None and proc is None:
+        return
+    try:
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except OSError:
+                if pid is not None:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except OSError:
+                        pass
+        elif pid is not None:
             try:
                 os.kill(pid, signal.SIGTERM)
             except OSError:
                 pass
-    deadline = time.monotonic() + 1.0
-    while time.monotonic() < deadline:
-        alive = False
-        for pid, _pair in items:
+
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.wait(timeout=grace_seconds)
+            except subprocess.TimeoutExpired:
+                pass
+
+        if pgid is not None and _is_pgid_alive(pgid):
+            sub_deadline = time.monotonic() + min(0.3, max(0.05, grace_seconds))
+            while time.monotonic() < sub_deadline and _is_pgid_alive(pgid):
+                time.sleep(0.03)
+    finally:
+        # Ensure no direct child or grandchild in the process group survives
+        still_alive = False
+        if proc is not None and proc.poll() is None:
+            still_alive = True
+        elif pgid is not None and _is_pgid_alive(pgid):
+            still_alive = True
+        elif pid is not None:
             try:
                 os.kill(pid, 0)
-                alive = True
-                break
+                still_alive = True
             except OSError:
                 pass
-        if not alive:
-            break
-        time.sleep(0.05)
+        if still_alive:
+            _force_kill_process_group(pid=pid, pgid=pgid, proc=proc)
+        elif proc is not None:
+            try:
+                proc.wait(timeout=0.5)
+            except BaseException:
+                pass
+
+
+def cleanup_active_chrome_instances(from_signal: bool = False) -> int:
+    """
+    Terminates all tracked active headless Chromium process groups and deletes
+    their temporary --user-data-dir directories. Safe inside signal handlers and atexit.
+    """
+    items: List[Tuple[int, Tuple[int, str]]] = []
+    acquired = _ACTIVE_CHROME_LOCK.acquire(blocking=not from_signal)
+    try:
+        items = list(_ACTIVE_CHROME_INSTANCES.items())
+        _ACTIVE_CHROME_INSTANCES.clear()
+    finally:
+        if acquired:
+            _ACTIVE_CHROME_LOCK.release()
+
+    if not items:
+        return 0
+
     for pid, (pgid, tmp_dir) in items:
         try:
-            os.killpg(pgid, signal.SIGKILL)
-        except OSError:
+            _terminate_process_group(pid=pid, pgid=pgid, proc=None, grace_seconds=0.8)
+        except BaseException:
             try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
+                _force_kill_process_group(pid=pid, pgid=pgid, proc=None)
+            except BaseException:
                 pass
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        if tmp_dir:
+            try:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            except Exception:
+                pass
+    return len(items)
+
+
+def _atexit_cleanup_chrome_instances() -> None:
+    """Safety net ensuring no orphaned headless Chromium processes or temp profiles survive exit."""
+    cleanup_active_chrome_instances(from_signal=False)
 
 
 atexit.register(_atexit_cleanup_chrome_instances)
+
+
+def _chrome_signal_handler(signum: int, frame: Any) -> None:
+    """Signal handler for SIGTERM/SIGINT that reaps active Chrome process groups before propagating."""
+    cleanup_active_chrome_instances(from_signal=True)
+    prev = _SIGNAL_PREV_HANDLERS.get(signum)
+    if prev == signal.SIG_IGN:
+        return
+    if callable(prev):
+        prev(signum, frame)
+        return
+    if signum == signal.SIGINT:
+        raise KeyboardInterrupt()
+    try:
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    except Exception:
+        raise SystemExit(128 + signum)
+
+
+class _ChromeSignalGuard:
+    """
+    Reentrant main-thread context manager installing SIGTERM/SIGINT handlers
+    for active headless Chromium workers and restoring prior handlers cleanly on exit.
+    """
+
+    def __init__(self) -> None:
+        self._entered = False
+
+    def __enter__(self) -> "_ChromeSignalGuard":
+        global _SIGNAL_GUARD_DEPTH
+        if threading.current_thread() is not threading.main_thread():
+            return self
+        with _SIGNAL_GUARD_LOCK:
+            if _SIGNAL_GUARD_DEPTH == 0:
+                _SIGNAL_PREV_HANDLERS.clear()
+                for sig in (signal.SIGTERM, signal.SIGINT):
+                    try:
+                        _SIGNAL_PREV_HANDLERS[sig] = signal.getsignal(sig)
+                        signal.signal(sig, _chrome_signal_handler)
+                    except (ValueError, OSError):
+                        pass
+            _SIGNAL_GUARD_DEPTH += 1
+            self._entered = True
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        global _SIGNAL_GUARD_DEPTH
+        if not self._entered:
+            return
+        self._entered = False
+        with _SIGNAL_GUARD_LOCK:
+            _SIGNAL_GUARD_DEPTH = max(0, _SIGNAL_GUARD_DEPTH - 1)
+            if _SIGNAL_GUARD_DEPTH == 0:
+                for sig, prev in list(_SIGNAL_PREV_HANDLERS.items()):
+                    try:
+                        if signal.getsignal(sig) is _chrome_signal_handler:
+                            signal.signal(sig, prev)
+                    except (ValueError, OSError):
+                        pass
+                _SIGNAL_PREV_HANDLERS.clear()
+
+
+def _is_pid_alive_non_zombie(pid: int) -> bool:
+    """Returns True if `pid` exists and is not in zombie ('Z') state."""
+    if pid <= 0:
+        return False
+    stat_file = Path(f"/proc/{pid}/stat")
+    if stat_file.is_file():
+        try:
+            raw = stat_file.read_text(encoding="utf-8", errors="ignore")
+            rparen = raw.rfind(")")
+            if rparen != -1:
+                after = raw[rparen + 2 :].split()
+                if after and after[0] == "Z":
+                    return False
+                return True
+        except Exception:
+            pass
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _collect_live_cdp_worker_dir_refs() -> set:
+    """
+    Collects all temp user-data-dir paths currently referenced by live non-zombie
+    processes on the host or tracked in _ACTIVE_CHROME_INSTANCES.
+    """
+    refs = set()
+    with _ACTIVE_CHROME_LOCK:
+        for _pid, (_pgid, t_dir) in _ACTIVE_CHROME_INSTANCES.items():
+            if t_dir:
+                refs.add(str(t_dir))
+                refs.add(os.path.realpath(t_dir))
+
+    proc_root = Path("/proc")
+    if proc_root.is_dir():
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if not _is_pid_alive_non_zombie(pid):
+                continue
+            try:
+                raw_cmd = (entry / "cmdline").read_bytes()
+            except Exception:
+                continue
+            if not raw_cmd:
+                continue
+            for arg_bytes in raw_cmd.split(b"\x00"):
+                if not arg_bytes:
+                    continue
+                arg = arg_bytes.decode("utf-8", errors="ignore")
+                if _CDP_WORKER_TEMP_PREFIX not in arg:
+                    continue
+                if arg.startswith("--user-data-dir="):
+                    val = arg.split("=", 1)[1].strip()
+                else:
+                    val = arg.strip()
+                if val:
+                    refs.add(val)
+                    refs.add(os.path.realpath(val))
+        return refs
+
+    try:
+        res = subprocess.run(
+            ["ps", "-eo", "pid=,stat=,args="],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                parts = line.strip().split(None, 2)
+                if len(parts) < 3 or parts[1].startswith("Z"):
+                    continue
+                for tok in parts[2].split():
+                    if _CDP_WORKER_TEMP_PREFIX in tok:
+                        val = tok.split("=", 1)[1].strip() if tok.startswith("--user-data-dir=") else tok.strip()
+                        if val:
+                            refs.add(val)
+                            refs.add(os.path.realpath(val))
+    except Exception:
+        pass
+    return refs
+
+
+def reap_stale_cdp_workers(
+    tmp_root: Optional[Union[str, Path]] = None,
+    min_age_seconds: float = 0.0,
+) -> List[str]:
+    """
+    Safely cleans only dead/orphaned /tmp/pseofactory_cdp_worker_* directories.
+    Never kills any live process and never deletes directories owned by another live run.
+    Returns list of removed directory paths.
+    """
+    base_dir = Path(tmp_root) if tmp_root is not None else Path(tempfile.gettempdir())
+    if not base_dir.is_dir():
+        return []
+
+    live_refs = _collect_live_cdp_worker_dir_refs()
+    now = time.time()
+    reaped: List[str] = []
+
+    for cand in sorted(base_dir.glob(f"{_CDP_WORKER_TEMP_PREFIX}*")):
+        if not cand.is_dir() or cand.is_symlink():
+            continue
+        cand_str = str(cand)
+        cand_real = os.path.realpath(cand_str)
+        if cand_str in live_refs or cand_real in live_refs:
+            continue
+
+        if min_age_seconds > 0:
+            try:
+                if (now - cand.stat().st_mtime) < min_age_seconds:
+                    continue
+            except OSError:
+                continue
+
+        # Respect Chromium SingletonLock symlink if its target PID is still alive
+        singleton_lock = cand / "SingletonLock"
+        if singleton_lock.is_symlink():
+            try:
+                target = os.readlink(singleton_lock)
+                m_lock = re.search(r"-(\d+)$", target)
+                if m_lock and _is_pid_alive_non_zombie(int(m_lock.group(1))):
+                    continue
+            except OSError:
+                pass
+
+        # Respect another live pseofactory worker process still initializing its dir
+        owner_pid_file = cand / _OWNER_PID_FILENAME
+        if owner_pid_file.is_file():
+            try:
+                raw_owner = owner_pid_file.read_text(encoding="utf-8").strip()
+                if raw_owner.isdigit():
+                    owner_pid = int(raw_owner)
+                    if owner_pid != os.getpid() and _is_pid_alive_non_zombie(owner_pid):
+                        continue
+            except OSError:
+                pass
+
+        try:
+            shutil.rmtree(cand, ignore_errors=True)
+            if not cand.exists():
+                reaped.append(cand_str)
+        except Exception:
+            pass
+
+    return reaped
 
 
 def _playwright_revision_key(path: Path) -> Tuple[int, str]:
@@ -295,38 +607,56 @@ class _HeadlessChromiumInstance:
         self.pgid: Optional[int] = None
         self.port: int = 0
         self._stderr_fp: Optional[Any] = None
+        self._signal_guard: Optional[_ChromeSignalGuard] = None
+
+    def _enter_signal_guard(self) -> None:
+        if self._signal_guard is None:
+            guard = _ChromeSignalGuard()
+            guard.__enter__()
+            self._signal_guard = guard
+
+    def _exit_signal_guard(self) -> None:
+        guard = self._signal_guard
+        self._signal_guard = None
+        if guard is not None:
+            guard.__exit__(None, None, None)
 
     def start(self) -> int:
-        self.tmp_dir = tempfile.mkdtemp(prefix="pseofactory_cdp_worker_")
-        stderr_path = Path(self.tmp_dir) / "chrome_stderr.log"
-        self._stderr_fp = open(stderr_path, "wb")
-
-        cmd = [self.binary_path]
-        if not self.is_headless_shell:
-            cmd.append("--headless=new")
-        cmd.extend([
-            "--disable-gpu",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--font-render-hinting=none",
-            "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-component-update",
-            "--disable-default-apps",
-            "--disable-sync",
-            "--no-first-run",
-            "--mute-audio",
-            "--hide-scrollbars",
-            "--window-size=1440,900",
-            "--remote-debugging-port=0",
-            f"--user-data-dir={self.tmp_dir}",
-            "about:blank",
-        ])
-
+        self._enter_signal_guard()
         try:
+            self.tmp_dir = tempfile.mkdtemp(prefix=_CDP_WORKER_TEMP_PREFIX)
+            try:
+                (Path(self.tmp_dir) / _OWNER_PID_FILENAME).write_text(str(os.getpid()), encoding="utf-8")
+            except OSError:
+                pass
+            stderr_path = Path(self.tmp_dir) / "chrome_stderr.log"
+            self._stderr_fp = open(stderr_path, "wb")
+
+            cmd = [self.binary_path]
+            if not self.is_headless_shell:
+                cmd.append("--headless=new")
+            cmd.extend([
+                "--disable-gpu",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--font-render-hinting=none",
+                "--disable-background-timer-throttling",
+                "--disable-renderer-backgrounding",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-component-update",
+                "--disable-default-apps",
+                "--disable-sync",
+                "--no-first-run",
+                "--mute-audio",
+                "--hide-scrollbars",
+                "--window-size=1440,900",
+                "--remote-debugging-port=0",
+                f"--user-data-dir={self.tmp_dir}",
+                "about:blank",
+            ])
+
             self.proc = subprocess.Popen(
                 cmd,
                 stdin=subprocess.DEVNULL,
@@ -334,7 +664,10 @@ class _HeadlessChromiumInstance:
                 stderr=self._stderr_fp,
                 start_new_session=True,
             )
-            self.pgid = self.proc.pid
+            try:
+                self.pgid = os.getpgid(self.proc.pid)
+            except OSError:
+                self.pgid = self.proc.pid
             with _ACTIVE_CHROME_LOCK:
                 _ACTIVE_CHROME_INSTANCES[self.proc.pid] = (self.pgid, self.tmp_dir)
 
@@ -392,7 +725,7 @@ class _HeadlessChromiumInstance:
 
             self.port = discovered_port
             return self.port
-        except Exception:
+        except BaseException:
             self.stop()
             raise
 
@@ -405,45 +738,28 @@ class _HeadlessChromiumInstance:
         self.tmp_dir = None
         self.port = 0
 
-        if proc is not None:
-            with _ACTIVE_CHROME_LOCK:
-                _ACTIVE_CHROME_INSTANCES.pop(proc.pid, None)
-            try:
-                if pgid is not None:
-                    try:
-                        os.killpg(pgid, signal.SIGTERM)
-                    except OSError:
-                        pass
-                if proc.poll() is None:
-                    proc.terminate()
+        try:
+            if proc is not None:
+                with _ACTIVE_CHROME_LOCK:
+                    _ACTIVE_CHROME_INSTANCES.pop(proc.pid, None)
+                _terminate_process_group(
+                    pid=proc.pid,
+                    pgid=pgid,
+                    proc=proc,
+                    grace_seconds=1.5,
+                )
+        finally:
+            if self._stderr_fp is not None:
                 try:
-                    proc.wait(timeout=3.0)
-                except subprocess.TimeoutExpired:
-                    if pgid is not None:
-                        try:
-                            os.killpg(pgid, signal.SIGKILL)
-                        except OSError:
-                            pass
-                    try:
-                        proc.kill()
-                    except OSError:
-                        pass
-                    try:
-                        proc.wait(timeout=2.0)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    self._stderr_fp.close()
+                except Exception:
+                    pass
+                self._stderr_fp = None
 
-        if self._stderr_fp is not None:
-            try:
-                self._stderr_fp.close()
-            except Exception:
-                pass
-            self._stderr_fp = None
+            if tmp_dir:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
-        if tmp_dir:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+            self._exit_signal_guard()
 
     def __enter__(self) -> "_HeadlessChromiumInstance":
         self.start()
@@ -5637,8 +5953,9 @@ class UnifiedBrowserAuditor:
                 if receipt_store is not None
                 else contextlib.nullcontext()
             )
-            with batch_ctx:
+            with _ChromeSignalGuard(), batch_ctx:
                 if use_isolated and chrome_bin:
+                    reap_stale_cdp_workers(min_age_seconds=60.0)
                     effective_workers = compute_auto_worker_count(
                         len(live_routes),
                         requested_workers=eff_workers_req,
@@ -5648,29 +5965,33 @@ class UnifiedBrowserAuditor:
                     for r in ordered_live:
                         route_queue.put_nowait(r)
                     cb_fn = _record_live_receipt if receipt_store is not None else None
-                    if effective_workers <= 1:
-                        live_findings = self._run_isolated_worker_queue(
-                            route_queue,
-                            chrome_bin,
-                            is_shell,
-                            prop_id,
-                            on_route_done=cb_fn,
-                        )
-                    else:
-                        with ThreadPoolExecutor(max_workers=effective_workers) as pool:
-                            futures = [
-                                pool.submit(
-                                    self._run_isolated_worker_queue,
-                                    route_queue,
-                                    chrome_bin,
-                                    is_shell,
-                                    prop_id,
-                                    cb_fn,
-                                )
-                                for _ in range(effective_workers)
-                            ]
-                            for fut in as_completed(futures):
-                                live_findings.extend(fut.result())
+                    try:
+                        if effective_workers <= 1:
+                            live_findings = self._run_isolated_worker_queue(
+                                route_queue,
+                                chrome_bin,
+                                is_shell,
+                                prop_id,
+                                on_route_done=cb_fn,
+                            )
+                        else:
+                            with ThreadPoolExecutor(max_workers=effective_workers) as pool:
+                                futures = [
+                                    pool.submit(
+                                        self._run_isolated_worker_queue,
+                                        route_queue,
+                                        chrome_bin,
+                                        is_shell,
+                                        prop_id,
+                                        cb_fn,
+                                    )
+                                    for _ in range(effective_workers)
+                                ]
+                                for fut in as_completed(futures):
+                                    live_findings.extend(fut.result())
+                    except BaseException:
+                        cleanup_active_chrome_instances(from_signal=False)
+                        raise
                 else:
                     effective_workers = 1
                     live_findings = self._run_shared_cdp_routes(live_routes, prop_id)
