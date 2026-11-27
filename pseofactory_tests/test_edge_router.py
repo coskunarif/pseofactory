@@ -336,3 +336,39 @@ def test_edge_routes_json_and_410_gone_middleware_no_redirects_410(tmp_path):
     assert '"/llms-full.txt"' in mw_txt
     assert 'pathname.startsWith("/ai-benchmarks/")' in mw_txt
     assert "status: 410" in mw_txt
+
+
+def test_validate_edge_redirects_blocks_wildcard_self_loop_and_routes_extra_include(tmp_path):
+    """
+    Verifies validate_edge_redirects_file fails closed on same-prefix wildcard splats (X/* -> X/),
+    compact_edge_redirects_to_cloudflare_cap strips them, and build_edge_routes_json supports extra_include.
+    """
+    from pseofactory.edge import (
+        build_edge_routes_json,
+        compact_edge_redirects_to_cloudflare_cap,
+        validate_edge_redirects_file,
+    )
+
+    bad_red = tmp_path / "_redirects"
+    bad_red.write_text(
+        "/tools/irs-2027-tax-brackets/*  /tools/irs-tax-brackets/  301\n"
+        "/tools/section-1031-calculator/*  /tools/section-1031-calculator/  301\n",
+        encoding="utf-8",
+    )
+    res_bad = validate_edge_redirects_file(bad_red)
+    assert res_bad["status"] == "FAIL"
+    assert any("section-1031-calculator/*" in msg for msg in res_bad["issues"])
+
+    compacted = compact_edge_redirects_to_cloudflare_cap(bad_red.read_text(encoding="utf-8"))
+    assert "/tools/section-1031-calculator/*" not in compacted
+    assert "/tools/irs-2027-tax-brackets/*  /tools/irs-tax-brackets/  301" in compacted
+
+    good_red = tmp_path / "_redirects_good"
+    good_red.write_text(compacted, encoding="utf-8")
+    assert validate_edge_redirects_file(good_red)["status"] == "PASS"
+
+    routes_doc = json.loads(
+        build_edge_routes_json(extra_include=["/tools/section-1031-calculator/*", "/tools/section-179-calculator/*"])
+    )
+    assert "/tools/section-1031-calculator/*" in routes_doc["include"]
+    assert "/tools/section-179-calculator/*" in routes_doc["include"]

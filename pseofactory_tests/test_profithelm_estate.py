@@ -375,14 +375,21 @@ def test_live_profithelm_spoke_collapse_redirects_and_truthgate(tmp_path: Path) 
     assert all_rules.get("/tools/capital-gains-tax-rate-2021-calculator/") == "/tools/capital-gains-calculator/"
     assert all_rules.get("/tools/1031-exchange-capital-gains-calculator/") == "/tools/section-1031-calculator/"
     assert all_rules.get("/tools/irs-2027-tax-brackets/*") == "/tools/irs-tax-brackets/"
-    assert all_rules.get("/tools/section-1031-calculator/*") == "/tools/section-1031-calculator/"
-    assert all_rules.get("/tools/section-179-calculator/*") == "/tools/section-179-calculator/"
+    assert "/tools/section-1031-calculator/*" not in all_rules
+    assert "/tools/section-179-calculator/*" not in all_rules
     # Verify 0 two-hop chains in _redirects
     for src, dst in all_rules.items():
         assert dst not in all_rules, f"2-hop chain in _redirects: {src} -> {dst}"
 
+    # 3b. Verify same-prefix child-spoke redirects live in functions/_middleware.js + dist/_routes.json
+    routes_doc = json.loads((dist / "_routes.json").read_text(encoding="utf-8"))
+    assert "/tools/section-1031-calculator/*" in routes_doc["include"]
+    assert "/tools/section-179-calculator/*" in routes_doc["include"]
+
     # 4. Verify edgeGone in functions/_middleware.js handles the 4 off-vertical / cross-tenant pages with 410
     mw_txt = (tmp_path / "functions" / "_middleware.js").read_text(encoding="utf-8")
+    assert '["/tools/section-1031-calculator/", "/tools/section-1031-calculator/"]' in mw_txt
+    assert '["/tools/section-179-calculator/", "/tools/section-179-calculator/"]' in mw_txt
     for gone_p in (
         "/tools/contractor-surety-bond-cost-calculator/",
         "/tools/workers-comp-and-payroll-burden-calculator/",

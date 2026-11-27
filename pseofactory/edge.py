@@ -84,19 +84,27 @@ def _is_canonical_link_header(header_line: str) -> bool:
 def build_edge_routes_json(
     include: Optional[List[str]] = None,
     exclude: Optional[List[str]] = None,
+    extra_include: Optional[Sequence[str]] = None,
 ) -> str:
     """
     Builds deterministic Cloudflare Pages dist/_routes.json configuration so 100% of static
     HTML pages and static assets bypass Pages Functions invocations, reserving Worker
-    execution strictly for /api/*, /r/*, /llms-full.txt, and /ai-benchmarks/* routes.
+    execution strictly for /api/*, /r/*, /llms-full.txt, /ai-benchmarks/*, and any
+    same-prefix child-spoke redirect patterns.
     """
+    base_include = (
+        list(include)
+        if include is not None
+        else ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"]
+    )
+    if extra_include:
+        for route_pat in extra_include:
+            clean_pat = str(route_pat or "").strip()
+            if clean_pat and clean_pat not in base_include:
+                base_include.append(clean_pat)
     payload = {
         "version": 1,
-        "include": (
-            include
-            if include is not None
-            else ["/api/*", "/r/*", "/llms-full.txt", "/ai-benchmarks/*"]
-        ),
+        "include": base_include,
         "exclude": exclude if exclude is not None else [],
     }
     content = json.dumps(payload, indent=2) + "\n"
@@ -543,6 +551,9 @@ def compact_edge_redirects_to_cloudflare_cap(
             is_wild = "*" in src or ":" in src
             if not is_wild and src.rstrip("/") == final_dst.rstrip("/"):
                 continue
+            wild_prefix = src[:-1] if src.endswith("*") else src
+            if "*" in src and wild_prefix.rstrip("/") == final_dst.rstrip("/"):
+                continue
             final_norm = final_dst.rstrip("/") if final_dst != "/" else "/"
             if final_dst in gone_norm_set or final_norm in gone_norm_set:
                 continue
@@ -637,7 +648,9 @@ def validate_edge_redirects_file(
                 f"Unsupported Cloudflare Pages _redirects status 410 for {src}; serve 410 via functions/_middleware.js and _routes.json"
             )
             continue
-        if src != "/" and src.rstrip("/") == dst.rstrip("/"):
+        wild_prefix = src[:-1] if src.endswith("*") else src
+        is_wild_self_loop = "*" in src and wild_prefix.rstrip("/") == dst.rstrip("/")
+        if is_wild_self_loop or (src != "/" and src.rstrip("/") == dst.rstrip("/")):
             issues.append(f"Self-redirect detected in _redirects: {src} -> {dst}")
         elif dst != "/" and dst in all_sources:
             issues.append(f"Redirect chain detected in _redirects: {src} -> {dst}")
@@ -18859,17 +18872,10 @@ def sync_tenant_edge_redirect_function(
     except Exception:
         pass
 
-    # Synchronize dist/_routes.json static-asset bypass and dist/_headers <= 95 rule cap
+    # Synchronize dist/_headers <= 95 rule cap and dist/_redirects (dist/_routes.json syncs after middleware)
     dist_dir = repo / "dist"
     routes_json_file = dist_dir / "_routes.json"
     if dist_dir.is_dir():
-        try:
-            routes_json_content = build_edge_routes_json()
-            if not routes_json_file.is_file() or routes_json_file.read_text(encoding="utf-8") != routes_json_content:
-                routes_json_file.write_text(routes_json_content, encoding="utf-8")
-                dist_needs_update = True
-        except Exception:
-            pass
         headers_file = dist_dir / "_headers"
         if headers_file.is_file():
             try:
@@ -19048,6 +19054,15 @@ def sync_tenant_edge_redirect_function(
                 repo=repo,
                 dist_dir=dist_dir,
             )
+            if prop_clean == "profithelm":
+                extra_prefix_redirects.setdefault(
+                    "/tools/section-1031-calculator/",
+                    "/tools/section-1031-calculator/",
+                )
+                extra_prefix_redirects.setdefault(
+                    "/tools/section-179-calculator/",
+                    "/tools/section-179-calculator/",
+                )
             mw_new = _sync_middleware_redirect_table(
                 mw_new,
                 extra_mw_redirects,
@@ -19104,6 +19119,25 @@ def sync_tenant_edge_redirect_function(
             )
             if mw_new != mw_orig:
                 mw_file.write_text(mw_new, encoding="utf-8")
+                dist_needs_update = True
+        except Exception:
+            pass
+
+    if dist_dir.is_dir():
+        try:
+            same_prefix_routes: List[str] = []
+            if mw_file.is_file():
+                mw_final_txt = mw_file.read_text(encoding="utf-8", errors="ignore")
+                for pm in re.finditer(r"const legacyPrefixTargets = \[([\s\S]*?)\];", mw_final_txt):
+                    for pair_m in re.finditer(r'\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]', pm.group(1)):
+                        pk, pv = pair_m.group(1), pair_m.group(2)
+                        if pk.rstrip("/") and pk.rstrip("/") == pv.rstrip("/"):
+                            pat = f"{pk.rstrip('/')}/*"
+                            if pat not in same_prefix_routes:
+                                same_prefix_routes.append(pat)
+            routes_json_content = build_edge_routes_json(extra_include=same_prefix_routes or None)
+            if not routes_json_file.is_file() or routes_json_file.read_text(encoding="utf-8") != routes_json_content:
+                routes_json_file.write_text(routes_json_content, encoding="utf-8")
                 dist_needs_update = True
         except Exception:
             pass

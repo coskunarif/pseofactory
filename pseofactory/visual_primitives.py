@@ -3963,8 +3963,10 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
       }
       if (!_initialUrlHydrated && !_userInteracted) {
         _initialUrlHydrated = true;
-        restoreSavedBlueprintIfPresent();
-        hydrateInputsFromLocationSearch();
+        var urlHydratedCount = hydrateInputsFromLocationSearch();
+        if (!urlHydratedCount) {
+          restoreSavedBlueprintIfPresent();
+        }
       }
       hydrateCheckoutFulfillmentFromUrl();
       syncOutboundAffiliateLinks();
@@ -5376,6 +5378,18 @@ def _render_runtime_sync_events_js(property_id: Optional[str] = None) -> str:
         });
       }
       var exerciseMount = Boolean(window.__PSEO_EXERCISE_TURNSTILE_MOUNT__);
+      if (
+        isLocalStaticPreview()
+        && forceCfg === true
+        && exerciseMount
+        && window.turnstile
+        && typeof window.turnstile.render === "function"
+      ) {
+        return Promise.resolve({
+          turnstile_enabled: true,
+          turnstile_site_key: "1x00000000000000000000AA"
+        });
+      }
       if (
         (window.__PSEO_SYNTHETIC_TEST__ && !exerciseMount)
         || (isLocalStaticPreview() && !forceCfg)

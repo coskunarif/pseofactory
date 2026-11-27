@@ -6581,7 +6581,7 @@ _ARCHETYPE_OFFICIAL_PRIMARY_SOURCES: Tuple[Tuple[Tuple[str, ...], Tuple[Tuple[st
     (
         ("dora-", "dora_"),
         (
-            ("https://eur-lex.europa.eu/eli/reg/2022/2554/oj", "Regulation (EU) 2022/2554 (EU Digital Operational Resilience Act - DORA)", "EUR-Lex (Official Journal of the European Union)", 2026, "2026-11-24"),
+            ("https://eur-lex.europa.eu/eli/reg/2022/2554/oj", "Regulation (EU) 2022/2554: EU Digital Operational Resilience Act (DORA)", "EUR-Lex (Official Journal of the European Union)", 2026, "2026-11-24"),
             ("https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series", "U.S. Bureau of Labor Statistics", 2026, "2026-11-24"),
         ),
     ),
@@ -6781,7 +6781,7 @@ _ARCHETYPE_OFFICIAL_PRIMARY_SOURCES: Tuple[Tuple[Tuple[str, ...], Tuple[Tuple[st
     (
         ("corporate-amt", "camt"),
         (
-            ("https://www.irs.gov/businesses/corporations", "26 U.S.C. Sections 55 & 56A (Corporate Alternative Minimum Tax - CAMT)", "Internal Revenue Service", 2026, "2026-11-24"),
+            ("https://www.irs.gov/businesses/corporations", "26 U.S.C. Sections 55 & 56A: Corporate Alternative Minimum Tax (CAMT)", "Internal Revenue Service", 2026, "2026-11-24"),
             ("https://uscode.house.gov/view.xhtml?req=granuleid:USC-prelim-title26-section55", "26 U.S.C. Section 55 (Alternative Minimum Tax Imposed)", "Office of the Law Revision Counsel (U.S. House)", 2026, "2026-11-24"),
         ),
     ),
@@ -6874,7 +6874,7 @@ _ARCHETYPE_OFFICIAL_PRIMARY_SOURCES: Tuple[Tuple[Tuple[str, ...], Tuple[Tuple[st
     (
         ("save-plan",),
         (
-            ("https://www.federalregister.gov/d/2023-13112", "34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan Rule - subject to federal litigation)", "U.S. Department of Education", 2026, "2026-11-24"),
+            ("https://www.federalregister.gov/d/2023-13112", "34 CFR 685.209(f) (88 FR 43820, 2024 SAVE Plan Rule, subject to federal litigation)", "U.S. Department of Education", 2026, "2026-11-24"),
             ("https://studentaid.gov/idr/", "P.L. 119-21 Section 82001 (Repayment Assistance Plan)", "U.S. Department of Education (Federal Student Aid)", 2026, "2026-11-24"),
             ("https://www.federalregister.gov/d/2026-00690", "91 FR 1797 (2026 HHS Poverty Guidelines)", "U.S. Department of Health and Human Services", 2026, "2026-11-24"),
         ),
@@ -6994,7 +6994,9 @@ def resolve_statutory_sources_for_calculator(
         if not url or url in seen_urls or not _is_official_primary_source_url_porcelain(url):
             return
         seen_urls.add(url)
-        selected.append((url, cit, pub, ey, va))
+        clean_cit = re.sub(r"\s+-\s+", ", ", str(cit or "").replace("\u2014", "-").replace("\u2013", "-")).strip()
+        clean_pub = re.sub(r"\s+-\s+", ", ", str(pub or "").replace("\u2014", "-").replace("\u2013", "-")).strip()
+        selected.append((url, clean_cit, clean_pub, ey, va))
 
     # (a1) TruthPack explicit applies_to_slugs entries for this exact slug
     for entry in pack_entries:

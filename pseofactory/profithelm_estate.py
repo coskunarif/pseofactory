@@ -2072,7 +2072,7 @@ def _build_hub_spoke_directory_html(repo_root: Optional[Path], mode: str) -> str
                 f'<option value="{html_lib.escape(s_slug)}" '
                 f'data-income="{int(med_inc)}" data-top-rate="{top_rate:.4f}" '
                 f'data-has-tax="{has_tax}" data-code="{html_lib.escape(s_code)}">'
-                f'{html_lib.escape(s_name)} ({html_lib.escape(s_code)}) - '
+                f'{html_lib.escape(s_name)} ({html_lib.escape(s_code)}): '
                 f'{"No State Income Tax" if has_tax == "0" else "State Income Tax"}'
                 "</option>"
             )
@@ -2119,7 +2119,7 @@ def _build_hub_spoke_directory_html(repo_root: Optional[Path], mode: str) -> str
                 f'<option value="{html_lib.escape(s_slug)}" '
                 f'data-top-rate="{top_rate:.4f}" data-has-tax="{has_tax}" '
                 f'data-agency="{html_lib.escape(agency)}">'
-                f'{html_lib.escape(s_name)} ({html_lib.escape(s_code)}) - '
+                f'{html_lib.escape(s_name)} ({html_lib.escape(s_code)}): '
                 f'{"No State Income Tax" if has_tax == "0" else "State Conformity Benchmark"}'
                 "</option>"
             )
@@ -3493,8 +3493,6 @@ def _build_profithelm_redirects_content(repo_root: Optional[Path] = None) -> str
         "/tools/irs-2027-tax-brackets /tools/irs-tax-brackets/ 301",
         "/tools/irs-2027-tax-brackets/ /tools/irs-tax-brackets/ 301",
         "/tools/irs-2027-tax-brackets/* /tools/irs-tax-brackets/ 301",
-        "/tools/section-1031-calculator/* /tools/section-1031-calculator/ 301",
-        "/tools/section-179-calculator/* /tools/section-179-calculator/ 301",
         "/tools/irs-interest-calculator-2027 /tools/irs-interest-calculator/ 301",
         "/tools/irs-interest-calculator-2027/ /tools/irs-interest-calculator/ 301",
         "/tools/capital-gains-tax-rate-2021-calculator /tools/capital-gains-calculator/ 301",
@@ -3598,6 +3596,17 @@ def build_machine_endpoints(
         machine_endpoints=["/feed.xml", "/llms.txt", "/sitemap.xml"],
         static_patterns=["/static/*", "/css/*"],
         redirects_content=_build_profithelm_redirects_content(repo_root=repo_root),
+    )
+    from pseofactory.edge import build_edge_routes_json
+
+    (dist / "_routes.json").write_text(
+        build_edge_routes_json(
+            extra_include=[
+                "/tools/section-1031-calculator/*",
+                "/tools/section-179-calculator/*",
+            ]
+        ),
+        encoding="utf-8",
     )
     # Remove stale legacy ai-benchmarks bundle
     ai_bench = dist / "ai-benchmarks"
@@ -5998,6 +6007,10 @@ def compile_profithelm_estate_impl(
         mw_updated = _sync_middleware_redirect_table(
             mw_raw,
             extra_exact_redirects={},
+            extra_prefix_redirects={
+                "/tools/section-1031-calculator/": "/tools/section-1031-calculator/",
+                "/tools/section-179-calculator/": "/tools/section-179-calculator/",
+            },
             apex_domain=PROFITHELM_DOMAIN,
             extra_gone_paths=_OFF_VERTICAL_GONE_PATHS,
             dist_dir=dist,
@@ -6021,6 +6034,10 @@ def compile_profithelm_estate_impl(
         mw_updated = _sync_middleware_redirect_table(
             mw_raw,
             extra_exact_redirects={},
+            extra_prefix_redirects={
+                "/tools/section-1031-calculator/": "/tools/section-1031-calculator/",
+                "/tools/section-179-calculator/": "/tools/section-179-calculator/",
+            },
             apex_domain=PROFITHELM_DOMAIN,
             extra_gone_paths=_OFF_VERTICAL_GONE_PATHS,
             dist_dir=dist,
