@@ -1279,6 +1279,7 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
         rep = verify_department_handoff_chain(
             property_ids=handoff_props,
             persist=not getattr(args, "dry_run", False),
+            strict_current_engine_hash=bool(getattr(args, "strict_engine_hash", False)),
         )
         if getattr(args, "json", False):
             print(json.dumps(rep, indent=2))
@@ -2962,6 +2963,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
     p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 4 tenants")
+    p_sup.add_argument("--strict-engine-hash", action="store_true", help="Require every tenant substrate_lock and engine_hash to match current engine_hash exactly")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
     p_sup.add_argument("--budget", type=float, default=float(os.environ.get("PSEUFACTORY_SUPERVISOR_TICK_BUDGET", "3300.0")), help="Execution budget in seconds (default: 3300)")
@@ -3113,6 +3115,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_wst.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
     p_wst.add_argument("--ledger-path", type=str, default=None, help="Optional summary ledger JSON output path override")
     p_wst.add_argument("--json", action="store_true", help="Output weekly SEO tune summary ledger as JSON")
+
+    p_bp = subparsers.add_parser(
+        "build-proof",
+        help="Stage 3 Proof: compile tenants fresh from source in an isolated directory and audit with AssetIntegrityEvaluator + UnifiedTruthGate",
+    )
+    p_bp.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_bp.add_argument("--output-dir", type=str, default=None, help="Optional staging output directory (defaults to isolated temp dir)")
+    p_bp.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_bp.add_argument("--json", action="store_true", help="Output build-proof report as JSON")
+
+    p_ev = subparsers.add_parser(
+        "edge-verify",
+        help="Stage 6 Proof: verify live edge deployment parity read-only against canonical domains",
+    )
+    p_ev.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_ev.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_ev.add_argument("--json", action="store_true", help="Output edge-verify report as JSON")
 
     return parser
 
@@ -3753,6 +3772,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_commerce_audit(args)
     elif args.command == "weekly-seo-tune":
         return cmd_weekly_seo_tune(args)
+    elif args.command == "build-proof":
+        return cmd_build_proof(args)
+    elif args.command == "edge-verify":
+        return cmd_edge_verify(args)
     else:
         parser.print_help()
         return 1
@@ -4045,6 +4068,305 @@ def cmd_video(args: argparse.Namespace) -> int:
                 f"quota_remaining={qb.get('remaining_units_today', 0)}/{qb.get('daily_ceiling_units', 10000)}"
             )
     return 0 if all_ok else 1
+
+
+def _seed_isolated_build_staging(repo_root: Path, stage_dir: Path, property_id: str) -> Dict[str, Any]:
+    """
+    Copies read-only source inputs (.pseofactory.json, content/, <pkg>/static/, .agy config/overlays)
+    into an isolated staging directory without ever mutating repo_root or copying prebuilt dist/.
+    """
+    import shutil
+
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    marker_meta: Dict[str, Any] = {}
+    marker_p = repo_root / ".pseofactory.json"
+    if marker_p.is_file():
+        try:
+            marker_meta = json.loads(marker_p.read_text(encoding="utf-8"))
+        except Exception:
+            marker_meta = {}
+        shutil.copy2(marker_p, stage_dir / ".pseofactory.json")
+
+    pkg_name = str(marker_meta.get("package_name") or property_id).strip() or property_id
+    src_content = repo_root / "content"
+    if src_content.is_dir():
+        shutil.copytree(src_content, stage_dir / "content", dirs_exist_ok=True)
+
+    for sub_dir in ("static", "data"):
+        src_sub = repo_root / pkg_name / sub_dir
+        if src_sub.is_dir():
+            shutil.copytree(src_sub, stage_dir / pkg_name / sub_dir, dirs_exist_ok=True)
+
+    src_agy = repo_root / ".agy"
+    if src_agy.is_dir():
+        dst_agy = stage_dir / ".agy"
+        dst_agy.mkdir(parents=True, exist_ok=True)
+        for rel_f in ("deployed_voids.json", "indexing_quarantine_ledger.json"):
+            fp = src_agy / rel_f
+            if fp.is_file():
+                shutil.copy2(fp, dst_agy / rel_f)
+        ov_dir = src_agy / "overlays"
+        if ov_dir.is_dir():
+            shutil.copytree(ov_dir, dst_agy / "overlays", dirs_exist_ok=True)
+
+    return marker_meta
+
+
+def cmd_build_proof(args: argparse.Namespace) -> int:
+    """
+    Stage 3 Proof: Compiles each discovered tenant fresh from source into an isolated
+    staging directory and audits the fresh dist/ with AssetIntegrityEvaluator + UnifiedTruthGate.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import contextlib
+    import io
+    import tempfile
+    import time
+    from pseofactory.compiler import (
+        compile_gainhelm_estate,
+        compile_lienbond_estate,
+        compile_prexvo_estate,
+        compile_profithelm_estate,
+    )
+    from pseofactory.impact_planner import discover_active_tenants
+    from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
+    from pseofactory.truth_gate import UnifiedTruthGate
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
+    as_json = bool(getattr(args, "json", False))
+    out_dir_arg = getattr(args, "output_dir", None)
+
+    discovered = discover_active_tenants(ws_root)
+    if req_prop != "all":
+        targets = [(pid, rp) for pid, rp in discovered if pid.lower() == req_prop]
+        if not targets:
+            msg = f"Error: Property '{req_prop}' not found in workspace '{ws_root}'."
+            if as_json:
+                print(json.dumps({"status": "FAIL", "error": msg}))
+            else:
+                print(msg, file=sys.stderr)
+            return 1
+    else:
+        targets = discovered
+
+    if not targets:
+        msg = f"Error: No active tenants discovered under '{ws_root}'."
+        if as_json:
+            print(json.dumps({"status": "FAIL", "error": msg}))
+        else:
+            print(msg, file=sys.stderr)
+        return 1
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    tmp_ctx = None
+    if out_dir_arg:
+        base_out = Path(out_dir_arg).resolve()
+        base_out.mkdir(parents=True, exist_ok=True)
+    else:
+        tmp_ctx = tempfile.TemporaryDirectory(prefix="pseofactory_build_proof_")
+        base_out = Path(tmp_ctx.name).resolve()
+
+    all_passed = True
+    results: Dict[str, Dict[str, Any]] = {}
+    evaluator = AssetIntegrityEvaluator()
+    truth_gate = UnifiedTruthGate()
+
+    try:
+        for pid, repo_path in targets:
+            t0 = time.monotonic()
+            stage_dir = base_out / pid
+            violations: List[str] = []
+            html_count = 0
+            manifest_count = 0
+            compiled_dist = stage_dir / "dist"
+            passed = False
+
+            try:
+                marker_meta = _seed_isolated_build_staging(repo_path, stage_dir, pid)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    if pid == "prexvo":
+                        compile_res = compile_prexvo_estate(stage_dir, run_retrofit=True, repo_root=stage_dir)
+                        compiled_dist = Path(compile_res) if not isinstance(compile_res, dict) else Path(compile_res.get("dist_dir") or (stage_dir / "dist"))
+                    elif pid == "profithelm":
+                        compile_res = compile_profithelm_estate(stage_dir, run_retrofit=True, repo_root=stage_dir)
+                        compiled_dist = Path(compile_res) if not isinstance(compile_res, dict) else Path(compile_res.get("dist_dir") or (stage_dir / "dist"))
+                    elif pid == "gainhelm":
+                        compile_res = compile_gainhelm_estate(stage_dir, run_retrofit=True)
+                        compiled_dist = Path(compile_res.get("dist_dir") or (stage_dir / "dist")) if isinstance(compile_res, dict) else (stage_dir / "dist")
+                    elif pid == "lienbond":
+                        compile_res = compile_lienbond_estate(stage_dir, run_retrofit=True)
+                        compiled_dist = Path(compile_res.get("dist_dir") or (stage_dir / "dist")) if isinstance(compile_res, dict) else (stage_dir / "dist")
+                    else:
+                        compile_tenant_porcelain_estate(compiled_dist, pid, repo_root=stage_dir)
+
+                html_count = len(list(compiled_dist.rglob("*.html"))) if compiled_dist.is_dir() else 0
+                manifests_dir = compiled_dist / "manifests"
+                manifest_count = len(list(manifests_dir.glob("*.json"))) if manifests_dir.is_dir() else 0
+
+                domain = str(marker_meta.get("domain") or f"{pid}.com")
+                canonical_base = _resolve_cli_live_base_url(pid, repo_path, reg) or f"https://{domain}"
+                brand_name = str(marker_meta.get("brand_name") or pid.capitalize())
+                temp_adapter = ConfigurablePropertyAdapter(
+                    property_id=pid,
+                    brand_name=brand_name,
+                    domain=domain,
+                    canonical_base=canonical_base,
+                    dist_dir=compiled_dist,
+                    repo_path=stage_dir,
+                )
+
+                asset_rep = evaluator.audit_all(temp_adapter, check_engine_drift=False)
+                if asset_rep.status != "PASS":
+                    for d in asset_rep.drifted_assets:
+                        reasons_str = ",".join(r.value if isinstance(r, DriftReason) else str(r) for r in d.reasons)
+                        details_str = "; ".join(d.details[:2])
+                        violations.append(f"[ASSET:{reasons_str}] {d.asset_path}: {details_str}")
+
+                truth_rep = truth_gate.audit_estate(
+                    dist_dir=compiled_dist,
+                    property_id=pid,
+                    repo_root=stage_dir,
+                )
+                if not truth_rep.passed:
+                    for tv in truth_rep.violations:
+                        violations.append(f"[{tv.gate}:{tv.code}] {tv.file_path}: {tv.message}")
+
+                passed = (asset_rep.status == "PASS") and bool(truth_rep.passed)
+            except Exception as exc:
+                violations.append(f"[BUILD_ERROR:{type(exc).__name__}] {exc}")
+                passed = False
+
+            elapsed = round(time.monotonic() - t0, 2)
+            if not passed:
+                all_passed = False
+
+            results[pid] = {
+                "property_id": pid,
+                "status": "PASS" if passed else "FAIL",
+                "passed": passed,
+                "elapsed_seconds": elapsed,
+                "html_files_count": html_count,
+                "manifest_files_count": manifest_count,
+                "violations_count": len(violations),
+                "violations": violations[:25],
+                "staging_dir": str(stage_dir),
+            }
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()
+
+    if as_json:
+        print(json.dumps({"status": "PASS" if all_passed else "FAIL", "properties": results}, indent=2))
+    else:
+        for pid, r in results.items():
+            print(
+                f"[{r['status']}] build-proof ({pid}): "
+                f"elapsed={r['elapsed_seconds']:.2f}s | html={r['html_files_count']} | "
+                f"manifests={r['manifest_files_count']} | violations={r['violations_count']}"
+            )
+            for v in r["violations"][:10]:
+                print(f"  - {v}")
+    return 0 if all_passed else 1
+
+
+def cmd_edge_verify(args: argparse.Namespace) -> int:
+    """
+    Stage 6 Proof: Runs LiveEdgeVerifier.verify_edge_deployment read-only against
+    each discovered tenant's live canonical domain and local dist/ reference.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import contextlib
+    import io
+    from pseofactory.gitops import LiveEdgeVerifier
+    from pseofactory.impact_planner import discover_active_tenants
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
+    as_json = bool(getattr(args, "json", False))
+
+    discovered = discover_active_tenants(ws_root)
+    if req_prop != "all":
+        targets = [(pid, rp) for pid, rp in discovered if pid.lower() == req_prop]
+        if not targets:
+            msg = f"Error: Property '{req_prop}' not found in workspace '{ws_root}'."
+            if as_json:
+                print(json.dumps({"status": "FAIL", "error": msg}))
+            else:
+                print(msg, file=sys.stderr)
+            return 1
+    else:
+        targets = discovered
+
+    if not targets:
+        msg = f"Error: No active tenants discovered under '{ws_root}'."
+        if as_json:
+            print(json.dumps({"status": "FAIL", "error": msg}))
+        else:
+            print(msg, file=sys.stderr)
+        return 1
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    verifier = LiveEdgeVerifier()
+    all_passed = True
+    results: Dict[str, Dict[str, Any]] = {}
+
+    for pid, repo_path in targets:
+        canonical_base = _resolve_cli_live_base_url(pid, repo_path, reg) or f"https://{pid}.com"
+        dist_rel = "dist"
+        marker_p = repo_path / ".pseofactory.json"
+        if marker_p.is_file():
+            try:
+                marker_meta = json.loads(marker_p.read_text(encoding="utf-8"))
+                dist_rel = str(marker_meta.get("dist_dir") or "dist")
+            except Exception:
+                dist_rel = "dist"
+        dist_dir = (repo_path / dist_rel).resolve()
+
+        if as_json:
+            with contextlib.redirect_stdout(io.StringIO()):
+                rep = verifier.verify_edge_deployment(
+                    base_url=canonical_base,
+                    dist_dir=dist_dir if dist_dir.is_dir() else None,
+                    dry_run=False,
+                    sample_tools=True,
+                )
+        else:
+            rep = verifier.verify_edge_deployment(
+                base_url=canonical_base,
+                dist_dir=dist_dir if dist_dir.is_dir() else None,
+                dry_run=False,
+                sample_tools=True,
+            )
+
+        passed = bool(rep.get("all_passed")) and rep.get("status") == "PASS"
+        if not passed:
+            all_passed = False
+        results[pid] = {
+            "property_id": pid,
+            "base_url": canonical_base,
+            "status": rep.get("status", "FAIL"),
+            "all_passed": passed,
+            "edge_status": rep.get("edge_status"),
+            "verified_count": rep.get("verified_count", 0),
+            "endpoints_total": len(rep.get("endpoints") or {}),
+            "latency_ms": rep.get("latency_ms", 0),
+            "latency_sla": rep.get("latency_sla", False),
+            "error": rep.get("error"),
+            "report": rep,
+        }
+
+    if as_json:
+        print(json.dumps({"status": "PASS" if all_passed else "FAIL", "properties": results}, indent=2, default=str))
+    else:
+        for pid, r in results.items():
+            err_suffix = f" | error={r['error']}" if r.get("error") else ""
+            print(
+                f"[{r['status']}] edge-verify ({pid}) {r['base_url']}: "
+                f"endpoints={r['verified_count']}/{r['endpoints_total']} | "
+                f"latency_ms={r['latency_ms']} | edge_status={r['edge_status']}{err_suffix}"
+            )
+    return 0 if all_passed else 1
 
 
 if __name__ == "__main__":

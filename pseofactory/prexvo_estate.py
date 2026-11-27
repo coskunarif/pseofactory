@@ -3707,11 +3707,25 @@ def _post_porcelain_truth_hygiene(dist: Path, all_tools: Sequence[Dict[str, Any]
     """
     write_runtime_synchronizer_asset(dist, property_id="prexvo")
     sync_tag = render_external_runtime_synchronizer_tag("prexvo")
+    calc_manifest_re = re.compile(
+        r'<script\b[^>]*\bclass=(?:"[^"]*\bcalculation-manifest\b[^"]*"|\'[^\']*\bcalculation-manifest\b[^\']*\')[^>]*>[\s\S]*?</script>',
+        re.IGNORECASE,
+    )
     for html_file in sorted(dist.rglob("*.html")):
         if html_file.name.startswith("."):
             continue
         raw = html_file.read_text(encoding="utf-8", errors="ignore")
-        updated = _scrub_prexvo_truth_text(raw)
+        preserved_manifests: List[str] = []
+
+        def _stash_manifest(m: re.Match) -> str:
+            idx = len(preserved_manifests)
+            preserved_manifests.append(m.group(0))
+            return f"__PREXVO_PRESERVED_CALC_MANIFEST_{idx}__"
+
+        masked_raw = calc_manifest_re.sub(_stash_manifest, raw)
+        updated = _scrub_prexvo_truth_text(masked_raw)
+        for idx, manifest_blk in enumerate(preserved_manifests):
+            updated = updated.replace(f"__PREXVO_PRESERVED_CALC_MANIFEST_{idx}__", manifest_blk, 1)
 
         if 'id="pseo-runtime-sync"' not in updated and "</body>" in updated:
             updated = updated.replace("</body>", f"{sync_tag}\n</body>", 1)

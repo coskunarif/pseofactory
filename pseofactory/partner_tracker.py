@@ -257,7 +257,7 @@ def _poll_impact_api_v16(
     impact_sid: str,
     impact_tok: str,
     impact_ver: str = "16",
-    timeout: float = 6.0,
+    timeout: float = 20.0,
 ) -> Dict[str, Any]:
     """
     Polls Impact REST API v16 partner_performance_by_program report headlessly.
@@ -396,7 +396,7 @@ def _poll_impact_api_v16(
 def _poll_cj_graphql_commissions(
     cj_pat: str,
     cj_pub_id: str = "8101803",
-    timeout: float = 6.0,
+    timeout: float = 20.0,
 ) -> Dict[str, Any]:
     """
     Polls CJ GraphQL Commissions API headlessly.
@@ -565,7 +565,7 @@ class PartnerTrackingEngine:
         impact_sid: Optional[str] = None,
         impact_tok: Optional[str] = None,
         impact_ver: Optional[str] = None,
-        timeout: float = 6.0,
+        timeout: float = 20.0,
     ) -> Dict[str, Any]:
         sid = str(impact_sid if impact_sid is not None else (os.getenv("IMPACT_ACCOUNT_SID") or "")).strip()
         tok = str(impact_tok if impact_tok is not None else (os.getenv("IMPACT_AUTH_TOKEN") or "")).strip()
@@ -576,7 +576,7 @@ class PartnerTrackingEngine:
         self,
         cj_pat: Optional[str] = None,
         cj_pub_id: Optional[str] = None,
-        timeout: float = 6.0,
+        timeout: float = 20.0,
     ) -> Dict[str, Any]:
         pat = str(cj_pat if cj_pat is not None else (os.getenv("CJ_PERSONAL_ACCESS_TOKEN") or "")).strip()
         pub_id = str(cj_pub_id if cj_pub_id is not None else (os.getenv("CJ_PUBLISHER_ID") or "8101803")).strip() or "8101803"
@@ -2632,7 +2632,7 @@ class PartnerTrackingEngine:
         ledger_path: Optional[Any] = None,
         extra_email_messages: Optional[List[EmailMessage]] = None,
         engagement_by_property: Optional[Dict[str, Dict[str, Any]]] = None,
-        timeout: float = 6.0,
+        timeout: float = 20.0,
         persist: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -2907,9 +2907,15 @@ class PartnerTrackingEngine:
 
             # 1. PartnerStack REST API v2 via MonetizationHub
             if self.hub.partnerstack_api_key:
-                hub_live = self.hub.reconcile_live_networks(live_network=True, timeout=timeout, save=False)
+                try:
+                    hub_live = self.hub.reconcile_live_networks(live_network=True, timeout=timeout, save=False)
+                except Exception as ps_exc:
+                    hub_live = {}
+                    portals_state["partnerstack"]["uncollected_telemetry_reason"] = (
+                        f"Live PartnerStack REST API v2 poll failed ({type(ps_exc).__name__}); relying on cached snapshot."
+                    )
                 ps_live = hub_live.get("partnerstack") or {}
-                if isinstance(ps_live, dict):
+                if isinstance(ps_live, dict) and ps_live:
                     portals_state["partnerstack"]["realized_commission_usd"] = float(
                         ps_live.get("total_revenue_usd", 0.0) or 0.0
                     )
@@ -2973,12 +2979,19 @@ class PartnerTrackingEngine:
             impact_tok = str(os.getenv("IMPACT_AUTH_TOKEN") or "").strip()
             impact_ver = str(os.getenv("IMPACT_API_VERSION") or "16").strip() or "16"
             if impact_sid and impact_tok:
-                impact_poll = self._poll_impact_api_v16(
-                    impact_sid=impact_sid,
-                    impact_tok=impact_tok,
-                    impact_ver=impact_ver,
-                    timeout=timeout,
-                )
+                try:
+                    impact_poll = self._poll_impact_api_v16(
+                        impact_sid=impact_sid,
+                        impact_tok=impact_tok,
+                        impact_ver=impact_ver,
+                        timeout=timeout,
+                    )
+                except Exception as imp_exc:
+                    impact_poll = {
+                        "ok": False,
+                        "status": "OFFLINE",
+                        "error": f"Impact poll exception ({type(imp_exc).__name__})",
+                    }
                 if impact_poll.get("ok"):
                     total_impact_clicks = int(impact_poll.get("portal_verified_clicks", 0) or 0)
                     portals_state["impact"]["portal_verified_clicks"] = total_impact_clicks
@@ -3009,11 +3022,18 @@ class PartnerTrackingEngine:
             cj_pat = str(os.getenv("CJ_PERSONAL_ACCESS_TOKEN") or "").strip()
             cj_pub_id = str(os.getenv("CJ_PUBLISHER_ID") or cj_cfg.get("publisher_id") or "8101803").strip()
             if cj_pat and cj_pub_id:
-                cj_poll = self._poll_cj_graphql_commissions(
-                    cj_pat=cj_pat,
-                    cj_pub_id=cj_pub_id,
-                    timeout=timeout,
-                )
+                try:
+                    cj_poll = self._poll_cj_graphql_commissions(
+                        cj_pat=cj_pat,
+                        cj_pub_id=cj_pub_id,
+                        timeout=timeout,
+                    )
+                except Exception as cj_exc:
+                    cj_poll = {
+                        "ok": False,
+                        "status": "OFFLINE",
+                        "error": f"CJ poll exception ({type(cj_exc).__name__})",
+                    }
                 if cj_poll.get("ok"):
                     portals_state["cj_affiliate"]["conversions_count"] = int(cj_poll.get("conversions_count", 0) or 0)
                     portals_state["cj_affiliate"]["realized_commission_usd"] = float(
@@ -5283,6 +5303,7 @@ class PartnerTrackingEngine:
         persist_path: Optional[str] = None,
         repo_roots: Optional[Dict[str, Any]] = None,
         edge_redirect_sources: Optional[Dict[str, str]] = None,
+        fetch_live_earnings: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Executes a falsification-grade audit of pseofactory's claimed revenue, partner integrations,
@@ -5293,9 +5314,18 @@ class PartnerTrackingEngine:
         Zero em-dashes. Zero en-dashes.
         """
         is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        is_fast_mode = (
+            os.environ.get("PSEUFACTORY_FAST_MODE") == "1"
+            or os.environ.get("PSEOFACTORY_FAST_MODE") == "1"
+        )
         eff_live = bool(execute_live and not is_pytest)
+        eff_live_earnings = bool(
+            (execute_live if fetch_live_earnings is None else fetch_live_earnings)
+            and not is_pytest
+            and not is_fast_mode
+        )
 
-        earnings = self.sync_partner_earnings_and_balances(fetch_live_api=eff_live)
+        earnings = self.sync_partner_earnings_and_balances(fetch_live_api=eff_live_earnings)
         stripe_ledger = verify_live_stripe_revenue_ledger(execute_live=eff_live)
         messages = self.email_engine.sync_all(force=False)
         correspondence_audit = self.email_engine.analyze_correspondence_anomalies_and_checkins(
@@ -5714,6 +5744,7 @@ class PartnerTrackingEngine:
         lienbond_dist_dir: Optional[str] = None,
         persist_path: Optional[str] = None,
         auto_heal_prerequisites: bool = True,
+        fetch_live_earnings: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """
         Executes the zero-touch autonomous partner lifecycle loop:
@@ -5732,7 +5763,16 @@ class PartnerTrackingEngine:
         from pseofactory.edge import sync_tenant_edge_redirect_function
 
         is_pytest = "PYTEST_CURRENT_TEST" in os.environ
+        is_fast_mode = (
+            os.environ.get("PSEUFACTORY_FAST_MODE") == "1"
+            or os.environ.get("PSEOFACTORY_FAST_MODE") == "1"
+        )
         eff_force_poll = bool(force_mail_poll and not is_pytest)
+        eff_live_earnings = bool(
+            (not is_pytest and not is_fast_mode)
+            if fetch_live_earnings is None
+            else (fetch_live_earnings and not is_pytest and not is_fast_mode)
+        )
 
         target_p = (
             str(persist_path)
@@ -5821,7 +5861,10 @@ class PartnerTrackingEngine:
         non_active_recon = self.reconcile_non_active_partnerships_and_edge_routes()
         correspondence_anomalies = self.email_engine.analyze_correspondence_anomalies_and_checkins(messages)
         followup_dispatches = self.dispatch_autonomous_partner_followups(execute_live=execute_live_probes)
-        falsification_summary = self.falsify_monetization_and_partner_health(execute_live=execute_live_probes)
+        falsification_summary = self.falsify_monetization_and_partner_health(
+            execute_live=execute_live_probes,
+            fetch_live_earnings=eff_live_earnings,
+        )
 
         cls_tuples = sorted(
             f"{c.email_id}:{c.partner_key}:{c.classification_type}" for c in classifications
@@ -12814,6 +12857,7 @@ def falsify_monetization_and_partner_health(
     persist_path: Optional[str] = None,
     repo_roots: Optional[Dict[str, Any]] = None,
     edge_redirect_sources: Optional[Dict[str, str]] = None,
+    fetch_live_earnings: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Module-level convenience wrapper for PartnerTrackingEngine.falsify_monetization_and_partner_health."""
     return PartnerTrackingEngine().falsify_monetization_and_partner_health(
@@ -12821,6 +12865,7 @@ def falsify_monetization_and_partner_health(
         persist_path=persist_path,
         repo_roots=repo_roots,
         edge_redirect_sources=edge_redirect_sources,
+        fetch_live_earnings=fetch_live_earnings,
     )
 
 
@@ -12833,6 +12878,7 @@ def run_autonomous_partner_lifecycle_sync(
     gainhelm_dist_dir: Optional[str] = None,
     lienbond_dist_dir: Optional[str] = None,
     persist_path: Optional[str] = None,
+    fetch_live_earnings: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Module-level convenience wrapper for PartnerTrackingEngine.run_autonomous_partner_lifecycle_sync."""
     return PartnerTrackingEngine().run_autonomous_partner_lifecycle_sync(
@@ -12844,6 +12890,7 @@ def run_autonomous_partner_lifecycle_sync(
         gainhelm_dist_dir=gainhelm_dist_dir,
         lienbond_dist_dir=lienbond_dist_dir,
         persist_path=persist_path,
+        fetch_live_earnings=fetch_live_earnings,
     )
 
 

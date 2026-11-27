@@ -325,7 +325,7 @@ def test_supervisor_escalation_triggers_autonomous_self_healing(tmp_path):
 
     actions = res.get("self_healing_actions") or []
     assert len(actions) == 1
-    assert actions[0]["status"] == "RECOVERED"
+    assert actions[0]["status"] == "PARTIAL_RECOVERY"
     assert mock_insp.called
     assert (tmp_path / ".agy" / "self_healing_ledger.jsonl").is_file()
 

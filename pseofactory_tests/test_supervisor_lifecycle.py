@@ -1323,6 +1323,200 @@ def test_spoke_overlay_routing_geo_meta_and_partial_success_streak(tmp_path):
     assert "Gate 1" in loaded["tenants"]["profithelm"]["reason"]
 
 
+def test_supervisor_root_fixes_breaker_alignment_pipeline_and_self_heal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Regression tests for Fix 5:
+    5a. Aligned healthy tenants are skipped when drift_detected=True and 1 tenant fails.
+    5b. RollbackCircuitBreaker trips on NOT_ATTRIBUTABLE as well as ROLLBACK_CI_FAILED.
+    5c. DISCOVERY/MONETIZATION ERROR stamps FAILED, failed cycles persist department_pipeline_state.json,
+        and _execute_self_healing_recovery does not stamp RECOVERED on non-indexing failures or reconcile errors.
+    """
+    import subprocess
+    import pseofactory.supervisor as sup_mod
+    from pseofactory.drift import compute_dist_lock_metrics, compute_engine_hash
+    from pseofactory.supervisor import (
+        AutonomousLifecycleSupervisor,
+        MaintenanceResult,
+        RollbackCircuitBreaker,
+    )
+
+    # 5b: NOT_ATTRIBUTABLE trips RollbackCircuitBreaker (even beyond 300 chars in traceback)
+    hit_na, reason_na = RollbackCircuitBreaker.result_has_rollback_ci_failed(
+        MaintenanceResult(
+            property_id="prexvo",
+            status="FAILED",
+            assets_audited=1,
+            assets_drifted=1,
+            assets_refactored=0,
+            assets_failed=1,
+            failed_records=[{"traceback": "x" * 350, "type": "GitOps", "status": "NOT_ATTRIBUTABLE", "error": "baseline broken on main"}],
+        )
+    )
+    assert hit_na is True
+    assert "NOT_ATTRIBUTABLE" in reason_na
+
+    # 5a + 5c: Setup 2 tenants (prexvo aligned, profithelm drifted/failing)
+    cur_hash = compute_engine_hash()
+    for tid, dom, doc, aligned in (
+        ("prexvo", "prexvo.com", PREXVO_COMPLIANT_HTML, True),
+        ("profithelm", "profithelm.com", PROFITHELM_COMPLIANT_HTML, False),
+    ):
+        t_dir = tmp_path / tid
+        (t_dir / "dist").mkdir(parents=True, exist_ok=True)
+        (t_dir / "dist" / "index.html").write_text(doc, encoding="utf-8")
+        (t_dir / ".pseofactory.json").write_text(
+            json.dumps({
+                "property_id": tid,
+                "brand_name": tid.capitalize(),
+                "domain": dom,
+                "canonical_base": f"https://{dom}",
+                "dist_dir": "dist",
+            }),
+            encoding="utf-8",
+        )
+        if aligned:
+            d_fp, d_tot = compute_dist_lock_metrics(t_dir / "dist")
+            (t_dir / "substrate_lock.json").write_text(
+                json.dumps({
+                    "property_id": tid,
+                    "engine_hash": cur_hash,
+                    "substrate_hash": cur_hash,
+                    "dist_fingerprint": d_fp,
+                    "total_assets": d_tot,
+                }),
+                encoding="utf-8",
+            )
+            (t_dir / ".agy").mkdir(parents=True, exist_ok=True)
+            (t_dir / ".agy" / "engine_hash.json").write_text(
+                json.dumps({"engine_hash": cur_hash}),
+                encoding="utf-8",
+            )
+
+    state_f = tmp_path / ".agy" / "engine_hash.json"
+    AtomicStateLedger.save_json(state_f, {"engine_hash": "0" * 64})
+
+    sup = AutonomousLifecycleSupervisor(
+        workspace_root=tmp_path,
+        state_file=state_f,
+        ledger_file=tmp_path / ".agy" / "asset_ledger.json",
+        heartbeat_path=tmp_path / ".agy" / "supervisor_heartbeat.json",
+        void_candidates_path=tmp_path / "missing_voids.json",
+    )
+
+    from pseofactory.maintenance import AssetIntegrityEvaluator, RetroReflectionEngine
+
+    monkeypatch.setattr(
+        AssetIntegrityEvaluator,
+        "audit_all",
+        lambda self, adp, **kw: type("Rep", (), {"status": "PASS", "total_assets_checked": 1, "drifted_assets_count": 0})(),
+    )
+    monkeypatch.setattr(RetroReflectionEngine, "audit_estate", staticmethod(lambda d, p: {"stale_count": 0}))
+
+    fleet_calls: List[List[str]] = []
+
+    def _fake_run_fleet(**kw: Any) -> Dict[str, MaintenanceResult]:
+        pids = list(kw.get("property_ids") or [])
+        fleet_calls.append(pids)
+        return {
+            p: MaintenanceResult(
+                property_id=p,
+                status="FAILED",
+                assets_audited=1,
+                assets_drifted=1,
+                assets_refactored=0,
+                assets_failed=1,
+                failed_records=[
+                    {"status": "NOT_ATTRIBUTABLE", "error": "CI broken"}
+                    if p == "profithelm"
+                    else {"status": "FAILED", "error": "alignment check"}
+                ],
+            )
+            for p in pids
+        }
+
+    monkeypatch.setattr(sup.coordinator, "run_fleet", _fake_run_fleet)
+    monkeypatch.setattr(
+        "pseofactory.pipeline.execute_autonomous_daily_trend_page_build",
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    res = sup.run_cycle(force=False, dry_run=False)
+    assert res["status"] in ("FAILED", "DEGRADED")
+    # 5a: prexvo was aligned so only profithelm was passed to run_fleet
+    assert fleet_calls == [["profithelm"]]
+    assert res["properties"]["prexvo"]["status"] == "SKIPPED_ALIGNED"
+    # 5b: profithelm tripped circuit breaker on NOT_ATTRIBUTABLE
+    assert sup.rollback_breaker.is_open("profithelm", cur_hash)[0] is True
+    # 5c: DISCOVERY FAILED recorded and department_pipeline_state.json persisted with overall_status FAIL
+    dp = json.loads((tmp_path / ".agy" / "department_pipeline_state.json").read_text(encoding="utf-8"))
+    assert dp["overall_status"] == "FAIL"
+    assert dp["stages"]["DISCOVERY"]["status"] == "FAILED"
+
+    # 5a edge cases: stale dist_fingerprint OR unpushed commits ahead of origin/main must NOT skip prexvo
+    px_dir = tmp_path / "prexvo"
+    px_lock = json.loads((px_dir / "substrate_lock.json").read_text(encoding="utf-8"))
+    stale_lock = dict(px_lock, dist_fingerprint="bad" * 20)
+    (px_dir / "substrate_lock.json").write_text(json.dumps(stale_lock), encoding="utf-8")
+    fleet_calls.clear()
+    sup.run_cycle(force=False, dry_run=False)
+    assert "prexvo" in fleet_calls[0], "Stale dist_fingerprint must NOT be skipped as SKIPPED_ALIGNED"
+
+    # Restore valid dist_fingerprint, init git repo with 1 unpushed commit ahead of origin/main
+    (px_dir / "substrate_lock.json").write_text(json.dumps(px_lock), encoding="utf-8")
+    bare_origin = tmp_path / "prexvo_origin.git"
+    subprocess.run(["git", "init", "--bare", str(bare_origin)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "init", "-b", "main"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "config", "user.email", "test@example.com"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "config", "user.name", "Test"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "commit", "-m", "initial"], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "remote", "add", "origin", str(bare_origin)], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(px_dir), "push", "-u", "origin", "main"], check=True, capture_output=True)
+    # Create an unpushed commit on main ahead of origin/main
+    subprocess.run(["git", "-C", str(px_dir), "commit", "--allow-empty", "-m", "unpushed"], check=True, capture_output=True)
+    fleet_calls.clear()
+    sup.run_cycle(force=False, dry_run=False, enable_gitops=True)
+    assert "prexvo" in fleet_calls[0], "Unpushed commit ahead of origin/main must NOT be skipped when enable_gitops=True"
+
+    # 5c: _execute_self_healing_recovery truth table
+    monkeypatch.setattr(
+        "pseofactory.gitops.reconcile_workspace_tracking_state",
+        lambda **kw: (_ for _ in ()).throw(RuntimeError("git lock error")),
+    )
+    monkeypatch.setattr(
+        "pseofactory.indexing_inspector.DailyIndexingInspector",
+        lambda tenant_id: type("Insp", (), {"run_inspection": lambda self, **kw: {"audit_status": "PASS"}})(),
+    )
+    heal_err = sup._execute_self_healing_recovery(
+        [{"tenant_id": "prexvo", "streak": 3, "reason": "unindexed gsc exclusion"}],
+        cycle_id="c1",
+        dry_run=False,
+    )
+    assert heal_err[0]["status"] == "UNRECOVERED"
+
+    monkeypatch.setattr(
+        "pseofactory.gitops.reconcile_workspace_tracking_state",
+        lambda **kw: {"status": "PASS"},
+    )
+    heal_non_idx = sup._execute_self_healing_recovery(
+        [{"tenant_id": "prexvo", "streak": 3, "reason": "ROLLBACK_CI_FAILED timeout 404"}],
+        cycle_id="c2",
+        dry_run=False,
+    )
+    assert heal_non_idx[0]["status"] == "PARTIAL_RECOVERY"
+
+    heal_idx_ok = sup._execute_self_healing_recovery(
+        [{"tenant_id": "prexvo", "streak": 3, "reason": "unindexed gsc exclusion"}],
+        cycle_id="c3",
+        dry_run=False,
+    )
+    assert heal_idx_ok[0]["status"] == "RECOVERED"
+
+
+
 
 
 

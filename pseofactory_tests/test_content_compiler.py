@@ -263,3 +263,55 @@ def test_compiler_zero_forbidden_dashes_enforcement():
     assert_no_forbidden_dashes(json.dumps(res["manifest"]), context="compiled manifest")
     assert "\u2014" not in res["html"]
     assert "\u2013" not in res["html"]
+
+
+def test_compiler_clamps_long_title_to_seo_bounds():
+    import html as _html
+    import re
+
+    spec = {
+        "query": "section 179 equipment expense tax deduction calculator",
+        "slug": "section-179-equipment-expense-tax-deduction-calculator",
+        "model_name": "Section 179 Deduction Engine",
+        "formula": "min(cost, 2560000)",
+        "inputs": {"cost": 500000},
+        "published_output": 500000.0,
+        "sample_calculation": "Cost 500,000 under IRC Section 179 limit yields 500,000 deduction",
+        "statutory_authority": "IRC Section 179(b)(1)",
+        "economic_dataset": "FRED CPILFESL Series",
+    }
+    res = compile_high_effort_page(spec)
+    m = re.search(r"<title>(.*?)</title>", res["html"], re.IGNORECASE | re.DOTALL)
+    assert m is not None
+    rendered_title = _html.unescape(m.group(1).strip())
+    assert 30 <= len(rendered_title) <= 70
+    assert rendered_title == "Section 179 Equipment Expense Tax Deduction Calculator"
+    assert "\u2014" not in rendered_title and "\u2013" not in rendered_title
+
+    from pseofactory.compiler import _clamp_seo_title
+
+    # Edge case (a): popping a long token must not collapse below min_len=30
+    long_tok = _clamp_seo_title("Tax " + ("B" * 80))
+    assert 30 <= len(long_tok) <= 70
+    short_pfx = _clamp_seo_title("Short Prefix " + ("X" * 58))
+    assert 30 <= len(short_pfx) <= 70
+
+    # Edge case (b): trailing connectors never left dangling even near min_len
+    dangling_conn = _clamp_seo_title("Corporate Tax Planning Guide and " + ("X" * 45))
+    assert len(dangling_conn) <= 70
+    assert not dangling_conn.lower().endswith((" and", " or", " for", " |"))
+    assert dangling_conn == "Corporate Tax Planning Guide"
+
+    # Edge case (c): trailing | / & / unbalanced ( or [ clauses stripped cleanly
+    pipe_title = _clamp_seo_title("Federal Equipment Depreciation and Tax Deduction Rules for | " + ("X" * 20))
+    assert pipe_title == "Federal Equipment Depreciation and Tax Deduction Rules"
+    paren_title = _clamp_seo_title("Equipment Tax Depreciation Calculator Ending With Open Paren (2026 Edition)")
+    assert len(paren_title) <= 70
+    assert "(" not in paren_title
+    assert paren_title == "Equipment Tax Depreciation Calculator Ending With Open Paren"
+    bracket_title = _clamp_seo_title("Section 179 Heavy Vehicle Deduction Guide & Matrix [2026 Statutory Update]")
+    assert len(bracket_title) <= 70
+    assert "[" not in bracket_title
+    assert not bracket_title.endswith(("&", "|", "/", "(", "["))
+
+

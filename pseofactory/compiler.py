@@ -2693,6 +2693,52 @@ def _build_compiled_disclosures_funnel_and_seo(
     }
 
 
+def _clamp_seo_title(raw_title: str, max_len: int = 70, min_len: int = 30) -> str:
+    """Clamps a compiled SEO title cleanly at a word boundary to <= max_len chars with zero em/en-dashes."""
+    cleaned = re.sub(
+        r"\s+",
+        " ",
+        str(raw_title or "").replace("\u2014", "-").replace("\u2013", "-"),
+    ).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    trimmed_suffix = re.sub(r"\s+and\s+Statutory\s+Analysis$", "", cleaned, flags=re.IGNORECASE).strip()
+    if trimmed_suffix and min_len <= len(trimmed_suffix) <= max_len:
+        return trimmed_suffix
+
+    words = cleaned.split()
+    while len(words) > 1 and len(" ".join(words)) > max_len:
+        words.pop()
+    candidate = " ".join(words)
+    if len(candidate) < min_len:
+        candidate = cleaned[:max_len].strip()
+
+    connectors = {"and", "or", "for", "with", "of", "in", "to", "by", "from", "the", "a", "an", "&", "-", "|", "/", ":"}
+    trailing_punct = " ,;:-|&/([{"
+    while True:
+        prev = candidate
+        candidate = candidate.rstrip(trailing_punct).strip()
+        for open_ch, close_ch in (("(", ")"), ("[", "]")):
+            if candidate.count(open_ch) > candidate.count(close_ch):
+                last_open = candidate.rfind(open_ch)
+                if last_open != -1 and close_ch not in candidate[last_open:]:
+                    prefix = candidate[:last_open].strip()
+                    if prefix:
+                        candidate = prefix
+        parts = candidate.split()
+        if len(parts) > 1 and parts[-1].lower().rstrip(",;:") in connectors:
+            candidate = " ".join(parts[:-1]).strip()
+        candidate = candidate.rstrip(trailing_punct).strip()
+        if candidate == prev:
+            break
+
+    if not candidate:
+        candidate = cleaned[:max_len].rstrip(trailing_punct).strip()
+    if len(candidate) > max_len:
+        candidate = candidate[:max_len].rstrip(trailing_punct).strip()
+    return candidate
+
+
 def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     """
     Compiles a qualified candidate specification into a verified high-effort programmatic HTML asset.
@@ -2718,6 +2764,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         economic_dataset,
         sample_calc,
     ) = _extract_candidate_metadata(candidate_spec)
+    title = _clamp_seo_title(title)
 
     # 3. Numeric metric clamping to non-negative (>= 0) per HWL-1263
     clamped_inputs = _clamp_candidate_inputs(raw_inputs)

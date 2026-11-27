@@ -205,16 +205,23 @@ class GSCRootCauseClassifier:
         url_low = url_str.lower()
         if "prexvo" in url_low or str(meta.get("tenant_id") or "").lower() == "prexvo":
             tenant = "prexvo"
-            statutory_framework = "Title IV Higher Education Act (20 U.S.C. 1087a et seq.), 34 CFR Part 685 (RAP, IBR, PAYE, ICR, PSLF 685.219, Tiered Standard 685.208), and IRC Section 108(f)"
+            statutory_framework = (
+                "Title IV Higher Education Act (20 U.S.C. 1087e), P.L. 119-21 Section 82001 (RAP), "
+                "91 FR 1797, 34 CFR Part 685 (IBR 685.221, PAYE/ICR 685.209, PSLF 685.219, Tiered Standard 685.208), "
+                "and IRC Section 108(f)"
+            )
         elif "gainhelm" in url_low or str(meta.get("tenant_id") or "").lower() == "gainhelm":
             tenant = "gainhelm"
             statutory_framework = "AICPA SSAE 18 (SOC 2 Trust Services Criteria), 32 CFR Part 170 (CMMC 2.0), NIST SP 800-171 Rev 2/3 (DFARS 252.204-7012), HIPAA 45 CFR Part 164, ISO/IEC 27001:2022, and PCI DSS v4.0"
         elif "lienbond" in url_low or str(meta.get("tenant_id") or "").lower() == "lienbond":
             tenant = "lienbond"
-            statutory_framework = "40 U.S.C. 3131-3134 Federal Miller Act, State Little Miller Acts, NCCI Workers' Compensation Manuals, and State Mechanics Lien Statutes"
+            if any(tok in url_low for tok in ("workers-comp", "emr", "class-code")):
+                statutory_framework = "NCCI Experience Rating Plan Manual, NCCI Basic Manual, State Workers' Compensation Rating Schedules, and State Mechanics Lien Statutes"
+            else:
+                statutory_framework = "40 U.S.C. 3131-3134 Federal Miller Act, State Little Miller Acts, NCCI Experience Rating Plan Manual, and State Mechanics Lien Statutes"
         else:
             tenant = "profithelm"
-            statutory_framework = "Internal Revenue Code Sections 1(j), 162, 168(k), 174, 179, 199A, 1031, 1250, 1401, and IRS Rev. Proc. 2025-2026 inflation-adjusted schedules"
+            statutory_framework = "Internal Revenue Code Sections 1(j), 162, 168(k), 174, 179, 199A, 1031, 1250, 1401, P.L. 119-21, and IRS Rev. Proc. 2025-32 and Rev. Proc. 2026-35 inflation-adjusted schedules"
 
         cov_state = str(meta.get("coverage_state") or "Unknown").strip()
         verdict = str(meta.get("verdict") or "NEUTRAL").strip()

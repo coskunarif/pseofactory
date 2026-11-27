@@ -2400,26 +2400,34 @@ class RollbackCircuitBreaker:
 
     @staticmethod
     def result_has_rollback_ci_failed(res_obj: Any) -> Tuple[bool, str]:
-        """Detects whether a MaintenanceResult or dict contains a ROLLBACK_CI_FAILED signal."""
+        """Detects whether a MaintenanceResult or dict contains a ROLLBACK_CI_FAILED or NOT_ATTRIBUTABLE signal."""
         res_dict = res_obj.to_dict() if hasattr(res_obj, "to_dict") else (res_obj if isinstance(res_obj, dict) else {})
         if not isinstance(res_dict, dict):
             return False, ""
+        trip_signals = ("ROLLBACK_CI_FAILED", "NOT_ATTRIBUTABLE")
         st = str(res_dict.get("status") or "").upper()
-        if "ROLLBACK_CI_FAILED" in st:
+        if any(sig in st for sig in trip_signals):
             return True, st
         gitops = res_dict.get("gitops_result") or res_dict.get("gitops") or {}
         if isinstance(gitops, dict):
             for k in ("status", "rollback_status"):
                 v = str(gitops.get(k) or "").upper()
-                if "ROLLBACK_CI_FAILED" in v:
+                if any(sig in v for sig in trip_signals):
                     return True, v
             rb = gitops.get("rollback") or gitops.get("auto_rollback") or {}
-            if isinstance(rb, dict) and "ROLLBACK_CI_FAILED" in str(rb.get("status") or "").upper():
-                return True, str(rb.get("reason") or rb.get("status") or "ROLLBACK_CI_FAILED")
+            rb_st = str(rb.get("status") or "").upper() if isinstance(rb, dict) else ""
+            if isinstance(rb, dict) and any(sig in rb_st for sig in trip_signals):
+                return True, str(rb.get("reason") or rb.get("status") or rb_st)
         for rec in (res_dict.get("failed_records") or []):
             blob = json.dumps(rec, default=str) if isinstance(rec, dict) else str(rec)
-            if "ROLLBACK_CI_FAILED" in blob.upper():
-                return True, blob[:300]
+            blob_up = blob.upper()
+            for sig in trip_signals:
+                idx = blob_up.find(sig)
+                if idx != -1:
+                    if idx + len(sig) <= 300:
+                        return True, blob[:300]
+                    start = max(0, idx - 60)
+                    return True, f"{sig}: {blob[start:start + 260]}"
         return False, ""
 
 
@@ -3019,12 +3027,49 @@ class AutonomousLifecycleSupervisor:
             except Exception as ex:
                 rec["steps"]["workspace_reconcile"] = f"ERROR: {ex}"
 
+            ws_step = str(rec["steps"].get("workspace_reconcile") or "")
+            ws_ok = (not ws_step.startswith("ERROR")) and (ws_step.upper() not in ("ERROR", "FAIL", "FAILED"))
+            reason_low = rec["failure_reason"].lower()
+            is_non_indexing = any(
+                tok in reason_low
+                for tok in (
+                    "rollback_ci",
+                    "not_attributable",
+                    "ci fail",
+                    "ci_fail",
+                    "timeout",
+                    "timed out",
+                    "seo",
+                    "masterseo",
+                    "truth_gate",
+                    "truth_contradiction",
+                    "unlisted_citation",
+                    "404",
+                    "latch",
+                    "reconcil",
+                    "contamination",
+                )
+            )
+            is_indexing_failure = any(
+                tok in reason_low
+                for tok in ("index", "gsc", "sitemap", "crawl", "quarantine", "degraded_rolled_back", "overlay")
+            )
+
             try:
                 from pseofactory.indexing_inspector import DailyIndexingInspector
                 insp = DailyIndexingInspector(tenant_id=tid)
                 insp_rep = insp.run_inspection(dry_run=False, auto_remediate=True, vertex_diagnose=False)
-                rec["steps"]["indexing_auto_remediate"] = insp_rep.get("audit_status", "UNKNOWN")
-                rec["status"] = "RECOVERED" if insp_rep.get("audit_status") == "PASS" else "PARTIAL_RECOVERY"
+                insp_status = insp_rep.get("audit_status", "UNKNOWN")
+                rec["steps"]["indexing_auto_remediate"] = insp_status
+                if insp_status == "PASS":
+                    if ws_ok and is_indexing_failure and not is_non_indexing:
+                        rec["status"] = "RECOVERED"
+                    elif ws_ok:
+                        rec["status"] = "PARTIAL_RECOVERY"
+                    else:
+                        rec["status"] = "UNRECOVERED"
+                else:
+                    rec["status"] = "UNRECOVERED"
             except Exception as ex:
                 rec["steps"]["indexing_auto_remediate"] = f"ERROR: {ex}"
                 rec["status"] = "RECOVERY_FAILED"
@@ -3270,9 +3315,12 @@ class AutonomousLifecycleSupervisor:
             state_path=self.state_file.parent / "department_pipeline_state.json",
             ledger=getattr(self.heartbeat_tracker, "ledger", AtomicStateLedger),
         )
+        discovery_status = (
+            "FAILED" if daily_trend_build_summary.get("status") == "ERROR" else "COMPLETED"
+        )
         pipeline_sm.record_stage(
             stage="DISCOVERY",
-            status="COMPLETED",
+            status=discovery_status,
             trigger_mode="IMMEDIATE_DELTA" if (force or drift_detected or daily_built_cnt > 0) else "BATCHED_CADENCE",
             delta_detected=bool(force or drift_detected or daily_built_cnt > 0),
             upstream_fingerprint=current_engine_hash,
@@ -3294,9 +3342,14 @@ class AutonomousLifecycleSupervisor:
                     sync_edge_leads_to_ledger,
                 )
                 sync_edge_leads_to_ledger(auto_fulfill_unfulfilled=True)
+                is_fast_mode = (
+                    os.environ.get("PSEUFACTORY_FAST_MODE") == "1"
+                    or os.environ.get("PSEOFACTORY_FAST_MODE") == "1"
+                )
                 p_rep = run_autonomous_partner_lifecycle_sync(
                     force_mail_poll=True,
                     execute_live_probes=False,
+                    fetch_live_earnings=not is_fast_mode,
                     persist=True,
                 )
                 audit_end_to_end_monetization_and_fulfillment(execute_live=False)
@@ -3326,9 +3379,12 @@ class AutonomousLifecycleSupervisor:
             except Exception as exc:
                 partner_sync_summary = {"status": "ERROR", "error": str(exc)}
 
+        monetization_status = (
+            "FAILED" if partner_sync_summary.get("status") == "ERROR" else "COMPLETED"
+        )
         pipeline_sm.record_stage(
             stage="MONETIZATION",
-            status="COMPLETED",
+            status=monetization_status,
             trigger_mode="IMMEDIATE_DELTA" if monetization_requires_rebuild else "BATCHED_CADENCE",
             delta_detected=bool(
                 monetization_requires_rebuild
@@ -3530,9 +3586,106 @@ class AutonomousLifecycleSupervisor:
                     else:
                         eligible_prop_ids.append(pid)
 
+                aligned_skipped: Dict[str, MaintenanceResult] = {}
+                unaligned_prop_ids: List[str] = list(eligible_prop_ids)
+                if not force and drift_detected and not monetization_requires_rebuild and eligible_prop_ids:
+                    from pseofactory.drift import _verify_single_tenant_for_latch, compute_tenant_substrate_hash
+                    from pseofactory.maintenance import AssetIntegrityEvaluator, RetroReflectionEngine
+
+                    chk_evaluator = AssetIntegrityEvaluator()
+                    already_retro_ok = set(drift_report.get("tenants_retro_verified") or [])
+                    is_prod_ws = (
+                        Path(self.workspace_root).resolve() == Path("/home/ubuntuadmin/projects").resolve()
+                    )
+                    next_unaligned: List[str] = []
+                    for pid in eligible_prop_ids:
+                        if pid in reconcile_failures:
+                            next_unaligned.append(pid)
+                            continue
+                        adp = adapters.get(pid)
+                        t_repo = Path(adp.repo_path) if (adp and getattr(adp, "repo_path", None)) else None
+                        t_dist = Path(adp.dist_dir) if (adp and getattr(adp, "dist_dir", None)) else None
+                        if t_repo is None or t_dist is None or not t_dist.is_dir():
+                            next_unaligned.append(pid)
+                            continue
+                        lock_f = t_repo / "substrate_lock.json"
+                        eh_f = t_repo / ".agy" / "engine_hash.json"
+                        if not (lock_f.is_file() and eh_f.is_file()):
+                            next_unaligned.append(pid)
+                            continue
+                        try:
+                            l_data = json.loads(lock_f.read_text(encoding="utf-8"))
+                            eh_data = json.loads(eh_f.read_text(encoding="utf-8"))
+                            l_eh = str(l_data.get("engine_hash") or "")
+                            l_sh = str(l_data.get("substrate_hash") or l_eh)
+                            eh_val = str(eh_data.get("engine_hash") or eh_data.get("hash") or "")
+                            lock_aligned = (
+                                l_eh == current_engine_hash
+                                and l_sh == current_engine_hash
+                            ) or (
+                                bool(l_data.get("tenant_substrate_hash"))
+                                and str(l_data.get("tenant_substrate_hash")) == compute_tenant_substrate_hash(pid)
+                            )
+                            eh_aligned = bool(eh_val) and (eh_val == current_engine_hash or eh_val == l_eh)
+                            if not (lock_aligned and eh_aligned):
+                                next_unaligned.append(pid)
+                                continue
+                        except Exception:
+                            next_unaligned.append(pid)
+                            continue
+                        if (t_repo / ".git").exists():
+                            try:
+                                st_chk = subprocess.run(
+                                    ["git", "-C", str(t_repo), "status", "--porcelain"],
+                                    capture_output=True,
+                                    text=True,
+                                    check=False,
+                                    timeout=5,
+                                )
+                                if st_chk.returncode != 0 or st_chk.stdout.strip():
+                                    next_unaligned.append(pid)
+                                    continue
+                            except Exception:
+                                next_unaligned.append(pid)
+                                continue
+                        try:
+                            a_rep = chk_evaluator.audit_all(adp, check_engine_drift=False, check_ledger=False)
+                            if a_rep.drifted_assets_count > 0:
+                                next_unaligned.append(pid)
+                                continue
+                            if pid not in already_retro_ok:
+                                r_rep = RetroReflectionEngine.audit_estate(t_dist, pid)
+                                if int(r_rep.get("stale_count", 0)) > 0:
+                                    next_unaligned.append(pid)
+                                    continue
+                            latch_reasons_t = _verify_single_tenant_for_latch(
+                                str(t_repo.parent),
+                                pid,
+                                t_repo.name,
+                                current_engine_hash,
+                                is_prod_ws,
+                                bool(enable_gitops),
+                                True,
+                            )
+                            if latch_reasons_t:
+                                next_unaligned.append(pid)
+                                continue
+                        except Exception:
+                            next_unaligned.append(pid)
+                            continue
+                        aligned_skipped[pid] = MaintenanceResult(
+                            property_id=pid,
+                            status="SKIPPED_ALIGNED",
+                            assets_audited=a_rep.total_assets_checked,
+                            assets_drifted=0,
+                            assets_refactored=0,
+                            assets_failed=0,
+                        )
+                    unaligned_prop_ids = next_unaligned
+
                 fleet_results: Dict[str, MaintenanceResult] = {}
-                if eligible_prop_ids:
-                    target_prop_list = eligible_prop_ids if (property_ids or breaker_skipped) else None
+                if unaligned_prop_ids:
+                    target_prop_list = unaligned_prop_ids if (property_ids or breaker_skipped or aligned_skipped) else None
                     fleet_results = self.coordinator.run_fleet(
                         property_ids=target_prop_list,
                         force=force or drift_detected,
@@ -3544,7 +3697,7 @@ class AutonomousLifecycleSupervisor:
                         enable_distribution=enable_distribution,
                     )
 
-                # Inspect run_fleet outcomes for ROLLBACK_CI_FAILED and trip circuit-breaker
+                # Inspect run_fleet outcomes for ROLLBACK_CI_FAILED or NOT_ATTRIBUTABLE and trip circuit-breaker
                 if not dry_run:
                     for pid, res_obj in fleet_results.items():
                         hit_rb_ci, rb_reason = RollbackCircuitBreaker.result_has_rollback_ci_failed(res_obj)
@@ -3555,6 +3708,9 @@ class AutonomousLifecycleSupervisor:
                                 cycle_id=cycle_id,
                                 reason=rb_reason,
                             )
+
+                for pid, skip_res in aligned_skipped.items():
+                    fleet_results[pid] = skip_res
 
                 for pid, skip_res in breaker_skipped.items():
                     fleet_results[pid] = skip_res
@@ -3850,6 +4006,63 @@ class AutonomousLifecycleSupervisor:
                     False, property_dicts, cycle_id, dry_run, scoped=bool(property_ids)
                 )
                 self_heal_actions = self._execute_self_healing_recovery(escalations, cycle_id, dry_run)
+                for stg, stg_status, stg_summary in (
+                    (
+                        "ENGINEERING",
+                        "FAILED" if any(
+                            r.status not in ("SUCCESS", "SKIPPED_NO_CHANGES", "DRY_RUN", "SKIPPED_ALIGNED", "DEFERRED")
+                            for r in fleet_results.values()
+                        ) else "COMPLETED",
+                        {
+                            "tenants_processed": list(fleet_results.keys()),
+                            "assets_refactored": sum(int(getattr(r, "assets_refactored", 0)) for r in fleet_results.values()),
+                            "assets_failed": sum(int(getattr(r, "assets_failed", 0)) for r in fleet_results.values()),
+                        },
+                    ),
+                    (
+                        "VERIFICATION",
+                        "FAILED",
+                        {
+                            "all_passed": False,
+                            "reconcile_failures": reconcile_failures,
+                            "tenant_statuses": {k: v.status for k, v in fleet_results.items()},
+                        },
+                    ),
+                    (
+                        "SYNDICATION",
+                        "SKIPPED",
+                        {
+                            "distribution_enabled": False,
+                            "reason": "Blocked by upstream ENGINEERING/VERIFICATION failure",
+                        },
+                    ),
+                    (
+                        "DEPLOYMENT",
+                        "FAILED",
+                        {
+                            "gitops_enabled": bool(enable_gitops and not dry_run),
+                            "tenant_statuses": {k: v.status for k, v in fleet_results.items()},
+                        },
+                    ),
+                ):
+                    pipeline_sm.record_stage(
+                        stage=stg,
+                        status=stg_status,
+                        trigger_mode="IMMEDIATE_DELTA",
+                        delta_detected=True,
+                        upstream_fingerprint=current_engine_hash,
+                        summary=stg_summary,
+                    )
+                pipeline_state = pipeline_sm.finalize_and_persist(
+                    cycle_id=cycle_id,
+                    overall_status="FAIL",
+                    trigger_mode="IMMEDIATE_DELTA",
+                    engine_hash=current_engine_hash,
+                    persist=not dry_run,
+                )
+                hb_extra_fail: Dict[str, Any] = {"department_pipeline": pipeline_state}
+                if partner_sync_summary:
+                    hb_extra_fail["partner_lifecycle_sync"] = partner_sync_summary
                 self.heartbeat_tracker.emit(
                     status=cycle_status,
                     cycle_id=cycle_id,
@@ -3857,6 +4070,7 @@ class AutonomousLifecycleSupervisor:
                     engine_hash=current_engine_hash,
                     consecutive_failures=self.consecutive_failures,
                     last_cycle_duration_seconds=duration,
+                    extra=hb_extra_fail,
                 )
                 return {
                     "status": cycle_status,
@@ -3868,6 +4082,7 @@ class AutonomousLifecycleSupervisor:
                     "consecutive_failures": self.consecutive_failures,
                     "escalations": escalations,
                     "self_healing_actions": self_heal_actions,
+                    "department_pipeline": pipeline_state,
                 }
         except Exception as exc:
             duration = time.time() - start_time

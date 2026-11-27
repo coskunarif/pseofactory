@@ -1857,6 +1857,44 @@ def test_decoupled_14d_validate_fix_and_core_page_canary():
     assert alert_discovered["failing_core_pages"][0]["path"] == "/about/"
 
 
+def test_build_ai_repair_prompt_passes_truth_gate_citations_all_tenants() -> None:
+    """
+    Regression test for Fix 2: build_ai_repair_prompt statutory frameworks for all
+    4 canonical tenants (prexvo, gainhelm, lienbond, profithelm) must pass
+    UnifiedTruthGate GATE_CITATIONS with zero unlisted or forbidden citations.
+    """
+    from pseofactory.indexing.feedback_loop import GSCRootCauseClassifier
+    from pseofactory.truth_gate import UnifiedTruthGate
+
+    gate = UnifiedTruthGate()
+    classifications = (
+        "CONTENT_QUALITY_DEFICIT",
+        "CONTENT_DEPTH_DEFICIT",
+        "CRAWL_BUDGET_LAG",
+        "ALGORITHMIC_EXPANSION_FREEZE",
+        "OTHER_ANOMALY",
+    )
+    for tenant in ("prexvo", "gainhelm", "lienbond", "profithelm"):
+        for cls in classifications:
+            prompt = GSCRootCauseClassifier.build_ai_repair_prompt(
+                url=f"https://{tenant}.com/tools/sample-tool/",
+                classification=cls,
+                reason="Crawled - currently not indexed",
+                remediation_action="REWRITE_ENRICH",
+                metadata={"tenant_id": tenant},
+            )
+            assert "\u2014" not in prompt and "\u2013" not in prompt
+            payload = json.dumps({"slug": "sample-tool", "ai_repair_prompt": prompt}, indent=2)
+            rep = gate.audit_non_html_file(
+                f"/tmp/{tenant}_repair_prompt.json",
+                property_id=tenant,
+                content=payload,
+            )
+            cit_viols = [v for v in rep.violations if v.gate == "GATE_CITATIONS"]
+            assert cit_viols == [], f"{tenant}/{cls} failed GATE_CITATIONS: {cit_viols}"
+
+
+
 
 
 

@@ -186,10 +186,25 @@ def test_compile_prexvo_estate_end_to_end_and_truth_gate(tmp_path):
         # Mandatory YMYL federal-refinance disclosure
         assert "permanently forfeits" in raw.lower(), f"Missing YMYL forfeiture notice on {page_path.parent.name}"
 
-        # Never stale 2025 $15,650 / wrong $16,120 / stale RAP 120 to 240
-        assert "15,650" not in raw and "15650" not in raw
+        # Never stale 2025 $15,650 / wrong $16,120 / stale RAP 120 to 240 in prose or JS (calculation-manifest timeseries matches sidecar)
+        raw_no_manifest = re.sub(
+            r'<script\b[^>]*\bclass=(?:"[^"]*\bcalculation-manifest\b[^"]*"|\'[^\']*\bcalculation-manifest\b[^\']*\')[^>]*>[\s\S]*?</script>',
+            "",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        assert "15,650" not in raw_no_manifest and "15650" not in raw_no_manifest
         assert "16,120" not in raw and "16120" not in raw
         assert "120 to 240 certified monthly payments" not in raw.lower()
+        sidecar_m = json.loads((dist_dir / "manifests" / f"{slug}.json").read_text(encoding="utf-8"))
+        embed_m_match = re.search(
+            r'<script\b[^>]*\bclass=(?:"[^"]*\bcalculation-manifest\b[^"]*"|\'[^\']*\bcalculation-manifest\b[^\']*\')[^>]*>([\s\S]*?)</script>',
+            raw,
+            flags=re.IGNORECASE,
+        )
+        assert embed_m_match is not None
+        embed_m = json.loads(embed_m_match.group(1))
+        assert embed_m.get("statutory_economic_matrix") == sidecar_m.get("statutory_economic_matrix")
 
         # Serialized 2026 FPL in inline JS
         assert "15960" in raw and "5680" in raw
