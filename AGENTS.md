@@ -1,6 +1,6 @@
 # Autonomous pSEO & GEO Software Factory (`pseofactory`)
 
-**Goal**: Solo-founder autonomous factory (`/home/ubuntuadmin/projects/pseofactory`) that builds, verifies, monetizes, and deploys compiled sites with zero manual QA. Design every change for 50+ sites (not 4): keep stages independent with fail-closed handoffs, and keep runs fast via file hashes and isolated property lanes.
+**Goal**: An AI-powered autonomous software factory (`/home/ubuntuadmin/projects/pseofactory`) with repeatable results. It finds what to build, builds it, verifies it, deploys it, gets it found, earns from it, and learns from the result, with no person in the loop. The engine is the product that lasts; the tenants are what it produces. Revenue is the result of a factory that works better than the rest, not the target of one step. Design every change for 50+ sites (not 4): keep stages independent with fail-closed handoffs, and keep runs fast via file hashes and isolated property lanes.
 
 ## 1. Workflow (Isolate -> Edit -> Verify -> Ship)
 1. **Isolate Worktree**: `/home/ubuntuadmin/projects/.agy/worktree_harness.sh create pseofactory <run_id>` (never edit a tenant repo directly).
