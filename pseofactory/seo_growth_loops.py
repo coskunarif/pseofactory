@@ -7684,24 +7684,38 @@ def evaluate_north_star_targets(
 
     # Pillar 4: Sponsor Readiness & Reader Conversions
     eng_path = root / ".agy" / "outbound_partner_engagement.json"
+    tel_path = root / ".agy" / "telemetry_events.jsonl"
     calculator_Preset_events = 0
     sponsor_clicks = 0
     unapproved_partner_leaks = 0
+    if tel_path.is_file():
+        try:
+            from pseofactory.partner_tracker import aggregate_verified_outbound_partner_engagement
+
+            v_eng = aggregate_verified_outbound_partner_engagement(tel_path, property_id=prop)
+            sponsor_clicks = int(v_eng.get("verified_non_probe_outbound_clicks", 0) or 0)
+            calculator_Preset_events = int(v_eng.get("total_calculator_interactions", 0) or 0)
+        except Exception:
+            pass
     if eng_path.is_file():
         try:
             e_data = json.loads(eng_path.read_text(encoding="utf-8"))
             if isinstance(e_data, dict):
-                sponsor_clicks = int(
-                    e_data.get("total_outbound_clicks", 0)
-                    or e_data.get("total_affiliate_clicks", 0)
-                    or e_data.get("total_clicks", 0)
-                    or 0
-                )
-                calculator_Preset_events = int(
-                    e_data.get("total_preset_interactions", 0)
-                    or e_data.get("total_calculator_interactions", 0)
-                    or 0
-                )
+                if not tel_path.is_file():
+                    if "verified_non_probe_outbound_clicks" in e_data:
+                        sponsor_clicks = int(e_data.get("verified_non_probe_outbound_clicks", 0) or 0)
+                    else:
+                        sponsor_clicks = int(
+                            e_data.get("total_outbound_clicks", 0)
+                            or e_data.get("total_affiliate_clicks", 0)
+                            or e_data.get("total_clicks", 0)
+                            or 0
+                        )
+                    calculator_Preset_events = int(
+                        e_data.get("total_preset_interactions", 0)
+                        or e_data.get("total_calculator_interactions", 0)
+                        or 0
+                    )
                 unapproved_partner_leaks = int(e_data.get("unapproved_partner_leaks", 0) or 0)
         except Exception:
             pass
@@ -7723,11 +7737,47 @@ def evaluate_north_star_targets(
         except Exception:
             refl_summary = {}
 
+    impr_target_30 = int(p1_targets["impressions_30d_target"])
+    clicks_target_30 = int(p1_targets["clicks_30d_target"])
+    impr_attainment_pct = round((impr_30d / float(max(1, impr_target_30))) * 100.0, 2)
+    clicks_attainment_pct = round((clicks_30d / float(max(1, clicks_target_30))) * 100.0, 2)
+    missing_targets: List[str] = []
+    if impr_30d < impr_target_30:
+        missing_targets.append(f"30d_impressions:{impr_30d}/{impr_target_30}")
+    if clicks_30d < clicks_target_30:
+        missing_targets.append(f"30d_clicks:{clicks_30d}/{clicks_target_30}")
+    if pages_audited > 0 and indexed_coverage_ratio_pct < 60.0:
+        missing_targets.append(f"indexed_coverage:{indexed_coverage_ratio_pct}%/60.0%")
+
+    health_ok = (
+        kw_inflation_res["status"] == "PASS"
+        and unapproved_partner_leaks == 0
+        and quota_exhaustion_events == 0
+    )
+    critical_miss = (
+        clicks_30d == 0
+        or impr_30d < (impr_target_30 * 0.25)
+        or clicks_30d < (clicks_target_30 * 0.25)
+    )
+    if (not health_ok) or critical_miss:
+        ns_status = "FAIL"
+    elif missing_targets:
+        ns_status = "BELOW_TARGET"
+    else:
+        ns_status = "PASS"
+
     scorecard = {
         "workflow": "north_star_scorecard",
-        "status": "PASS" if (kw_inflation_res["status"] == "PASS" and unapproved_partner_leaks == 0 and quota_exhaustion_events == 0) else "WARN",
+        "status": ns_status,
         "property_id": prop,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "target_attainment": {
+            "impressions_30d_pct": impr_attainment_pct,
+            "clicks_30d_pct": clicks_attainment_pct,
+            "indexed_coverage_pct": indexed_coverage_ratio_pct,
+            "targets_met": len(missing_targets) == 0 and health_ok,
+            "missing_targets": missing_targets,
+        },
         "pillars": {
             "1_search_impressions_and_ctr": {
                 "current_30d_impressions": impr_30d,
@@ -8033,27 +8083,12 @@ def evaluate_closed_loop_cohort_reflection(
         if canonicalized_legacy_slugs:
             eng_data["canonicalized_legacy_slugs"] = canonicalized_legacy_slugs
 
-    probe_sub_id_re = re.compile(
-        r"(?:_oct19\b|_test_|_live_kv_|_card(?:_\d+|\b)|_edge\b|^qa_|^probe_|^smoke_)",
-        re.IGNORECASE,
-    )
+    from pseofactory.affiliates import load_live_partner_keys_from_vault
+    from pseofactory.partner_tracker import classify_outbound_click_event
+
     raw_click_events: List[Dict[str, Any]] = []
     if isinstance(eng_data.get("events"), list):
         raw_click_events.extend(x for x in eng_data["events"] if isinstance(x, dict))
-    if not raw_click_events and isinstance(eng_data.get("by_subid"), dict):
-        for sub_k, sub_v in eng_data["by_subid"].items():
-            if isinstance(sub_v, dict):
-                raw_click_events.append(
-                    {
-                        "event_type": "affiliate_click",
-                        "sub_id": str(sub_v.get("subid") or sub_k).strip(),
-                        "cta_slot": str(sub_v.get("cta_slot") or "preset_scenario_cta").strip(),
-                        "clicks": int(sub_v.get("outbound_clicks", sub_v.get("clicks", 1)) or 1),
-                        "estimated_revenue_yield_usd": float(
-                            sub_v.get("estimated_revenue_yield_usd", sub_v.get("estimated_yield_usd", 0.0)) or 0.0
-                        ),
-                    }
-                )
     local_clicks_jsonl = root / ".agy" / "outbound_partner_clicks.jsonl"
     local_telemetry_jsonl = root / ".agy" / "telemetry_events.jsonl"
     central_clicks_jsonl = Path("/home/ubuntuadmin/projects/pseofactory/.agy/outbound_partner_clicks.jsonl")
@@ -8077,51 +8112,108 @@ def evaluate_closed_loop_cohort_reflection(
                             raw_click_events.append(ev)
             except Exception:
                 pass
+    if not raw_click_events and isinstance(eng_data.get("by_subid"), dict):
+        for sub_k, sub_v in eng_data["by_subid"].items():
+            if isinstance(sub_v, dict):
+                raw_click_events.append(
+                    {
+                        "event_type": "affiliate_click",
+                        "sub_id": str(sub_v.get("subid") or sub_k).strip(),
+                        "partner_key": str(sub_v.get("partner_key") or "").strip(),
+                        "tool_slug": str(sub_v.get("tool_slug") or "").strip(),
+                        "cta_slot": str(sub_v.get("cta_slot") or "preset_scenario_cta").strip(),
+                        "contract_tier": str(sub_v.get("contract_tier") or "").strip(),
+                        "clicks": int(sub_v.get("outbound_clicks", sub_v.get("clicks", 1)) or 1),
+                        "estimated_revenue_yield_usd": float(
+                            sub_v.get("estimated_revenue_yield_usd", sub_v.get("estimated_yield_usd", 0.0)) or 0.0
+                        ),
+                    }
+                )
 
+    live_partner_keys = load_live_partner_keys_from_vault(prop)
     synthetic_probe_clicks_filtered = 0
+    unmonetized_clicks_filtered = 0
+    unapproved_partner_clicks_filtered = 0
     synthetic_probe_sub_ids: List[str] = []
     organic_slot_clicks: Dict[str, float] = {}
     organic_slot_yield: Dict[str, float] = {}
+    organic_partner_clicks: Dict[str, int] = {}
+    organic_partner_yield: Dict[str, float] = {}
+    organic_slug_clicks: Dict[str, int] = {}
+    organic_slug_yield: Dict[str, float] = {}
+    verified_non_probe_clicks_stream = 0
     has_raw_click_event_stream = False
     for ev in raw_click_events:
-        ev_type = str(ev.get("event_type") or ev.get("event") or "outbound_partner_click").strip().lower()
-        if ev_type not in ("outbound_partner_click", "partner_click", "affiliate_click", "click"):
+        cls = classify_outbound_click_event(
+            ev,
+            property_id=prop,
+            live_partner_keys=live_partner_keys,
+            include_card_subid_as_probe=True,
+        )
+        if not cls["is_click"]:
             continue
         has_raw_click_event_stream = True
-        sub_id = str(ev.get("sub_id") or ev.get("subid") or ev.get("click_id") or "").strip()
-        slot_name = str(ev.get("cta_slot") or "preset_scenario_cta").strip()
-        if sub_id and probe_sub_id_re.search(sub_id):
-            synthetic_probe_clicks_filtered += int(ev.get("clicks", 1) or 1)
-            if sub_id not in synthetic_probe_sub_ids:
+        cnt_i = int(cls["clicks"])
+        sub_id = str(cls["subid"])
+        slot_name = str(cls["cta_slot"] or "preset_scenario_cta")
+        pk_name = str(cls["partner_key"] or "")
+        slug_name = legacy_slug_map.get(str(cls["slug"] or "").strip().lower(), str(cls["slug"] or "").strip())
+        if cls["is_synthetic_probe"]:
+            synthetic_probe_clicks_filtered += cnt_i
+            if sub_id and sub_id not in synthetic_probe_sub_ids:
                 synthetic_probe_sub_ids.append(sub_id)
+        elif cls["is_unmonetized_tier"]:
+            unmonetized_clicks_filtered += cnt_i
+        elif cls["is_unapproved_partner"]:
+            unapproved_partner_clicks_filtered += cnt_i
         else:
-            clk_v = float(ev.get("clicks", 1) or 1.0)
-            rev_v = float(ev.get("estimated_revenue_yield_usd", ev.get("estimated_yield_usd", 0.0)) or 0.0)
-            organic_slot_clicks[slot_name] = organic_slot_clicks.get(slot_name, 0.0) + clk_v
+            verified_non_probe_clicks_stream += cnt_i
+            rev_v = float(cls["estimated_yield_usd"])
+            organic_slot_clicks[slot_name] = organic_slot_clicks.get(slot_name, 0.0) + float(cnt_i)
             organic_slot_yield[slot_name] = organic_slot_yield.get(slot_name, 0.0) + rev_v
+            if pk_name:
+                organic_partner_clicks[pk_name] = organic_partner_clicks.get(pk_name, 0) + cnt_i
+                organic_partner_yield[pk_name] = organic_partner_yield.get(pk_name, 0.0) + rev_v
+            if slug_name:
+                organic_slug_clicks[slug_name] = organic_slug_clicks.get(slug_name, 0) + cnt_i
+                organic_slug_yield[slug_name] = organic_slug_yield.get(slug_name, 0.0) + rev_v
 
     raw_recorded_clicks = int(eng_data.get("total_outbound_clicks", 0) or 0)
     verified_non_probe_clicks = (
-        max(0, raw_recorded_clicks - synthetic_probe_clicks_filtered)
+        verified_non_probe_clicks_stream
         if has_raw_click_event_stream
-        else raw_recorded_clicks
+        else int(eng_data.get("verified_non_probe_outbound_clicks", raw_recorded_clicks) or 0)
+    )
+    total_verified_revenue_yield_usd = (
+        round(sum(organic_slot_yield.values()), 2)
+        if has_raw_click_event_stream
+        else round(float(eng_data.get("total_estimated_revenue_yield_usd", 0.0) or 0.0), 2)
     )
     eng_data["raw_recorded_outbound_clicks"] = raw_recorded_clicks
     eng_data["synthetic_probe_clicks_filtered"] = synthetic_probe_clicks_filtered
+    eng_data["unmonetized_destination_clicks_filtered"] = unmonetized_clicks_filtered
+    eng_data["unapproved_partner_clicks_filtered"] = unapproved_partner_clicks_filtered
     eng_data["synthetic_probe_sub_ids_filtered"] = synthetic_probe_sub_ids
     eng_data["verified_non_probe_outbound_clicks"] = verified_non_probe_clicks
-    if persist and eng_path.is_file() and (canonicalized_legacy_slugs or synthetic_probe_clicks_filtered > 0):
+    if has_raw_click_event_stream:
+        eng_data["total_estimated_revenue_yield_usd"] = total_verified_revenue_yield_usd
+    if persist and eng_path.is_file() and (
+        canonicalized_legacy_slugs
+        or synthetic_probe_clicks_filtered > 0
+        or unmonetized_clicks_filtered > 0
+        or unapproved_partner_clicks_filtered > 0
+    ):
         try:
             AtomicStateLedger.save_json(eng_path, eng_data)
         except Exception:
             pass
 
-    # Compute empirical conversion slot weights from non-probe partner click logs
+    # Compute empirical conversion slot weights from verified non-probe monetized partner click logs
     conversion_slot_weights: Dict[str, float] = {}
     by_slot_raw = eng_data.get("by_cta_slot") if isinstance(eng_data.get("by_cta_slot"), dict) else {}
     for slot_k, slot_v in by_slot_raw.items():
         slot_key = str(slot_k)
-        if has_raw_click_event_stream and synthetic_probe_clicks_filtered > 0:
+        if has_raw_click_event_stream:
             s_clicks = float(organic_slot_clicks.get(slot_key, 0.0))
             s_rev = float(organic_slot_yield.get(slot_key, 0.0))
             s_interactions = float(slot_v.get("intent_interactions", 0) or 0.0) if isinstance(slot_v, dict) else 0.0
@@ -8177,9 +8269,11 @@ def evaluate_closed_loop_cohort_reflection(
             "total_outbound_clicks": int(eng_data.get("total_outbound_clicks", 0) or 0),
             "verified_non_probe_outbound_clicks": verified_non_probe_clicks,
             "synthetic_probe_clicks_filtered": synthetic_probe_clicks_filtered,
+            "unmonetized_destination_clicks_filtered": unmonetized_clicks_filtered,
+            "unapproved_partner_clicks_filtered": unapproved_partner_clicks_filtered,
             "canonicalized_legacy_slugs_count": len(canonicalized_legacy_slugs),
             "total_calculator_interactions": int(eng_data.get("total_calculator_interactions", 0) or 0),
-            "total_estimated_revenue_yield_usd": round(float(eng_data.get("total_estimated_revenue_yield_usd", 0.0) or 0.0), 2),
+            "total_estimated_revenue_yield_usd": total_verified_revenue_yield_usd,
             "tracked_slugs_count": len(eng_data.get("by_slug") or {}),
             "tracked_partners_count": len(eng_data.get("by_partner") or {}),
         },
@@ -9038,10 +9132,14 @@ def evaluate_closed_loop_cohort_reflection(
             ai_attribution_pages_count += 1
 
         s_eng = by_slug_eng.get(t_slug) if isinstance(by_slug_eng.get(t_slug), dict) else {}
-        out_clicks = int(s_eng.get("outbound_clicks", 0) or 0)
+        if has_raw_click_event_stream:
+            out_clicks = int(organic_slug_clicks.get(t_slug, 0) or 0)
+            est_rev = round(float(organic_slug_yield.get(t_slug, 0.0) or 0.0), 2)
+        else:
+            out_clicks = int(s_eng.get("outbound_clicks", 0) or 0)
+            est_rev = round(float(s_eng.get("estimated_revenue_yield_usd", 0.0) or 0.0), 2)
         calc_inter = int(s_eng.get("calculator_interactions", 0) or 0)
         preset_clk = int(s_eng.get("preset_clicks", 0) or 0)
-        est_rev = round(float(s_eng.get("estimated_revenue_yield_usd", 0.0) or 0.0), 2)
         top_slot = str(s_eng.get("top_converting_cta_slot") or "preset_scenario_cta")
         top_partner = str(s_eng.get("top_converting_partner") or "")
         if out_clicks > 0:
@@ -9074,10 +9172,18 @@ def evaluate_closed_loop_cohort_reflection(
         [
             {
                 "cta_slot": str(k),
-                "outbound_clicks": int(v.get("outbound_clicks", v.get("clicks", 0)) or 0) if isinstance(v, dict) else int(v),
+                "outbound_clicks": (
+                    int(organic_slot_clicks.get(str(k), 0) or 0)
+                    if has_raw_click_event_stream
+                    else (int(v.get("outbound_clicks", v.get("clicks", 0)) or 0) if isinstance(v, dict) else int(v))
+                ),
                 "intent_interactions": int(v.get("intent_interactions", 0) or 0) if isinstance(v, dict) else int(v),
                 "intent_to_click_rate": round(float(v.get("intent_to_click_rate", 0.0) or 0.0), 3) if isinstance(v, dict) else 1.0,
-                "estimated_revenue_yield_usd": round(float(v.get("estimated_revenue_yield_usd", v.get("estimated_yield_usd", 0.0)) or 0.0), 2) if isinstance(v, dict) else round(float(v) * 75.0, 2),
+                "estimated_revenue_yield_usd": (
+                    round(float(organic_slot_yield.get(str(k), 0.0) or 0.0), 2)
+                    if has_raw_click_event_stream
+                    else (round(float(v.get("estimated_revenue_yield_usd", v.get("estimated_yield_usd", 0.0)) or 0.0), 2) if isinstance(v, dict) else round(float(v) * 75.0, 2))
+                ),
                 "empirical_weight": conversion_slot_weights.get(str(k), 1.0),
             }
             for k, v in by_slot_raw.items()
@@ -9091,9 +9197,21 @@ def evaluate_closed_loop_cohort_reflection(
         [
             {
                 "partner_key": str(pk),
-                "outbound_clicks": int(pv.get("outbound_clicks", pv.get("clicks", 0)) or 0),
-                "estimated_revenue_yield_usd": round(float(pv.get("estimated_revenue_yield_usd", pv.get("estimated_yield_usd", 0.0)) or 0.0), 2),
-                "empirical_erpm_usd": round(float(pv.get("empirical_erpm_usd", 0.0) or 0.0), 2),
+                "outbound_clicks": (
+                    int(organic_partner_clicks.get(str(pk), 0) or 0)
+                    if has_raw_click_event_stream
+                    else int(pv.get("outbound_clicks", pv.get("clicks", 0)) or 0)
+                ),
+                "estimated_revenue_yield_usd": (
+                    round(float(organic_partner_yield.get(str(pk), 0.0) or 0.0), 2)
+                    if has_raw_click_event_stream
+                    else round(float(pv.get("estimated_revenue_yield_usd", pv.get("estimated_yield_usd", 0.0)) or 0.0), 2)
+                ),
+                "empirical_erpm_usd": (
+                    0.0
+                    if (has_raw_click_event_stream and int(organic_partner_clicks.get(str(pk), 0) or 0) == 0)
+                    else round(float(pv.get("empirical_erpm_usd", 0.0) or 0.0), 2)
+                ),
             }
             for pk, pv in by_partner_eng.items()
             if isinstance(pv, dict)
@@ -9323,13 +9441,13 @@ def evaluate_closed_loop_cohort_reflection(
                 "after_outbound_clicks": int(eng_data.get("total_outbound_clicks", 0) or 0),
                 "verified_non_probe_outbound_clicks": verified_non_probe_clicks,
                 "synthetic_probe_clicks_filtered": synthetic_probe_clicks_filtered,
+                "unmonetized_destination_clicks_filtered": unmonetized_clicks_filtered,
+                "unapproved_partner_clicks_filtered": unapproved_partner_clicks_filtered,
                 "synthetic_probe_sub_ids_filtered": synthetic_probe_sub_ids,
                 "canonicalized_legacy_slugs": canonicalized_legacy_slugs,
                 "before_calculator_interactions": 0,
                 "after_calculator_interactions": int(eng_data.get("total_calculator_interactions", 0) or 0),
-                "total_estimated_revenue_yield_usd": round(
-                    float(eng_data.get("total_estimated_revenue_yield_usd", 0.0) or 0.0), 2
-                ),
+                "total_estimated_revenue_yield_usd": total_verified_revenue_yield_usd,
                 "ai_mode_attribution_coverage_pct": round(
                     (ai_attribution_pages_count / float(max(1, len(top_level_tools)))) * 100.0, 2
                 ),

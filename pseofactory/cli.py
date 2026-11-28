@@ -427,7 +427,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             print(json.dumps(report, indent=2))
         else:
             _print_browser_audit_report(args.property or "dist", report)
-        return 0 if report.get("status") in ("PASS", "SKIPPED_CDP_OFFLINE") else 1
+        return 0 if report.get("status") == "PASS" else 1
 
     reg = TenantRegistry.default(workspace_root=ws_root_arg)
     if args.dist_dir:
@@ -1286,7 +1286,7 @@ def cmd_supervisor(args: argparse.Namespace) -> int:
                 handoff_props.append(sp_id)
         rep = verify_department_handoff_chain(
             property_ids=handoff_props,
-            persist=not getattr(args, "dry_run", False),
+            persist=bool(getattr(args, "persist", False)) and not bool(getattr(args, "dry_run", False)),
             strict_current_engine_hash=bool(getattr(args, "strict_engine_hash", False)),
         )
         if getattr(args, "json", False):
@@ -2974,6 +2974,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sup.add_argument("--force", action="store_true", help="Force rebuild and verification regardless of drift")
     p_sup.add_argument("--dry-run", action="store_true", help="Simulate cycle without writing disk assets or git commits")
     p_sup.add_argument("--verify-handoffs", action="store_true", help="Execute 6-stage department handoff contract verification across all 4 tenants")
+    p_sup.add_argument("--persist", action="store_true", help="Persist verification state to disk when running --verify-handoffs")
     p_sup.add_argument("--strict-engine-hash", action="store_true", help="Require every tenant substrate_lock and engine_hash to match current engine_hash exactly")
     p_sup.add_argument("--json", action="store_true", help="Output summary in JSON format")
     p_sup.add_argument("--skip-ci", action="store_true", help="Skip CI/CD watcher gate during GitOps dispatch")
@@ -3161,6 +3162,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_lp.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
     p_lp.add_argument("--json", action="store_true", help="Output learn-proof report as JSON")
 
+    p_ep = subparsers.add_parser(
+        "earn-proof",
+        help="Stage 2 Proof: read-only verification of commerce parity, live /r/<partner> redirects, approved partners, portal health, human leads, and revenue truth",
+    )
+    p_ep.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_ep.add_argument("--max-age-hours", type=float, default=72.0, help="Max age in hours for portfolio_revenue_truth.json (default: 72)")
+    p_ep.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_ep.add_argument("--skip-live", action="store_true", help="Skip live HTTP /r/<partner> redirect probes")
+    p_ep.add_argument("--json", action="store_true", help="Output earn-proof report as JSON")
+
+    p_sp = subparsers.add_parser(
+        "syndicate-proof",
+        help="Stage 5 Proof: read-only verification of GSC indexation ratio, live sitemap/robots/IndexNow reachability, external distribution permalinks, and AIO observatory freshness",
+    )
+    p_sp.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_sp.add_argument("--max-age-days", type=int, default=7, help="Max age in days for AIO observatory snapshots (default: 7)")
+    p_sp.add_argument("--min-indexed-pct", type=float, default=50.0, help="Minimum GSC indexed URL percentage when >=5 URLs inspected (default: 50)")
+    p_sp.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_sp.add_argument("--skip-live", action="store_true", help="Skip live HTTP sitemap/robots/IndexNow reachability probes")
+    p_sp.add_argument("--json", action="store_true", help="Output syndicate-proof report as JSON")
+
     return parser
 
 
@@ -3226,16 +3248,23 @@ def cmd_lead_monitor(args: argparse.Namespace) -> int:
     if getattr(args, "json", False):
         print(json.dumps(summary, indent=2))
     else:
+        human_leads = int(summary.get("human_leads", summary.get("total_leads", 0)) or 0)
+        synth_leads = int(summary.get("synthetic_probe_leads", 0) or 0)
+        internal_leads = int(summary.get("internal_operator_test_leads", 0) or 0)
+        total_leads = int(summary.get("total_leads", 0) or 0)
+        human_by_prop = summary.get("human_leads_by_property") or summary.get("by_property") or {}
+        lead_tag = "WARN" if (human_leads == 0 and (synth_leads > 0 or internal_leads > 0)) else "PASS"
         print(
-            f"[PASS] Lead Monitor: total={summary['total_leads']} | "
-            f"profithelm={summary['by_property'].get('profithelm', 0)} | "
-            f"prexvo={summary['by_property'].get('prexvo', 0)} | "
-            f"gainhelm={summary['by_property'].get('gainhelm', 0)} | "
-            f"lienbond={summary['by_property'].get('lienbond', 0)} | "
-            f"fulfilled={summary['transactional_fulfilled_count']} | "
-            f"action_bus={summary['action_bus_dispatched_count']} | "
-            f"pipeline_usd=${summary['total_pipeline_calculated_usd']:,.2f} | "
-            f"checkout_offers_usd=${summary['total_checkout_offer_pipeline_usd']:,.2f}"
+            f"[{lead_tag}] Lead Monitor: human_leads={human_leads} | synthetic_probe_leads={synth_leads} | "
+            f"internal_test_leads={internal_leads} | total={total_leads} | "
+            f"profithelm={human_by_prop.get('profithelm', 0)} | "
+            f"prexvo={human_by_prop.get('prexvo', 0)} | "
+            f"gainhelm={human_by_prop.get('gainhelm', 0)} | "
+            f"lienbond={human_by_prop.get('lienbond', 0)} | "
+            f"fulfilled={summary.get('human_transactional_fulfilled_count', summary.get('transactional_fulfilled_count', 0))} | "
+            f"action_bus={summary.get('human_action_bus_dispatched_count', summary.get('action_bus_dispatched_count', 0))} | "
+            f"pipeline_usd=${float(summary.get('total_pipeline_calculated_usd', 0.0) or 0.0):,.2f} | "
+            f"checkout_offers_usd=${float(summary.get('total_checkout_offer_pipeline_usd', 0.0) or 0.0):,.2f}"
         )
         if stripe_webhooks_report is not None:
             wh_tag = "PASS" if exit_code == 0 else "FAIL"
@@ -3259,11 +3288,18 @@ def cmd_north_star(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
-    props = list(CANONICAL_TENANT_IDS) if prop_arg == "all" else [prop_arg]
+    props = _discover_cli_tenant_ids() if prop_arg == "all" else [prop_arg]
     cards = {}
     for p_id in props:
         cards[p_id] = evaluate_north_star_targets(property_id=p_id, persist=not dry_run)
-    out = cards[props[0]] if len(props) == 1 else {"status": "PASS", "properties": cards}
+    card_statuses = [str(sc.get("status") or "FAIL").upper() for sc in cards.values()]
+    if any(st == "FAIL" for st in card_statuses):
+        overall_status = "FAIL"
+    elif any(st in ("BELOW_TARGET", "WARN") for st in card_statuses):
+        overall_status = "BELOW_TARGET"
+    else:
+        overall_status = "PASS"
+    out = cards[props[0]] if len(props) == 1 else {"status": overall_status, "properties": cards}
     if getattr(args, "json", False):
         print(json.dumps(out, indent=2))
     else:
@@ -3271,13 +3307,13 @@ def cmd_north_star(args: argparse.Namespace) -> int:
             p1 = sc.get("pillars", {}).get("1_search_impressions_and_ctr", {})
             p3 = sc.get("pillars", {}).get("3_ai_citations_and_entity_authority", {})
             print(
-                f"[{sc.get('status', 'PASS')}] North Star ({p_id}): "
+                f"[{sc.get('status', 'FAIL')}] North Star ({p_id}): "
                 f"30d_impr={p1.get('current_30d_impressions', 0)}/{p1.get('target_30d_impressions', 0)} | "
                 f"30d_clicks={p1.get('current_30d_clicks', 0)}/{p1.get('target_30d_clicks', 0)} | "
                 f"citation_ready={p3.get('citation_ready_briefs_coverage_pct', 0)}% | "
                 f"kw_ratio_gate={p3.get('source_keyword_inflation_gate_status', 'PASS')}"
             )
-    return 0
+    return 1 if overall_status == "FAIL" else 0
 
 
 def cmd_cohort_reflection(args: argparse.Namespace) -> int:
@@ -3808,6 +3844,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_find_proof(args)
     elif args.command == "learn-proof":
         return cmd_learn_proof(args)
+    elif args.command == "earn-proof":
+        return cmd_earn_proof(args)
+    elif args.command == "syndicate-proof":
+        return cmd_syndicate_proof(args)
     else:
         parser.print_help()
         return 1
@@ -4420,12 +4460,12 @@ def _resolve_trend_db_path(ws_root: str) -> Path:
 
 
 def _resolve_factory_agy_file(filename: str, ws_root: str) -> Path:
-    local_cand = Path(_project_root) / ".agy" / filename
-    if local_cand.is_file():
-        return local_cand
     ws_cand = Path(ws_root) / "pseofactory" / ".agy" / filename
     if ws_cand.is_file():
         return ws_cand
+    local_cand = Path(_project_root) / ".agy" / filename
+    if local_cand.is_file():
+        return local_cand
     return Path("/home/ubuntuadmin/projects/pseofactory/.agy") / filename
 
 
@@ -5046,6 +5086,715 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
             f"pseofactory=${rev_truth_summary.get('pseofactory_realized_revenue_usd', 0.0):.2f} | "
             f"persisted_age_h={rev_truth_summary.get('persisted_artifact_age_hours')}"
         )
+        for w in warnings:
+            print(f"  [WARN] {w}")
+        for f in failures:
+            print(f"  [FAIL] {f}")
+    return 0 if passed else 1
+
+
+def _discover_proof_targets(
+    ws_root: str,
+    req_prop: str,
+    as_json: bool,
+) -> Optional[List[Tuple[str, Path]]]:
+    """Discovers active tenants via .pseofactory.json and filters by req_prop."""
+    from pseofactory.impact_planner import discover_active_tenants
+
+    discovered = discover_active_tenants(ws_root)
+    if req_prop != "all":
+        targets = [(pid, rp) for pid, rp in discovered if pid.lower() == req_prop]
+        if not targets:
+            msg = f"Error: Property '{req_prop}' not found in workspace '{ws_root}'."
+            if as_json:
+                print(json.dumps({"status": "FAIL", "error": msg}))
+            else:
+                print(msg, file=sys.stderr)
+            return None
+        return targets
+    if not discovered:
+        msg = f"Error: No active tenants discovered under '{ws_root}'."
+        if as_json:
+            print(json.dumps({"status": "FAIL", "error": msg}))
+        else:
+            print(msg, file=sys.stderr)
+        return None
+    return discovered
+
+
+def _resolve_tenant_dist_dir(repo_path: Path) -> Path:
+    """Resolves a tenant's dist_dir from .pseofactory.json read-only."""
+    dist_rel = "dist"
+    marker_p = repo_path / ".pseofactory.json"
+    if marker_p.is_file():
+        try:
+            marker_meta = json.loads(marker_p.read_text(encoding="utf-8"))
+            if isinstance(marker_meta, dict):
+                dist_rel = str(marker_meta.get("dist_dir") or "dist")
+        except Exception:
+            dist_rel = "dist"
+    return (repo_path / dist_rel).resolve()
+
+
+def _probe_http_readonly(
+    url: str,
+    follow_redirects: bool = True,
+    timeout: float = 8.0,
+    retries: int = 1,
+    max_bytes: int = 65536,
+) -> Dict[str, Any]:
+    """Performs a bounded read-only HTTP GET probe with retry-once on transient HTTP 0."""
+    import time as _time
+    import urllib.error
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    headers = {
+        "User-Agent": "pseofactory-live-edge-verifier/1.0",
+        "Accept": "text/html,application/xml,text/plain,application/json,*/*",
+        "Connection": "close",
+    }
+    opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(_NoRedirect)
+    status_code = 0
+    location = ""
+    resp_headers: Dict[str, str] = {}
+    body_text = ""
+    err_msg = ""
+
+    for attempt in range(max(1, retries + 1)):
+        status_code = 0
+        location = ""
+        resp_headers = {}
+        body_text = ""
+        err_msg = ""
+        req = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with opener.open(req, timeout=timeout) as resp:
+                status_code = int(resp.getcode() or 200)
+                location = str(resp.headers.get("Location") or "")
+                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                body_text = resp.read(max_bytes).decode("utf-8", errors="ignore")
+        except urllib.error.HTTPError as he:
+            status_code = int(he.code or 0)
+            if getattr(he, "headers", None):
+                location = str(he.headers.get("Location") or "")
+                resp_headers = {str(k).lower(): str(v) for k, v in he.headers.items()}
+            try:
+                body_text = he.read(max_bytes).decode("utf-8", errors="ignore")
+            except Exception:
+                body_text = ""
+            err_msg = f"HTTP {status_code}"
+        except Exception as exc:
+            status_code = 0
+            err_msg = f"{type(exc).__name__}: {exc}"
+        if status_code != 0:
+            break
+        if attempt < retries:
+            _time.sleep(0.5)
+
+    return {
+        "url": url,
+        "status_code": status_code,
+        "location": location,
+        "headers": resp_headers,
+        "body_snippet": body_text[:4096],
+        "error": err_msg,
+    }
+
+
+def cmd_earn_proof(args: argparse.Namespace) -> int:
+    """
+    Stage 2 Proof: Strictly read-only verification across active tenants of:
+      1. Commerce audit paywall/SKU parity (audit_tenant_commerce_fail_closed)
+      2. Active approved affiliate partner counts from monetization_vault.json
+      3. Live read-only /r/<partner>?synthetic_test=1 redirect checks
+      4. Affiliate portal collection health from .agy/partner_earnings_ledger.json
+      5. Real human leads vs synthetic probe leads from .agy/captured_leads.jsonl
+      6. Realized revenue truth and freshness from .agy/portfolio_revenue_truth.json
+    Zero em-dashes. Zero en-dashes.
+    """
+    from datetime import datetime, timezone
+    from pseofactory.affiliates import MONETIZATION_VAULT_PATH
+    from pseofactory.commerce_gate import audit_tenant_commerce_fail_closed
+    from pseofactory.revenue_truth import classify_captured_lead
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
+    max_age_hours = float(getattr(args, "max_age_hours", 72.0) or 72.0)
+    skip_live = bool(getattr(args, "skip_live", False))
+    as_json = bool(getattr(args, "json", False))
+
+    targets = _discover_proof_targets(ws_root, req_prop, as_json)
+    if targets is None:
+        return 1
+
+    now_utc = datetime.now(timezone.utc)
+    failures: List[str] = []
+    warnings: List[str] = []
+
+    vault_props: Dict[str, Any] = {}
+    vault_path = Path(MONETIZATION_VAULT_PATH)
+    if vault_path.is_file():
+        try:
+            vault_doc = json.loads(vault_path.read_text(encoding="utf-8"))
+            if isinstance(vault_doc, dict) and isinstance(vault_doc.get("properties"), dict):
+                vault_props = vault_doc["properties"]
+        except Exception:
+            vault_props = {}
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    tenant_results: Dict[str, Dict[str, Any]] = {}
+
+    for pid, repo_path in targets:
+        dist_dir = _resolve_tenant_dist_dir(repo_path)
+        canonical_base = _resolve_cli_live_base_url(pid, repo_path, reg) or f"https://{pid}.com"
+
+        commerce_passed = False
+        commerce_status = "FAIL"
+        commerce_issues: List[str] = []
+        try:
+            c_rep = audit_tenant_commerce_fail_closed(
+                repo_root=repo_path,
+                property_id=pid,
+                live_base_url=None,
+                dist_dir=dist_dir,
+            )
+            commerce_passed = bool(c_rep.passed)
+            commerce_status = str(c_rep.status)
+            commerce_issues = list(c_rep.issues[:10])
+            if not commerce_passed:
+                failures.append(f"commerce-audit failed for '{pid}': {commerce_status} ({len(c_rep.issues)} issues)")
+        except Exception as c_exc:
+            commerce_issues = [f"{type(c_exc).__name__}: {c_exc}"]
+            failures.append(f"commerce-audit error for '{pid}': {c_exc}")
+
+        p_meta = vault_props.get(pid) if isinstance(vault_props.get(pid), dict) else {}
+        partners_map = p_meta.get("partners") if isinstance(p_meta.get("partners"), dict) else {}
+        approved_partners = sorted(
+            str(pk).strip().lower()
+            for pk, pe in partners_map.items()
+            if isinstance(pe, dict) and str(pe.get("status") or "").strip().lower() in ("live", "active_direct")
+        )
+        approved_count = len(approved_partners)
+        if approved_count == 0:
+            failures.append(f"Tenant '{pid}' has 0 active approved affiliate partners in monetization_vault.json")
+
+        redirect_probes: List[Dict[str, Any]] = []
+        redirect_failures = 0
+        if not skip_live and approved_partners:
+            for pk in approved_partners:
+                probe_url = f"{canonical_base}/r/{pk}?synthetic_test=1"
+                res = _probe_http_readonly(probe_url, follow_redirects=False, timeout=8.0, retries=1)
+                code = int(res["status_code"])
+                loc = str(res["location"])
+                tier_hdr = str(res["headers"].get("x-edge-contract-tier") or "").strip().lower()
+                ok = code in (301, 302, 307, 308) and bool(loc) and tier_hdr != "native_unmonetized_destination"
+                if not ok:
+                    redirect_failures += 1
+                    failures.append(
+                        f"Live /r/{pk} redirect check failed for '{pid}': HTTP {code} tier={tier_hdr or 'none'}"
+                    )
+                redirect_probes.append(
+                    {
+                        "partner_key": pk,
+                        "status_code": code,
+                        "location": loc,
+                        "contract_tier": tier_hdr,
+                        "passed": ok,
+                    }
+                )
+
+        tenant_results[pid] = {
+            "commerce_audit": {
+                "status": commerce_status,
+                "passed": commerce_passed,
+                "issues": commerce_issues,
+            },
+            "approved_affiliates_count": approved_count,
+            "approved_affiliate_keys": approved_partners,
+            "live_redirect_probes": {
+                "skipped": skip_live,
+                "checked_count": len(redirect_probes),
+                "failures_count": redirect_failures,
+                "probes": redirect_probes,
+            },
+        }
+
+    # Fleet portal health from .agy/partner_earnings_ledger.json
+    earnings_path = _resolve_factory_agy_file("partner_earnings_ledger.json", ws_root)
+    portal_health: Dict[str, Any] = {
+        "exists": earnings_path.is_file(),
+        "path": str(earnings_path),
+        "live_polled_portals_count": 0,
+        "uncollected_portals_count": 0,
+        "expired_or_unpolled_portals": [],
+        "realized_commission_usd": 0.0,
+        "modeled_epc_pipeline_usd": 0.0,
+    }
+    if not earnings_path.is_file():
+        failures.append(f"partner_earnings_ledger.json missing at {earnings_path}")
+    else:
+        try:
+            pe_doc = json.loads(earnings_path.read_text(encoding="utf-8"))
+            portals = pe_doc.get("portals") if isinstance(pe_doc.get("portals"), dict) else {}
+            expired_list = sorted(
+                pk for pk, pv in portals.items()
+                if isinstance(pv, dict) and (
+                    not bool(pv.get("is_authenticated_and_syncing"))
+                    or "EXPIRED" in str(pv.get("auth_status") or "").upper()
+                )
+            )
+            uncollected_cnt = int(pe_doc.get("uncollected_portals_count", len(expired_list)) or 0)
+            live_polled_cnt = int(pe_doc.get("live_polled_portals_count", 0) or 0)
+            cashflow = pe_doc.get("cashflow_summary") if isinstance(pe_doc.get("cashflow_summary"), dict) else {}
+            portal_health.update(
+                {
+                    "synced_at": pe_doc.get("synced_at"),
+                    "live_polled_portals_count": live_polled_cnt,
+                    "uncollected_portals_count": max(uncollected_cnt, len(expired_list)),
+                    "expired_or_unpolled_portals": expired_list,
+                    "realized_commission_usd": float(cashflow.get("realized_commission_usd", 0.0) or 0.0),
+                    "modeled_epc_pipeline_usd": float(cashflow.get("modeled_epc_pipeline_usd", 0.0) or 0.0),
+                }
+            )
+            if expired_list or uncollected_cnt > 0:
+                failures.append(
+                    f"Affiliate portal collection degraded: {max(uncollected_cnt, len(expired_list))} expired/unpolled portals ({', '.join(expired_list)})"
+                )
+        except Exception as pe_exc:
+            failures.append(f"Failed reading partner_earnings_ledger.json: {pe_exc}")
+
+    # Real human leads vs synthetic probe leads from .agy/captured_leads.jsonl
+    leads_path = _resolve_factory_agy_file("captured_leads.jsonl", ws_root)
+    leads_health: Dict[str, Any] = {
+        "exists": leads_path.is_file(),
+        "path": str(leads_path),
+        "total_records": 0,
+        "human_leads": 0,
+        "synthetic_probe_leads": 0,
+        "internal_operator_test_leads": 0,
+    }
+    if not leads_path.is_file():
+        failures.append(f"captured_leads.jsonl missing at {leads_path}")
+    else:
+        try:
+            for raw_line in leads_path.read_text(encoding="utf-8").splitlines():
+                s_line = raw_line.strip()
+                if not s_line:
+                    continue
+                try:
+                    rec = json.loads(s_line)
+                except Exception:
+                    continue
+                if not isinstance(rec, dict):
+                    continue
+                leads_health["total_records"] += 1
+                cls_lbl = classify_captured_lead(rec)
+                if cls_lbl == "external_human":
+                    leads_health["human_leads"] += 1
+                elif cls_lbl == "synthetic_probe":
+                    leads_health["synthetic_probe_leads"] += 1
+                else:
+                    leads_health["internal_operator_test_leads"] += 1
+            if leads_health["human_leads"] == 0:
+                failures.append(
+                    f"captured_leads.jsonl has 0 real external human leads "
+                    f"(synthetic_probe={leads_health['synthetic_probe_leads']}, "
+                    f"internal_test={leads_health['internal_operator_test_leads']})"
+                )
+        except Exception as ld_exc:
+            failures.append(f"Failed reading captured_leads.jsonl: {ld_exc}")
+
+    # Realized revenue truth & freshness from .agy/portfolio_revenue_truth.json
+    rev_path = _resolve_factory_agy_file("portfolio_revenue_truth.json", ws_root)
+    revenue_health: Dict[str, Any] = {
+        "exists": rev_path.is_file(),
+        "path": str(rev_path),
+        "generated_at": None,
+        "age_hours": None,
+        "fresh": False,
+        "pseofactory_realized_revenue_usd": 0.0,
+        "gross_realized_revenue_usd": 0.0,
+    }
+    if not rev_path.is_file():
+        failures.append(f"portfolio_revenue_truth.json missing at {rev_path}")
+    else:
+        try:
+            rt_doc = json.loads(rev_path.read_text(encoding="utf-8"))
+            gen_at = str(rt_doc.get("generated_at") or "")
+            gen_dt = _parse_utc_iso(gen_at)
+            age_h = round((now_utc - gen_dt).total_seconds() / 3600.0, 2) if gen_dt else None
+            fresh_ok = bool(age_h is not None and 0.0 <= age_h <= max_age_hours)
+            bottom = rt_doc.get("portfolio_bottom_line") if isinstance(rt_doc.get("portfolio_bottom_line"), dict) else {}
+            pseo_rev = float(bottom.get("pseofactory_realized_revenue_usd", 0.0) or 0.0)
+            gross_rev = float(bottom.get("gross_realized_revenue_usd", 0.0) or 0.0)
+            revenue_health.update(
+                {
+                    "generated_at": gen_at,
+                    "age_hours": age_h,
+                    "fresh": fresh_ok,
+                    "pseofactory_realized_revenue_usd": pseo_rev,
+                    "gross_realized_revenue_usd": gross_rev,
+                }
+            )
+            if not fresh_ok:
+                failures.append(
+                    f"portfolio_revenue_truth.json stale: age_hours={age_h} exceeds {max_age_hours}h"
+                )
+            if pseo_rev <= 0.0:
+                failures.append(
+                    f"pseofactory realized revenue is ${pseo_rev:.2f} ($0.00)"
+                )
+        except Exception as rt_exc:
+            failures.append(f"Failed reading portfolio_revenue_truth.json: {rt_exc}")
+
+    passed = len(failures) == 0
+    payload = {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "max_age_hours": max_age_hours,
+        "properties": tenant_results,
+        "portal_health": portal_health,
+        "leads_health": leads_health,
+        "revenue_truth": revenue_health,
+        "warnings": warnings,
+        "failures": failures,
+    }
+
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        tag = "PASS" if passed else "FAIL"
+        for pid, tr in tenant_results.items():
+            ca = tr["commerce_audit"]
+            rp = tr["live_redirect_probes"]
+            r_str = "SKIPPED" if rp["skipped"] else f"{rp['checked_count'] - rp['failures_count']}/{rp['checked_count']}"
+            t_tag = "PASS" if (ca["passed"] and tr["approved_affiliates_count"] > 0 and rp["failures_count"] == 0) else "FAIL"
+            print(
+                f"[{t_tag}] earn-proof ({pid}): commerce={ca['status']} | "
+                f"approved_affiliates={tr['approved_affiliates_count']} | "
+                f"live_redirects={r_str}"
+            )
+        print(
+            f"[{tag}] earn-proof (fleet): portals_live={portal_health['live_polled_portals_count']} "
+            f"uncollected={portal_health['uncollected_portals_count']} | "
+            f"human_leads={leads_health['human_leads']} (synthetic_probes={leads_health['synthetic_probe_leads']}) | "
+            f"pseofactory_rev=${revenue_health['pseofactory_realized_revenue_usd']:.2f} "
+            f"(truth_age={revenue_health['age_hours']}h)"
+        )
+        for w in warnings:
+            print(f"  [WARN] {w}")
+        for f in failures:
+            print(f"  [FAIL] {f}")
+    return 0 if passed else 1
+
+
+def _read_json_list_or_dict_readonly(path: Path) -> Any:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def cmd_syndicate_proof(args: argparse.Namespace) -> int:
+    """
+    Stage 5 Proof: Strictly read-only verification across active tenants of:
+      1. Real GSC indexation ratio from trend_history.db (gsc_url_inspection_states) and metric_recovery_ledger.json
+      2. Live sitemap.xml, robots.txt, and IndexNow key reachability
+      3. Real external distribution / permalinks from broadcast_ledger.json, parasite-ledger, and youtube_upload_ledger.json
+      4. AIO Observatory freshness and citation share from aio_observatory.db
+    Zero em-dashes. Zero en-dashes.
+    """
+    import re
+    import sqlite3
+    from datetime import datetime, timezone
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
+    max_age_days = int(getattr(args, "max_age_days", 7) or 7)
+    min_indexed_pct = float(getattr(args, "min_indexed_pct", 50.0) or 50.0)
+    skip_live = bool(getattr(args, "skip_live", False))
+    as_json = bool(getattr(args, "json", False))
+
+    targets = _discover_proof_targets(ws_root, req_prop, as_json)
+    if targets is None:
+        return 1
+
+    now_utc = datetime.now(timezone.utc)
+    db_path = _resolve_trend_db_path(ws_root)
+    failures: List[str] = []
+    warnings: List[str] = []
+
+    inspection_by_prop: Dict[str, Dict[str, Any]] = {}
+    if not db_path.is_file():
+        failures.append(f"trend_history.db missing at {db_path}")
+    else:
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            for pid, _ in targets:
+                row = conn.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS total_cnt,
+                        SUM(CASE WHEN verdict = 'PASS' OR lower(coverage_state) IN ('submitted and indexed', 'indexed, not submitted in sitemap') THEN 1 ELSE 0 END) AS indexed_cnt,
+                        MAX(recorded_at) AS latest_recorded_at
+                    FROM gsc_url_inspection_states
+                    WHERE property_id = ?;
+                    """,
+                    (pid,),
+                ).fetchone()
+                total_cnt = int(row["total_cnt"] or 0) if row else 0
+                indexed_cnt = int(row["indexed_cnt"] or 0) if row else 0
+                ratio_pct = round((indexed_cnt / float(total_cnt)) * 100.0, 1) if total_cnt > 0 else 0.0
+                inspection_by_prop[pid] = {
+                    "total_inspected": total_cnt,
+                    "indexed_count": indexed_cnt,
+                    "indexed_ratio_pct": ratio_pct,
+                    "latest_recorded_at": str(row["latest_recorded_at"] or "") if row else "",
+                }
+                if total_cnt == 0:
+                    failures.append(f"No GSC URL inspection rows for '{pid}' in gsc_url_inspection_states")
+                elif total_cnt >= 5 and ratio_pct < min_indexed_pct:
+                    failures.append(
+                        f"GSC indexation ratio critically low for '{pid}': "
+                        f"{indexed_cnt}/{total_cnt} ({ratio_pct:.1f}% < {min_indexed_pct:.0f}%)"
+                    )
+        except Exception as db_exc:
+            failures.append(f"SQLite read error on gsc_url_inspection_states: {db_exc}")
+        finally:
+            if conn is not None:
+                conn.close()
+
+    # Load global parasite ledger & YouTube upload ledger read-only
+    global_parasite_path = Path(ws_root) / ".agy" / "runs" / "parasite_ledger.json"
+    if not global_parasite_path.is_file():
+        global_parasite_path = Path("/home/ubuntuadmin/projects/.agy/runs/parasite_ledger.json")
+    global_parasite_data = _read_json_list_or_dict_readonly(global_parasite_path) or {}
+    if not isinstance(global_parasite_data, dict):
+        global_parasite_data = {}
+
+    yt_ledger_path = _resolve_factory_agy_file("youtube_upload_ledger.json", ws_root)
+    yt_ledger_data = _read_json_list_or_dict_readonly(yt_ledger_path) or {}
+    yt_uploads_all = yt_ledger_data.get("uploads") if isinstance(yt_ledger_data, dict) and isinstance(yt_ledger_data.get("uploads"), dict) else {}
+    youtube_uploads_enabled = os.environ.get("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD") == "1"
+    if not youtube_uploads_enabled:
+        failures.append("YouTube uploads disabled (PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD != '1')")
+
+    # Load AIO Observatory DB read-only
+    aio_db_path = Path(ws_root) / ".agy" / "runs" / "aio_observatory.db"
+    if not aio_db_path.is_file():
+        aio_db_path = Path("/home/ubuntuadmin/projects/.agy/runs/aio_observatory.db")
+    aio_by_prop: Dict[str, Dict[str, Any]] = {}
+    if not aio_db_path.is_file():
+        failures.append(f"aio_observatory.db missing at {aio_db_path}")
+    else:
+        aio_conn = None
+        try:
+            aio_conn = sqlite3.connect(f"file:{aio_db_path}?mode=ro", uri=True)
+            aio_conn.row_factory = sqlite3.Row
+            from pseofactory.aio_observatory import AIOObservatory
+
+            obs = AIOObservatory(db_path=aio_db_path)
+            sb = obs.scoreboard(window_days=max_age_days)
+            sb_tenants = sb.get("tenants") if isinstance(sb.get("tenants"), dict) else {}
+            for pid, _ in targets:
+                latest_row = aio_conn.execute(
+                    "SELECT MAX(sampled_at) AS latest_at, COUNT(*) AS total_all FROM aio_snapshots WHERE tenant = ?;",
+                    (pid,),
+                ).fetchone()
+                latest_at = str(latest_row["latest_at"] or "") if latest_row else ""
+                total_all = int(latest_row["total_all"] or 0) if latest_row else 0
+                latest_dt = _parse_utc_iso(latest_at)
+                age_days = round((now_utc - latest_dt).total_seconds() / 86400.0, 2) if latest_dt else None
+                t_sb = sb_tenants.get(pid) if isinstance(sb_tenants.get(pid), dict) else {}
+                win_samples = int(t_sb.get("samples", 0) or 0)
+                cit_share = float(t_sb.get("citation_share", 0.0) or 0.0)
+                fresh_ok = bool(win_samples > 0 and age_days is not None and 0.0 <= age_days <= float(max_age_days))
+                aio_by_prop[pid] = {
+                    "total_samples": total_all,
+                    "window_samples": win_samples,
+                    "latest_sampled_at": latest_at,
+                    "age_days": age_days,
+                    "fresh": fresh_ok,
+                    "aio_presence_rate": float(t_sb.get("aio_presence_rate", 0.0) or 0.0),
+                    "citation_share": cit_share,
+                }
+                if not fresh_ok:
+                    failures.append(
+                        f"AIO observatory stale or empty for '{pid}': window_samples={win_samples}, age_days={age_days} (max={max_age_days}d)"
+                    )
+        except Exception as aio_exc:
+            failures.append(f"AIO observatory read error: {aio_exc}")
+        finally:
+            if aio_conn is not None:
+                aio_conn.close()
+
+    reg = TenantRegistry.default(workspace_root=ws_root)
+    tenant_results: Dict[str, Dict[str, Any]] = {}
+
+    for pid, repo_path in targets:
+        dist_dir = _resolve_tenant_dist_dir(repo_path)
+        canonical_base = _resolve_cli_live_base_url(pid, repo_path, reg) or f"https://{pid}.com"
+
+        # Metric recovery ledger cross-check
+        m_ledger_path = repo_path / ".agy" / "metric_recovery_ledger.json"
+        m_ledger = _read_json_list_or_dict_readonly(m_ledger_path)
+        m_snapshots_count = len(m_ledger.get("snapshots") or {}) if isinstance(m_ledger, dict) else 0
+        m_last_eval = str(m_ledger.get("last_evaluated") or "") if isinstance(m_ledger, dict) else ""
+
+        # Live sitemap, robots.txt, and IndexNow key check
+        indexnow_files = sorted(
+            f.name for f in dist_dir.glob("*.txt")
+            if re.fullmatch(r"[0-9a-f]{32}\.txt", f.name, re.IGNORECASE)
+        ) if dist_dir.is_dir() else []
+        indexnow_key_file = indexnow_files[0] if indexnow_files else ""
+
+        edge_checks: Dict[str, Any] = {
+            "skipped": skip_live,
+            "robots_ok": None,
+            "sitemap_ok": None,
+            "indexnow_key_file": indexnow_key_file,
+            "indexnow_ok": None,
+        }
+        if not skip_live:
+            r_res = _probe_http_readonly(f"{canonical_base}/robots.txt", follow_redirects=True, timeout=8.0, retries=1)
+            r_ok = r_res["status_code"] == 200 and "sitemap:" in r_res["body_snippet"].lower()
+            edge_checks["robots_ok"] = r_ok
+            edge_checks["robots_status"] = r_res["status_code"]
+            if not r_ok:
+                failures.append(f"Live robots.txt check failed for '{pid}': HTTP {r_res['status_code']}")
+
+            s_res = _probe_http_readonly(f"{canonical_base}/sitemap.xml", follow_redirects=True, timeout=8.0, retries=1)
+            s_body_low = s_res["body_snippet"].lower()
+            s_ok = s_res["status_code"] == 200 and ("<urlset" in s_body_low or "<sitemapindex" in s_body_low)
+            edge_checks["sitemap_ok"] = s_ok
+            edge_checks["sitemap_status"] = s_res["status_code"]
+            if not s_ok:
+                failures.append(f"Live sitemap.xml check failed for '{pid}': HTTP {s_res['status_code']}")
+
+            if not indexnow_key_file:
+                edge_checks["indexnow_ok"] = False
+                failures.append(f"IndexNow 32-hex key file missing in {dist_dir} for '{pid}'")
+            else:
+                expected_stem = Path(indexnow_key_file).stem
+                in_res = _probe_http_readonly(f"{canonical_base}/{indexnow_key_file}", follow_redirects=True, timeout=8.0, retries=1)
+                in_ok = in_res["status_code"] == 200 and expected_stem in in_res["body_snippet"]
+                edge_checks["indexnow_ok"] = in_ok
+                edge_checks["indexnow_status"] = in_res["status_code"]
+                if not in_ok:
+                    failures.append(f"Live IndexNow key check failed for '{pid}' ({indexnow_key_file}): HTTP {in_res['status_code']}")
+
+        # Broadcast ledger, parasite ledger, and YouTube ledger
+        bl_path = repo_path / ".agy" / "broadcast_ledger.json"
+        bl_data = _read_json_list_or_dict_readonly(bl_path)
+        bl_entries: List[Dict[str, Any]] = []
+        if isinstance(bl_data, list):
+            bl_entries = [x for x in bl_data if isinstance(x, dict)]
+        elif isinstance(bl_data, dict):
+            for k in ("records", "posts", "entries", "dispatches"):
+                if isinstance(bl_data.get(k), list):
+                    bl_entries = [x for x in bl_data[k] if isinstance(x, dict)]
+                    break
+        verified_broadcast = 0
+        staged_broadcast = 0
+        live_social_permalinks = 0
+        for b_item in bl_entries:
+            mode_val = str(b_item.get("mode") or b_item.get("status") or "").upper()
+            if "VERIFIED" in mode_val:
+                verified_broadcast += 1
+            elif "STAGED" in mode_val:
+                staged_broadcast += 1
+            for perm_k in ("tweet_id", "linkedin_post_url", "permalink", "live_url", "external_url", "gist_url", "ghost_url"):
+                if b_item.get(perm_k):
+                    live_social_permalinks += 1
+                    break
+
+        tenant_ext_path = repo_path / ".agy" / "external_authority_ledger.json"
+        tenant_ext_data = _read_json_list_or_dict_readonly(tenant_ext_path) or {}
+        if not isinstance(tenant_ext_data, dict):
+            tenant_ext_data = {}
+        parasite_entries = [
+            rec for rec in list(tenant_ext_data.values()) + list(global_parasite_data.values())
+            if isinstance(rec, dict) and str(rec.get("tenant") or "").strip().lower() == pid
+        ]
+        parasite_count = len(parasite_entries)
+        if parasite_count == 0:
+            failures.append(f"parasite-ledger has 0 external authority permalinks for '{pid}'")
+        if live_social_permalinks == 0 and parasite_count == 0:
+            failures.append(f"Live social and parasite permalinks count is 0 for '{pid}' (staged_drafts={staged_broadcast})")
+
+        yt_tenant_cnt = sum(
+            1 for v in yt_uploads_all.values()
+            if isinstance(v, dict) and str(v.get("property_id") or "").strip().lower() == pid
+        )
+
+        insp_info = inspection_by_prop.get(pid, {"total_inspected": 0, "indexed_count": 0, "indexed_ratio_pct": 0.0})
+        aio_info = aio_by_prop.get(pid, {"window_samples": 0, "age_days": None, "fresh": False, "citation_share": 0.0})
+        tenant_results[pid] = {
+            "gsc_indexation": {
+                **insp_info,
+                "metric_recovery_snapshots": m_snapshots_count,
+                "metric_recovery_last_evaluated": m_last_eval,
+            },
+            "edge_discovery_reachability": edge_checks,
+            "external_distribution": {
+                "broadcast_total": len(bl_entries),
+                "broadcast_verified": verified_broadcast,
+                "broadcast_staged_drafts": staged_broadcast,
+                "live_social_permalinks": live_social_permalinks,
+                "parasite_permalinks": parasite_count,
+                "youtube_uploads_recorded": yt_tenant_cnt,
+                "youtube_uploads_enabled": youtube_uploads_enabled,
+            },
+            "aio_observatory": aio_info,
+        }
+
+    passed = len(failures) == 0
+    payload = {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "min_indexed_pct": min_indexed_pct,
+        "max_age_days": max_age_days,
+        "youtube_uploads_enabled": youtube_uploads_enabled,
+        "properties": tenant_results,
+        "warnings": warnings,
+        "failures": failures,
+    }
+
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        tag = "PASS" if passed else "FAIL"
+        for pid, tr in tenant_results.items():
+            gi = tr["gsc_indexation"]
+            ed = tr["edge_discovery_reachability"]
+            ex = tr["external_distribution"]
+            aio = tr["aio_observatory"]
+            t_ok = (
+                gi.get("total_inspected", 0) > 0
+                and (gi.get("total_inspected", 0) < 5 or gi.get("indexed_ratio_pct", 0.0) >= min_indexed_pct)
+                and (ed["skipped"] or (ed.get("robots_ok") and ed.get("sitemap_ok") and ed.get("indexnow_ok")))
+                and ex["parasite_permalinks"] > 0
+                and youtube_uploads_enabled
+                and aio.get("fresh")
+            )
+            t_tag = "PASS" if t_ok else "FAIL"
+            reach_str = "SKIPPED" if ed["skipped"] else f"robots={ed['robots_ok']},sitemap={ed['sitemap_ok']},indexnow={ed['indexnow_ok']}"
+            print(
+                f"[{t_tag}] syndicate-proof ({pid}): "
+                f"indexed={gi.get('indexed_count', 0)}/{gi.get('total_inspected', 0)} ({gi.get('indexed_ratio_pct', 0.0):.1f}%) | "
+                f"{reach_str} | "
+                f"social_permalinks={ex['live_social_permalinks']} staged={ex['broadcast_staged_drafts']} "
+                f"parasite={ex['parasite_permalinks']} yt_enabled={ex['youtube_uploads_enabled']} (yt_cnt={ex['youtube_uploads_recorded']}) | "
+                f"aio_age={aio.get('age_days')}d cite_share={aio.get('citation_share', 0.0):.3f}"
+            )
         for w in warnings:
             print(f"  [WARN] {w}")
         for f in failures:

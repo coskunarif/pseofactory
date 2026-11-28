@@ -114,6 +114,350 @@ class PartnerStatusSummary:
     def is_live(self) -> bool:
         return self.is_live_link
 
+
+_OUTBOUND_CLICK_EVENT_TYPES = frozenset(
+    {
+        "outbound_partner_click",
+        "partner_click",
+        "affiliate_click",
+        "click",
+        "click_conversion_cta",
+        "outbound_redirect",
+        "partner_cta_click",
+    }
+)
+_SYNTHETIC_CLICK_SUBID_RE = re.compile(
+    r"(?:(?:^|[_-])(?:test|probe|smoke|synthetic|qa|verify)(?:$|[_-]|\d)|_oct19\b|_live_kv_|_edge\b)",
+    re.IGNORECASE,
+)
+_SYNTHETIC_CLICK_SUBID_WITH_CARD_RE = re.compile(
+    r"(?:(?:^|[_-])(?:test|probe|smoke|synthetic|qa|verify)(?:$|[_-]|\d)|_oct19\b|_live_kv_|_edge\b|_card(?:_\d+|\b))",
+    re.IGNORECASE,
+)
+_UNMONETIZED_CONTRACT_TIERS = frozenset(
+    {
+        "native_unmonetized_destination",
+        "unapproved_native_unmonetized",
+        "unmonetized",
+        "blocked_unapproved",
+    }
+)
+
+
+def classify_outbound_click_event(
+    ev: Dict[str, Any],
+    property_id: str,
+    live_partner_keys: Optional[Set[str]] = None,
+    include_card_subid_as_probe: bool = False,
+) -> Dict[str, Any]:
+    """
+    Classifies a raw telemetry event for outbound affiliate click monetization truth.
+    Excludes synthetic/test subids, unmonetized native destinations, and unapproved partners.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import (
+        ENTERPRISE_B2B_PARTNERS,
+        get_partner_bounty_midpoint,
+        is_commercial_b2b_slug,
+        load_live_partner_keys_from_vault,
+    )
+
+    etype = str(ev.get("event_type") or ev.get("event") or "").strip().lower()
+    if etype not in _OUTBOUND_CLICK_EVENT_TYPES:
+        return {
+            "is_click": False,
+            "is_synthetic_probe": False,
+            "is_unmonetized_tier": False,
+            "is_unapproved_partner": False,
+            "is_verified_monetized": False,
+            "estimated_yield_usd": 0.0,
+        }
+
+    props = ev.get("properties") if isinstance(ev.get("properties"), dict) else {}
+    mon = ev.get("monetization") if isinstance(ev.get("monetization"), dict) else {}
+
+    slug = str(
+        ev.get("tool_slug")
+        or ev.get("slug")
+        or ev.get("source_tool")
+        or props.get("tool_slug")
+        or props.get("source_tool")
+        or ""
+    ).strip().lower()
+    if not slug:
+        path_val = str(ev.get("path") or "").strip("/")
+        parts = [pt for pt in path_val.split("/") if pt]
+        if len(parts) >= 2 and parts[0] == "tools":
+            slug = parts[1].lower()
+        elif len(parts) == 1 and parts[0] != "tools":
+            slug = parts[0].lower()
+        else:
+            slug = "general"
+
+    partner_key = str(
+        ev.get("partner_key")
+        or ev.get("partner")
+        or props.get("partner_key")
+        or props.get("partner")
+        or mon.get("partner_key")
+        or mon.get("partner")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if not partner_key:
+        href_or_path = str(ev.get("href") or props.get("href") or ev.get("path") or "")
+        m_r = re.search(r"/r/([a-z0-9_]+)", href_or_path.lower())
+        if m_r:
+            partner_key = m_r.group(1)
+
+    cta_slot = str(
+        ev.get("cta_slot")
+        or ev.get("cta_id")
+        or props.get("cta_slot")
+        or props.get("cta_id")
+        or mon.get("cta_slot")
+        or "primary_partner_cta"
+    ).strip()
+
+    subid = str(
+        ev.get("sub_id")
+        or ev.get("subid")
+        or ev.get("click_id")
+        or props.get("sub_id")
+        or props.get("subid")
+        or mon.get("subid")
+        or ""
+    ).strip()
+
+    contract_tier = str(
+        ev.get("contract_tier")
+        or props.get("contract_tier")
+        or mon.get("contract_tier")
+        or ""
+    ).strip().lower()
+
+    subid_re = _SYNTHETIC_CLICK_SUBID_WITH_CARD_RE if include_card_subid_as_probe else _SYNTHETIC_CLICK_SUBID_RE
+    is_synthetic_probe = bool(
+        ev.get("is_synthetic_probe")
+        or ev.get("synthetic_test")
+        or props.get("is_synthetic_probe")
+        or props.get("synthetic_test")
+        or ("synthetic" in etype)
+        or ("probe" in etype)
+        or (cta_slot.lower() in ("smoke", "verify", "synthetic_probe"))
+        or (slug in ("smoke-test", "synthetic-probe"))
+        or (subid and subid_re.search(subid))
+    )
+    is_unmonetized_tier = contract_tier in _UNMONETIZED_CONTRACT_TIERS
+
+    if live_partner_keys is None:
+        live_partner_keys = load_live_partner_keys_from_vault(property_id)
+    is_unapproved_partner = (not partner_key) or (partner_key not in live_partner_keys)
+
+    is_verified_monetized = (not is_synthetic_probe) and (not is_unmonetized_tier) and (not is_unapproved_partner)
+
+    click_count = max(1, int(ev.get("clicks", 1) or 1))
+    estimated_yield_usd = 0.0
+    if is_verified_monetized:
+        payout = 0.0
+        for p_src in (props, mon, ev):
+            raw_pay = (
+                p_src.get("payout_usd")
+                or p_src.get("revenue_usd")
+                or p_src.get("revenue")
+                or p_src.get("amount")
+                or p_src.get("estimated_revenue_yield_usd")
+                or p_src.get("estimated_yield_usd")
+            )
+            if raw_pay is not None:
+                try:
+                    payout = float(raw_pay)
+                    break
+                except Exception:
+                    pass
+        if payout > 0.0:
+            estimated_yield_usd = round(payout, 4)
+        else:
+            bounty_mid = float(get_partner_bounty_midpoint(partner_key) or 0.0)
+            value_tier = str(
+                ev.get("value_tier")
+                or ev.get("tier")
+                or props.get("value_tier")
+                or mon.get("value_tier")
+                or "starter"
+            ).strip().lower()
+            is_b2b_partner = partner_key in ENTERPRISE_B2B_PARTNERS or is_commercial_b2b_slug(slug)
+            base_conv = 0.045 if is_b2b_partner else 0.035
+            tier_mult = 1.25 if value_tier in ("premium", "tier_1") else 1.0
+            estimated_yield_usd = round(bounty_mid * base_conv * tier_mult * click_count, 4)
+
+    return {
+        "is_click": True,
+        "is_synthetic_probe": is_synthetic_probe,
+        "is_unmonetized_tier": is_unmonetized_tier,
+        "is_unapproved_partner": is_unapproved_partner,
+        "is_verified_monetized": is_verified_monetized,
+        "clicks": click_count,
+        "subid": subid,
+        "partner_key": partner_key,
+        "contract_tier": contract_tier,
+        "cta_slot": cta_slot,
+        "slug": slug,
+        "estimated_yield_usd": estimated_yield_usd,
+    }
+
+
+def _load_raw_telemetry_events(events_or_path: Any) -> List[Dict[str, Any]]:
+    """Loads raw telemetry dicts from a list, JSONL/JSON file, or tenant base_dir read-only."""
+    if isinstance(events_or_path, list):
+        return [e for e in events_or_path if isinstance(e, dict)]
+    if isinstance(events_or_path, (str, Path)):
+        p = Path(events_or_path)
+        if p.is_dir():
+            for cand_file in (
+                p / ".agy" / "telemetry_events.jsonl",
+                p / ".agy" / "outbound_partner_engagement.json",
+                p / "telemetry_events.jsonl",
+            ):
+                if cand_file.is_file():
+                    p = cand_file
+                    break
+        if p.is_file():
+            try:
+                content = p.read_text(encoding="utf-8").strip()
+                if p.suffix == ".json" and content.startswith("{"):
+                    loaded = json.loads(content)
+                    if isinstance(loaded, dict) and isinstance(loaded.get("events"), list):
+                        return [e for e in loaded["events"] if isinstance(e, dict)]
+                    return []
+                out: List[Dict[str, Any]] = []
+                for line in content.splitlines():
+                    s_line = line.strip()
+                    if not s_line:
+                        continue
+                    try:
+                        ev = json.loads(s_line)
+                        if isinstance(ev, dict):
+                            out.append(ev)
+                    except Exception:
+                        continue
+                return out
+            except Exception:
+                return []
+    return []
+
+
+def aggregate_verified_outbound_partner_engagement(
+    events_or_path: Any = None,
+    property_id: Optional[str] = None,
+    include_card_subid_as_probe: bool = False,
+) -> Dict[str, Any]:
+    """
+    Aggregates outbound partner engagement read-only while strictly filtering synthetic/test
+    subids, native_unmonetized_destination contract tiers, and unapproved partners out of
+    verified_non_probe_outbound_clicks and total_estimated_revenue_yield_usd.
+    Zero em-dashes. Zero en-dashes.
+    """
+    from pseofactory.affiliates import load_live_partner_keys_from_vault
+
+    raw_events = _load_raw_telemetry_events(events_or_path)
+    base_agg = dict(aggregate_outbound_partner_engagement(raw_events if raw_events else events_or_path, property_id=property_id))
+    prop_filter = str(property_id or base_agg.get("property_id") or "").strip().lower() or None
+
+    live_keys_cache: Dict[str, Set[str]] = {}
+    verified_clicks_total = 0
+    synthetic_filtered_total = 0
+    unmonetized_filtered_total = 0
+    unapproved_filtered_total = 0
+    total_verified_yield = 0.0
+
+    verified_by_slug: Dict[str, int] = {}
+    yield_by_slug: Dict[str, float] = {}
+    synth_by_slug: Dict[str, int] = {}
+    yield_by_partner: Dict[str, float] = {}
+    verified_by_partner: Dict[str, int] = {}
+    yield_by_slot: Dict[str, float] = {}
+    verified_by_slot: Dict[str, int] = {}
+
+    for ev in raw_events:
+        ev_prop = str(
+            ev.get("property_id")
+            or ev.get("tenant_id")
+            or (ev.get("properties") or {}).get("property_id")
+            or prop_filter
+            or "profithelm"
+        ).strip().lower()
+        if prop_filter and ev_prop and ev_prop != prop_filter:
+            continue
+        if ev_prop not in live_keys_cache:
+            live_keys_cache[ev_prop] = load_live_partner_keys_from_vault(ev_prop)
+        cls = classify_outbound_click_event(
+            ev,
+            property_id=ev_prop,
+            live_partner_keys=live_keys_cache[ev_prop],
+            include_card_subid_as_probe=include_card_subid_as_probe,
+        )
+        if not cls["is_click"]:
+            continue
+        cnt = int(cls["clicks"])
+        slug = str(cls["slug"])
+        pk = str(cls["partner_key"])
+        slot = str(cls["cta_slot"])
+
+        if cls["is_synthetic_probe"]:
+            synthetic_filtered_total += cnt
+            synth_by_slug[slug] = synth_by_slug.get(slug, 0) + cnt
+        elif cls["is_unmonetized_tier"]:
+            unmonetized_filtered_total += cnt
+        elif cls["is_unapproved_partner"]:
+            unapproved_filtered_total += cnt
+        else:
+            verified_clicks_total += cnt
+            y_val = float(cls["estimated_yield_usd"])
+            total_verified_yield += y_val
+            verified_by_slug[slug] = verified_by_slug.get(slug, 0) + cnt
+            yield_by_slug[slug] = round(yield_by_slug.get(slug, 0.0) + y_val, 4)
+            if pk:
+                verified_by_partner[pk] = verified_by_partner.get(pk, 0) + cnt
+                yield_by_partner[pk] = round(yield_by_partner.get(pk, 0.0) + y_val, 4)
+            verified_by_slot[slot] = verified_by_slot.get(slot, 0) + cnt
+            yield_by_slot[slot] = round(yield_by_slot.get(slot, 0.0) + y_val, 4)
+
+    if raw_events or isinstance(events_or_path, list):
+        base_agg["verified_non_probe_outbound_clicks"] = verified_clicks_total
+        base_agg["synthetic_probe_clicks_filtered"] = synthetic_filtered_total
+        base_agg["unmonetized_destination_clicks_filtered"] = unmonetized_filtered_total
+        base_agg["unapproved_partner_clicks_filtered"] = unapproved_filtered_total
+        base_agg["total_estimated_revenue_yield_usd"] = round(total_verified_yield, 2)
+
+        for slug_k, s_rec in (base_agg.get("by_slug") or {}).items():
+            if isinstance(s_rec, dict):
+                s_rec["verified_non_probe_outbound_clicks"] = verified_by_slug.get(slug_k, 0)
+                s_rec["synthetic_probe_clicks_filtered"] = synth_by_slug.get(slug_k, 0)
+                s_rec["estimated_revenue_yield_usd"] = round(yield_by_slug.get(slug_k, 0.0), 4)
+                for sp_k, sp_rec in (s_rec.get("partners") or {}).items():
+                    if isinstance(sp_rec, dict) and sp_k not in yield_by_partner:
+                        sp_rec["estimated_revenue_yield_usd"] = 0.0
+                for sl_k, sl_rec in (s_rec.get("cta_slots") or {}).items():
+                    if isinstance(sl_rec, dict) and sl_k not in yield_by_slot:
+                        sl_rec["estimated_revenue_yield_usd"] = 0.0
+
+        for pk_k, p_rec in (base_agg.get("by_partner") or {}).items():
+            if isinstance(p_rec, dict):
+                v_cnt = verified_by_partner.get(pk_k, 0)
+                v_yield = round(yield_by_partner.get(pk_k, 0.0), 4)
+                p_rec["verified_non_probe_outbound_clicks"] = v_cnt
+                p_rec["estimated_revenue_yield_usd"] = v_yield
+                if v_cnt == 0:
+                    p_rec["empirical_epc_usd"] = 0.0
+                    p_rec["empirical_erpm_usd"] = 0.0
+
+        for slot_k, slot_rec in (base_agg.get("by_cta_slot") or {}).items():
+            if isinstance(slot_rec, dict):
+                slot_rec["verified_non_probe_outbound_clicks"] = verified_by_slot.get(slot_k, 0)
+                slot_rec["estimated_revenue_yield_usd"] = round(yield_by_slot.get(slot_k, 0.0), 4)
+
+    return base_agg
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -2613,7 +2957,7 @@ class PartnerTrackingEngine:
                 except Exception:
                     pass
 
-            agg = aggregate_outbound_partner_engagement(all_prop_events, property_id=prop_id)
+            agg = aggregate_verified_outbound_partner_engagement(all_prop_events, property_id=prop_id)
             try:
                 summary_path.write_text(json.dumps(agg, indent=2) + "\n", encoding="utf-8")
             except Exception:
@@ -11855,10 +12199,13 @@ def get_lead_monitoring_summary(
     verify_live_providers: bool = False,
 ) -> Dict[str, Any]:
     """
-    Returns structured lead lifecycle monitoring visibility across ProfitHelm and Prexvo,
-    including counts by property, lifecycle stage, lead type, vertical, total calculated capital
-    pipeline, first-party Stripe Checkout offer pipeline, and live provider readiness status.
+    Returns structured lead lifecycle monitoring visibility across discovered tenants,
+    explicitly separating real external human leads from synthetic probe and internal test leads.
+    Pipeline and checkout offer totals reflect real external human leads only.
+    Zero em-dashes. Zero en-dashes.
     """
+    from pseofactory.revenue_truth import classify_captured_lead
+
     engine = PartnerTrackingEngine()
     leads = engine.get_captured_leads(property_id=property_id, leads_ledger_path=leads_ledger_path)
     if not leads and leads_ledger_path is None:
@@ -11868,13 +12215,22 @@ def get_lead_monitoring_summary(
         extra_ids=[property_id] if property_id else None
     )
     by_property: Dict[str, int] = {pid: 0 for pid in discovered_bases}
+    human_by_property: Dict[str, int] = {pid: 0 for pid in discovered_bases}
+    synthetic_by_property: Dict[str, int] = {pid: 0 for pid in discovered_bases}
     by_stage: Dict[str, int] = {}
     by_type: Dict[str, int] = {}
     by_vertical: Dict[str, int] = {}
+    human_leads_count = 0
+    synthetic_probe_leads_count = 0
+    internal_test_leads_count = 0
     total_calc_usd = 0.0
     total_offer_usd = 0.0
+    synthetic_calc_usd = 0.0
+    synthetic_offer_usd = 0.0
     action_bus_count = 0
     fulfilled_count = 0
+    human_action_bus_count = 0
+    human_fulfilled_count = 0
 
     for rec in leads:
         p = str(rec.get("property_id") or "profithelm").lower()
@@ -11885,12 +12241,31 @@ def get_lead_monitoring_summary(
         by_type[lt] = by_type.get(lt, 0) + 1
         vt = str(rec.get("vertical") or "general")
         by_vertical[vt] = by_vertical.get(vt, 0) + 1
-        total_calc_usd += float(rec.get("calculated_amount") or 0.0)
-        total_offer_usd += float(rec.get("offer_price_usd") or 0.0)
         if rec.get("action_bus_dispatched"):
             action_bus_count += 1
         if rec.get("zeptomail_dispatched") or st == "fulfilled":
             fulfilled_count += 1
+
+        lead_cls = classify_captured_lead(rec)
+        calc_amt = float(rec.get("calculated_amount") or 0.0)
+        offer_amt = float(rec.get("offer_price_usd") or 0.0)
+        if lead_cls == "external_human":
+            human_leads_count += 1
+            human_by_property[p] = human_by_property.get(p, 0) + 1
+            total_calc_usd += calc_amt
+            total_offer_usd += offer_amt
+            if rec.get("action_bus_dispatched"):
+                human_action_bus_count += 1
+            if rec.get("zeptomail_dispatched") or st == "fulfilled":
+                human_fulfilled_count += 1
+        else:
+            if lead_cls == "synthetic_probe":
+                synthetic_probe_leads_count += 1
+            else:
+                internal_test_leads_count += 1
+            synthetic_by_property[p] = synthetic_by_property.get(p, 0) + 1
+            synthetic_calc_usd += calc_amt
+            synthetic_offer_usd += offer_amt
 
     scenario_demand = compute_scenario_demand_and_conversion_metrics(
         property_id=property_id,
@@ -11899,14 +12274,23 @@ def get_lead_monitoring_summary(
     )
     summary: Dict[str, Any] = {
         "total_leads": len(leads),
+        "human_leads": human_leads_count,
+        "synthetic_probe_leads": synthetic_probe_leads_count,
+        "internal_operator_test_leads": internal_test_leads_count,
         "by_property": by_property,
+        "human_leads_by_property": human_by_property,
+        "synthetic_probe_leads_by_property": synthetic_by_property,
         "by_lifecycle_stage": by_stage,
         "by_lead_type": by_type,
         "by_vertical": by_vertical,
         "action_bus_dispatched_count": action_bus_count,
         "transactional_fulfilled_count": fulfilled_count,
+        "human_action_bus_dispatched_count": human_action_bus_count,
+        "human_transactional_fulfilled_count": human_fulfilled_count,
         "total_pipeline_calculated_usd": round(total_calc_usd, 2),
         "total_checkout_offer_pipeline_usd": round(total_offer_usd, 2),
+        "synthetic_probe_pipeline_calculated_usd": round(synthetic_calc_usd, 2),
+        "synthetic_probe_checkout_offer_pipeline_usd": round(synthetic_offer_usd, 2),
         "attributed_settled_revenue_usd": scenario_demand["fleet_conversion_totals"]["total_attributed_revenue_usd"],
         "net_settled_revenue_usd": scenario_demand["fleet_conversion_totals"]["total_net_settled_revenue_usd"],
         "scenario_demand_attribution": scenario_demand,
