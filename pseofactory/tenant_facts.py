@@ -3668,6 +3668,28 @@ class TenantFactStore:
             )
 
 
+def _is_real_tenant_repo_root(repo_root: Optional[Path]) -> bool:
+    """
+    Returns True only when repo_root resolves to a real tenant repository
+    directly under /home/ubuntuadmin/projects/ (never /tmp, /var/tmp, pytest,
+    .agy/worktrees/, or isolated staging directories).
+    """
+    if repo_root is None or "PYTEST_CURRENT_TEST" in os.environ:
+        return False
+    try:
+        resolved = repo_root.resolve()
+        projects_base = Path("/home/ubuntuadmin/projects").resolve()
+        rel = resolved.relative_to(projects_base)
+    except Exception:
+        return False
+    if len(rel.parts) != 1:
+        return False
+    top_name = rel.parts[0]
+    if not top_name or top_name.startswith(".") or top_name == "pseofactory":
+        return False
+    return (resolved / ".pseofactory.json").is_file()
+
+
 class TruthReconciliationEngine:
     """
     Deterministic Truth-Reconciliation and Auto-Remediation Engine.
@@ -5131,27 +5153,7 @@ class TruthReconciliationEngine:
             cls._AUDIT_TRUTH_CACHE[cache_key] = list(violations)
         return violations
 
-    @staticmethod
-    def _is_real_tenant_repo_root(repo_root: Optional[Path]) -> bool:
-        """
-        Returns True only when repo_root resolves to a real tenant repository
-        directly under /home/ubuntuadmin/projects/ (never /tmp, /var/tmp, pytest,
-        .agy/worktrees/, or isolated staging directories).
-        """
-        if repo_root is None or "PYTEST_CURRENT_TEST" in os.environ:
-            return False
-        try:
-            resolved = repo_root.resolve()
-            projects_base = Path("/home/ubuntuadmin/projects").resolve()
-            rel = resolved.relative_to(projects_base)
-        except Exception:
-            return False
-        if len(rel.parts) != 1:
-            return False
-        top_name = rel.parts[0]
-        if not top_name or top_name.startswith(".") or top_name == "pseofactory":
-            return False
-        return (resolved / ".pseofactory.json").is_file()
+    _is_real_tenant_repo_root = staticmethod(_is_real_tenant_repo_root)
 
     @classmethod
     def reconcile_estate_assets(

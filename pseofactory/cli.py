@@ -3048,6 +3048,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ns.add_argument("--property", "--tenant", dest="property", type=str, default="profithelm", help="Property ID (profithelm, prexvo, gainhelm, or all)")
     p_ns.add_argument("--dry-run", action="store_true", help="Evaluate North Star targets without persisting scorecard JSON")
+    p_ns.add_argument("--strict", action="store_true", help="Return exit code 1 when overall North Star status is FAIL even under --dry-run")
     p_ns.add_argument("--json", action="store_true", help="Output North Star scorecard as structured JSON")
 
     p_cr = subparsers.add_parser(
@@ -3288,6 +3289,7 @@ def cmd_north_star(args: argparse.Namespace) -> int:
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
+    strict = bool(getattr(args, "strict", False))
     props = _discover_cli_tenant_ids() if prop_arg == "all" else [prop_arg]
     cards = {}
     for p_id in props:
@@ -3313,7 +3315,7 @@ def cmd_north_star(args: argparse.Namespace) -> int:
                 f"citation_ready={p3.get('citation_ready_briefs_coverage_pct', 0)}% | "
                 f"kw_ratio_gate={p3.get('source_keyword_inflation_gate_status', 'PASS')}"
             )
-    return 1 if overall_status == "FAIL" else 0
+    return 1 if (overall_status == "FAIL" and (strict or not dry_run)) else 0
 
 
 def cmd_cohort_reflection(args: argparse.Namespace) -> int:

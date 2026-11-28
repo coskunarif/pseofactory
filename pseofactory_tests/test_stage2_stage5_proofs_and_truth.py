@@ -201,12 +201,17 @@ def test_north_star_audit_browser_and_supervisor_verify_handoffs_fixes(
     assert sc["status"] == "FAIL"
     assert sc["target_attainment"]["targets_met"] is False
 
-    # cmd_north_star does not hardcode PASS or return 0 when tenant fails
+    # cmd_north_star does not hardcode PASS; --dry-run returns 0 with honest FAIL, while --strict returns 1
     with patch("pseofactory.seo_growth_loops.evaluate_north_star_targets", return_value=sc):
-        rc_ns = cmd_north_star(argparse.Namespace(property="lienbond", dry_run=True, json=True))
-    out_ns = json.loads(capsys.readouterr().out)
-    assert rc_ns == 1
-    assert out_ns["status"] == "FAIL"
+        rc_ns_dry = cmd_north_star(argparse.Namespace(property="lienbond", dry_run=True, strict=False, json=True))
+        out_ns_dry = json.loads(capsys.readouterr().out)
+        assert rc_ns_dry == 0
+        assert out_ns_dry["status"] == "FAIL"
+
+        rc_ns_strict = cmd_north_star(argparse.Namespace(property="lienbond", dry_run=True, strict=True, json=True))
+        out_ns_strict = json.loads(capsys.readouterr().out)
+        assert rc_ns_strict == 1
+        assert out_ns_strict["status"] == "FAIL"
 
     # 2. Single-property audit --browser fails closed on SKIPPED_CDP_OFFLINE
     import pseofactory.browser_verifier as bv_mod

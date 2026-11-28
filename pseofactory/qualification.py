@@ -32,6 +32,7 @@ from pseofactory.tenant_facts import (
     CANONICAL_TENANT_DECLARATIONS,
     TENANT_CANNIBALIZATION_MAPS_BY_ID,
     TENANT_CORE_TOOLS_BY_ID,
+    _is_real_tenant_repo_root,
     get_tenant_contract,
     resolve_canonical_property_id,
 )
@@ -3587,28 +3588,6 @@ def reconcile_void_candidates_queue(
             encoding="utf-8",
         )
     return updated_count
-
-
-def _is_real_tenant_repo_root(repo_root: Optional[Path]) -> bool:
-    """
-    Returns True only when repo_root resolves to a real tenant repository
-    directly under /home/ubuntuadmin/projects/ (never /tmp, /var/tmp, pytest,
-    .agy/worktrees/, or isolated staging directories).
-    """
-    if repo_root is None or "PYTEST_CURRENT_TEST" in os.environ:
-        return False
-    try:
-        resolved = repo_root.resolve()
-        projects_base = Path("/home/ubuntuadmin/projects").resolve()
-        rel = resolved.relative_to(projects_base)
-    except Exception:
-        return False
-    if len(rel.parts) != 1:
-        return False
-    top_name = rel.parts[0]
-    if not top_name or top_name.startswith(".") or top_name == "pseofactory":
-        return False
-    return (resolved / ".pseofactory.json").is_file()
 
 
 def _clean_syndication_directories_and_ledgers(
