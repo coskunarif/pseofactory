@@ -2662,6 +2662,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 (not any(k in slug_low for k in ("soc-2", "soc2", "ssae")) and any(m in clean.lower() for m in ("aicpa", "ssae 18", "soc 2")))
                 or (not any(k in slug_low for k in ("cmmc", "sprs", "800-171")) and any(m in clean.lower() for m in ("32 cfr part 170", "cmmc", "c3pao")))
                 or (not any(k in slug_low for k in ("hipaa", "hitech")) and any(m in clean.lower() for m in ("45 cfr 160", "hipaa")))
+                or (
+                    (
+                        ("soc-1" in q_low or "soc 1" in q_low)
+                        or bool(re.search(r"\bvs\b|\bversus\b", q_low))
+                        or (bool(slug_low) and slug_low != "soc-2-audit-cost-calculator")
+                    )
+                    and "calculate soc 2 type i and type ii cpa attestation fees" in clean.lower()
+                )
             )
         )
         or (
@@ -2890,6 +2898,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Verified under Title IV 34 CFR Part 685 statutory rules.",
             )
         if tenant_id == "gainhelm":
+            is_vs_query = bool(re.search(r"\bvs\b|\bversus\b", q_low))
+            is_vs_slug_or_unslugged = (
+                bool(re.search(r"\bvs\b|\bversus\b", slug_low))
+                if slug_low
+                else is_vs_query
+            )
             if "disclaimer" in q_low:
                 return (
                     "Review GainHelm enterprise cyber compliance statutory disclaimers, CPA and C3PAO "
@@ -2920,79 +2934,87 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "CMMC 2.0 C3PAO, NIST 800-171 SPRS, ISO 27001, and HIPAA penalties.",
                     " Grounded in AICPA SSAE 18 and 32 CFR Part 170 standards.",
                 )
-            if any(k in q_low for k in ("dora", "ict-third-party", "2022/2554")):
+            if ("soc-1" in q_low or "soc 1" in q_low) and ("soc-2" in q_low or "soc 2" in q_low):
+                return (
+                    "Compare SOC 2 Type II Trust Services security controls against SOC 1 "
+                    "ICFR financial reporting audits, CPA attestation fees, and SSAE 18 scope.",
+                    " Verified under AICPA SSAE 18 AT-C 205 and 320.",
+                )
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("dora", "ict-third-party", "2022/2554")):
                 return (
                     "Calculate EU DORA Regulation 2022/2554 compliance costs, Article 26 TLPT red "
                     "teaming, ICT vendor audits, and Article 28 Register of Information.",
                     " Verified under Regulation (EU) 2022/2554 rules.",
                 )
-            if any(k in q_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
                 return (
                     "Model EU AI Act Regulation 2024/1689 Article 43 conformity assessment fees, "
                     "Annex IV technical dossiers, and Article 17 QMS engineering costs.",
                     " Verified under Regulation (EU) 2024/1689 and NIST AI RMF.",
                 )
-            if any(k in q_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
                 return (
                     "Calculate SEC Rule 33-11216 Form 8-K Item 1.05 cybersecurity materiality readiness, "
                     "DFIR incident retainers, and Regulation S-K Item 106 costs.",
                     " Verified under 17 CFR 229.106 and Item 1.05 rules.",
                 )
-            if any(k in q_low for k in ("hipaa", "hitech", "ephi", "160.404")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("hipaa", "hitech", "ephi", "160.404")):
                 return (
                     "Model HIPAA civil monetary penalty exposure under 45 CFR 160.404 across four "
                     "culpability tiers plus 45 CFR Part 164 breach response costs.",
                     " Verified under 45 CFR 160.404 and 42 U.S.C. 1320d-5.",
                 )
-            if any(k in q_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
                 return (
                     "Calculate PCI DSS v4.0.1 Level 1 QSA Report on Compliance (ROC) fees, quarterly "
                     "ASV scans, penetration tests, and CDE remediation labor.",
                     " Verified under PCI Security Standards Council v4.0.1.",
                 )
-            if any(k in q_low for k in ("iso-27001", "iso 27001", "27006")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("iso-27001", "iso 27001", "27006")):
                 return (
                     "Estimate ISO/IEC 27001:2022 ISMS certification fees, Stage 1 and Stage 2 "
                     "auditor-day schedules under ISO/IEC 27006-1:2024, and gap closure.",
                     " Verified under ISO/IEC 27006-1:2024 Annex B tables.",
                 )
-            if any(k in q_low for k in ("fedramp", "3pao", "3607")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("fedramp", "3pao", "3607")):
                 return (
                     "Model FedRAMP 20x and Rev 5 Moderate ATO budgets under 44 U.S.C. 3607, including "
                     "3PAO SAR fees, FIPS 140-3 engineering, and annual ConMon.",
                     " Verified under NIST SP 800-53 Rev 5 baselines.",
                 )
-            if any(k in q_low for k in ("hitrust", "mycsf")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("hitrust", "mycsf")):
                 return (
                     "Compare HITRUST CSF v11 e1, i1, and r2 Validated Assessment fees, MyCSF licensing, "
                     "External Assessor validation costs, and gap remediation.",
                     " Verified under HITRUST CSF v11 assurance standards.",
                 )
-            if any(k in q_low for k in ("pentest", "penetration", "800-115")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("pentest", "penetration", "800-115")):
                 return (
                     "Scope CREST and OSCP technical penetration testing fees across web apps, APIs, "
                     "cloud IAM, and retesting under NIST SP 800-115 and OWASP.",
                     " Verified under NIST SP 800-115 and PCI Req 11.4.",
                 )
-            if any(k in q_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
                 return (
                     "Estimate commercial cyber liability insurance premiums, self-insured retentions, "
                     "and first-incident financial exposure under NAIC cyber rules.",
                     " Verified against SEC Item 1.05 and NAIC data.",
                 )
-            if any(k in q_low for k in ("sprs", "800-171")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("sprs", "800-171")):
                 return (
                     "Calculate DoD NIST SP 800-171 Rev 2 SPRS scores from -203 to +110, 5/3/1-point "
                     "control deductions, and 32 CFR 170.21 180-day POA&M eligibility.",
                     " Verified under DFARS 252.204-7019 assessment rules.",
                 )
-            if any(k in q_low for k in ("cmmc", "c3pao", "32 cfr")):
+            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("cmmc", "c3pao", "32 cfr")):
                 return (
                     "Model DoD CMMC 2.0 Level 2 C3PAO certification fees, 110 NIST 800-171 controls, "
                     "enclave licensing, and RPO advisory under 32 CFR Part 170.",
                     " Verified under 32 CFR Part 170 and DFARS 7021.",
                 )
-            if any(k in q_low for k in ("soc-2", "soc 2", "ssae")):
+            if any(k in q_low for k in ("soc-2", "soc 2", "ssae")) and (
+                slug_low == "soc-2-audit-cost-calculator" or not is_vs_slug_or_unslugged
+            ):
                 return (
                     "Calculate SOC 2 Type I and Type II CPA attestation fees, Trust Services Criteria "
                     "surcharges, GRC automation ROI, and BLS SOC 15-1212 labor.",
@@ -3354,91 +3376,106 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
     combined_low = f"{clean_q.lower()} {slug.lower()}"
 
     if tenant_id == "gainhelm":
-        if any(k in combined_low for k in ("hipaa", "hitech", "ephi", "160.404")):
+        is_vs_qa = (
+            bool(re.search(r"\bvs\b|\bversus\b", slug.lower()))
+            if slug.strip()
+            else bool(re.search(r"\bvs\b|\bversus\b", combined_low))
+        )
+        if ("soc-1" in combined_low or "soc 1" in combined_low) and ("soc-2" in combined_low or "soc 2" in combined_low):
+            base_words = (
+                "Under AICPA SSAE 18, SOC 2 Type II (AT-C Section 205, TSP Section 100) audits security "
+                "and availability Trust Services Criteria, whereas SOC 1 (AT-C Section 320) evaluates "
+                "financial reporting ICFR controls. First-year SOC 2 Type II readiness totals $78,100.40 "
+                "across $37,000.00 CPA attestation, $15,000.00 GRC automation, $11,500.00 pentesting, and $14,600.40 engineering labor."
+            ).split()
+        elif not is_vs_qa and any(k in combined_low for k in ("hipaa", "hitech", "ephi", "160.404")):
             base_words = (
                 "Pursuant to 45 CFR 160.404, 91 FR 3665 / 91 FR 66566, and the HITECH Act (42 U.S.C. 1320d-5), "
                 "HHS Office for Civil Rights assesses four-tier civil monetary penalties alongside 45 CFR Part 164 "
                 "breach notification. A 1,500-record ePHI breach reaches $2,577,794.00 total exposure, including "
                 "the $2,190,294.00 annual statutory penalty cap."
             ).split()
-        elif any(k in combined_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+        elif not is_vs_qa and any(k in combined_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
             base_words = (
                 "Under PCI DSS v4.0.1, Level 1 merchants processing over 6 million annual Visa or Mastercard "
                 "transactions must complete an annual Report on Compliance (ROC) led by a Qualified Security Assessor "
                 "(QSA). Total Level 1 compliance cost across 6 CDE systems reaches $93,400.60, comprising $42,000.00 "
                 "in QSA fees, $3,800.00 in ASV scans, $13,200.00 in CDE system scoping, $12,500.00 in pentesting, and $21,900.60 in remediation."
             ).split()
-        elif any(k in combined_low for k in ("fedramp", "3pao", "3607")):
+        elif not is_vs_qa and any(k in combined_low for k in ("fedramp", "3pao", "3607")):
             base_words = (
                 "Pursuant to the FedRAMP Authorization Act (44 U.S.C. 3607) and NIST SP 800-53 Rev 5 baselines, "
                 "achieving FedRAMP Moderate Authorization to Operate (ATO) across 325 security controls costs "
                 "$500,000.00. This total includes $165,000.00 for the 3PAO Readiness and Security Assessment Report, "
                 "$217,000.00 in FIPS 140-3 boundary engineering, $68,000.00 for ConMon, and $50,000.00 in PMO documentation."
             ).split()
-        elif any(k in combined_low for k in ("hitrust", "mycsf")):
+        elif not is_vs_qa and any(k in combined_low for k in ("hitrust", "mycsf")):
             base_words = (
                 "HITRUST CSF v11 provides three progressive assurance tiers: e1 Essentials (44 controls), i1 Implemented "
                 "(182 controls), and r2 Risk-Based (200 to 350+ tailored controls). An i1 Validated Assessment costs "
                 "$115,000.00 in total, consisting of $22,500.00 in MyCSF subscription fees, $54,000.00 in External "
                 "Assessor validation fees, $14,500.00 in certification review, and $24,000.00 in control remediation."
             ).split()
-        elif any(k in combined_low for k in ("pentest", "penetration", "800-115")):
+        elif not is_vs_qa and any(k in combined_low for k in ("pentest", "penetration", "800-115")):
             base_words = (
                 "Technical penetration testing scoped under NIST SP 800-115, OWASP ASVS v4.0, and PCI DSS v4.0.1 "
                 "Requirement 11.4 scales deterministically by base engagement scope, web application and API endpoints, "
                 "cloud IAM architecture, and retest verification. A multi-vector SaaS engagement covering 18 web and "
                 "API endpoints totals $23,300.00 ($8,500.00 base, $8,100.00 endpoints, $4,200.00 cloud IAM, $2,500.00 retest)."
             ).split()
-        elif any(k in combined_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+        elif not is_vs_qa and any(k in combined_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
             base_words = (
                 "Actuarial cyber liability insurance underwriting pursuant to the NAIC Cyber Supplement and SEC Item "
                 "1.05 Form 8-K materiality rules evaluates policy limits, industry hazard multipliers, and technical "
                 "controls. A $5M limit policy with a 1.35 hazard multiplier and 20 percent control discount yields a "
                 "$20,415.00 annual premium plus $20,485.00 self-insured retention ($40,900.00 total first-incident outlay)."
             ).split()
-        elif any(k in combined_low for k in ("iso-27001", "iso 27001", "27006")):
+        elif not is_vs_qa and any(k in combined_low for k in ("iso-27001", "iso 27001", "27006")):
             base_words = (
                 "Under ISO/IEC 27006-1:2024 mandatory auditor-day tables and ISO/IEC 27001:2022 Annex A (93 controls), "
                 "a 75-employee organization requires 11.0 accredited Stage 1 and Stage 2 auditor days. Total first-year "
                 "ISMS certification cost reaches $66,350.60, combining $21,450.00 in registrar fees, $14,500.00 for ISMS "
                 "platform licensing, $8,500.00 for internal audit, and $21,900.60 in gap remediation."
             ).split()
-        elif any(k in combined_low for k in ("sprs", "800-171")):
+        elif not is_vs_qa and any(k in combined_low for k in ("sprs", "800-171")):
             base_words = (
                 "Under DFARS 252.204-7019 and DoD NIST SP 800-171 Assessment Methodology v1.2.1, Supplier Performance "
                 "Risk System (SPRS) scores begin at +110 across 44 five-point, 14 three-point, 51 one-point, and 1 "
                 "zero-point SSP control down to -203. Missing 3 five-point, 2 three-point, and 2 one-point controls "
                 "yields an 87.00 SPRS score."
             ).split()
-        elif any(k in combined_low for k in ("cmmc", "c3pao", "32 cfr")):
+        elif not is_vs_qa and any(k in combined_low for k in ("cmmc", "c3pao", "32 cfr")):
             base_words = (
                 "Pursuant to 32 CFR Part 170 and DFARS 252.204-7021, achieving CMMC 2.0 Level 2 certification across "
                 "all 110 NIST SP 800-171 Rev 2 security requirements for a 75-employee defense contractor costs "
                 "$134,534.60, encompassing $48,500.00 in accredited C3PAO assessment fees, $26,400.00 for enclave "
                 "licensing, $46,234.60 in engineering remediation labor, and $13,400.00 for RPO advisory."
             ).split()
-        elif any(k in combined_low for k in ("soc-2", "soc 2", "ssae")):
+        elif (
+            any(k in combined_low for k in ("soc-2", "soc 2", "ssae"))
+            and (slug.strip().lower() == "soc-2-audit-cost-calculator" or not is_vs_qa)
+        ):
             base_words = (
                 "Under AICPA SSAE 18 (AT-C Section 205) and Trust Services Criteria (TSP Section 100), a first-year "
                 "SOC 2 Type II compliance program for a 75-employee SaaS company with 3 Trust Services Criteria costs "
                 "$78,100.40 in total, combining $37,000.00 in CPA attestation fees, $15,000.00 for GRC automation, "
                 "$11,500.00 for penetration testing, and $14,600.40 in internal engineering labor."
             ).split()
-        elif any(k in combined_low for k in ("dora", "ict-third-party", "2022/2554")):
+        elif not is_vs_qa and any(k in combined_low for k in ("dora", "ict-third-party", "2022/2554")):
             base_words = (
                 "Pursuant to the EU Digital Operational Resilience Act (Regulation (EU) 2022/2554 Articles 17, 26, and 28), "
                 "financial entities scoping ICT third-party risk management across 12 critical ICT providers incur "
                 "$112,100.00 in first-year compliance costs, combining $42,000.00 in threat-led penetration testing, "
                 "$33,600.00 in vendor exit-strategy audits, $16,500.00 in Register of Information automation, and $20,000.00 in engineering labor."
             ).split()
-        elif any(k in combined_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+        elif not is_vs_qa and any(k in combined_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
             base_words = (
                 "Under EU Artificial Intelligence Act Regulation (EU) 2024/1689 Articles 6 and 43 alongside "
                 "NIST AI RMF 1.0, an enterprise deploying 2 Annex III high-risk AI systems incurs $120,000.00 "
                 "in first-year conformity costs, combining $57,000.00 in Notified Body audits, $18,000.00 in "
                 "Annex IV technical dossiers, $24,000.00 in Article 17 QMS setup, and $21,000.00 in ML validation labor."
             ).split()
-        elif any(k in combined_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+        elif not is_vs_qa and any(k in combined_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
             base_words = (
                 "Pursuant to SEC Final Rule 33-11216 (17 CFR 229.106 Regulation S-K Item 106 and Form 8-K "
                 "Item 1.05 4-business-day materiality disclosure mandate), a public registrant incurs $180,000.00 "
@@ -11283,6 +11320,19 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 and any(k in ov_slug_q.lower() for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347"))
                 and "fringe benefit cash-in-lieu" in meta_desc.lower()
             )
+            or (
+                ov_tenant == "gainhelm"
+                and (
+                    ("soc-1" in ov_slug_q.lower() or "soc 1" in ov_slug_q.lower())
+                    or bool(re.search(r"\bvs\b|\bversus\b", ov_slug_q.lower()))
+                    or (
+                        bool(str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1]).strip("/"))
+                        and str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1]).strip("/").lower()
+                        != "soc-2-audit-cost-calculator"
+                    )
+                )
+                and "calculate soc 2 type i and type ii cpa attestation fees" in meta_desc.lower()
+            )
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
             ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
@@ -11335,6 +11385,18 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         and ("146,380" in quick_answer or "fringe benefits in cash over 2,000 hours" in quick_answer.lower())
     ):
         q_lbl_qa = str(overlay_data.get("query") or overlay_data.get("slug") or "Davis Bacon Overtime").replace("-", " ")
+        ov_slug_qa = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
+        quick_answer = _normalize_quick_answer_40_60_words(q_lbl_qa, tenant_id=ov_tenant, slug=ov_slug_qa)
+    if (
+        quick_answer
+        and ov_tenant == "gainhelm"
+        and (
+            ("soc-1" in ov_qa_ctx or "soc 1" in ov_qa_ctx)
+            or bool(re.search(r"\bvs\b|\bversus\b", ov_qa_ctx))
+        )
+        and "a first-year soc 2 type ii compliance program for a 75-employee saas company" in quick_answer.lower()
+    ):
+        q_lbl_qa = str(overlay_data.get("query") or overlay_data.get("slug") or "SOC 2 Type 2 vs SOC 1").replace("-", " ")
         ov_slug_qa = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
         quick_answer = _normalize_quick_answer_40_60_words(q_lbl_qa, tenant_id=ov_tenant, slug=ov_slug_qa)
     if quick_answer:
