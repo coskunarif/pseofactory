@@ -4123,7 +4123,10 @@ def cmd_video(args: argparse.Namespace) -> int:
     Executes autonomous page-value gated video synthesis and quota-aware YouTube CLI distribution.
     Zero em-dashes. Zero en-dashes.
     """
-    from pseofactory.video_factory import run_autonomous_video_pipeline
+    from pseofactory.video_factory import (
+        resolve_tenant_youtube_credentials,
+        run_autonomous_video_pipeline,
+    )
 
     prop_arg = str(getattr(args, "property", "profithelm") or "profithelm").strip().lower()
     dry_run = bool(getattr(args, "dry_run", False))
@@ -4131,6 +4134,7 @@ def cmd_video(args: argparse.Namespace) -> int:
     reports = {}
     all_ok = True
     for p_id in props:
+        yt_token_path, yt_channel_id = resolve_tenant_youtube_credentials(p_id)
         rep = run_autonomous_video_pipeline(
             property_id=p_id,
             target_slug=getattr(args, "slug", None),
@@ -4140,6 +4144,8 @@ def cmd_video(args: argparse.Namespace) -> int:
             live_upload=bool(getattr(args, "upload", False) and not dry_run),
             privacy=str(getattr(args, "privacy", "public")),
             force_render=bool(getattr(args, "force", False)),
+            youtube_token_path=yt_token_path,
+            youtube_channel_id=yt_channel_id,
         )
         reports[p_id] = rep
         if rep.get("status") != "PASS":

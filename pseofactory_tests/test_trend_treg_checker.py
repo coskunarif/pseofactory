@@ -224,3 +224,57 @@ def test_parse_ai_citation_payload_gap_status_classification():
     assert weaker_res["citation_gap_status"] == "LOSING_TO_WEAKER_DOMAINS"
 
 
+def test_treg_checker_falls_back_to_serpstat_on_402_route_max_cost():
+    """
+    When treg.google.keywords.volume fails with HTTP 402 route_max_cost, TregChecker
+    automatically falls back to serpstat.google.keywords.volume and returns a real
+    non-synthetic measured TregDurabilityResult in both batch and single-query paths.
+    """
+    serpstat_endpoint = "serpstat.google.keywords.volume"
+    serpstat_stdout = json.dumps(
+        {
+            "id": "1",
+            "result": {
+                "data": [
+                    {
+                        "keyword": "irs interest calculator",
+                        "region_queries_count": 1300,
+                        "cost": 1.25,
+                        "concurrency": 45,
+                        "difficulty": 33,
+                    }
+                ]
+            },
+        }
+    )
+
+    def _side_effect(cmd, *args, **kwargs):
+        if "treg.google.keywords.volume" in cmd:
+            return MagicMock(returncode=1, stdout="", stderr="HTTP 402 route_max_cost")
+        if serpstat_endpoint in cmd:
+            return MagicMock(returncode=0, stdout=serpstat_stdout, stderr="")
+        return MagicMock(returncode=1, stdout="", stderr="unexpected endpoint")
+
+    with patch("shutil.which", return_value="/usr/local/bin/treg"):
+        with patch("subprocess.run", side_effect=_side_effect):
+            batch_checker = TregChecker(max_cost="0.05", timeout=5.0)
+            batch_res = batch_checker.check_queries_batch(["irs interest calculator"])
+            r_batch = batch_res["irs interest calculator"]
+            assert r_batch.endpoint_called == serpstat_endpoint
+            assert r_batch.is_synthetic is False
+            assert r_batch.search_volume == 1300
+            assert r_batch.cpc_usd == 1.25
+            assert r_batch.competition_index == 0.45
+            assert r_batch.keyword_difficulty == 33.0
+
+            single_checker = TregChecker(max_cost="0.05", timeout=5.0)
+            r_single = single_checker.check_query("irs interest calculator")
+            assert r_single.endpoint_called == serpstat_endpoint
+            assert r_single.is_synthetic is False
+            assert r_single.search_volume == 1300
+            assert r_single.cpc_usd == 1.25
+            assert r_single.competition_index == 0.45
+            assert r_single.keyword_difficulty == 33.0
+
+
+

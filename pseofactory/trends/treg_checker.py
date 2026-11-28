@@ -21,6 +21,7 @@ from pseofactory.trends.models import TregDurabilityResult
 
 ENDPOINT_IDEAS = "treg.google.keywords.ideas"
 ENDPOINT_VOLUME = "treg.google.keywords.volume"
+ENDPOINT_VOLUME_SERPSTAT = "serpstat.google.keywords.volume"
 ENDPOINT_AI_CITATION = "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced"
 MAX_ROUTE_COST = "0.05"
 MAX_AI_CITATION_COST = "0.01"
@@ -821,6 +822,150 @@ class TregChecker:
 
         return None
 
+    @staticmethod
+    def _serpstat_se_for_country(country: str = "us") -> str:
+        c = str(country or "us").strip().lower()
+        mapping = {
+            "us": "g_us",
+            "uk": "g_uk",
+            "gb": "g_uk",
+            "ca": "g_ca",
+            "au": "g_au",
+            "de": "g_de",
+            "fr": "g_fr",
+        }
+        if c in mapping:
+            return mapping[c]
+        if len(c) == 2 and c.isalpha():
+            return f"g_{c}"
+        return "g_us"
+
+    @staticmethod
+    def _extract_serpstat_data_rows(payload: Any) -> List[Dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return []
+        for candidate in (
+            (payload.get("result") or {}).get("data") if isinstance(payload.get("result"), dict) else None,
+            ((payload.get("output") or {}).get("result") or {}).get("data")
+            if isinstance(payload.get("output"), dict) and isinstance((payload.get("output") or {}).get("result"), dict)
+            else None,
+            (payload.get("output") or {}).get("data") if isinstance(payload.get("output"), dict) else None,
+            payload.get("data"),
+        ):
+            if isinstance(candidate, list):
+                return [r for r in candidate if isinstance(r, dict)]
+        return []
+
+    def _parse_serpstat_volume_row(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Parses a single serpstat.google.keywords.volume (SerpstatKeywordProcedure.getKeywordsInfo)
+        data object into normalized TregDurabilityResult fields.
+        """
+        if not isinstance(row, dict):
+            return None
+        raw_vol = (
+            row.get("region_queries_count")
+            if row.get("region_queries_count") is not None
+            else (row.get("search_volume") if row.get("search_volume") is not None else row.get("volume"))
+        )
+        raw_cpc = (
+            row.get("cost")
+            if row.get("cost") is not None
+            else (row.get("cpc_usd") if row.get("cpc_usd") is not None else row.get("cpc"))
+        )
+        if raw_vol is None and raw_cpc is None:
+            return None
+        volume = int(raw_vol or 0)
+        cpc = float(raw_cpc or 0.0)
+        raw_kd = (
+            row.get("difficulty")
+            if row.get("difficulty") is not None
+            else row.get("keyword_difficulty")
+        )
+        kd = float(raw_kd if raw_kd is not None else 50.0)
+        raw_comp = (
+            row.get("concurrency")
+            if row.get("concurrency") is not None
+            else (
+                row.get("competition_index")
+                if row.get("competition_index") is not None
+                else row.get("competition")
+            )
+        )
+        comp = self._normalize_competition(raw_comp)
+        return {
+            "search_volume": volume,
+            "cpc_usd": cpc,
+            "competition_index": comp,
+            "keyword_difficulty": kd,
+            "position_zero_vacant": kd < 25.0,
+            "historical_stability": 0.85,
+            "raw_ideas": [row],
+            "ai_citation_vacant": False,
+            "ai_cited_domains": [],
+            "ai_citation_checked": False,
+        }
+
+    def _call_serpstat_volume_batch(
+        self,
+        treg_bin: str,
+        queries: List[str],
+        call_timeout: float,
+        country: str = "us",
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Cheap live fallback via serpstat.google.keywords.volume ($0.0005/result)
+        when treg.google.keywords.volume fails (e.g. HTTP 402 route_max_cost).
+        """
+        if not queries:
+            return {}
+        req_payload = {
+            "method": "SerpstatKeywordProcedure.getKeywordsInfo",
+            "id": "1",
+            "params": {
+                "keywords": queries,
+                "se": self._serpstat_se_for_country(country),
+            },
+        }
+        cmd = [
+            treg_bin,
+            "call",
+            ENDPOINT_VOLUME_SERPSTAT,
+            "--method",
+            "POST",
+            "--data",
+            json.dumps(req_payload),
+            "--header",
+            f"X-Treg-Route-Max-Cost: {self.max_cost}",
+        ]
+        try:
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=call_timeout,
+            )
+            if proc.returncode != 0 or not proc.stdout.strip():
+                return {}
+            payload = json.loads(proc.stdout.strip())
+            rows = self._extract_serpstat_data_rows(payload)
+            if not rows:
+                return {}
+            parsed_by_kw: Dict[str, Dict[str, Any]] = {}
+            for row in rows:
+                parsed = self._parse_serpstat_volume_row(row)
+                if parsed is None:
+                    continue
+                kw_key = str(row.get("keyword") or "").strip().lower()
+                if not kw_key and len(queries) == 1 and len(rows) == 1:
+                    kw_key = queries[0].strip().lower()
+                if kw_key:
+                    parsed_by_kw[kw_key] = parsed
+            return parsed_by_kw
+        except (subprocess.TimeoutExpired, Exception):
+            return {}
+
     def check_queries_batch(
         self,
         queries: List[str],
@@ -906,6 +1051,7 @@ class TregChecker:
             if remaining_budget is not None
             else self.timeout
         )
+        primary_timed_out = False
         try:
             cmd = [
                 treg_bin,
@@ -942,11 +1088,9 @@ class TregChecker:
                     q_key = clean_q.lower()
                     matched_row = rows_by_kw.get(q_key)
                     if matched_row is None:
-                        results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
                         continue
                     parsed = self._parse_volume_payload({"output": {"rows": [matched_row]}}, clean_q)
                     if parsed is None:
-                        results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
                         continue
                     res = TregDurabilityResult(
                         query=clean_q,
@@ -963,14 +1107,44 @@ class TregChecker:
                     res.is_synthetic = False
                     self.cache[q_key] = res
                     results[clean_q] = res
-                return results
-        except (subprocess.TimeoutExpired, Exception):
-            for clean_q in pending:
-                results[clean_q] = self._offline_heuristic(clean_q, reason="subprocess_fallback")
-            return results
+        except subprocess.TimeoutExpired:
+            primary_timed_out = True
+        except Exception:
+            pass
 
+        unresolved = [q for q in pending if q not in results]
+        if unresolved and not primary_timed_out:
+            serp_by_kw = self._call_serpstat_volume_batch(
+                treg_bin=treg_bin,
+                queries=unresolved,
+                call_timeout=call_timeout,
+                country="us",
+            )
+            for clean_q in unresolved:
+                q_key = clean_q.lower()
+                parsed_serp = serp_by_kw.get(q_key)
+                if parsed_serp is None:
+                    continue
+                res = TregDurabilityResult(
+                    query=clean_q,
+                    endpoint_called=ENDPOINT_VOLUME_SERPSTAT,
+                    search_volume=parsed_serp["search_volume"],
+                    cpc_usd=parsed_serp["cpc_usd"],
+                    competition_index=parsed_serp["competition_index"],
+                    keyword_difficulty=parsed_serp["keyword_difficulty"],
+                    position_zero_vacant=parsed_serp["position_zero_vacant"],
+                    historical_stability=parsed_serp["historical_stability"],
+                    checked_at=datetime.now(timezone.utc).isoformat(),
+                    raw_ideas=parsed_serp["raw_ideas"],
+                )
+                res.is_synthetic = False
+                self.cache[q_key] = res
+                results[clean_q] = res
+
+        fallback_reason = "subprocess_fallback" if primary_timed_out else "no_volume_data"
         for clean_q in pending:
-            results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
+            if clean_q not in results:
+                results[clean_q] = self._offline_heuristic(clean_q, reason=fallback_reason)
         return results
 
     def check_query(
@@ -1109,49 +1283,60 @@ class TregChecker:
                     text=True,
                     timeout=call_timeout,
                 )
+                parsed: Optional[Dict[str, Any]] = None
+                used_endpoint = ENDPOINT_VOLUME
                 if proc.returncode == 0 and proc.stdout.strip():
                     payload = json.loads(proc.stdout.strip())
                     parsed = self._parse_volume_payload(payload, clean_q)
-                    if parsed is None:
-                        return self._offline_heuristic(clean_q, reason="no_volume_data")
-
-                    volume = parsed["search_volume"]
-                    ai_vacant = bool(parsed["ai_citation_vacant"])
-                    ai_domains = [
-                        _normalize_domain(d)
-                        for d in (parsed["ai_cited_domains"] or [])
-                        if _normalize_domain(d)
-                    ]
-                    ai_checked = bool(parsed["ai_citation_checked"])
-                    if should_check_ai and not ai_checked and volume >= 500:
-                        ai_info = self.check_ai_citation(
-                            clean_q,
-                            remaining_budget=remaining_budget,
-                            allow_live=allow_live,
-                        )
-                        ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
-                        ai_domains = list(ai_info.get("ai_cited_domains", []))
-                        ai_checked = True
-
-                    result = TregDurabilityResult(
-                        query=clean_q,
-                        endpoint_called=ENDPOINT_VOLUME,
-                        search_volume=volume,
-                        cpc_usd=parsed["cpc_usd"],
-                        competition_index=parsed["competition_index"],
-                        keyword_difficulty=parsed["keyword_difficulty"],
-                        position_zero_vacant=parsed["position_zero_vacant"],
-                        historical_stability=parsed["historical_stability"],
-                        checked_at=datetime.now(timezone.utc).isoformat(),
-                        raw_ideas=parsed["raw_ideas"],
-                        ai_citation_vacant=ai_vacant,
-                        ai_cited_domains=ai_domains,
-                        ai_citation_checked=ai_checked,
+                if parsed is None:
+                    serp_map = self._call_serpstat_volume_batch(
+                        treg_bin=treg_bin,
+                        queries=[clean_q],
+                        call_timeout=call_timeout,
+                        country="us",
                     )
-                    result.is_synthetic = False
-                    self.cache[q_key] = result
-                    return result
-                return self._offline_heuristic(clean_q, reason="no_volume_data")
+                    parsed = serp_map.get(q_key)
+                    if parsed is not None:
+                        used_endpoint = ENDPOINT_VOLUME_SERPSTAT
+                if parsed is None:
+                    return self._offline_heuristic(clean_q, reason="no_volume_data")
+
+                volume = parsed["search_volume"]
+                ai_vacant = bool(parsed["ai_citation_vacant"])
+                ai_domains = [
+                    _normalize_domain(d)
+                    for d in (parsed["ai_cited_domains"] or [])
+                    if _normalize_domain(d)
+                ]
+                ai_checked = bool(parsed["ai_citation_checked"])
+                if should_check_ai and not ai_checked and volume >= 500:
+                    ai_info = self.check_ai_citation(
+                        clean_q,
+                        remaining_budget=remaining_budget,
+                        allow_live=allow_live,
+                    )
+                    ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
+                    ai_domains = list(ai_info.get("ai_cited_domains", []))
+                    ai_checked = True
+
+                result = TregDurabilityResult(
+                    query=clean_q,
+                    endpoint_called=used_endpoint,
+                    search_volume=volume,
+                    cpc_usd=parsed["cpc_usd"],
+                    competition_index=parsed["competition_index"],
+                    keyword_difficulty=parsed["keyword_difficulty"],
+                    position_zero_vacant=parsed["position_zero_vacant"],
+                    historical_stability=parsed["historical_stability"],
+                    checked_at=datetime.now(timezone.utc).isoformat(),
+                    raw_ideas=parsed["raw_ideas"],
+                    ai_citation_vacant=ai_vacant,
+                    ai_cited_domains=ai_domains,
+                    ai_citation_checked=ai_checked,
+                )
+                result.is_synthetic = False
+                self.cache[q_key] = result
+                return result
             except (subprocess.TimeoutExpired, Exception):
                 return self._offline_heuristic(clean_q, reason="subprocess_fallback")
 

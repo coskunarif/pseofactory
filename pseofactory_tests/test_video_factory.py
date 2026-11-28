@@ -1174,6 +1174,61 @@ def test_youtube_cli_requires_explicit_token_path_and_sets_subprocess_env(
     assert all(e.get("YOUTUBE_TOKEN_PATH") == str(tenant_token) for e in seen_envs)
 
 
+def test_resolve_tenant_youtube_credentials_and_cmd_video_wiring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    resolve_tenant_youtube_credentials resolves per-tenant token paths (env, .pseofactory.json,
+    and profithelm on-disk token when outside pytest), rejects MindBall shared token, and cmd_video
+    passes resolved credentials to run_autonomous_video_pipeline without altering direct defaults.
+    """
+    import argparse
+    import pseofactory.cli as cli_mod
+
+    vf_mod = _require_video_factory_module()
+    tok_file = tmp_path / "profithelm_tok.json"
+    tok_file.write_text('{"token":"ok"}', encoding="utf-8")
+
+    # 1. cmd_video wires resolved per-tenant credentials into run_autonomous_video_pipeline
+    seen_calls: list[dict] = []
+
+    def _fake_pipeline(**kwargs):
+        seen_calls.append(kwargs)
+        return {"status": "PASS", "quota_budget": {}}
+
+    monkeypatch.setenv("YOUTUBE_TOKEN_PATH", str(tok_file))
+    monkeypatch.setenv("YOUTUBE_CHANNEL_ID", "UC_ph_1")
+    with patch("pseofactory.video_factory.run_autonomous_video_pipeline", side_effect=_fake_pipeline):
+        rc = cli_mod.cmd_video(
+            argparse.Namespace(property="profithelm", dry_run=True, upload=True, json=True)
+        )
+        capsys.readouterr()
+        assert rc == 0
+    assert seen_calls[0].get("youtube_token_path") == tok_file
+    assert seen_calls[0].get("youtube_channel_id") == "UC_ph_1"
+
+    # 2. Rejects MindBall shared token even via env
+    resolver = getattr(vf_mod, "resolve_tenant_youtube_credentials", None)
+    assert callable(resolver)
+    monkeypatch.setenv("FACTORY_PROFITHELM_YOUTUBE_TOKEN_PATH", "/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json")
+    bad_tok, _ = resolver("profithelm")
+    assert bad_tok is None
+
+    # 3. Resolves PROFITHELM_YOUTUBE_TOKEN_PATH when _in_pytest() is False and env is unset
+    monkeypatch.delenv("FACTORY_PROFITHELM_YOUTUBE_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("YOUTUBE_TOKEN_PATH", raising=False)
+    with (
+        patch.object(vf_mod, "PROFITHELM_YOUTUBE_TOKEN_PATH", tok_file),
+        patch("pseofactory.video_factory._in_pytest", return_value=False),
+        patch("pseofactory.video_factory._resolve_default_tenant_repo", return_value=tmp_path),
+    ):
+        resolved_tok, _ = resolver("profithelm")
+        assert resolved_tok == tok_file
+
+
+
 
 
 

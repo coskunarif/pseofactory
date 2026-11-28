@@ -87,7 +87,66 @@ FORBIDDEN_SHARED_YOUTUBE_TOKEN_PATH: Path = Path(
     "/home/ubuntuadmin/projects/MindBall/secrets/youtube_token.json"
 )
 DEFAULT_YOUTUBE_TOKEN_PATH: Optional[Path] = None
+PROFITHELM_YOUTUBE_TOKEN_PATH: Path = Path(
+    "/home/ubuntuadmin/projects/arif-cli/social/youtube-toolkit/secrets/token.json"
+)
 YOUTUBE_UPLOAD_OPT_IN_ENV: str = "PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD"
+
+
+def resolve_tenant_youtube_credentials(
+    property_id: str,
+    repo_root: Optional[Union[str, Path]] = None,
+) -> Tuple[Optional[Path], Optional[str]]:
+    """
+    Resolves per-tenant (youtube_token_path, youtube_channel_id) from environment variables,
+    tenant `.pseofactory.json`, or verified on-disk tenant credentials for `profithelm`,
+    while strictly rejecting the forbidden shared MindBall token path.
+    Zero em-dashes. Zero en-dashes.
+    """
+    prop = _normalize_property_id(property_id)
+    prop_upper = prop.upper()
+
+    raw_tok: Optional[str] = (
+        os.getenv(f"FACTORY_{prop_upper}_YOUTUBE_TOKEN_PATH")
+        or os.getenv("YOUTUBE_TOKEN_PATH")
+    )
+    raw_chan: Optional[str] = (
+        os.getenv(f"FACTORY_{prop_upper}_YOUTUBE_CHANNEL_ID")
+        or os.getenv("YOUTUBE_CHANNEL_ID")
+    )
+
+    candidate_repo: Optional[Path] = None
+    if repo_root is not None:
+        candidate_repo = Path(repo_root)
+    elif not _in_pytest():
+        candidate_repo = _resolve_default_tenant_repo(prop)
+
+    if candidate_repo is not None:
+        marker_p = candidate_repo / ".pseofactory.json"
+        if marker_p.is_file():
+            try:
+                meta = json.loads(marker_p.read_text(encoding="utf-8"))
+                if isinstance(meta, dict):
+                    if not raw_tok and meta.get("youtube_token_path"):
+                        raw_tok = str(meta["youtube_token_path"]).strip()
+                    if not raw_chan and meta.get("youtube_channel_id"):
+                        raw_chan = str(meta["youtube_channel_id"]).strip()
+            except Exception:
+                pass
+
+    if not raw_tok and prop == "profithelm" and not _in_pytest() and PROFITHELM_YOUTUBE_TOKEN_PATH.is_file():
+        raw_tok = str(PROFITHELM_YOUTUBE_TOKEN_PATH)
+
+    if not raw_chan:
+        brand_chan = (TENANT_VIDEO_BRANDING.get(prop) or {}).get("youtube_channel_id")
+        if brand_chan:
+            raw_chan = str(brand_chan).strip()
+
+    eff_tok, tok_err = _validate_explicit_youtube_token_path(raw_tok)
+    if tok_err is not None:
+        eff_tok = None
+    eff_chan = str(raw_chan).strip() if raw_chan and str(raw_chan).strip() else None
+    return eff_tok, eff_chan
 
 
 def _is_forbidden_shared_youtube_token(token_path: Optional[Union[str, Path]]) -> bool:
