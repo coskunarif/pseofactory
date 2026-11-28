@@ -2423,7 +2423,7 @@ def _render_compiled_calculator_runtime_js(
       if (outputElem) {{
         outputElem.textContent = formattedResult;
       }}
-      var sec179CapEl = document.getElementById("metric-sec179-cap-deduction");
+      var sec179CapEl = document.getElementById("sec179-cap-deduction");
       if (
         sec179CapEl
         && typeof inputs.equipment_cost === "number"
@@ -2936,7 +2936,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         sec179_metric_html = (
             '\n        <div class="calc-metric-card" style="margin-top: 8px;">'
             '<span class="calc-metric-label">Section 179 Expensing Deduction: </span>'
-            f'<strong id="metric-sec179-cap-deduction" class="calc-metric-value" data-output="sec179-cap-deduction">{_sec179_ded_str}</strong>'
+            f'<strong id="sec179-cap-deduction" class="calc-metric-value" data-output="sec179-cap-deduction">{_sec179_ded_str}</strong>'
             '</div>'
         )
     # Pre-render SSR 5-Point Scenario Comparison Table
@@ -3557,7 +3557,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       <div class="result-box" style="min-height: 110px; margin-top: 20px;">
         <h3>Published Baseline Calculation</h3>
         <p>Formula: {formula_html_inline}</p>
-        <p>Evaluated Output Result: <strong id="metric-total-first-year-deduction" class="output-value calc-metric-value" data-output="total-first-year-deduction" data-primary-output="true">{display_output}</strong></p>{sec179_metric_html}
+        <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>{sec179_metric_html}
         <p>Sample Calculation Methodology: {visible_sample_calc}</p>
         <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline{"; Title IV RAP $65k AGI benchmark: $248.23/mo, $59,575.20 total" if is_prexvo else ""}) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
         <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>
