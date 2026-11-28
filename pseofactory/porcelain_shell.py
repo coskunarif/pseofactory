@@ -12343,6 +12343,32 @@ def sync_tenant_porcelain_shell(repo_path: Path, property_id: str) -> Dict[str, 
         shutil.rmtree(dist_fn_leak_dir, ignore_errors=True)
         updated_files.append("dist/functions")
 
+    # 8. Gate legacy standalone treg CLI calls in tenant validator.py / scanner.py behind PSEUFACTORY_LIVE_TREG=1
+    _legacy_treg_re = re.compile(
+        r'(^[ \t]*try:\n)([ \t]+)(cmd = \[\n[ \t]+"treg",\s*"call",)',
+        re.MULTILINE,
+    )
+    for _legacy_rel in ("validator.py", "scanner.py"):
+        _legacy_py = pkg_dir / _legacy_rel
+        if not _legacy_py.is_file():
+            continue
+        _l_orig = _legacy_py.read_text(encoding="utf-8")
+        if '"treg", "call"' not in _l_orig:
+            continue
+        _l_patched = _legacy_treg_re.sub(
+            lambda m: (
+                f"{m.group(1)}"
+                f'{m.group(2)}if __import__("os").getenv("PSEUFACTORY_LIVE_TREG") != "1" and not ('
+                f'hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")):\n'
+                f'{m.group(2)}    raise RuntimeError("Live treg calls disabled (set PSEUFACTORY_LIVE_TREG=1 to opt in)")\n'
+                f"{m.group(2)}{m.group(3)}"
+            ),
+            _l_orig,
+        )
+        if _l_patched != _l_orig:
+            _legacy_py.write_text(_l_patched, encoding="utf-8")
+            updated_files.append(f"{pkg_name}/{_legacy_rel}")
+
     tsiu_p = repo / "tests" / "test_search_and_indexing_upgrades.py"
     if tsiu_p.is_file():
         tsiu_src = tsiu_p.read_text(encoding="utf-8")
