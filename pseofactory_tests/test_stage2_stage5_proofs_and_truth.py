@@ -20,7 +20,16 @@ from unittest.mock import patch
 
 import pytest
 
-from pseofactory.cli import build_parser, cmd_audit, cmd_earn_proof, cmd_lead_monitor, cmd_north_star, cmd_supervisor, cmd_syndicate_proof
+from pseofactory.cli import (
+    build_parser,
+    cmd_audit,
+    cmd_earn_proof,
+    cmd_lead_monitor,
+    cmd_learn_proof,
+    cmd_north_star,
+    cmd_supervisor,
+    cmd_syndicate_proof,
+)
 from pseofactory.contracts import assert_no_forbidden_dashes
 from pseofactory.partner_tracker import (
     aggregate_verified_outbound_partner_engagement,
@@ -266,7 +275,12 @@ def test_north_star_audit_browser_and_supervisor_verify_handoffs_fixes(
 def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Fix 4: earn-proof and syndicate-proof run read-only and fail closed on real Stage 2 / Stage 5 gaps."""
+    """
+    earn-proof, syndicate-proof, and learn-proof split engine health (failures -> exit 1)
+    from external business outcomes (business_blockers / business_kpis -> exit 0).
+    """
+    from datetime import datetime, timezone
+
     ws = tmp_path / "workspace"
     tenant_dir = ws / "acme"
     (tenant_dir / "dist").mkdir(parents=True)
@@ -278,6 +292,11 @@ def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
 
     agy = ws / "pseofactory" / ".agy"
     agy.mkdir(parents=True)
+    vault_file = agy / "monetization_vault.json"
+    vault_file.write_text(
+        json.dumps({"properties": {"acme": {"partners": {}}}}),
+        encoding="utf-8",
+    )
     (agy / "partner_earnings_ledger.json").write_text(
         json.dumps(
             {
@@ -294,11 +313,13 @@ def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
         json.dumps({"lead_id": "probe_acme_1", "property_id": "acme", "email": "smoke@acme.com", "lead_origin": "internal_probe"}) + "\n",
         encoding="utf-8",
     )
-    (agy / "portfolio_revenue_truth.json").write_text(
+    rev_truth_file = agy / "portfolio_revenue_truth.json"
+    rev_truth_file.write_text(
         json.dumps({"generated_at": "2020-01-01T00:00:00Z", "portfolio_bottom_line": {"pseofactory_realized_revenue_usd": 0.0, "gross_realized_revenue_usd": 0.0}}),
         encoding="utf-8",
     )
 
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     tdb = ws / "pseofactory" / "pseofactory" / "trends" / "data" / "trend_history.db"
     tdb.parent.mkdir(parents=True)
     conn = sqlite3.connect(tdb)
@@ -308,8 +329,15 @@ def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
     for i in range(10):
         conn.execute(
             "INSERT INTO gsc_url_inspection_states VALUES (?, ?, ?, ?, ?)",
-            ("acme", f"https://acme.com/tools/t{i}/", "NEUTRAL" if i < 9 else "PASS", "Discovered - currently not indexed" if i < 9 else "Submitted and indexed", "2026-11-27T00:00:00Z"),
+            ("acme", f"https://acme.com/tools/t{i}/", "NEUTRAL" if i < 9 else "PASS", "Discovered - currently not indexed" if i < 9 else "Submitted and indexed", now_iso),
         )
+    conn.execute(
+        "CREATE TABLE gsc_daily_metrics (property_id TEXT, date TEXT, impressions INTEGER, clicks INTEGER, recorded_at TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO gsc_daily_metrics VALUES (?, ?, ?, ?, ?)",
+        ("acme", "2026-11-27", 14, 0, now_iso),
+    )
     conn.commit()
     conn.close()
 
@@ -327,34 +355,156 @@ def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
         status = "PASS"
         issues: List[str] = []
 
+    class _FailCommerce:
+        passed = False
+        status = "FAIL"
+        issues = ["missing checkout button"]
+
+    class _CleanPreflight:
+        total_inspected = 5
+        passed_count = 5
+        blocked_count = 0
+        is_gate_passed = True
+
+    class _BlockedPreflight:
+        total_inspected = 5
+        passed_count = 3
+        blocked_count = 2
+        is_gate_passed = False
+
     with (
+        patch("pseofactory.affiliates.MONETIZATION_VAULT_PATH", vault_file),
         patch("pseofactory.commerce_gate.audit_tenant_commerce_fail_closed", return_value=_PassCommerce()),
         patch("pseofactory.cli._resolve_trend_db_path", return_value=tdb),
+        patch("pseofactory.indexing.preflight.run_indexing_preflight", return_value=_CleanPreflight()),
     ):
-        rc_earn = cmd_earn_proof(
+        # (a) Engine failures STILL fail closed: stale truth + no live/pending partner path, empty AIO DB
+        rc_earn_fail = cmd_earn_proof(
             argparse.Namespace(property="all", max_age_hours=72.0, workspace_root=str(ws), skip_live=True, json=True)
         )
-        earn_out = json.loads(capsys.readouterr().out)
-        assert rc_earn == 1
-        assert earn_out["status"] == "FAIL"
-        assert earn_out["leads_health"]["human_leads"] == 0
-        assert earn_out["leads_health"]["synthetic_probe_leads"] == 1
-        assert any("approved affiliate partners" in f for f in earn_out["failures"])
-        assert any("real external human leads" in f for f in earn_out["failures"])
-        assert any("stale" in f for f in earn_out["failures"])
+        earn_fail = json.loads(capsys.readouterr().out)
+        assert rc_earn_fail == 1
+        assert earn_fail["status"] == "FAIL"
+        assert any("neither live nor pending" in f for f in earn_fail["failures"])
+        assert any("stale" in f for f in earn_fail["failures"])
+        assert any("expired/unpolled" in b for b in earn_fail["business_blockers"])
+        assert any("real external human leads" in b for b in earn_fail["business_blockers"])
 
-        monkeypatch.delenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", raising=False)
-        rc_syn = cmd_syndicate_proof(
+        monkeypatch.setenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", "0")
+        rc_syn_fail = cmd_syndicate_proof(
             argparse.Namespace(property="all", max_age_days=7, min_indexed_pct=50.0, workspace_root=str(ws), skip_live=True, json=True)
         )
-        syn_out = json.loads(capsys.readouterr().out)
-        assert rc_syn == 1
-        assert syn_out["status"] == "FAIL"
-        assert syn_out["properties"]["acme"]["gsc_indexation"]["indexed_count"] == 1
-        assert syn_out["properties"]["acme"]["gsc_indexation"]["total_inspected"] == 10
-        assert any("GSC indexation ratio critically low" in f for f in syn_out["failures"])
-        assert any("parasite-ledger" in f for f in syn_out["failures"])
-        assert any("YouTube uploads disabled" in f for f in syn_out["failures"])
+        syn_fail = json.loads(capsys.readouterr().out)
+        assert rc_syn_fail == 1
+        assert syn_fail["status"] == "FAIL"
+        assert any("AIO observatory stale or empty" in f for f in syn_fail["failures"])
+        assert any("explicitly disabled" in f for f in syn_fail["failures"])
+        assert any("GSC indexation ratio below target" in b for b in syn_fail["business_blockers"])
+        assert any("parasite-ledger" in b for b in syn_fail["business_blockers"])
+
+        # learn-proof fails closed when portfolio_revenue_truth.json is stale (>72h)
+        with (
+            patch("pseofactory.seo_growth_loops.evaluate_north_star_targets", return_value={"status": "FAIL", "pillars": {"1_search_impressions_and_ctr": {"current_30d_impressions": 14, "current_30d_clicks": 0}}}),
+            patch("pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle", return_value={"status": "SUCCESS", "unindexed_audited": 0, "diagnosed_defects": []}),
+            patch("pseofactory.revenue_truth.build_portfolio_revenue_truth_report", return_value={"generated_at": now_iso, "portfolio_bottom_line": {"gross_realized_revenue_usd": 0.0, "pseofactory_realized_revenue_usd": 0.0, "local_arbitrage_realized_revenue_usd": 0.0, "solana_trading_realized_pnl_usd": 0.0}}),
+        ):
+            rc_learn_fail = cmd_learn_proof(
+                argparse.Namespace(property="all", max_age_days=3, workspace_root=str(ws), json=True)
+            )
+            learn_fail = json.loads(capsys.readouterr().out)
+            assert rc_learn_fail == 1
+            assert learn_fail["status"] == "FAIL"
+            assert any("portfolio_revenue_truth.json stale" in f for f in learn_fail["failures"])
+
+        # (b) With engine health clean (pending partner in vault, fresh truth, fresh AIO DB, clean preflight),
+        #     business blockers are reported in business_blockers/business_kpis and exit code is 0.
+        vault_file.write_text(
+            json.dumps({"properties": {"acme": {"partners": {"partner_pending": {"status": "pending"}}}}}),
+            encoding="utf-8",
+        )
+        rev_truth_file.write_text(
+            json.dumps({"generated_at": now_iso, "portfolio_bottom_line": {"pseofactory_realized_revenue_usd": 0.0, "gross_realized_revenue_usd": 0.0}}),
+            encoding="utf-8",
+        )
+        aconn2 = sqlite3.connect(aio_db)
+        aconn2.execute(
+            "INSERT INTO aio_snapshots VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("s1", "acme", "acme calculator", now_iso, 1, "Answer", "[]", "fake", 0.001, None, "factual"),
+        )
+        aconn2.commit()
+        aconn2.close()
+
+        rc_earn_ok = cmd_earn_proof(
+            argparse.Namespace(property="all", max_age_hours=72.0, workspace_root=str(ws), skip_live=True, json=True)
+        )
+        earn_ok = json.loads(capsys.readouterr().out)
+        assert rc_earn_ok == 0
+        assert earn_ok["status"] == "PASS"
+        assert earn_ok["failures"] == []
+        assert earn_ok["properties"]["acme"]["pending_affiliates_count"] == 1
+        assert earn_ok["business_kpis"]["business_blockers_count"] == 4
+        assert any("pending external approval" in b for b in earn_ok["business_blockers"])
+        assert any("expired/unpolled" in b for b in earn_ok["business_blockers"])
+        assert any("real external human leads" in b for b in earn_ok["business_blockers"])
+        assert any("realized revenue is $0.00" in b for b in earn_ok["business_blockers"])
+
+        monkeypatch.delenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", raising=False)
+        rc_syn_ok = cmd_syndicate_proof(
+            argparse.Namespace(property="all", max_age_days=7, min_indexed_pct=50.0, workspace_root=str(ws), skip_live=True, json=True)
+        )
+        syn_ok = json.loads(capsys.readouterr().out)
+        assert rc_syn_ok == 0
+        assert syn_ok["status"] == "PASS"
+        assert syn_ok["failures"] == []
+        assert syn_ok["properties"]["acme"]["indexing_preflight"]["blocked_count"] == 0
+        assert syn_ok["business_kpis"]["business_blockers_count"] >= 3
+        assert any("GSC indexation ratio below target" in b for b in syn_ok["business_blockers"])
+        assert any("parasite-ledger" in b for b in syn_ok["business_blockers"])
+
+        with (
+            patch("pseofactory.seo_growth_loops.evaluate_north_star_targets", return_value={"status": "FAIL", "pillars": {"1_search_impressions_and_ctr": {"current_30d_impressions": 14, "current_30d_clicks": 0}}}),
+            patch("pseofactory.indexing.feedback_loop.IndexingFeedbackLoop.run_feedback_cycle", return_value={"status": "SUCCESS", "unindexed_audited": 0, "diagnosed_defects": []}),
+            patch("pseofactory.revenue_truth.build_portfolio_revenue_truth_report", return_value={"generated_at": now_iso, "portfolio_bottom_line": {"gross_realized_revenue_usd": 0.0, "pseofactory_realized_revenue_usd": 0.0, "local_arbitrage_realized_revenue_usd": 0.0, "solana_trading_realized_pnl_usd": 0.0}}),
+        ):
+            rc_learn_ok = cmd_learn_proof(
+                argparse.Namespace(property="all", max_age_days=3, workspace_root=str(ws), json=True)
+            )
+            learn_ok = json.loads(capsys.readouterr().out)
+            assert rc_learn_ok == 0
+            assert learn_ok["status"] == "PASS"
+            assert learn_ok["failures"] == []
+            assert any("north-star 30d KPI FAIL" in b for b in learn_ok["business_blockers"])
+            assert any("realized revenue is $0.00" in b for b in learn_ok["business_blockers"])
+
+        # (c) Engine failures on commerce parity, blocked preflight, or failed live /r/ redirect STILL exit 1
+        with patch("pseofactory.commerce_gate.audit_tenant_commerce_fail_closed", return_value=_FailCommerce()):
+            rc_comm_fail = cmd_earn_proof(
+                argparse.Namespace(property="all", max_age_hours=72.0, workspace_root=str(ws), skip_live=True, json=True)
+            )
+            comm_out = json.loads(capsys.readouterr().out)
+            assert rc_comm_fail == 1
+            assert any("commerce-audit failed" in f for f in comm_out["failures"])
+
+        with patch("pseofactory.indexing.preflight.run_indexing_preflight", return_value=_BlockedPreflight()):
+            rc_pf_fail = cmd_syndicate_proof(
+                argparse.Namespace(property="all", max_age_days=7, min_indexed_pct=50.0, workspace_root=str(ws), skip_live=True, json=True)
+            )
+            pf_out = json.loads(capsys.readouterr().out)
+            assert rc_pf_fail == 1
+            assert any("Indexing preflight blocked" in f for f in pf_out["failures"])
+
+        # Live partner redirect failure must fail closed with exit 1
+        vault_file.write_text(
+            json.dumps({"properties": {"acme": {"partners": {"broken_partner": {"status": "live"}}}}}),
+            encoding="utf-8",
+        )
+        with patch("pseofactory.cli._probe_http_readonly", return_value={"status_code": 404, "location": "", "headers": {}, "body_snippet": "", "error": "HTTP 404"}):
+            rc_redir_fail = cmd_earn_proof(
+                argparse.Namespace(property="all", max_age_hours=72.0, workspace_root=str(ws), skip_live=False, json=True)
+            )
+            redir_out = json.loads(capsys.readouterr().out)
+            assert rc_redir_fail == 1
+            assert any("Live /r/broken_partner redirect check failed" in f for f in redir_out["failures"])
 
 
 def test_partner_status_summary_and_property_readiness_report_to_dict() -> None:

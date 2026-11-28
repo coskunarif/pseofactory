@@ -546,6 +546,7 @@ LOCAL_ENV_ALLOWED_KEYS: Tuple[str, ...] = (
     "TELEMETRY_EXPORT_SECRET",
     "CLOUDFLARE_ACCOUNT_ID",
     "CLOUDFLARE_API_TOKEN",
+    "PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD",
 )
 
 
@@ -566,6 +567,9 @@ def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
         fallback_repo_env = Path("/home/ubuntuadmin/projects/pseofactory/.env")
         if fallback_repo_env not in candidates:
             candidates.append(fallback_repo_env)
+        workspace_env = Path("/home/ubuntuadmin/projects/.env")
+        if workspace_env not in candidates:
+            candidates.append(workspace_env)
 
     loaded_keys: List[str] = []
     for cand in candidates:
@@ -588,7 +592,8 @@ def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
                 if key not in os.environ:
                     os.environ[key] = val
                     loaded_keys.append(key)
-            break
+            if dotenv_path:
+                break
         except Exception:
             continue
     return loaded_keys

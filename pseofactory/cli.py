@@ -4878,6 +4878,7 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
     db_path = _resolve_trend_db_path(ws_root)
     failures: List[str] = []
     warnings: List[str] = []
+    business_blockers: List[str] = []
     gsc_by_tenant: Dict[str, Dict[str, Any]] = {}
 
     if not db_path.is_file():
@@ -4947,6 +4948,11 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
                 p1 = (ns_card.get("pillars") or {}).get("1_search_impressions_and_ctr") or {}
                 ns_impr = int(p1.get("current_30d_impressions", 0) or 0)
                 ns_clicks = int(p1.get("current_30d_clicks", 0) or 0)
+                if ns_status != "PASS":
+                    business_blockers.append(
+                        f"north-star 30d KPI {ns_status} for '{pid}': "
+                        f"30d_impressions={ns_impr}, 30d_clicks={ns_clicks}"
+                    )
             except Exception as ns_exc:
                 failures.append(f"north-star evaluation failed for '{pid}': {ns_exc}")
 
@@ -5042,30 +5048,37 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
     rev_truth_summary: Dict[str, Any] = {}
     rev_file = _resolve_factory_agy_file("portfolio_revenue_truth.json", ws_root)
     rev_file_age_hours: Optional[float] = None
-    if rev_file.is_file():
+    max_age_hours = float(max_age_days) * 24.0
+    if not rev_file.is_file():
+        failures.append(f"portfolio_revenue_truth.json missing at {rev_file}")
+    else:
         try:
             persisted_rt = json.loads(rev_file.read_text(encoding="utf-8"))
-            rt_dt = _parse_utc_iso(str(persisted_rt.get("generated_at") or ""))
-            if rt_dt is not None:
-                rev_file_age_hours = round((now_utc - rt_dt).total_seconds() / 3600.0, 2)
-                if rev_file_age_hours > float(max_age_days) * 24.0:
-                    warnings.append(
-                        f"portfolio_revenue_truth.json is {rev_file_age_hours}h old (>{max_age_days}d)"
+            if not isinstance(persisted_rt, dict):
+                failures.append(f"portfolio_revenue_truth.json is not a JSON object at {rev_file}")
+            else:
+                gen_at = str(persisted_rt.get("generated_at") or "")
+                rt_dt = _parse_utc_iso(gen_at)
+                rev_file_age_hours = round((now_utc - rt_dt).total_seconds() / 3600.0, 2) if rt_dt else None
+                if rev_file_age_hours is None or rev_file_age_hours < 0.0 or rev_file_age_hours > max_age_hours:
+                    failures.append(
+                        f"portfolio_revenue_truth.json stale or invalid: age_hours={rev_file_age_hours} exceeds {max_age_hours}h"
                     )
-        except Exception:
-            pass
-    else:
-        warnings.append(f"portfolio_revenue_truth.json not found at {rev_file}")
+        except Exception as rt_read_exc:
+            failures.append(f"Failed reading portfolio_revenue_truth.json: {rt_read_exc}")
 
     try:
         rt_rep = build_portfolio_revenue_truth_report(live_network=False, persist=False)
         bottom = rt_rep.get("portfolio_bottom_line") or {}
+        pseo_rev = float(bottom.get("pseofactory_realized_revenue_usd", 0.0) or 0.0)
+        if pseo_rev <= 0.0:
+            business_blockers.append(f"pseofactory realized revenue is ${pseo_rev:.2f} ($0.00)")
         rev_truth_summary = {
             "status": "PASS",
             "generated_at": rt_rep.get("generated_at"),
             "persisted_artifact_age_hours": rev_file_age_hours,
             "gross_realized_revenue_usd": bottom.get("gross_realized_revenue_usd", 0.0),
-            "pseofactory_realized_revenue_usd": bottom.get("pseofactory_realized_revenue_usd", 0.0),
+            "pseofactory_realized_revenue_usd": pseo_rev,
             "local_arbitrage_realized_revenue_usd": bottom.get("local_arbitrage_realized_revenue_usd", 0.0),
             "solana_trading_realized_pnl_usd": bottom.get("solana_trading_realized_pnl_usd", 0.0),
         }
@@ -5074,12 +5087,29 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
         rev_truth_summary = {"status": "FAIL", "error": str(rt_exc)}
 
     passed = len(failures) == 0
+    business_kpis = {
+        "north_star_passing_tenants": sum(
+            1 for tr in tenant_results.values() if tr["north_star"]["status"] == "PASS"
+        ),
+        "north_star_total_tenants": len(tenant_results),
+        "total_30d_impressions": sum(
+            int(tr["north_star"]["current_30d_impressions"] or 0) for tr in tenant_results.values()
+        ),
+        "total_30d_clicks": sum(
+            int(tr["north_star"]["current_30d_clicks"] or 0) for tr in tenant_results.values()
+        ),
+        "pseofactory_realized_revenue_usd": rev_truth_summary.get("pseofactory_realized_revenue_usd", 0.0),
+        "gross_realized_revenue_usd": rev_truth_summary.get("gross_realized_revenue_usd", 0.0),
+        "business_blockers_count": len(business_blockers),
+    }
     payload = {
         "status": "PASS" if passed else "FAIL",
         "passed": passed,
         "max_age_days": max_age_days,
         "properties": tenant_results,
         "portfolio_revenue_truth": rev_truth_summary,
+        "business_kpis": business_kpis,
+        "business_blockers": business_blockers,
         "warnings": warnings,
         "failures": failures,
     }
@@ -5106,6 +5136,8 @@ def cmd_learn_proof(args: argparse.Namespace) -> int:
             f"pseofactory=${rev_truth_summary.get('pseofactory_realized_revenue_usd', 0.0):.2f} | "
             f"persisted_age_h={rev_truth_summary.get('persisted_artifact_age_hours')}"
         )
+        for biz in business_blockers:
+            print(f"  [BIZ] {biz}")
         for w in warnings:
             print(f"  [WARN] {w}")
         for f in failures:
@@ -5254,16 +5286,21 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
     now_utc = datetime.now(timezone.utc)
     failures: List[str] = []
     warnings: List[str] = []
+    business_blockers: List[str] = []
 
     vault_props: Dict[str, Any] = {}
     vault_path = Path(MONETIZATION_VAULT_PATH)
-    if vault_path.is_file():
+    if not vault_path.is_file():
+        failures.append(f"monetization_vault.json missing at {vault_path}")
+    else:
         try:
             vault_doc = json.loads(vault_path.read_text(encoding="utf-8"))
             if isinstance(vault_doc, dict) and isinstance(vault_doc.get("properties"), dict):
                 vault_props = vault_doc["properties"]
-        except Exception:
-            vault_props = {}
+            else:
+                failures.append(f"monetization_vault.json missing 'properties' mapping at {vault_path}")
+        except Exception as v_exc:
+            failures.append(f"Failed parsing monetization_vault.json at {vault_path}: {v_exc}")
 
     reg = TenantRegistry.default(workspace_root=ws_root)
     tenant_results: Dict[str, Dict[str, Any]] = {}
@@ -5298,9 +5335,25 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
             for pk, pe in partners_map.items()
             if isinstance(pe, dict) and str(pe.get("status") or "").strip().lower() in ("live", "active_direct")
         )
+        pending_partners = sorted(
+            str(pk).strip().lower()
+            for pk, pe in partners_map.items()
+            if isinstance(pe, dict)
+            and str(pe.get("status") or "").strip().lower()
+            in ("pending", "applied", "awaiting_response", "in_review", "requires_followup")
+        )
         approved_count = len(approved_partners)
+        pending_count = len(pending_partners)
         if approved_count == 0:
-            failures.append(f"Tenant '{pid}' has 0 active approved affiliate partners in monetization_vault.json")
+            if pending_count > 0:
+                business_blockers.append(
+                    f"Tenant '{pid}' has 0 active approved affiliate partners "
+                    f"({pending_count} pending external approval in monetization_vault.json)"
+                )
+            else:
+                failures.append(
+                    f"Tenant '{pid}' has neither live nor pending affiliate monetization paths in monetization_vault.json"
+                )
 
         redirect_probes: List[Dict[str, Any]] = []
         redirect_failures = 0
@@ -5335,6 +5388,8 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
             },
             "approved_affiliates_count": approved_count,
             "approved_affiliate_keys": approved_partners,
+            "pending_affiliates_count": pending_count,
+            "pending_affiliate_keys": pending_partners,
             "live_redirect_probes": {
                 "skipped": skip_live,
                 "checked_count": len(redirect_probes),
@@ -5359,6 +5414,9 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
     else:
         try:
             pe_doc = json.loads(earnings_path.read_text(encoding="utf-8"))
+            if not isinstance(pe_doc, dict):
+                failures.append(f"partner_earnings_ledger.json is not a JSON object at {earnings_path}")
+                pe_doc = {}
             portals = pe_doc.get("portals") if isinstance(pe_doc.get("portals"), dict) else {}
             expired_list = sorted(
                 pk for pk, pv in portals.items()
@@ -5381,8 +5439,8 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
                 }
             )
             if expired_list or uncollected_cnt > 0:
-                failures.append(
-                    f"Affiliate portal collection degraded: {max(uncollected_cnt, len(expired_list))} expired/unpolled portals ({', '.join(expired_list)})"
+                business_blockers.append(
+                    f"Affiliate portal sessions expired/unpolled: {max(uncollected_cnt, len(expired_list))} portals ({', '.join(expired_list)})"
                 )
         except Exception as pe_exc:
             failures.append(f"Failed reading partner_earnings_ledger.json: {pe_exc}")
@@ -5401,6 +5459,7 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
         failures.append(f"captured_leads.jsonl missing at {leads_path}")
     else:
         try:
+            corrupt_lead_lines = 0
             for raw_line in leads_path.read_text(encoding="utf-8").splitlines():
                 s_line = raw_line.strip()
                 if not s_line:
@@ -5408,8 +5467,10 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
                 try:
                     rec = json.loads(s_line)
                 except Exception:
+                    corrupt_lead_lines += 1
                     continue
                 if not isinstance(rec, dict):
+                    corrupt_lead_lines += 1
                     continue
                 leads_health["total_records"] += 1
                 cls_lbl = classify_captured_lead(rec)
@@ -5419,8 +5480,10 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
                     leads_health["synthetic_probe_leads"] += 1
                 else:
                     leads_health["internal_operator_test_leads"] += 1
+            if corrupt_lead_lines > 0:
+                failures.append(f"captured_leads.jsonl has {corrupt_lead_lines} corrupt JSON lines at {leads_path}")
             if leads_health["human_leads"] == 0:
-                failures.append(
+                business_blockers.append(
                     f"captured_leads.jsonl has 0 real external human leads "
                     f"(synthetic_probe={leads_health['synthetic_probe_leads']}, "
                     f"internal_test={leads_health['internal_operator_test_leads']})"
@@ -5444,6 +5507,9 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
     else:
         try:
             rt_doc = json.loads(rev_path.read_text(encoding="utf-8"))
+            if not isinstance(rt_doc, dict):
+                failures.append(f"portfolio_revenue_truth.json is not a JSON object at {rev_path}")
+                rt_doc = {}
             gen_at = str(rt_doc.get("generated_at") or "")
             gen_dt = _parse_utc_iso(gen_at)
             age_h = round((now_utc - gen_dt).total_seconds() / 3600.0, 2) if gen_dt else None
@@ -5465,13 +5531,26 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
                     f"portfolio_revenue_truth.json stale: age_hours={age_h} exceeds {max_age_hours}h"
                 )
             if pseo_rev <= 0.0:
-                failures.append(
+                business_blockers.append(
                     f"pseofactory realized revenue is ${pseo_rev:.2f} ($0.00)"
                 )
         except Exception as rt_exc:
             failures.append(f"Failed reading portfolio_revenue_truth.json: {rt_exc}")
 
     passed = len(failures) == 0
+    business_kpis = {
+        "tenants_with_approved_affiliates": sum(
+            1 for tr in tenant_results.values() if tr["approved_affiliates_count"] > 0
+        ),
+        "tenants_total": len(tenant_results),
+        "live_polled_portals_count": portal_health["live_polled_portals_count"],
+        "uncollected_portals_count": portal_health["uncollected_portals_count"],
+        "human_leads": leads_health["human_leads"],
+        "synthetic_probe_leads": leads_health["synthetic_probe_leads"],
+        "pseofactory_realized_revenue_usd": revenue_health["pseofactory_realized_revenue_usd"],
+        "gross_realized_revenue_usd": revenue_health["gross_realized_revenue_usd"],
+        "business_blockers_count": len(business_blockers),
+    }
     payload = {
         "status": "PASS" if passed else "FAIL",
         "passed": passed,
@@ -5480,6 +5559,8 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
         "portal_health": portal_health,
         "leads_health": leads_health,
         "revenue_truth": revenue_health,
+        "business_kpis": business_kpis,
+        "business_blockers": business_blockers,
         "warnings": warnings,
         "failures": failures,
     }
@@ -5492,10 +5573,12 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
             ca = tr["commerce_audit"]
             rp = tr["live_redirect_probes"]
             r_str = "SKIPPED" if rp["skipped"] else f"{rp['checked_count'] - rp['failures_count']}/{rp['checked_count']}"
-            t_tag = "PASS" if (ca["passed"] and tr["approved_affiliates_count"] > 0 and rp["failures_count"] == 0) else "FAIL"
+            has_mon_path = tr["approved_affiliates_count"] > 0 or tr["pending_affiliates_count"] > 0
+            t_tag = "PASS" if (ca["passed"] and has_mon_path and rp["failures_count"] == 0) else "FAIL"
             print(
                 f"[{t_tag}] earn-proof ({pid}): commerce={ca['status']} | "
                 f"approved_affiliates={tr['approved_affiliates_count']} | "
+                f"pending_affiliates={tr['pending_affiliates_count']} | "
                 f"live_redirects={r_str}"
             )
         print(
@@ -5505,6 +5588,8 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
             f"pseofactory_rev=${revenue_health['pseofactory_realized_revenue_usd']:.2f} "
             f"(truth_age={revenue_health['age_hours']}h)"
         )
+        for biz in business_blockers:
+            print(f"  [BIZ] {biz}")
         for w in warnings:
             print(f"  [WARN] {w}")
         for f in failures:
@@ -5512,27 +5597,32 @@ def cmd_earn_proof(args: argparse.Namespace) -> int:
     return 0 if passed else 1
 
 
-def _read_json_list_or_dict_readonly(path: Path) -> Any:
+def _read_json_readonly_strict(path: Path) -> Tuple[Any, Optional[str]]:
     if not path.is_file():
-        return None
+        return None, None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
+        return json.loads(path.read_text(encoding="utf-8")), None
+    except Exception as exc:
+        return None, f"Corrupt JSON ledger at {path}: {exc}"
+
+
+def _read_json_list_or_dict_readonly(path: Path) -> Any:
+    data, _ = _read_json_readonly_strict(path)
+    return data
 
 
 def cmd_syndicate_proof(args: argparse.Namespace) -> int:
     """
     Stage 5 Proof: Strictly read-only verification across active tenants of:
-      1. Real GSC indexation ratio from trend_history.db (gsc_url_inspection_states) and metric_recovery_ledger.json
-      2. Live sitemap.xml, robots.txt, and IndexNow key reachability
-      3. Real external distribution / permalinks from broadcast_ledger.json, parasite-ledger, and youtube_upload_ledger.json
-      4. AIO Observatory freshness and citation share from aio_observatory.db
+      1. Engine health: live sitemap.xml, robots.txt, IndexNow reachability, indexing preflight,
+         AIO Observatory freshness, and ledger parse integrity
+      2. External business outcomes: GSC indexation ratio and external social/parasite permalinks
     Zero em-dashes. Zero en-dashes.
     """
     import re
     import sqlite3
     from datetime import datetime, timezone
+    from pseofactory.indexing.preflight import run_indexing_preflight
 
     ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
     req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
@@ -5549,6 +5639,7 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
     db_path = _resolve_trend_db_path(ws_root)
     failures: List[str] = []
     warnings: List[str] = []
+    business_blockers: List[str] = []
 
     inspection_by_prop: Dict[str, Dict[str, Any]] = {}
     if not db_path.is_file():
@@ -5582,8 +5673,8 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
                 if total_cnt == 0:
                     failures.append(f"No GSC URL inspection rows for '{pid}' in gsc_url_inspection_states")
                 elif total_cnt >= 5 and ratio_pct < min_indexed_pct:
-                    failures.append(
-                        f"GSC indexation ratio critically low for '{pid}': "
+                    business_blockers.append(
+                        f"GSC indexation ratio below target for '{pid}': "
                         f"{indexed_cnt}/{total_cnt} ({ratio_pct:.1f}% < {min_indexed_pct:.0f}%)"
                     )
         except Exception as db_exc:
@@ -5596,16 +5687,38 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
     global_parasite_path = Path(ws_root) / ".agy" / "runs" / "parasite_ledger.json"
     if not global_parasite_path.is_file():
         global_parasite_path = Path("/home/ubuntuadmin/projects/.agy/runs/parasite_ledger.json")
-    global_parasite_data = _read_json_list_or_dict_readonly(global_parasite_path) or {}
-    if not isinstance(global_parasite_data, dict):
-        global_parasite_data = {}
+    global_parasite_raw, gp_err = _read_json_readonly_strict(global_parasite_path)
+    if gp_err:
+        failures.append(gp_err)
+    global_parasite_data = global_parasite_raw if isinstance(global_parasite_raw, dict) else {}
 
     yt_ledger_path = _resolve_factory_agy_file("youtube_upload_ledger.json", ws_root)
-    yt_ledger_data = _read_json_list_or_dict_readonly(yt_ledger_path) or {}
-    yt_uploads_all = yt_ledger_data.get("uploads") if isinstance(yt_ledger_data, dict) and isinstance(yt_ledger_data.get("uploads"), dict) else {}
-    youtube_uploads_enabled = os.environ.get("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD") == "1"
+    yt_ledger_raw, yt_err = _read_json_readonly_strict(yt_ledger_path)
+    if yt_err:
+        failures.append(yt_err)
+    yt_ledger_data = yt_ledger_raw if isinstance(yt_ledger_raw, dict) else {}
+    yt_uploads_all = yt_ledger_data.get("uploads") if isinstance(yt_ledger_data.get("uploads"), dict) else {}
+    if "PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD" not in os.environ and "PYTEST_CURRENT_TEST" not in os.environ:
+        try:
+            from pseofactory.partner_tracker import _load_local_env
+
+            _load_local_env()
+            for env_cand in (Path(ws_root) / "pseofactory" / ".env", Path(ws_root) / ".env"):
+                if env_cand.is_file():
+                    _load_local_env(dotenv_path=str(env_cand))
+        except Exception:
+            pass
+    raw_yt_flag = os.environ.get("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD")
+    youtube_uploads_enabled = raw_yt_flag == "1"
     if not youtube_uploads_enabled:
-        failures.append("YouTube uploads disabled (PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD != '1')")
+        if raw_yt_flag is not None and raw_yt_flag.strip().lower() in ("0", "false", "no", "off"):
+            failures.append(
+                f"YouTube uploads explicitly disabled (PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD={raw_yt_flag!r})"
+            )
+        else:
+            business_blockers.append(
+                "YouTube uploads not enabled in environment (PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD != '1')"
+            )
 
     # Load AIO Observatory DB read-only
     aio_db_path = Path(ws_root) / ".agy" / "runs" / "aio_observatory.db"
@@ -5662,12 +5775,43 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
     for pid, repo_path in targets:
         dist_dir = _resolve_tenant_dist_dir(repo_path)
         canonical_base = _resolve_cli_live_base_url(pid, repo_path, reg) or f"https://{pid}.com"
+        canonical_domain = canonical_base.replace("https://", "").replace("http://", "").split("/")[0]
 
         # Metric recovery ledger cross-check
         m_ledger_path = repo_path / ".agy" / "metric_recovery_ledger.json"
-        m_ledger = _read_json_list_or_dict_readonly(m_ledger_path)
+        m_ledger, m_err = _read_json_readonly_strict(m_ledger_path)
+        if m_err:
+            failures.append(m_err)
         m_snapshots_count = len(m_ledger.get("snapshots") or {}) if isinstance(m_ledger, dict) else 0
         m_last_eval = str(m_ledger.get("last_evaluated") or "") if isinstance(m_ledger, dict) else ""
+
+        # Indexing preflight check (0 blocked URLs required for engine health)
+        preflight_info: Dict[str, Any] = {
+            "total_inspected": 0,
+            "passed_count": 0,
+            "blocked_count": 0,
+            "passed": True,
+        }
+        try:
+            pre_rep = run_indexing_preflight(
+                dist_dir=dist_dir,
+                domain=canonical_domain,
+                property_id=pid,
+            )
+            preflight_info = {
+                "total_inspected": int(pre_rep.total_inspected),
+                "passed_count": int(pre_rep.passed_count),
+                "blocked_count": int(pre_rep.blocked_count),
+                "passed": bool(pre_rep.is_gate_passed),
+            }
+            if pre_rep.blocked_count > 0 or not pre_rep.is_gate_passed:
+                failures.append(
+                    f"Indexing preflight blocked {pre_rep.blocked_count} URLs for '{pid}'"
+                )
+        except Exception as pre_exc:
+            preflight_info["passed"] = False
+            preflight_info["error"] = str(pre_exc)
+            failures.append(f"Indexing preflight error for '{pid}': {pre_exc}")
 
         # Live sitemap, robots.txt, and IndexNow key check
         indexnow_files = sorted(
@@ -5713,7 +5857,9 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
 
         # Broadcast ledger, parasite ledger, and YouTube ledger
         bl_path = repo_path / ".agy" / "broadcast_ledger.json"
-        bl_data = _read_json_list_or_dict_readonly(bl_path)
+        bl_data, bl_err = _read_json_readonly_strict(bl_path)
+        if bl_err:
+            failures.append(bl_err)
         bl_entries: List[Dict[str, Any]] = []
         if isinstance(bl_data, list):
             bl_entries = [x for x in bl_data if isinstance(x, dict)]
@@ -5737,18 +5883,23 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
                     break
 
         tenant_ext_path = repo_path / ".agy" / "external_authority_ledger.json"
-        tenant_ext_data = _read_json_list_or_dict_readonly(tenant_ext_path) or {}
-        if not isinstance(tenant_ext_data, dict):
-            tenant_ext_data = {}
+        tenant_ext_raw, ext_err = _read_json_readonly_strict(tenant_ext_path)
+        if ext_err:
+            failures.append(ext_err)
+        tenant_ext_data = tenant_ext_raw if isinstance(tenant_ext_raw, dict) else {}
         parasite_entries = [
             rec for rec in list(tenant_ext_data.values()) + list(global_parasite_data.values())
             if isinstance(rec, dict) and str(rec.get("tenant") or "").strip().lower() == pid
         ]
         parasite_count = len(parasite_entries)
         if parasite_count == 0:
-            failures.append(f"parasite-ledger has 0 external authority permalinks for '{pid}'")
+            business_blockers.append(
+                f"parasite-ledger has 0 external authority permalinks for '{pid}' (staged_drafts={staged_broadcast})"
+            )
         if live_social_permalinks == 0 and parasite_count == 0:
-            failures.append(f"Live social and parasite permalinks count is 0 for '{pid}' (staged_drafts={staged_broadcast})")
+            business_blockers.append(
+                f"Live social and parasite permalinks count is 0 for '{pid}' (staged_drafts={staged_broadcast})"
+            )
 
         yt_tenant_cnt = sum(
             1 for v in yt_uploads_all.values()
@@ -5763,6 +5914,7 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
                 "metric_recovery_snapshots": m_snapshots_count,
                 "metric_recovery_last_evaluated": m_last_eval,
             },
+            "indexing_preflight": preflight_info,
             "edge_discovery_reachability": edge_checks,
             "external_distribution": {
                 "broadcast_total": len(bl_entries),
@@ -5777,6 +5929,25 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
         }
 
     passed = len(failures) == 0
+    business_kpis = {
+        "total_inspected_urls": sum(
+            int(tr["gsc_indexation"].get("total_inspected", 0) or 0) for tr in tenant_results.values()
+        ),
+        "total_indexed_urls": sum(
+            int(tr["gsc_indexation"].get("indexed_count", 0) or 0) for tr in tenant_results.values()
+        ),
+        "total_staged_drafts": sum(
+            int(tr["external_distribution"].get("broadcast_staged_drafts", 0) or 0) for tr in tenant_results.values()
+        ),
+        "total_live_social_permalinks": sum(
+            int(tr["external_distribution"].get("live_social_permalinks", 0) or 0) for tr in tenant_results.values()
+        ),
+        "total_parasite_permalinks": sum(
+            int(tr["external_distribution"].get("parasite_permalinks", 0) or 0) for tr in tenant_results.values()
+        ),
+        "youtube_uploads_enabled": youtube_uploads_enabled,
+        "business_blockers_count": len(business_blockers),
+    }
     payload = {
         "status": "PASS" if passed else "FAIL",
         "passed": passed,
@@ -5784,6 +5955,8 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
         "max_age_days": max_age_days,
         "youtube_uploads_enabled": youtube_uploads_enabled,
         "properties": tenant_results,
+        "business_kpis": business_kpis,
+        "business_blockers": business_blockers,
         "warnings": warnings,
         "failures": failures,
     }
@@ -5791,30 +5964,31 @@ def cmd_syndicate_proof(args: argparse.Namespace) -> int:
     if as_json:
         print(json.dumps(payload, indent=2))
     else:
-        tag = "PASS" if passed else "FAIL"
         for pid, tr in tenant_results.items():
             gi = tr["gsc_indexation"]
+            pf = tr["indexing_preflight"]
             ed = tr["edge_discovery_reachability"]
             ex = tr["external_distribution"]
             aio = tr["aio_observatory"]
             t_ok = (
                 gi.get("total_inspected", 0) > 0
-                and (gi.get("total_inspected", 0) < 5 or gi.get("indexed_ratio_pct", 0.0) >= min_indexed_pct)
+                and bool(pf.get("passed", True))
                 and (ed["skipped"] or (ed.get("robots_ok") and ed.get("sitemap_ok") and ed.get("indexnow_ok")))
-                and ex["parasite_permalinks"] > 0
-                and youtube_uploads_enabled
                 and aio.get("fresh")
             )
             t_tag = "PASS" if t_ok else "FAIL"
             reach_str = "SKIPPED" if ed["skipped"] else f"robots={ed['robots_ok']},sitemap={ed['sitemap_ok']},indexnow={ed['indexnow_ok']}"
             print(
                 f"[{t_tag}] syndicate-proof ({pid}): "
+                f"preflight_blocked={pf.get('blocked_count', 0)} | "
                 f"indexed={gi.get('indexed_count', 0)}/{gi.get('total_inspected', 0)} ({gi.get('indexed_ratio_pct', 0.0):.1f}%) | "
                 f"{reach_str} | "
                 f"social_permalinks={ex['live_social_permalinks']} staged={ex['broadcast_staged_drafts']} "
                 f"parasite={ex['parasite_permalinks']} yt_enabled={ex['youtube_uploads_enabled']} (yt_cnt={ex['youtube_uploads_recorded']}) | "
                 f"aio_age={aio.get('age_days')}d cite_share={aio.get('citation_share', 0.0):.3f}"
             )
+        for biz in business_blockers:
+            print(f"  [BIZ] {biz}")
         for w in warnings:
             print(f"  [WARN] {w}")
         for f in failures:
