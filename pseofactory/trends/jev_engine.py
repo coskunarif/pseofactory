@@ -97,6 +97,35 @@ def determine_target_asset_type(query: str, intent_cluster: str) -> str:
     return "void_documentation"
 
 
+def _has_first_party_demand_backing(candidate: TrendCandidate) -> bool:
+    """Returns True if candidate is backed by real first-party GSC telemetry or statutory dataset."""
+    first_party_sources = (
+        "gsc_search_console",
+        "gsc",
+        "statutory_economic_feed",
+        "statutory_economic_dataset",
+    )
+    src = str(candidate.source or "").strip().lower()
+    if src in first_party_sources:
+        return True
+    meta = candidate.metadata or {}
+    corrob = [str(s).strip().lower() for s in (meta.get("corroborating_sources") or [])]
+    if any(s in first_party_sources for s in corrob):
+        return True
+    gsc_meta = meta.get("gsc_telemetry")
+    if isinstance(gsc_meta, dict):
+        if int(gsc_meta.get("impressions", 0) or 0) > 0 or int(gsc_meta.get("clicks", 0) or 0) > 0:
+            return True
+    gsc_rows = meta.get("gsc_rows")
+    if isinstance(gsc_rows, list):
+        for row in gsc_rows:
+            if isinstance(row, dict) and (
+                int(row.get("impressions", 0) or 0) > 0 or int(row.get("clicks", 0) or 0) > 0
+            ):
+                return True
+    return False
+
+
 class JevEngine:
     """
     Evaluates candidate topics against Jev durability invariant and computes composite profit yield.
@@ -581,6 +610,21 @@ class JevEngine:
             )
 
         # Step 4: Build Page Qualification Gate (with Sponsor-Verified Monetization & AI Citation Void)
+        if bool(getattr(treg_result, "is_synthetic", False)) and not _has_first_party_demand_backing(candidate):
+            return JevDecisionResult(
+                query=clean_q,
+                slug=slug,
+                action="MONITOR",
+                jev_score=jev_score,
+                durable_prob=durable_prob,
+                composite_profit_yield=composite_yield,
+                cannibalization_risk=c_cannibal,
+                target_asset_type="none",
+                decision_reason="Synthetic treg heuristic fallback without measured search volume or first-party demand; hold at MONITOR",
+                passed_thresholds=False,
+                evaluated_at=now_iso,
+            )
+
         kd_norm = min(1.0, max(0.0, treg_result.keyword_difficulty / 100.0))
         r_composite = 0.6 * c_cannibal + 0.4 * kd_norm
         ai_vacant = bool(getattr(treg_result, "ai_citation_vacant", False))

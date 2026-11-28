@@ -374,10 +374,11 @@ def test_trend_pipeline_empty_queue_short_circuit_and_duplicate_idempotency(tmp_
 def test_harvested_statutory_suggest_spikes_qualify_for_build(tmp_path):
     """
     Verifies that top-ranked suggest completions for high-intent statutory/calculator queries
-    pass noise filtering, offline treg heuristics, and Jev scoring to reach BUILD_PAGE.
+    with measured treg volume reach BUILD_PAGE, while synthetic offline fallback stays capped at MONITOR.
     """
     from unittest.mock import patch
     from pseofactory.trends.collectors import GoogleSuggestCollector
+    from pseofactory.trends.treg_checker import TregChecker
 
     collector = GoogleSuggestCollector()
     with patch.object(
@@ -391,7 +392,27 @@ def test_harvested_statutory_suggest_spikes_qualify_for_build(tmp_path):
         harvested = collector.harvest_spikes(seed_query="section 179")
     assert len(harvested) == 2
 
-    pipeline = TrendPipeline()
+    # Unmeasured offline heuristic must NOT auto-promote to BUILD_PAGE
+    offline_pipeline = TrendPipeline()
+    offline_res = offline_pipeline.process_spikes(raw_spikes=harvested, sink_path=tmp_path / "offline.jsonl")
+    assert "section 179 deduction calculator 2026" not in [r["query"] for r in offline_res["approved_build"]]
+    assert "celebrity gossip oscars dress" in [r["query"] for r in offline_res["rejected"]]
+
+    # Measured treg metrics promote the statutory calculator to BUILD_PAGE
+    pipeline = TrendPipeline(
+        treg_checker=TregChecker(
+            mock_data={
+                "section 179 deduction calculator 2026": {
+                    "search_volume": 3200,
+                    "cpc_usd": 5.50,
+                    "competition_index": 0.25,
+                    "keyword_difficulty": 16.0,
+                    "position_zero_vacant": True,
+                    "historical_stability": 0.88,
+                }
+            }
+        )
+    )
     res = pipeline.process_spikes(raw_spikes=harvested, sink_path=tmp_path / "harvested.jsonl")
     approved_queries = [r["query"] for r in res["approved_build"]]
     rejected_queries = [r["query"] for r in res["rejected"]]

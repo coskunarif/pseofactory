@@ -1330,6 +1330,13 @@ class TrendHistoryDB:
             ),
         )
 
+    _SYNTHETIC_TREG_SNAPSHOT_SQL = (
+        "competition_index = 0.25 AND position_zero_vacant = 1 AND ("
+        "(keyword_difficulty = 16.0 AND historical_stability IN (0.85, 0.89)) "
+        "OR (keyword_difficulty = 20.0 AND search_volume = 1200 AND cpc_usd = 2.0)"
+        ")"
+    )
+
     def get_latest_treg_snapshot(
         self,
         query_slug: str,
@@ -1338,17 +1345,19 @@ class TrendHistoryDB:
     ) -> Optional[TregSnapshotRecord]:
         """
         Retrieves most recent TregSnapshotRecord for given query_slug from treg_metric_snapshots table.
-        Optionally validates snapshot freshness against max_age_days and rejects poisoned 0-volume defaults.
+        Optionally validates snapshot freshness against max_age_days and rejects poisoned 0-volume defaults
+        and known synthetic offline heuristic fingerprints.
         Zero em-dashes. Zero en-dashes.
         """
         assert_url_safe_slug(query_slug)
         conn = self.get_connection()
         if ignore_poisoned_zero:
             row = conn.execute(
-                """
+                f"""
                 SELECT * FROM treg_metric_snapshots
                 WHERE query_slug = ?
                   AND NOT (search_volume = 0 AND cpc_usd = 0.0 AND keyword_difficulty = 50.0)
+                  AND NOT ({self._SYNTHETIC_TREG_SNAPSHOT_SQL})
                 ORDER BY checked_at DESC
                 LIMIT 1;
                 """,
@@ -1397,15 +1406,25 @@ class TrendHistoryDB:
         )
 
     def purge_poisoned_treg_snapshots(self) -> int:
-        """Removes poisoned treg_metric_snapshots rows where search_volume=0, cpc_usd=0.0, and keyword_difficulty=50.0."""
+        """
+        Removes poisoned treg_metric_snapshots rows:
+        1. Zero-volume defaults (search_volume=0, cpc_usd=0.0, keyword_difficulty=50.0)
+        2. Synthetic offline heuristic fingerprints from _offline_heuristic.
+        """
         conn = self.get_connection()
-        cur = conn.execute(
+        cur_zero = conn.execute(
             """
             DELETE FROM treg_metric_snapshots
             WHERE search_volume = 0 AND cpc_usd = 0.0 AND keyword_difficulty = 50.0;
             """
         )
-        return int(cur.rowcount or 0)
+        cur_synth = conn.execute(
+            f"""
+            DELETE FROM treg_metric_snapshots
+            WHERE {self._SYNTHETIC_TREG_SNAPSHOT_SQL};
+            """
+        )
+        return int(cur_zero.rowcount or 0) + int(cur_synth.rowcount or 0)
 
     def record_jev_evaluation(self, evaluation: JevEvaluationRecord) -> None:
         """Records strategic Jev evaluation record."""

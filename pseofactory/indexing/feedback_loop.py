@@ -695,8 +695,27 @@ class GSCRootCauseClassifier:
         and vault_jev.call_system_one semantic triage with deterministic SHA-256 disk caching.
         Zero em-dashes. Zero en-dashes.
         """
+        from urllib.parse import urlparse
+
+        url_path = urlparse(str(url or "")).path.lower()
+        if url_path in ("/api", "/cdn-cgi", "/signal", "/r") or url_path.startswith(
+            ("/api/", "/cdn-cgi/", "/signal/", "/r/")
+        ):
+            return None
+
         err_low = eff_err.strip().lower()
         cov_low = eff_cov.strip().lower()
+        reason_low = str(data.get("reason") or data.get("details") or "").strip().lower()
+        code_low = str(data.get("code") or data.get("quarantine_code") or data.get("stage") or "").strip().lower()
+        combined_diag_txt = " ".join((err_low, cov_low, reason_low, code_low))
+        if (
+            "robots_disallow" in combined_diag_txt
+            or "quarantine_robots_disallowed" in combined_diag_txt
+            or "robots.txt" in combined_diag_txt
+            or ("robots" in combined_diag_txt and "disallow" in combined_diag_txt)
+        ):
+            return None
+
         status_up = str(data.get("status") or "").strip().upper()
         stage_up = str(data.get("stage") or data.get("code") or "").strip().upper()
         enable_triage = bool(

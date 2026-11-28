@@ -43,6 +43,22 @@ def _gsc_quota_day_pt(now: Optional[datetime] = None) -> str:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(GSC_QUOTA_TIMEZONE).strftime("%Y-%m-%d")
 
+
+def _parse_iso_to_pt_day(ts: str) -> Optional[str]:
+    """Parses an ISO-8601 timestamp string and returns its YYYY-MM-DD date in America/Los_Angeles."""
+    raw = str(ts or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return _gsc_quota_day_pt(dt)
+    except Exception:
+        return None
+
 def _baseline_env_get(key: str, default: str) -> str:
     maint_mod = sys.modules.get("pseofactory.maintenance")
     if maint_mod is not None:
@@ -1225,6 +1241,10 @@ class ChildSitemapPushLedger:
         return data
 
     def _save_state(self, state: Dict[str, Any]) -> None:
+        from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+        if _is_live_repo_mutation_blocked(self.ledger_path):
+            return
         isolated_t = self._infer_isolated_ledger_tenant()
         if isolated_t and isinstance(state, dict) and isinstance(state.get("tenants"), dict):
             state["tenants"] = {
@@ -1433,6 +1453,8 @@ class PushIndexer:
         child_sitemap_ledger_path: Optional[Path] = None,
         tenant_id: Optional[str] = None,
         section_rules: Optional[Dict[str, Any]] = None,
+        intent_wal_path: Optional[Path] = None,
+        read_only: bool = False,
     ):
         if domain == DEFAULT_DOMAIN and (
             "prexvo" in str(base_dir or "").lower()
@@ -1560,6 +1582,13 @@ class PushIndexer:
             else (self.base_dir / ".agy" / "child_sitemap_push_ledger.json")
         )
         self.child_sitemap_ledger = ChildSitemapPushLedger(ledger_path=self.child_sitemap_ledger_path)
+        self._explicit_intent_wal = intent_wal_path is not None
+        self.intent_wal_path = (
+            Path(intent_wal_path)
+            if intent_wal_path
+            else (self.base_dir / ".agy" / ".indexing_intent_wal.jsonl")
+        )
+        self.read_only = bool(read_only)
         self.section_rules = dict(section_rules) if isinstance(section_rules, dict) else None
         self.gsc_site = f"sc-domain:{self.domain}"
 
@@ -1835,7 +1864,7 @@ class PushIndexer:
 
             valid_urls.append(u)
 
-        if quarantined or valid_urls:
+        if (quarantined or valid_urls) and not getattr(self, "read_only", False):
             if os.environ.get("PYTEST_CURRENT_TEST"):
                 if getattr(self, "_explicit_quarantine_ledger", False):
                     ledger_targets = [self.quarantine_ledger_path]
@@ -1884,6 +1913,8 @@ class PushIndexer:
     def ensure_indexnow_key_file(self) -> Path:
         """Places the IndexNow verification key text file in dist/ and ~/.indexnow/ cache."""
         key_file = self.dist_dir / f"{self.indexnow_key}.txt"
+        if getattr(self, "read_only", False):
+            return key_file
         if (
             os.environ.get("PYTEST_CURRENT_TEST")
             and "/home/ubuntuadmin/projects/" in str(self.dist_dir.resolve())
@@ -1955,6 +1986,8 @@ class PushIndexer:
 
     def save_pushed_ledger(self, ledger: Dict[str, Any]):
         """Persists push ledger dictionary atomically using flock and temporary file."""
+        if getattr(self, "read_only", False):
+            return
         try:
             from pseofactory.supervisor import AtomicStateLedger
             AtomicStateLedger.save_json(self.ledger_path, ledger)
@@ -2120,6 +2153,37 @@ class PushIndexer:
 
         return tier1_hubs[:150], tier2_leaves
 
+    def _resolve_intent_wal_paths(self) -> List[Path]:
+        """Resolves target WAL paths, honoring explicit intent_wal_path overrides."""
+        default_wal = self.base_dir / ".agy" / ".indexing_intent_wal.jsonl"
+        cur_wal = getattr(self, "intent_wal_path", None)
+        if getattr(self, "_explicit_intent_wal", False) or (
+            cur_wal is not None and Path(cur_wal) != default_wal
+        ):
+            return [Path(cur_wal)]
+        wal_paths = [default_wal]
+        if not (self.base_dir / ".git").exists():
+            wal_paths.insert(0, self.base_dir / ".indexing_intent_wal.jsonl")
+        return wal_paths
+
+    def _append_intent_wal_record(self, record: Dict[str, Any]) -> None:
+        """Appends one WAL entry unless read_only or blocked from live repo mutation."""
+        if getattr(self, "read_only", False):
+            return
+        from pseofactory.maintenance import _is_live_repo_mutation_blocked
+
+        line = json.dumps(record) + "\n"
+        for wp in self._resolve_intent_wal_paths():
+            if _is_live_repo_mutation_blocked(wp):
+                continue
+            try:
+                wp.parent.mkdir(parents=True, exist_ok=True)
+                with open(wp, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+            except Exception:
+                pass
+
     def _record_push_intent(self, urls: List[str], channel: str) -> str:
         """
         Records a pre-push Write-Ahead Log (WAL) intent entry in .indexing_intent_wal.jsonl
@@ -2135,18 +2199,7 @@ class PushIndexer:
             "status": "PENDING_INTENT",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        line = json.dumps(record) + "\n"
-        wal_paths = [self.base_dir / ".agy" / ".indexing_intent_wal.jsonl"]
-        if not (self.base_dir / ".git").exists():
-            wal_paths.insert(0, self.base_dir / ".indexing_intent_wal.jsonl")
-        for wp in wal_paths:
-            try:
-                wp.parent.mkdir(parents=True, exist_ok=True)
-                with open(wp, "a", encoding="utf-8") as f:
-                    f.write(line)
-                    f.flush()
-            except Exception:
-                pass
+        self._append_intent_wal_record(record)
         return intent_id
 
     def _commit_push_result(self, intent_id: str, urls: List[str], status: str) -> Dict[str, Any]:
@@ -2160,18 +2213,7 @@ class PushIndexer:
             "status": status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        line = json.dumps(record) + "\n"
-        wal_paths = [self.base_dir / ".agy" / ".indexing_intent_wal.jsonl"]
-        if not (self.base_dir / ".git").exists():
-            wal_paths.insert(0, self.base_dir / ".indexing_intent_wal.jsonl")
-        for wp in wal_paths:
-            try:
-                wp.parent.mkdir(parents=True, exist_ok=True)
-                with open(wp, "a", encoding="utf-8") as f:
-                    f.write(line)
-                    f.flush()
-            except Exception:
-                pass
+        self._append_intent_wal_record(record)
         return record
 
     def calculate_indexing_velocity(
@@ -2371,6 +2413,8 @@ class PushIndexer:
 
     def _save_indexnow_backoff_state(self, state: Dict[str, Any]) -> None:
         """Persists IndexNow rate-limit cooldown state atomically."""
+        if getattr(self, "read_only", False):
+            return
         path = getattr(self, "indexnow_backoff_ledger_path", None)
         if not path:
             return
@@ -3679,6 +3723,54 @@ class PushIndexer:
             airlock_res = self.preflight_airlock(urls)
             urls = self.prioritize_urls_for_indexing_allocation(list(airlock_res[0]))
 
+        # Skip URLs already inspected within the current Pacific Time calendar day so
+        # hourly supervisor / indexing-inspector cycles never burn daily quota re-inspecting
+        # the same unindexed URLs on the same day.
+        skipped_today_count = 0
+        if live and urls:
+            is_pytest = "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+            custom_db_path = getattr(self, "db_path", None)
+            if not is_pytest or custom_db_path is not None:
+                try:
+                    from pseofactory.trends.db import DEFAULT_DB_PATH, TrendHistoryDB
+
+                    if custom_db_path:
+                        target_db = Path(custom_db_path)
+                    elif DEFAULT_DB_PATH.is_file():
+                        target_db = DEFAULT_DB_PATH
+                    else:
+                        target_db = Path(
+                            "/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db"
+                        )
+                    if target_db.is_file():
+                        today_pt = _gsc_quota_day_pt()
+                        prop_id = (
+                            str(getattr(self, "tenant_id", "") or "").strip().lower()
+                            or (
+                                (self.domain or "").split(".")[0].strip().lower()
+                                if self.domain
+                                else "profithelm"
+                            )
+                        )
+                        inspected_today_norm = set()
+                        with TrendHistoryDB(target_db, read_only=True) as tdb:
+                            db_rows = list(tdb.get_gsc_url_inspection_states(prop_id))
+                            if not db_rows and getattr(self, "gsc_site", None):
+                                db_rows = list(tdb.get_gsc_url_inspection_states(str(self.gsc_site)))
+                            for rec in db_rows:
+                                p_u = str(getattr(rec, "page_url", "") or "").strip()
+                                rec_at = str(getattr(rec, "recorded_at", "") or "").strip()
+                                if p_u and _parse_iso_to_pt_day(rec_at) == today_pt:
+                                    inspected_today_norm.add(p_u.rstrip("/"))
+                        if inspected_today_norm:
+                            filtered_urls = [
+                                u for u in urls if str(u or "").strip().rstrip("/") not in inspected_today_norm
+                            ]
+                            skipped_today_count = len(urls) - len(filtered_urls)
+                            urls = filtered_urls
+                except Exception as dedup_err:
+                    logger.warning("Same-day GSC URL inspection filter failed: %s", dedup_err)
+
         # When live=True and urls was not a narrow explicit list, prioritize unindexed and uninspected URLs first
         if live and len(urls) > max_urls and not explicit_urls_passed:
             try:
@@ -3790,14 +3882,24 @@ class PushIndexer:
         total = len(inspections)
         pct = (indexed_count / total * 100.0) if total > 0 else 0.0
 
+        if not live:
+            oracle_verdict = "CERTIFIED_INDEXED"
+        elif total == 0 and skipped_today_count > 0:
+            oracle_verdict = "SKIPPED_ALREADY_INSPECTED_TODAY"
+        elif total > 0 and indexed_count == total:
+            oracle_verdict = "CERTIFIED_INDEXED"
+        else:
+            oracle_verdict = "PENDING_INDEXATION"
+
         result = {
             "site": target_site,
             "mode": "LIVE" if live else "SIMULATED",
             "total_inspected": total,
             "indexed_count": indexed_count,
             "indexation_rate_pct": round(pct, 2),
+            "skipped_already_inspected_today": skipped_today_count,
             "quota_circuit_breaker_tripped": quota_circuit_breaker_tripped,
-            "oracle_verdict": "CERTIFIED_INDEXED" if (indexed_count == total or not live) else "PENDING_INDEXATION",
+            "oracle_verdict": oracle_verdict,
             "inspections": inspections,
         }
         if db_upsert_error is not None:
@@ -3822,6 +3924,8 @@ class PushIndexer:
         return []
 
     def save_gsc_rollover_queue(self, urls: List[str]):
+        if getattr(self, "read_only", False):
+            return
         try:
             from pseofactory.supervisor import AtomicStateLedger
             AtomicStateLedger.save_json(self.rollover_queue_path, urls)
@@ -4343,17 +4447,18 @@ class PushIndexer:
                 submitted_count += 1
                 if is_child:
                     child_submitted_count += 1
-                self.child_sitemap_ledger.record_submission(
-                    tenant_id=eff_tenant,
-                    sitemap_url=sm_url,
-                    xml_sha256=xml_sha,
-                    section=sec_name,
-                    url_count=url_count,
-                    status=status,
-                    site=target_site,
-                    command=cmd_str,
-                    date_bucket=d_bucket,
-                )
+                if not getattr(self, "read_only", False):
+                    self.child_sitemap_ledger.record_submission(
+                        tenant_id=eff_tenant,
+                        sitemap_url=sm_url,
+                        xml_sha256=xml_sha,
+                        section=sec_name,
+                        url_count=url_count,
+                        status=status,
+                        site=target_site,
+                        command=cmd_str,
+                        date_bucket=d_bucket,
+                    )
 
             submissions.append({
                 "engine": "gsc_sitemaps",
@@ -4918,9 +5023,13 @@ class PushIndexer:
             for bu in preflight_report.blocked_urls:
                 if bu not in blocked_urls:
                     blocked_urls.append(bu)
-            if blocked_urls and (
-                not os.environ.get("PYTEST_CURRENT_TEST")
-                or "/home/ubuntuadmin/projects" not in str(self.base_dir)
+            if (
+                blocked_urls
+                and not getattr(self, "read_only", False)
+                and (
+                    not os.environ.get("PYTEST_CURRENT_TEST")
+                    or "/home/ubuntuadmin/projects" not in str(self.base_dir)
+                )
             ):
                 blocked_log_path = self.base_dir / ".agy" / "indexing_preflight_blocked.json"
                 try:
@@ -5017,21 +5126,22 @@ class PushIndexer:
                 "blocked_urls": blocked_urls,
                 "audit_log_path": str(self.audit_log_path),
             }
-            try:
-                should_write_q = bool(live)
-                if not should_write_q and self.audit_log_path.is_file():
-                    try:
-                        prev_q = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
-                        should_write_q = not (isinstance(prev_q, dict) and prev_q.get("mode") == "LIVE")
-                    except Exception:
+            if not getattr(self, "read_only", False):
+                try:
+                    should_write_q = bool(live)
+                    if not should_write_q and self.audit_log_path.is_file():
+                        try:
+                            prev_q = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
+                            should_write_q = not (isinstance(prev_q, dict) and prev_q.get("mode") == "LIVE")
+                        except Exception:
+                            should_write_q = True
+                    elif not should_write_q:
                         should_write_q = True
-                elif not should_write_q:
-                    should_write_q = True
-                if should_write_q:
-                    self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-                    self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-            except Exception as ex:
-                report["audit_log_error"] = str(ex)
+                    if should_write_q:
+                        self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+                        self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+                except Exception as ex:
+                    report["audit_log_error"] = str(ex)
             return report
 
         if urls_to_submit:
@@ -5084,14 +5194,19 @@ class PushIndexer:
             }
             websub_res = {"status": "disabled_policy", "skipped": True, "reason": "websub_disabled_policy"}
             pingomatic_res = {"status": "disabled_policy", "skipped": True, "reason": "pingomatic_disabled_policy"}
-            oracle_sample = self.prioritize_urls_for_indexing_allocation(safe_all_urls)[:5]
+            oracle_candidates = self.prioritize_urls_for_indexing_allocation(safe_all_urls)
+            oracle_sample = oracle_candidates[:5]
             gsc_res = {
                 "site": self.gsc_site,
                 "urls_targeted": len(safe_all_urls),
                 "status": "disabled_policy",
                 "skipped": True,
                 "results": [{"engine": "gsc_idempotent", "status": "IDEMPOTENT_NO_OP", "message": "All assets already pushed"}],
-                "inspection_oracle": self.verify_gsc_indexation_loop(urls=oracle_sample, live=live) if oracle_sample else [],
+                "inspection_oracle": (
+                    self.verify_gsc_indexation_loop(urls=oracle_candidates, max_urls=5, live=live)
+                    if oracle_candidates
+                    else []
+                ),
                 "child_sitemap_submissions": sitemap_reg.get("submissions", []),
                 "sitemap_registration": sitemap_reg,
             }
@@ -5146,21 +5261,22 @@ class PushIndexer:
             "audit_log_path": str(self.audit_log_path),
         }
 
-        try:
-            should_write_audit = bool(live)
-            if not should_write_audit and self.audit_log_path.is_file():
-                try:
-                    prev_aud = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
-                    should_write_audit = not (isinstance(prev_aud, dict) and prev_aud.get("mode") == "LIVE")
-                except Exception:
+        if not getattr(self, "read_only", False):
+            try:
+                should_write_audit = bool(live)
+                if not should_write_audit and self.audit_log_path.is_file():
+                    try:
+                        prev_aud = json.loads(self.audit_log_path.read_text(encoding="utf-8"))
+                        should_write_audit = not (isinstance(prev_aud, dict) and prev_aud.get("mode") == "LIVE")
+                    except Exception:
+                        should_write_audit = True
+                elif not should_write_audit:
                     should_write_audit = True
-            elif not should_write_audit:
-                should_write_audit = True
-            if should_write_audit:
-                self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
-                self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        except Exception as ex:
-            report["audit_log_error"] = str(ex)
+                if should_write_audit:
+                    self.audit_log_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.audit_log_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            except Exception as ex:
+                report["audit_log_error"] = str(ex)
 
         return report
 

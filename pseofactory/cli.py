@@ -29,6 +29,14 @@ for _paid_env_var in (
 ):
     os.environ.pop(_paid_env_var, None)
 
+if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+    try:
+        from pseofactory.partner_tracker import _load_local_env
+
+        _load_local_env()
+    except Exception:
+        pass
+
 from pseofactory.maintenance import (
     TenantRegistry,
     ConfigurablePropertyAdapter,
@@ -3133,6 +3141,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_ev.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
     p_ev.add_argument("--json", action="store_true", help="Output edge-verify report as JSON")
 
+    p_fp = subparsers.add_parser(
+        "find-proof",
+        help="Stage 1 Proof: read-only, zero-cost verification of discovery DB, TREG telemetry, void candidates, build ledger handoff, and offline pipeline execution",
+    )
+    p_fp.add_argument("--max-age-hours", type=float, default=24.0, help="Max age in hours for latest COMPLETED crawl cycle (default: 24)")
+    p_fp.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_fp.add_argument("--json", action="store_true", help="Output find-proof report as JSON")
+
+    p_lp = subparsers.add_parser(
+        "learn-proof",
+        help="Stage 7 Proof: read-only verification of GSC telemetry freshness, north-star, feedback loop dry-run, overlays, remediation queue, and revenue truth",
+    )
+    p_lp.add_argument("--property", type=str, default="all", help="Property ID or 'all' (default: all)")
+    p_lp.add_argument("--max-age-days", type=int, default=3, help="Max age in days for gsc_daily_metrics recorded_at (default: 3)")
+    p_lp.add_argument("--workspace-root", type=str, default=None, help="Workspace root for dynamic .pseofactory.json tenant discovery")
+    p_lp.add_argument("--json", action="store_true", help="Output learn-proof report as JSON")
+
     return parser
 
 
@@ -3776,6 +3801,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return cmd_build_proof(args)
     elif args.command == "edge-verify":
         return cmd_edge_verify(args)
+    elif args.command == "find-proof":
+        return cmd_find_proof(args)
+    elif args.command == "learn-proof":
+        return cmd_learn_proof(args)
     else:
         parser.print_help()
         return 1
@@ -4367,6 +4396,658 @@ def cmd_edge_verify(args: argparse.Namespace) -> int:
                 f"latency_ms={r['latency_ms']} | edge_status={r['edge_status']}{err_suffix}"
             )
     return 0 if all_passed else 1
+
+
+def _resolve_trend_db_path(ws_root: str) -> Path:
+    from pseofactory.trends.db import DEFAULT_DB_PATH
+
+    ws_candidate = Path(ws_root) / "pseofactory" / "pseofactory" / "trends" / "data" / "trend_history.db"
+    prod_candidate = Path("/home/ubuntuadmin/projects/pseofactory/pseofactory/trends/data/trend_history.db")
+    if DEFAULT_DB_PATH.is_file():
+        if (
+            "/.agy/worktrees/" in DEFAULT_DB_PATH.as_posix()
+            and ws_candidate.is_file()
+            and ws_candidate.stat().st_size > DEFAULT_DB_PATH.stat().st_size
+        ):
+            return ws_candidate
+        return DEFAULT_DB_PATH
+    if ws_candidate.is_file():
+        return ws_candidate
+    return prod_candidate
+
+
+def _resolve_factory_agy_file(filename: str, ws_root: str) -> Path:
+    local_cand = Path(_project_root) / ".agy" / filename
+    if local_cand.is_file():
+        return local_cand
+    ws_cand = Path(ws_root) / "pseofactory" / ".agy" / filename
+    if ws_cand.is_file():
+        return ws_cand
+    return Path("/home/ubuntuadmin/projects/pseofactory/.agy") / filename
+
+
+def _parse_utc_iso(ts_raw: str) -> Optional[Any]:
+    from datetime import datetime, timezone
+
+    raw = str(ts_raw or "").strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def cmd_find_proof(args: argparse.Namespace) -> int:
+    """
+    Stage 1 Proof: Strictly read-only, zero-cost verification of trend_history.db crawl cycles,
+    real vs synthetic TREG snapshot telemetry, void_candidates.jsonl, daily_page_build_ledger.json
+    handoff on disk, truth-pack freshness, and offline NoiseFilter -> TregChecker -> JevEngine ->
+    FactoryPipeline.determine_property_assignment execution.
+    Zero em-dashes. Zero en-dashes.
+    """
+    import sqlite3
+    from datetime import datetime, timezone
+    from pseofactory.impact_planner import discover_active_tenants
+    from pseofactory.pipeline import FactoryPipeline
+    from pseofactory.trends.filters import NoiseFilter
+    from pseofactory.trends.jev_engine import JevEngine
+    from pseofactory.trends.models import FeedSpike
+    from pseofactory.trends.treg_checker import TregChecker
+    from pseofactory.truth_intake import check_truth_pack_freshness
+    from pseofactory.truth_pack import load_truth_pack
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    max_age_hours = float(getattr(args, "max_age_hours", 24.0) or 24.0)
+    as_json = bool(getattr(args, "json", False))
+
+    now_utc = datetime.now(timezone.utc)
+    db_path = _resolve_trend_db_path(ws_root)
+    failures: List[str] = []
+    warnings: List[str] = []
+
+    cycle_info: Dict[str, Any] = {
+        "db_path": str(db_path),
+        "db_exists": db_path.is_file(),
+        "cycle_id": None,
+        "executed_at": None,
+        "age_hours": None,
+        "raw_crawl_observations": 0,
+        "jev_evaluations": 0,
+        "passed": False,
+    }
+    treg_info: Dict[str, Any] = {
+        "last_7d_total": 0,
+        "last_7d_measured": 0,
+        "last_7d_synthetic": 0,
+        "latest_cycle_total": 0,
+        "latest_cycle_measured": 0,
+        "latest_cycle_synthetic": 0,
+        "overall_total": 0,
+        "overall_measured": 0,
+        "overall_synthetic": 0,
+    }
+
+    if not db_path.is_file():
+        failures.append(f"trend_history.db missing at {db_path}")
+    else:
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT cycle_id, executed_at, total_raw_observations, unique_queries_count
+                FROM crawl_cycles
+                WHERE status = 'COMPLETED'
+                ORDER BY executed_at DESC
+                LIMIT 1;
+                """
+            ).fetchone()
+            if row is None:
+                failures.append("No COMPLETED row in crawl_cycles")
+            else:
+                c_id = str(row["cycle_id"])
+                ex_at = str(row["executed_at"])
+                ex_dt = _parse_utc_iso(ex_at)
+                age_h = round((now_utc - ex_dt).total_seconds() / 3600.0, 2) if ex_dt else None
+                raw_cnt = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM raw_crawl_observations WHERE cycle_id = ?;",
+                        (c_id,),
+                    ).fetchone()[0]
+                )
+                jev_cnt = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM jev_evaluations WHERE cycle_id = ?;",
+                        (c_id,),
+                    ).fetchone()[0]
+                )
+                fresh_ok = age_h is not None and 0.0 <= age_h <= max_age_hours
+                cycle_ok = fresh_ok and raw_cnt > 0 and jev_cnt > 0
+                cycle_info.update(
+                    {
+                        "cycle_id": c_id,
+                        "executed_at": ex_at,
+                        "age_hours": age_h,
+                        "raw_crawl_observations": raw_cnt,
+                        "jev_evaluations": jev_cnt,
+                        "passed": cycle_ok,
+                    }
+                )
+                if not fresh_ok:
+                    failures.append(f"Latest COMPLETED crawl_cycle age_hours={age_h} exceeds {max_age_hours}h")
+                if raw_cnt <= 0:
+                    failures.append(f"Latest COMPLETED crawl_cycle {c_id} has 0 raw_crawl_observations")
+                if jev_cnt <= 0:
+                    failures.append(f"Latest COMPLETED crawl_cycle {c_id} has 0 jev_evaluations")
+
+                heur_pred = (
+                    "competition_index = 0.25 AND keyword_difficulty IN (16.0, 20.0) "
+                    "AND historical_stability IN (0.85, 0.89)"
+                )
+                t7_tot = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM treg_metric_snapshots WHERE checked_at >= datetime('now', '-7 days');"
+                    ).fetchone()[0]
+                )
+                t7_meas = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM treg_metric_snapshots WHERE checked_at >= datetime('now', '-7 days') AND NOT ({heur_pred});"
+                    ).fetchone()[0]
+                )
+                tc_tot = int(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM treg_metric_snapshots WHERE cycle_id = ?;",
+                        (c_id,),
+                    ).fetchone()[0]
+                )
+                tc_meas = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM treg_metric_snapshots WHERE cycle_id = ? AND NOT ({heur_pred});",
+                        (c_id,),
+                    ).fetchone()[0]
+                )
+                tall_tot = int(conn.execute("SELECT COUNT(*) FROM treg_metric_snapshots;").fetchone()[0])
+                tall_meas = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM treg_metric_snapshots WHERE NOT ({heur_pred});"
+                    ).fetchone()[0]
+                )
+                treg_info = {
+                    "last_7d_total": t7_tot,
+                    "last_7d_measured": t7_meas,
+                    "last_7d_synthetic": max(0, t7_tot - t7_meas),
+                    "latest_cycle_total": tc_tot,
+                    "latest_cycle_measured": tc_meas,
+                    "latest_cycle_synthetic": max(0, tc_tot - tc_meas),
+                    "overall_total": tall_tot,
+                    "overall_measured": tall_meas,
+                    "overall_synthetic": max(0, tall_tot - tall_meas),
+                }
+                if t7_meas == 0:
+                    warnings.append(
+                        f"treg_metric_snapshots has 0 non-heuristic measured rows in last 7d (synthetic={t7_tot - t7_meas}, overall_measured={tall_meas}/{tall_tot})"
+                    )
+        except Exception as db_exc:
+            failures.append(f"SQLite read error: {db_exc}")
+        finally:
+            if conn is not None:
+                conn.close()
+
+    # Check void_candidates.jsonl
+    void_path = _resolve_factory_agy_file("void_candidates.jsonl", ws_root)
+    candidate_queries: List[str] = []
+    void_status_counts: Dict[str, int] = {}
+    void_total = 0
+    if not void_path.is_file():
+        failures.append(f"void_candidates.jsonl missing at {void_path}")
+    else:
+        try:
+            with void_path.open("r", encoding="utf-8", errors="ignore") as fh:
+                for raw_line in fh:
+                    s_line = raw_line.strip()
+                    if not s_line:
+                        continue
+                    void_total += 1
+                    try:
+                        rec = json.loads(s_line)
+                    except Exception:
+                        continue
+                    if isinstance(rec, dict):
+                        st = str(rec.get("status") or "UNKNOWN").strip()
+                        void_status_counts[st] = void_status_counts.get(st, 0) + 1
+                        q = str(rec.get("query") or "").strip()
+                        if q and q not in candidate_queries and len(candidate_queries) < 5:
+                            candidate_queries.append(q)
+        except Exception as vc_exc:
+            failures.append(f"Failed reading void_candidates.jsonl: {vc_exc}")
+    if void_total <= 0:
+        failures.append("void_candidates.jsonl is empty")
+
+    # Check daily_page_build_ledger.json handoff on disk
+    ledger_path = _resolve_factory_agy_file("daily_page_build_ledger.json", ws_root)
+    discovered = discover_active_tenants(ws_root)
+    tenant_roots = {pid: rp for pid, rp in discovered}
+    built_checked = 0
+    built_on_disk = 0
+    missing_on_disk: List[str] = []
+    if not ledger_path.is_file():
+        failures.append(f"daily_page_build_ledger.json missing at {ledger_path}")
+    else:
+        try:
+            ldata = json.loads(ledger_path.read_text(encoding="utf-8"))
+            days_map = ldata.get("days") if isinstance(ldata, dict) else {}
+            if isinstance(days_map, dict):
+                for day_val in days_map.values():
+                    entries: List[Dict[str, Any]] = []
+                    if isinstance(day_val, dict):
+                        for p_entries in day_val.values():
+                            if isinstance(p_entries, list):
+                                entries.extend([e for e in p_entries if isinstance(e, dict)])
+                    elif isinstance(day_val, list):
+                        entries.extend([e for e in day_val if isinstance(e, dict)])
+                    for entry in entries:
+                        slug = str(entry.get("slug") or "").strip()
+                        pid = str(entry.get("property_id") or "").strip().lower()
+                        out_f = str(entry.get("output_file") or "").strip()
+                        if not slug and not out_f:
+                            continue
+                        built_checked += 1
+                        exists = bool(out_f and Path(out_f).is_file())
+                        if not exists and pid in tenant_roots and slug:
+                            exists = (tenant_roots[pid] / "dist" / "tools" / slug / "index.html").is_file()
+                        if exists:
+                            built_on_disk += 1
+                        else:
+                            missing_on_disk.append(f"{pid}:{slug or out_f}")
+        except Exception as led_exc:
+            failures.append(f"Failed reading daily_page_build_ledger.json: {led_exc}")
+
+    if built_checked <= 0:
+        failures.append("daily_page_build_ledger.json has 0 built entries")
+    elif missing_on_disk:
+        failures.append(
+            f"daily_page_build_ledger.json has {len(missing_on_disk)} built slugs missing on disk: {', '.join(missing_on_disk[:5])}"
+        )
+
+    # Check truth-pack freshness
+    truth_freshness: Dict[str, str] = {}
+    for pid, _ in discovered:
+        try:
+            tp = load_truth_pack(pid, workspace_root=Path(ws_root), allow_expired=True)
+            f_rep = check_truth_pack_freshness(tp)
+            truth_freshness[pid] = str(f_rep.status)
+            if f_rep.status == "FREEZE_EXPIRED":
+                failures.append(f"truth-pack FREEZE_EXPIRED for {pid}: {list(f_rep.expired_keys)}")
+        except Exception as tp_exc:
+            truth_freshness[pid] = "ERROR"
+            failures.append(f"truth-pack freshness check failed for {pid}: {tp_exc}")
+
+    # Offline zero-cost pipeline dry run on real candidate queries
+    pipeline_checks: List[Dict[str, Any]] = []
+    if not candidate_queries:
+        failures.append("No candidate queries available in void_candidates.jsonl for pipeline dry-check")
+    else:
+        try:
+            nf = NoiseFilter()
+            tc = TregChecker(check_ai_citations=False)
+            je = JevEngine()
+            fp = FactoryPipeline(noise_filter=nf, treg_checker=tc, jev_engine=je)
+            for idx, q_text in enumerate(candidate_queries):
+                spike = FeedSpike(
+                    id=f"find-proof-{idx}",
+                    query=q_text,
+                    source="find_proof_offline",
+                    velocity=1.4,
+                    acceleration=0.6,
+                    z_score=2.4,
+                )
+                passes_nf, nf_reason, cand = nf.evaluate_spike(spike)
+                treg_res = tc.check_query(q_text, remaining_budget=0.0)
+                jev_res = je.evaluate(cand, treg_res)
+                prop_res = fp.determine_property_assignment(q_text)
+                pipeline_checks.append(
+                    {
+                        "query": q_text,
+                        "noise_filter_passed": bool(passes_nf),
+                        "noise_filter_reason": nf_reason,
+                        "treg_endpoint": treg_res.endpoint_called,
+                        "jev_action": jev_res.action,
+                        "property_id": prop_res.get("property_id"),
+                        "assignment_basis": prop_res.get("basis"),
+                    }
+                )
+        except Exception as pipe_exc:
+            failures.append(f"Offline Stage 1 pipeline execution failed: {pipe_exc}")
+
+    passed = len(failures) == 0
+    payload = {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "crawl_cycle": cycle_info,
+        "treg_metric_snapshots": treg_info,
+        "void_candidates": {
+            "path": str(void_path),
+            "total_lines": void_total,
+            "status_counts": void_status_counts,
+        },
+        "daily_page_build_ledger": {
+            "path": str(ledger_path),
+            "built_entries_checked": built_checked,
+            "built_on_disk_count": built_on_disk,
+            "missing_on_disk_count": len(missing_on_disk),
+        },
+        "truth_pack_freshness": truth_freshness,
+        "offline_pipeline_checks": pipeline_checks,
+        "warnings": warnings,
+        "failures": failures,
+    }
+
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        tag = "PASS" if passed else "FAIL"
+        print(
+            f"[{tag}] find-proof: cycle={cycle_info.get('cycle_id')} "
+            f"(age={cycle_info.get('age_hours')}h, raw={cycle_info.get('raw_crawl_observations')}, "
+            f"jev={cycle_info.get('jev_evaluations')}) | "
+            f"treg_7d={treg_info['last_7d_measured']}/{treg_info['last_7d_total']} measured "
+            f"(overall={treg_info['overall_measured']}/{treg_info['overall_total']}) | "
+            f"void_candidates={void_total} | ledger_on_disk={built_on_disk}/{built_checked} | "
+            f"pipeline_checks={len(pipeline_checks)} | truth={truth_freshness}"
+        )
+        for w in warnings:
+            print(f"  [WARN] {w}")
+        for f in failures:
+            print(f"  [FAIL] {f}")
+    return 0 if passed else 1
+
+
+def cmd_learn_proof(args: argparse.Namespace) -> int:
+    """
+    Stage 7 Proof: Strictly read-only, zero-mutation verification across active tenants of
+    gsc_daily_metrics freshness, evaluate_north_star_targets(persist=False),
+    IndexingFeedbackLoop dry-run, .agy/overlays & gsc_remediation_queue.json state, and
+    build_portfolio_revenue_truth_report(live_network=False, persist=False).
+    Zero em-dashes. Zero en-dashes.
+    """
+    import sqlite3
+    import tempfile
+    from datetime import datetime, timezone
+    from pseofactory.impact_planner import discover_active_tenants
+    from pseofactory.indexing.feedback_loop import IndexingFeedbackLoop
+    from pseofactory.revenue_truth import build_portfolio_revenue_truth_report
+    from pseofactory.seo_growth_loops import evaluate_north_star_targets
+
+    ws_root = getattr(args, "workspace_root", None) or os.environ.get("WORKSPACE_ROOT", "/home/ubuntuadmin/projects")
+    req_prop = str(getattr(args, "property", "all") or "all").strip().lower()
+    max_age_days = int(getattr(args, "max_age_days", 3) or 3)
+    as_json = bool(getattr(args, "json", False))
+
+    discovered = discover_active_tenants(ws_root)
+    if req_prop != "all":
+        targets = [(pid, rp) for pid, rp in discovered if pid.lower() == req_prop]
+        if not targets:
+            msg = f"Error: Property '{req_prop}' not found in workspace '{ws_root}'."
+            if as_json:
+                print(json.dumps({"status": "FAIL", "error": msg}))
+            else:
+                print(msg, file=sys.stderr)
+            return 1
+    else:
+        targets = discovered
+
+    if not targets:
+        msg = f"Error: No active tenants discovered under '{ws_root}'."
+        if as_json:
+            print(json.dumps({"status": "FAIL", "error": msg}))
+        else:
+            print(msg, file=sys.stderr)
+        return 1
+
+    now_utc = datetime.now(timezone.utc)
+    db_path = _resolve_trend_db_path(ws_root)
+    failures: List[str] = []
+    warnings: List[str] = []
+    gsc_by_tenant: Dict[str, Dict[str, Any]] = {}
+
+    if not db_path.is_file():
+        failures.append(f"trend_history.db missing at {db_path}")
+    else:
+        conn = None
+        try:
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+            conn.row_factory = sqlite3.Row
+            for pid, _ in targets:
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS cnt, MAX(date) AS latest_date, MAX(recorded_at) AS latest_recorded_at
+                    FROM gsc_daily_metrics
+                    WHERE property_id = ?;
+                    """,
+                    (pid,),
+                ).fetchone()
+                cnt = int(row["cnt"] or 0) if row else 0
+                latest_date = str(row["latest_date"] or "") if row else ""
+                latest_rec = str(row["latest_recorded_at"] or "") if row else ""
+                rec_dt = _parse_utc_iso(latest_rec)
+                age_days = round((now_utc - rec_dt).total_seconds() / 86400.0, 2) if rec_dt else None
+                fresh = bool(cnt > 0 and age_days is not None and 0.0 <= age_days <= float(max_age_days))
+                if not fresh:
+                    failures.append(
+                        f"gsc_daily_metrics stale or empty for '{pid}': rows={cnt}, latest_recorded_at={latest_rec}, age_days={age_days} (max={max_age_days}d)"
+                    )
+                gsc_by_tenant[pid] = {
+                    "rows_count": cnt,
+                    "latest_metric_date": latest_date,
+                    "latest_recorded_at": latest_rec,
+                    "age_days": age_days,
+                    "fresh": fresh,
+                }
+        except Exception as db_exc:
+            failures.append(f"SQLite read error on gsc_daily_metrics: {db_exc}")
+        finally:
+            if conn is not None:
+                conn.close()
+
+    tenant_results: Dict[str, Dict[str, Any]] = {}
+    with tempfile.TemporaryDirectory(prefix="pseofactory_learn_proof_") as tmp_dir:
+        tmp_dir_p = Path(tmp_dir)
+        for pid, repo_path in targets:
+            dist_rel = "dist"
+            marker_p = repo_path / ".pseofactory.json"
+            if marker_p.is_file():
+                try:
+                    marker_meta = json.loads(marker_p.read_text(encoding="utf-8"))
+                    dist_rel = str(marker_meta.get("dist_dir") or "dist")
+                except Exception:
+                    dist_rel = "dist"
+            dist_dir = (repo_path / dist_rel).resolve()
+
+            ns_status = "ERROR"
+            ns_impr = 0
+            ns_clicks = 0
+            try:
+                ns_card = evaluate_north_star_targets(
+                    property_id=pid,
+                    repo_root=repo_path,
+                    dist_dir=dist_dir,
+                    persist=False,
+                )
+                ns_status = str(ns_card.get("status") or "PASS")
+                p1 = (ns_card.get("pillars") or {}).get("1_search_impressions_and_ctr") or {}
+                ns_impr = int(p1.get("current_30d_impressions", 0) or 0)
+                ns_clicks = int(p1.get("current_30d_clicks", 0) or 0)
+            except Exception as ns_exc:
+                failures.append(f"north-star evaluation failed for '{pid}': {ns_exc}")
+
+            fb_status = "ERROR"
+            fb_unindexed = 0
+            fb_diagnosed = 0
+            try:
+                tenant_tmp = tmp_dir_p / pid
+                tenant_tmp.mkdir(parents=True, exist_ok=True)
+                coord = IndexingFeedbackLoop(
+                    property_id=pid,
+                    base_dir=repo_path,
+                    dist_dir=dist_dir,
+                )
+                if getattr(coord, "indexer", None) is not None:
+                    coord.indexer.read_only = True
+                    coord.indexer.audit_log_path = tenant_tmp / "indexing_audit_log.json"
+                    coord.indexer.intent_wal_path = tenant_tmp / ".indexing_intent_wal.jsonl"
+                    coord.indexer._explicit_intent_wal = True
+                    coord.indexer.quarantine_ledger_path = tenant_tmp / "indexing_quarantine_ledger.json"
+                    coord.indexer._explicit_quarantine_ledger = True
+                    coord.indexer.velocity_ledger_path = tenant_tmp / "indexing_velocity_ledger.json"
+                    coord.indexer.indexnow_backoff_ledger_path = tenant_tmp / "indexnow_backoff_ledger.json"
+                if getattr(coord, "milestone_tracker", None) is not None:
+                    coord.milestone_tracker.ledger_path = tenant_tmp / "milestone_ledger.json"
+                if getattr(coord, "inspector", None) is not None and hasattr(
+                    coord.inspector, "audit_airlock_quarantine"
+                ):
+                    _orig_audit_q = coord.inspector.audit_airlock_quarantine
+                    coord.inspector.audit_airlock_quarantine = lambda prune_stale=False: _orig_audit_q(
+                        prune_stale=False
+                    )
+                fb_res = coord.run_feedback_cycle(dry_run=True, live=False, skip_recompile=True)
+                fb_status = str(fb_res.get("status") or "SUCCESS")
+                fb_unindexed = int(fb_res.get("unindexed_audited", 0) or 0)
+                fb_diagnosed = len(fb_res.get("diagnosed_defects") or [])
+                if fb_status not in ("SUCCESS", "PARTIAL"):
+                    failures.append(f"indexing-feedback-loop dry-run returned status={fb_status} for '{pid}'")
+            except Exception as fb_exc:
+                failures.append(f"indexing-feedback-loop dry-run failed for '{pid}': {fb_exc}")
+
+            ov_dir = repo_path / ".agy" / "overlays"
+            ov_count = len(list(ov_dir.glob("*.json"))) if ov_dir.is_dir() else 0
+            rem_q_path = repo_path / ".agy" / "gsc_remediation_queue.json"
+            rem_q_exists = rem_q_path.is_file()
+            rem_q_total = 0
+            rem_q_pending = 0
+            if rem_q_exists:
+                try:
+                    rq_data = json.loads(rem_q_path.read_text(encoding="utf-8"))
+                    tasks_list: Any = []
+                    if isinstance(rq_data, dict):
+                        tenant_blk = (rq_data.get("tenants") or {}).get(pid)
+                        if isinstance(tenant_blk, dict) and tenant_blk.get("tasks") is not None:
+                            tasks_list = tenant_blk.get("tasks")
+                        elif rq_data.get("tasks") is not None:
+                            tasks_list = rq_data.get("tasks")
+                        elif rq_data.get("items") is not None:
+                            tasks_list = rq_data.get("items")
+                    elif isinstance(rq_data, list):
+                        tasks_list = rq_data
+                    if isinstance(tasks_list, dict):
+                        tasks_list = list(tasks_list.values())
+                    if isinstance(tasks_list, list):
+                        rem_q_total = len(tasks_list)
+                        rem_q_pending = sum(
+                            1 for t in tasks_list
+                            if isinstance(t, dict) and str(t.get("status") or "").upper() in ("PENDING", "QUEUED", "")
+                        )
+                except Exception:
+                    pass
+
+            tenant_results[pid] = {
+                "gsc_daily_metrics": gsc_by_tenant.get(pid, {}),
+                "north_star": {
+                    "status": ns_status,
+                    "current_30d_impressions": ns_impr,
+                    "current_30d_clicks": ns_clicks,
+                },
+                "feedback_loop_dry_run": {
+                    "status": fb_status,
+                    "unindexed_audited": fb_unindexed,
+                    "diagnosed_defects": fb_diagnosed,
+                },
+                "overlays_count": ov_count,
+                "gsc_remediation_queue": {
+                    "exists": rem_q_exists,
+                    "total_tasks": rem_q_total,
+                    "pending_tasks": rem_q_pending,
+                },
+            }
+
+    rev_truth_summary: Dict[str, Any] = {}
+    rev_file = _resolve_factory_agy_file("portfolio_revenue_truth.json", ws_root)
+    rev_file_age_hours: Optional[float] = None
+    if rev_file.is_file():
+        try:
+            persisted_rt = json.loads(rev_file.read_text(encoding="utf-8"))
+            rt_dt = _parse_utc_iso(str(persisted_rt.get("generated_at") or ""))
+            if rt_dt is not None:
+                rev_file_age_hours = round((now_utc - rt_dt).total_seconds() / 3600.0, 2)
+                if rev_file_age_hours > float(max_age_days) * 24.0:
+                    warnings.append(
+                        f"portfolio_revenue_truth.json is {rev_file_age_hours}h old (>{max_age_days}d)"
+                    )
+        except Exception:
+            pass
+    else:
+        warnings.append(f"portfolio_revenue_truth.json not found at {rev_file}")
+
+    try:
+        rt_rep = build_portfolio_revenue_truth_report(live_network=False, persist=False)
+        bottom = rt_rep.get("portfolio_bottom_line") or {}
+        rev_truth_summary = {
+            "status": "PASS",
+            "generated_at": rt_rep.get("generated_at"),
+            "persisted_artifact_age_hours": rev_file_age_hours,
+            "gross_realized_revenue_usd": bottom.get("gross_realized_revenue_usd", 0.0),
+            "pseofactory_realized_revenue_usd": bottom.get("pseofactory_realized_revenue_usd", 0.0),
+            "local_arbitrage_realized_revenue_usd": bottom.get("local_arbitrage_realized_revenue_usd", 0.0),
+            "solana_trading_realized_pnl_usd": bottom.get("solana_trading_realized_pnl_usd", 0.0),
+        }
+    except Exception as rt_exc:
+        failures.append(f"build_portfolio_revenue_truth_report offline failed: {rt_exc}")
+        rev_truth_summary = {"status": "FAIL", "error": str(rt_exc)}
+
+    passed = len(failures) == 0
+    payload = {
+        "status": "PASS" if passed else "FAIL",
+        "passed": passed,
+        "max_age_days": max_age_days,
+        "properties": tenant_results,
+        "portfolio_revenue_truth": rev_truth_summary,
+        "warnings": warnings,
+        "failures": failures,
+    }
+
+    if as_json:
+        print(json.dumps(payload, indent=2))
+    else:
+        tag = "PASS" if passed else "FAIL"
+        for pid, tr in tenant_results.items():
+            gm = tr["gsc_daily_metrics"]
+            ns = tr["north_star"]
+            fb = tr["feedback_loop_dry_run"]
+            rq = tr["gsc_remediation_queue"]
+            print(
+                f"[{tag}] learn-proof ({pid}): "
+                f"gsc_rows={gm.get('rows_count', 0)} (age={gm.get('age_days')}d, latest={gm.get('latest_metric_date')}) | "
+                f"north_star={ns['status']} (30d_impr={ns['current_30d_impressions']}, clicks={ns['current_30d_clicks']}) | "
+                f"feedback_dry={fb['status']} (unindexed={fb['unindexed_audited']}, defects={fb['diagnosed_defects']}) | "
+                f"overlays={tr['overlays_count']} | rem_q={rq['exists']} ({rq['total_tasks']} total, {rq['pending_tasks']} pending)"
+            )
+        print(
+            f"[{tag}] learn-proof (revenue-truth): "
+            f"gross=${rev_truth_summary.get('gross_realized_revenue_usd', 0.0):.2f} | "
+            f"pseofactory=${rev_truth_summary.get('pseofactory_realized_revenue_usd', 0.0):.2f} | "
+            f"persisted_age_h={rev_truth_summary.get('persisted_artifact_age_hours')}"
+        )
+        for w in warnings:
+            print(f"  [WARN] {w}")
+        for f in failures:
+            print(f"  [FAIL] {f}")
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

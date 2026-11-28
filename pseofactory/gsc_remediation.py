@@ -2176,6 +2176,10 @@ def _normalize_title_50_60(
     base = re.sub(r"\b(?:Model\s+Tool(?:\s+Guide)?|Tool\s+Guide)\b", "", base, flags=re.IGNORECASE)
     base = re.sub(r"\b1099\s+Da\b", "1099-DA", base, flags=re.IGNORECASE)
     base = re.sub(r"\bRap\s+Vs\s+Ibr\b", "RAP vs IBR", base, flags=re.IGNORECASE)
+    if re.match(r"^How\s+to\s+Calculate\s+", base, re.IGNORECASE):
+        stripped_htc = re.sub(r"^How\s+to\s+Calculate\s+", "", base, flags=re.IGNORECASE).strip(" |-:")
+        if stripped_htc:
+            base = stripped_htc
     base = re.sub(r"\s+", " ", base).strip(" |-:")
 
     _dangling_trailing = frozenset({
@@ -2680,6 +2684,11 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                             "miller-act" not in slug_low
                             and "40 u.s.c. section 3131" in clean.lower()
                         )
+                        or (
+                            "overtime" in q_low
+                            and any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347"))
+                            and "fringe benefit cash-in-lieu" in clean.lower()
+                        )
                     )
                 )
             )
@@ -3024,6 +3033,12 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "Calculate ERISA Section 412 fidelity bond coverage limits (10% of qualifying plan "
                     "assets, $1,000 minimum to $500,000 cap) under 29 U.S.C. Section 1112.",
                     " Verified under 29 CFR 2580.412-1 and Treasury Circular 570.",
+                )
+            if "overtime" in q_low and any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347")):
+                return (
+                    "Calculate Davis-Bacon 1.5x overtime hourly rates, base prevailing wages, and "
+                    "bona fide fringe credits under 40 U.S.C. Section 3141 and 29 CFR Section 5.5.",
+                    " Verified under DOL WH-347 certified payroll rules.",
                 )
             if any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347", "fringe")):
                 return (
@@ -3475,6 +3490,13 @@ def _normalize_quick_answer_40_60_words(query_label: str, tenant_id: str, slug: 
                 "retainage cap statutes (5 to 10 percent), withholding 10 percent retainage on $900,000 of "
                 "commercial construction billings financed at 8.50 percent APR over 180 days locks up $93,772.60 "
                 "in principal and working-capital interest drag."
+            ).split()
+        elif "overtime" in combined_low and any(k in combined_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347")):
+            base_words = (
+                "Under the Davis-Bacon Act (40 U.S.C. Section 3141), 29 CFR Section 5.5 Form WH-347 certified "
+                "payroll rules, and CWHSSA overtime standards, multiplying a $42.00/hr base prevailing wage by "
+                "1.5x ($63.00/hr) plus $10.00/hr net cash-in-lieu fringe ($16.50 required minus $6.50 bona fide "
+                "credit) yields $73.00/hr overtime hourly rate."
             ).split()
         elif any(k in combined_low for k in ("davis-bacon", "prevailing-wage", "wh-347")):
             base_words = (
@@ -11124,7 +11146,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
     if title_rewrite == "California, Texas and Florida Calculator | LienBond":
         title_rewrite = "California, Texas & Florida Notice Calculator | LienBond"
     title_rewrite = re.sub(r"\b34\s+CFR\b(?!\s+(?:Part|\d{3}))", "Title IV", title_rewrite, flags=re.IGNORECASE)
-    if title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
+    if title_rewrite and re.search(r"^How\s+to\s+Calculate\s+.+\bCalculator\b", title_rewrite, re.IGNORECASE):
+        stripped_tr = re.sub(r"^How\s+to\s+Calculate\s+", "", title_rewrite, flags=re.IGNORECASE).strip()
+        if stripped_tr:
+            title_rewrite = _normalize_title_50_60(stripped_tr, ov_brand, ov_tenant)
+    elif title_rewrite and re.search(r"\b(?:Model\s+Tool|Tool\s+Guide|1099\s+Da)\b", title_rewrite, re.IGNORECASE):
         title_rewrite = _normalize_title_50_60(title_rewrite, ov_brand, ov_tenant)
     if title_rewrite:
         escaped_title = html_lib.escape(title_rewrite)
@@ -11252,6 +11278,11 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                     )
                 )
             )
+            or (
+                "overtime" in ov_slug_q.lower()
+                and any(k in ov_slug_q.lower() for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347"))
+                and "fringe benefit cash-in-lieu" in meta_desc.lower()
+            )
         ):
             q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
             ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
@@ -11295,6 +11326,17 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 or "certified GVWR" in ex_qa_inner
             ) and 40 <= ex_qa_words <= 60:
                 quick_answer = ""
+    ov_qa_ctx = f"{overlay_data.get('slug') or ''} {overlay_data.get('query') or ''} {canon_url_ov}".lower()
+    if (
+        quick_answer
+        and ov_tenant == "lienbond"
+        and "overtime" in ov_qa_ctx
+        and any(k in ov_qa_ctx for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347"))
+        and ("146,380" in quick_answer or "fringe benefits in cash over 2,000 hours" in quick_answer.lower())
+    ):
+        q_lbl_qa = str(overlay_data.get("query") or overlay_data.get("slug") or "Davis Bacon Overtime").replace("-", " ")
+        ov_slug_qa = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
+        quick_answer = _normalize_quick_answer_40_60_words(q_lbl_qa, tenant_id=ov_tenant, slug=ov_slug_qa)
     if quick_answer:
         quick_answer = normalize_statutory_acronym_casing(quick_answer)
         escaped_qa = html_lib.escape(quick_answer)

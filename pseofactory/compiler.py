@@ -2246,6 +2246,20 @@ def _resolve_candidate_tenant_flags(
     return "prexvo" in env_signals, False, False
 
 
+def _sanitize_howto_calculator_title(raw_title: str) -> str:
+    """Rewrites redundant 'How to Calculate <X> Calculator' titles to '<X> Calculator'."""
+    cleaned = str(raw_title or "").strip()
+    if re.search(
+        r"^How\s+to\s+Calculate\s+.+\bCalculator(?:\s+202\d|\s+Engine|\s+Model)?\s*$",
+        cleaned,
+        re.IGNORECASE,
+    ):
+        stripped = re.sub(r"^How\s+to\s+Calculate\s+", "", cleaned, flags=re.IGNORECASE).strip()
+        if stripped:
+            return stripped
+    return cleaned
+
+
 def _extract_candidate_metadata(candidate_spec: Dict[str, Any]) -> tuple:
     """Extracts and normalizes core candidate metadata and manifest fields."""
     manifest_source = candidate_spec.get("calculation_manifest") if isinstance(candidate_spec.get("calculation_manifest"), dict) else {}
@@ -2255,7 +2269,7 @@ def _extract_candidate_metadata(candidate_spec: Dict[str, Any]) -> tuple:
         slug_src = query or candidate_spec.get("title") or "proprietary-model"
         raw_slug = re.sub(r"[^a-z0-9]+", "-", str(slug_src).lower()).strip("-")
     from pseofactory.audit import _resolve_expected_title
-    title = _resolve_expected_title(candidate_spec)
+    title = _sanitize_howto_calculator_title(_resolve_expected_title(candidate_spec))
     model_name = str(candidate_spec.get("model_name") or candidate_spec.get("proprietary_model") or manifest_source.get("model_name") or manifest_source.get("proprietary_model") or "Proprietary Calculation Model").strip()
     formula = str(candidate_spec.get("formula") or manifest_source.get("formula") or "").strip()
     raw_inputs = candidate_spec.get("inputs") if candidate_spec.get("inputs") is not None else manifest_source.get("inputs", {})
@@ -4011,6 +4025,18 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
             default_dataset="SFAA Commercial Surety Loss Cost Series & BLS PPI Construction Inputs WPUIP2311001",
         )
     )
+    for sp in specs:
+        if isinstance(sp, dict) and sp.get("title"):
+            orig_t = str(sp["title"])
+            clean_t = _sanitize_howto_calculator_title(orig_t)
+            if clean_t != orig_t:
+                sp["title"] = clean_t
+                if str(sp.get("short_title") or "").lower().startswith("how to calculate"):
+                    sp["short_title"] = (
+                        clean_t
+                        if len(clean_t) <= 28
+                        else clean_t[:28].rsplit(" ", 1)[0].rstrip(".,;:-&| ")
+                    )
     all_slugs = [str(s["slug"]) for s in specs]
     from pseofactory.qualification import detect_non_us_jurisdiction
 
@@ -5089,8 +5115,10 @@ def test_edge_functions_present():
 """,
         encoding="utf-8",
     )
-    (workflows_dir / "ci.yml").write_text(
-        """name: LienBond CI
+    ci_workflow_path = workflows_dir / "ci.yml"
+    if not ci_workflow_path.exists():
+        ci_workflow_path.write_text(
+            """name: LienBond CI
 
 on:
   push:
@@ -5111,8 +5139,8 @@ jobs:
       - name: Run LienBond Estate Verification Suite
         run: pytest -q tests/
 """,
-        encoding="utf-8",
-    )
+            encoding="utf-8",
+        )
 
     retrofit_report = finalize_estate_build(
         root=root,

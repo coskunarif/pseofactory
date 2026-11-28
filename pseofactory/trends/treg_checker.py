@@ -20,6 +20,7 @@ from pseofactory.trends.models import TregDurabilityResult
 
 
 ENDPOINT_IDEAS = "treg.google.keywords.ideas"
+ENDPOINT_VOLUME = "treg.google.keywords.volume"
 ENDPOINT_AI_CITATION = "dataforseo.x.ai-optimization-chat-gpt-llm-scraper-live-advanced"
 MAX_ROUTE_COST = "0.05"
 MAX_AI_CITATION_COST = "0.01"
@@ -345,6 +346,7 @@ class TregChecker:
         tenant_domains: Optional[List[str]] = None,
         mock_override: Optional[Dict[str, Any]] = None,
         remaining_budget: Optional[float] = None,
+        allow_live: bool = True,
     ) -> Dict[str, Any]:
         """
         Checks live AI citation landscape for a high-intent query via treg route
@@ -421,7 +423,7 @@ class TregChecker:
             or (self._live_ai_calls_made < self._max_live_ai_calls and _PROCESS_LIVE_AI_CALLS_MADE < self._max_live_ai_calls)
         )
 
-        if treg_bin and (not is_test_env or is_mocked or live_opt_in) and within_live_cap:
+        if allow_live and treg_bin and (not is_test_env or is_mocked or live_opt_in) and within_live_cap:
             self._live_ai_calls_made += 1
             if not is_mocked:
                 _PROCESS_LIVE_AI_CALLS_MADE += 1
@@ -621,6 +623,8 @@ class TregChecker:
         """
         Deterministic offline fallback heuristic when treg fails, is unconfigured, or budget is low.
         Supports both existing tenant statutory queries and greenfield market-intelligence verticals.
+        Marks returned TregDurabilityResult with is_synthetic=True so downstream engines do not
+        promote unmeasured fallback metrics as real search volume.
         Zero em-dashes. Zero en-dashes.
         """
         clean_q = query.strip()
@@ -632,9 +636,9 @@ class TregChecker:
             if v_match is not None:
                 for tool in v_match.get("anchor_tools", []):
                     if q_key == tool["query"].lower():
-                        return TregDurabilityResult(
+                        res = TregDurabilityResult(
                             query=clean_q,
-                            endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
+                            endpoint_called=f"{ENDPOINT_VOLUME}#{reason}",
                             search_volume=int(tool["search_volume"]),
                             cpc_usd=float(tool["cpc_usd"]),
                             competition_index=0.35,
@@ -644,6 +648,8 @@ class TregChecker:
                             checked_at=datetime.now(timezone.utc).isoformat(),
                             raw_ideas=[],
                         )
+                        res.is_synthetic = True
+                        return res
             is_greenfield_high_intent = any(tok in q_key for tok in GREENFIELD_HIGH_INTENT_TOKENS)
         except Exception:
             is_greenfield_high_intent = False
@@ -681,7 +687,7 @@ class TregChecker:
             est_stability = 0.85
         result = TregDurabilityResult(
             query=clean_q,
-            endpoint_called=f"{ENDPOINT_IDEAS}#offline_fallback",
+            endpoint_called=f"{ENDPOINT_VOLUME}#{reason}",
             search_volume=est_volume,
             cpc_usd=est_cpc,
             competition_index=0.25,
@@ -691,7 +697,282 @@ class TregChecker:
             checked_at=datetime.now(timezone.utc).isoformat(),
             raw_ideas=[],
         )
+        result.is_synthetic = True
         return result
+
+    @staticmethod
+    def _normalize_competition(raw_comp: Any) -> float:
+        comp = float(raw_comp if raw_comp is not None else 0.0)
+        if comp > 1.0:
+            comp = round(min(1.0, comp / 100.0), 4)
+        return comp
+
+    def _parse_volume_payload(
+        self,
+        payload: Any,
+        clean_q: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Parses treg.google.keywords.volume output.rows (SE Ranking / DataForSEO) or
+        backward-compatible top-level search_volume/cpc_usd payloads.
+        Returns None when rows are empty or volume metrics are absent.
+        Zero em-dashes. Zero en-dashes.
+        """
+        if not isinstance(payload, dict):
+            return None
+        res_body = payload.get("result")
+        if not isinstance(res_body, dict):
+            res_body = payload.get("output")
+        if not isinstance(res_body, dict):
+            res_body = payload
+        if not isinstance(res_body, dict):
+            return None
+
+        q_key = clean_q.strip().lower()
+        rows = res_body.get("rows")
+        if isinstance(rows, list):
+            dict_rows = [r for r in rows if isinstance(r, dict)]
+            if not dict_rows:
+                return None
+            matched_row: Optional[Dict[str, Any]] = None
+            for r in dict_rows:
+                if str(r.get("keyword", "")).strip().lower() == q_key:
+                    matched_row = r
+                    break
+            if matched_row is None:
+                matched_row = dict_rows[0]
+
+            raw_vol = (
+                matched_row["search_volume"]
+                if matched_row.get("search_volume") is not None
+                else matched_row.get("volume")
+            )
+            raw_cpc = (
+                matched_row["cpc_usd"]
+                if matched_row.get("cpc_usd") is not None
+                else matched_row.get("cpc")
+            )
+            if raw_vol is None and raw_cpc is None:
+                return None
+
+            volume = int(raw_vol or 0)
+            cpc = float(raw_cpc or 0.0)
+            raw_kd = (
+                matched_row["keyword_difficulty"]
+                if matched_row.get("keyword_difficulty") is not None
+                else matched_row.get("difficulty")
+            )
+            kd = float(raw_kd if raw_kd is not None else 50.0)
+            raw_comp = (
+                matched_row["competition_index"]
+                if matched_row.get("competition_index") is not None
+                else matched_row.get("competition")
+            )
+            comp = self._normalize_competition(raw_comp)
+            p0_flag = matched_row.get("position_zero_vacant")
+            p0_vacant = bool(p0_flag) if p0_flag is not None else (kd < 25.0)
+            raw_stab = matched_row.get("historical_stability")
+            stability = float(raw_stab if raw_stab is not None else 0.85)
+
+            return {
+                "search_volume": volume,
+                "cpc_usd": cpc,
+                "competition_index": comp,
+                "keyword_difficulty": kd,
+                "position_zero_vacant": p0_vacant,
+                "historical_stability": stability,
+                "raw_ideas": res_body.get("keywords") or rows,
+                "ai_citation_vacant": bool(matched_row.get("ai_citation_vacant", res_body.get("ai_citation_vacant", False))),
+                "ai_cited_domains": matched_row.get("ai_cited_domains") or res_body.get("ai_cited_domains") or [],
+                "ai_citation_checked": bool(
+                    matched_row.get("ai_citation_checked", res_body.get("ai_citation_checked", False))
+                    or "ai_citation_vacant" in matched_row
+                    or "ai_cited_domains" in matched_row
+                    or "ai_citation_vacant" in res_body
+                    or "ai_cited_domains" in res_body
+                ),
+            }
+
+        if "search_volume" in res_body or "cpc_usd" in res_body:
+            volume = int(res_body.get("search_volume") or 0)
+            cpc = float(res_body.get("cpc_usd") or 0.0)
+            comp = self._normalize_competition(res_body.get("competition_index"))
+            raw_kd = res_body.get("keyword_difficulty")
+            kd = float(raw_kd if raw_kd is not None else 50.0)
+            p0_flag = res_body.get("position_zero_vacant")
+            p0_vacant = bool(p0_flag) if p0_flag is not None else (kd < 25.0)
+            raw_stab = res_body.get("historical_stability")
+            stability = float(raw_stab if raw_stab is not None else 0.85)
+            return {
+                "search_volume": volume,
+                "cpc_usd": cpc,
+                "competition_index": comp,
+                "keyword_difficulty": kd,
+                "position_zero_vacant": p0_vacant,
+                "historical_stability": stability,
+                "raw_ideas": res_body.get("keywords"),
+                "ai_citation_vacant": bool(res_body.get("ai_citation_vacant", False)),
+                "ai_cited_domains": res_body.get("ai_cited_domains") or [],
+                "ai_citation_checked": bool(
+                    res_body.get("ai_citation_checked", False)
+                    or "ai_citation_vacant" in res_body
+                    or "ai_cited_domains" in res_body
+                ),
+            }
+
+        return None
+
+    def check_queries_batch(
+        self,
+        queries: List[str],
+        remaining_budget: Optional[float] = None,
+        allow_live: bool = True,
+    ) -> Dict[str, TregDurabilityResult]:
+        """
+        Batch-checks search volume and difficulty for multiple queries in one
+        treg.google.keywords.volume call after resolving mocks and cached DB snapshots.
+        Zero em-dashes. Zero en-dashes.
+        """
+        results: Dict[str, TregDurabilityResult] = {}
+        pending: List[str] = []
+        seen_keys: set = set()
+
+        for q in queries:
+            assert_no_forbidden_dashes(q, "TregChecker.check_queries_batch.query")
+            clean_q = q.strip()
+            q_key = clean_q.lower()
+            if not clean_q or q_key in seen_keys:
+                continue
+            seen_keys.add(q_key)
+            if q_key in self.cache:
+                results[clean_q] = self.cache[q_key]
+            elif q_key in self.mock_registry:
+                results[clean_q] = self.check_query(
+                    clean_q,
+                    remaining_budget=remaining_budget,
+                    allow_live=allow_live,
+                )
+            elif self.db is not None and hasattr(self.db, "get_latest_treg_snapshot"):
+                slug = sanitize_url_slug(clean_q)
+                try:
+                    snap = self.db.get_latest_treg_snapshot(slug)
+                except Exception:
+                    snap = None
+                if snap is not None:
+                    res = TregDurabilityResult(
+                        query=clean_q,
+                        endpoint_called=f"{ENDPOINT_VOLUME}#snapshot_cache",
+                        search_volume=snap.search_volume,
+                        cpc_usd=snap.cpc_usd,
+                        competition_index=snap.competition_index,
+                        keyword_difficulty=snap.keyword_difficulty,
+                        position_zero_vacant=bool(snap.position_zero_vacant),
+                        historical_stability=snap.historical_stability,
+                        checked_at=snap.checked_at,
+                        raw_ideas=[],
+                    )
+                    res.is_synthetic = False
+                    self.cache[q_key] = res
+                    results[clean_q] = res
+                else:
+                    pending.append(clean_q)
+            else:
+                pending.append(clean_q)
+
+        if not pending:
+            return results
+
+        if remaining_budget is not None and remaining_budget < 15.0:
+            for clean_q in pending:
+                results[clean_q] = self._offline_heuristic(clean_q, reason="deadline_budget_fallback")
+            return results
+
+        if not allow_live:
+            for clean_q in pending:
+                results[clean_q] = self._offline_heuristic(clean_q, reason="dry_run_offline_fallback")
+            return results
+
+        treg_bin = shutil.which("treg")
+        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
+        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
+        live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
+
+        if not (treg_bin and (not is_test_env or is_mocked or live_opt_in)):
+            for clean_q in pending:
+                results[clean_q] = self._offline_heuristic(clean_q, reason="offline_fallback")
+            return results
+
+        call_timeout = (
+            min(self.timeout, max(1.0, remaining_budget - 2.0))
+            if remaining_budget is not None
+            else self.timeout
+        )
+        try:
+            cmd = [
+                treg_bin,
+                "call",
+                ENDPOINT_VOLUME,
+                "--method",
+                "POST",
+                "--data",
+                json.dumps({"keywords": pending, "country": "us", "language": "en"}),
+                "--header",
+                f"X-Treg-Route-Max-Cost: {self.max_cost}",
+                "--header",
+                "X-Treg-Route-Waterfall: 0",
+            ]
+            proc = subprocess.run(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=call_timeout,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                payload = json.loads(proc.stdout.strip())
+                res_body = payload.get("result") if isinstance(payload, dict) and isinstance(payload.get("result"), dict) else (
+                    payload.get("output") if isinstance(payload, dict) and isinstance(payload.get("output"), dict) else payload
+                )
+                rows = res_body.get("rows") if isinstance(res_body, dict) else None
+                rows_by_kw: Dict[str, Dict[str, Any]] = {}
+                if isinstance(rows, list):
+                    for r in rows:
+                        if isinstance(r, dict) and r.get("keyword"):
+                            rows_by_kw[str(r["keyword"]).strip().lower()] = r
+                for clean_q in pending:
+                    q_key = clean_q.lower()
+                    matched_row = rows_by_kw.get(q_key)
+                    if matched_row is None:
+                        results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
+                        continue
+                    parsed = self._parse_volume_payload({"output": {"rows": [matched_row]}}, clean_q)
+                    if parsed is None:
+                        results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
+                        continue
+                    res = TregDurabilityResult(
+                        query=clean_q,
+                        endpoint_called=ENDPOINT_VOLUME,
+                        search_volume=parsed["search_volume"],
+                        cpc_usd=parsed["cpc_usd"],
+                        competition_index=parsed["competition_index"],
+                        keyword_difficulty=parsed["keyword_difficulty"],
+                        position_zero_vacant=parsed["position_zero_vacant"],
+                        historical_stability=parsed["historical_stability"],
+                        checked_at=datetime.now(timezone.utc).isoformat(),
+                        raw_ideas=parsed["raw_ideas"],
+                    )
+                    res.is_synthetic = False
+                    self.cache[q_key] = res
+                    results[clean_q] = res
+                return results
+        except (subprocess.TimeoutExpired, Exception):
+            for clean_q in pending:
+                results[clean_q] = self._offline_heuristic(clean_q, reason="subprocess_fallback")
+            return results
+
+        for clean_q in pending:
+            results[clean_q] = self._offline_heuristic(clean_q, reason="no_volume_data")
+        return results
 
     def check_query(
         self,
@@ -699,9 +980,10 @@ class TregChecker:
         mock_override: Optional[Dict[str, Any]] = None,
         remaining_budget: Optional[float] = None,
         check_ai_citations: Optional[bool] = None,
+        allow_live: bool = True,
     ) -> TregDurabilityResult:
         """
-        Cross-checks search demand for candidate query.
+        Cross-checks search demand for candidate query via treg.google.keywords.volume.
         Optionally enriches qualified candidates with live AI citation telemetry ($0.004/call).
         Returns TregDurabilityResult.
         Zero em-dashes. Zero en-dashes.
@@ -743,6 +1025,7 @@ class TregChecker:
                     clean_q,
                     mock_override=m_data,
                     remaining_budget=remaining_budget,
+                    allow_live=allow_live,
                 )
                 ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
                 ai_domains = list(ai_info.get("ai_cited_domains", []))
@@ -753,7 +1036,7 @@ class TregChecker:
                 endpoint_called=str(m_data.get("endpoint_called", ENDPOINT_IDEAS)),
                 search_volume=int(m_data.get("search_volume", 1000)),
                 cpc_usd=float(m_data.get("cpc_usd", 1.50)),
-                competition_index=float(m_data.get("competition_index", 0.30)),
+                competition_index=self._normalize_competition(m_data.get("competition_index", 0.30)),
                 keyword_difficulty=kd,
                 position_zero_vacant=p0_vacant,
                 historical_stability=float(m_data.get("historical_stability", 0.85)),
@@ -763,10 +1046,11 @@ class TregChecker:
                 ai_cited_domains=ai_domains,
                 ai_citation_checked=ai_checked,
             )
+            result.is_synthetic = bool(m_data.get("is_synthetic", False))
             self.cache[q_key] = result
             return result
 
-        # 2. Persistent SQLite snapshot lookup
+        # 2. Persistent SQLite snapshot lookup (poisoned synthetic/zero rows already filtered by db)
         if self.db is not None and hasattr(self.db, "get_latest_treg_snapshot"):
             slug = sanitize_url_slug(clean_q)
             try:
@@ -774,7 +1058,7 @@ class TregChecker:
                 if snap is not None:
                     result = TregDurabilityResult(
                         query=clean_q,
-                        endpoint_called=f"{ENDPOINT_IDEAS}#snapshot_cache",
+                        endpoint_called=f"{ENDPOINT_VOLUME}#snapshot_cache",
                         search_volume=snap.search_volume,
                         cpc_usd=snap.cpc_usd,
                         competition_index=snap.competition_index,
@@ -784,12 +1068,17 @@ class TregChecker:
                         checked_at=snap.checked_at,
                         raw_ideas=[],
                     )
+                    result.is_synthetic = False
                     self.cache[q_key] = result
                     return result
             except Exception:
                 pass
 
-        # 3. External treg CLI execution if available
+        # 3. Dry-run guard: never spawn paid live treg subprocesses when allow_live=False
+        if not allow_live:
+            return self._offline_heuristic(clean_q, reason="dry_run_offline_fallback")
+
+        # 4. External treg CLI execution if available
         treg_bin = shutil.which("treg")
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
         is_test_env = "PYTEST_CURRENT_TEST" in os.environ
@@ -805,13 +1094,15 @@ class TregChecker:
                 cmd = [
                     treg_bin,
                     "call",
-                    ENDPOINT_IDEAS,
+                    ENDPOINT_VOLUME,
                     "--method",
                     "POST",
                     "--data",
-                    json.dumps({"keyword": clean_q}),
+                    json.dumps({"keywords": [clean_q], "country": "us", "language": "en"}),
                     "--header",
                     f"X-Treg-Route-Max-Cost: {self.max_cost}",
+                    "--header",
+                    "X-Treg-Route-Waterfall: 0",
                 ]
                 proc = subprocess.run(
                     cmd,
@@ -822,64 +1113,49 @@ class TregChecker:
                 )
                 if proc.returncode == 0 and proc.stdout.strip():
                     payload = json.loads(proc.stdout.strip())
-                    res_body = payload.get("result") or payload.get("output") or payload
-                    if not isinstance(res_body, dict):
-                        res_body = {}
-                    raw_ideas = res_body.get("keywords")
-                    if "search_volume" in res_body or "cpc_usd" in res_body:
-                        volume = int(res_body.get("search_volume", 0))
-                        cpc = float(res_body.get("cpc_usd", 0.0))
-                        comp = float(res_body.get("competition_index", 0.0))
-                        kd = float(res_body.get("keyword_difficulty", 50.0))
-                        p0_vacant = bool(res_body.get("position_zero_vacant", kd < 25.0))
-                        stability = float(res_body.get("historical_stability", 0.85))
-                    else:
-                        heur = self._offline_heuristic(clean_q, reason="treg_ideas_calibrated")
-                        idea_count = len(raw_ideas) if isinstance(raw_ideas, list) else int(res_body.get("count", 0) or 0)
-                        scale = min(1.35, max(0.85, 0.85 + 0.05 * idea_count)) if idea_count > 0 else 1.0
-                        volume = int(round(heur.search_volume * scale))
-                        cpc = round(heur.cpc_usd * scale, 2)
-                        comp = heur.competition_index
-                        kd = heur.keyword_difficulty
-                        p0_vacant = heur.position_zero_vacant
-                        stability = heur.historical_stability
+                    parsed = self._parse_volume_payload(payload, clean_q)
+                    if parsed is None:
+                        return self._offline_heuristic(clean_q, reason="no_volume_data")
 
-                    ai_vacant = bool(res_body.get("ai_citation_vacant", False))
+                    volume = parsed["search_volume"]
+                    ai_vacant = bool(parsed["ai_citation_vacant"])
                     ai_domains = [
                         _normalize_domain(d)
-                        for d in (res_body.get("ai_cited_domains") or [])
+                        for d in (parsed["ai_cited_domains"] or [])
                         if _normalize_domain(d)
                     ]
-                    ai_checked = bool(
-                        res_body.get("ai_citation_checked", False)
-                        or "ai_citation_vacant" in res_body
-                        or "ai_cited_domains" in res_body
-                    )
+                    ai_checked = bool(parsed["ai_citation_checked"])
                     if should_check_ai and not ai_checked and volume >= 500:
-                        ai_info = self.check_ai_citation(clean_q, remaining_budget=remaining_budget)
+                        ai_info = self.check_ai_citation(
+                            clean_q,
+                            remaining_budget=remaining_budget,
+                            allow_live=allow_live,
+                        )
                         ai_vacant = bool(ai_info.get("ai_citation_vacant", False))
                         ai_domains = list(ai_info.get("ai_cited_domains", []))
                         ai_checked = True
 
                     result = TregDurabilityResult(
                         query=clean_q,
-                        endpoint_called=ENDPOINT_IDEAS,
+                        endpoint_called=ENDPOINT_VOLUME,
                         search_volume=volume,
-                        cpc_usd=cpc,
-                        competition_index=comp,
-                        keyword_difficulty=kd,
-                        position_zero_vacant=p0_vacant,
-                        historical_stability=stability,
+                        cpc_usd=parsed["cpc_usd"],
+                        competition_index=parsed["competition_index"],
+                        keyword_difficulty=parsed["keyword_difficulty"],
+                        position_zero_vacant=parsed["position_zero_vacant"],
+                        historical_stability=parsed["historical_stability"],
                         checked_at=datetime.now(timezone.utc).isoformat(),
-                        raw_ideas=raw_ideas,
+                        raw_ideas=parsed["raw_ideas"],
                         ai_citation_vacant=ai_vacant,
                         ai_cited_domains=ai_domains,
                         ai_citation_checked=ai_checked,
                     )
+                    result.is_synthetic = False
                     self.cache[q_key] = result
                     return result
+                return self._offline_heuristic(clean_q, reason="no_volume_data")
             except (subprocess.TimeoutExpired, Exception):
                 return self._offline_heuristic(clean_q, reason="subprocess_fallback")
 
-        # 4. Deterministic offline fallback heuristic
+        # 5. Deterministic offline fallback heuristic
         return self._offline_heuristic(clean_q, reason="offline_fallback")

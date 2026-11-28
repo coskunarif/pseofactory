@@ -958,21 +958,25 @@ class TrendCronRunner:
                     clean_q,
                     mock_override=mock_treg,
                     remaining_budget=rem_budget,
+                    allow_live=not dry_run,
                 )
 
-                snap_rec = TregSnapshotRecord(
-                    snapshot_id=f"treg_{slug}_{cycle_id}",
-                    query_slug=slug,
-                    cycle_id=cycle_id,
-                    search_volume=treg_res.search_volume,
-                    cpc_usd=treg_res.cpc_usd,
-                    competition_index=treg_res.competition_index,
-                    keyword_difficulty=treg_res.keyword_difficulty,
-                    position_zero_vacant=1 if treg_res.position_zero_vacant else 0,
-                    historical_stability=treg_res.historical_stability,
-                    checked_at=now_iso,
-                )
-                snapshot_records.append(snap_rec)
+                is_synthetic_treg = bool(getattr(treg_res, "is_synthetic", False))
+                is_snapshot_cache_hit = "#snapshot_cache" in str(getattr(treg_res, "endpoint_called", "") or "")
+                if (not is_synthetic_treg or mock_treg is not None) and not is_snapshot_cache_hit:
+                    snap_rec = TregSnapshotRecord(
+                        snapshot_id=f"treg_{slug}_{cycle_id}",
+                        query_slug=slug,
+                        cycle_id=cycle_id,
+                        search_volume=treg_res.search_volume,
+                        cpc_usd=treg_res.cpc_usd,
+                        competition_index=treg_res.competition_index,
+                        keyword_difficulty=treg_res.keyword_difficulty,
+                        position_zero_vacant=1 if treg_res.position_zero_vacant else 0,
+                        historical_stability=treg_res.historical_stability,
+                        checked_at=now_iso,
+                    )
+                    snapshot_records.append(snap_rec)
 
                 cann_ctx = {
                     "cannibalization_score": cann_score,
@@ -1198,7 +1202,8 @@ class TrendCronRunner:
                         monetization_qualifies = bool(monetization_qual.get("monetization_qualified", False))
 
                         if (
-                            yield_qualifies
+                            not is_synthetic_treg
+                            and yield_qualifies
                             and stability_qualifies
                             and jev_qualifies
                             and volume_qualifies

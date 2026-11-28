@@ -118,9 +118,9 @@ def build_edge_routes_json_for_estate(
 ) -> str:
     """
     Builds deterministic Cloudflare Pages dist/_routes.json for an estate by combining
-    the base Function routes with dynamic edgeGone (410) and same-prefix
-    legacyPrefixTargets (301 child spokes with parent hub exclusions) parsed from
-    functions/_middleware.js, capped at <= 95 total rules.
+    the base Function routes with dynamic edgeGone (410), legacyPrefixes (410), and
+    same-prefix legacyPrefixTargets (301 child spokes with parent hub exclusions) parsed
+    from functions/_middleware.js, capped at <= 95 total rules.
     """
     dist_path = Path(dist_dir)
     mw_path = Path(mw_file) if mw_file is not None else (dist_path.parent / "functions" / "_middleware.js")
@@ -158,6 +158,21 @@ def build_edge_routes_json_for_estate(
                 if p not in gone_bases:
                     gone_bases.append(p)
 
+        legacy_prefixes: List[str] = []
+        for lm in re.finditer(r"const\s+legacyPrefixes\s*=\s*\[([\s\S]*?)\]\s*;?", mw_txt):
+            for sm in re.finditer(r'["\']([^"\']+)["\']', lm.group(1)):
+                raw_p = sm.group(1).strip()
+                if not raw_p or raw_p == "/":
+                    continue
+                p = raw_p.rstrip("/")
+                if not p or not p.startswith("/"):
+                    continue
+                rel_p = p.lstrip("/")
+                if (dist_path / rel_p / "index.html").is_file() or (dist_path / rel_p).is_file():
+                    continue
+                if p not in legacy_prefixes:
+                    legacy_prefixes.append(p)
+
         for base in same_prefix_bases:
             inc_pat = f"{base}/*"
             new_inc = [inc_pat] if inc_pat not in include else []
@@ -170,6 +185,23 @@ def build_edge_routes_json_for_estate(
             new_inc = [pat for pat in (p, f"{p}/*") if pat not in include]
             if new_inc and len(include) + len(exclude) + len(new_inc) <= max_rules:
                 include.extend(new_inc)
+
+        legacy_all_pats: List[str] = []
+        for p in legacy_prefixes:
+            for pat in (p, f"{p}/*"):
+                if pat not in include and pat not in legacy_all_pats:
+                    legacy_all_pats.append(pat)
+
+        if len(include) + len(exclude) + len(legacy_all_pats) <= max_rules:
+            include.extend(legacy_all_pats)
+        else:
+            for p in legacy_prefixes:
+                wild = f"{p}/*"
+                if wild not in include and len(include) + len(exclude) < max_rules:
+                    include.append(wild)
+            for p in legacy_prefixes:
+                if p not in include and len(include) + len(exclude) < max_rules:
+                    include.append(p)
 
     return build_edge_routes_json(include=include, exclude=exclude)
 

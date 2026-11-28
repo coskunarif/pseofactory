@@ -6823,6 +6823,7 @@ class _ExtractableContentParser(HTMLParser):
         self.current_li_text: List[str] = []
         self.in_li = False
         self.in_nav = False
+        self._container_stack: List[Tuple[str, bool]] = []
 
         self.current_passage_tag: Optional[str] = None
         self.current_passage_text: List[str] = []
@@ -6830,6 +6831,16 @@ class _ExtractableContentParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
         tag_lower = tag.lower()
         attrs_dict = {k.lower(): (v or "") for k, v in attrs}
+
+        if tag_lower in ("section", "div", "aside", "nav"):
+            id_val = attrs_dict.get("id", "").lower()
+            cls_val = attrs_dict.get("class", "").lower()
+            is_cluster_container = (
+                "topic-cluster" in id_val
+                or "topic-cluster" in cls_val
+                or "three-tier-cluster" in cls_val
+            )
+            self._container_stack.append((tag_lower, is_cluster_container))
 
         if tag_lower == "nav":
             self.in_nav = True
@@ -6853,12 +6864,13 @@ class _ExtractableContentParser(HTMLParser):
             self.current_cell_text = []
 
         elif tag_lower in ("ol", "ul"):
+            in_topic_cluster = any(is_cl for _, is_cl in self._container_stack)
             self.list_stack.append({
                 "type": tag_lower,
                 "items": [],
                 "context_heading": self.last_seen_heading_text,
                 "attrs": attrs_dict,
-                "in_nav": self.in_nav,
+                "in_nav": self.in_nav or in_topic_cluster,
             })
 
         elif tag_lower == "li":
@@ -6871,6 +6883,12 @@ class _ExtractableContentParser(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         tag_lower = tag.lower()
+
+        if tag_lower in ("section", "div", "aside", "nav"):
+            for idx_st in range(len(self._container_stack) - 1, -1, -1):
+                if self._container_stack[idx_st][0] == tag_lower:
+                    del self._container_stack[idx_st:]
+                    break
 
         if tag_lower == "nav":
             self.in_nav = False
@@ -6998,6 +7016,17 @@ def _extract_content_structure_metadata_cached(content: str) -> Dict[str, Any]:
     unordered_lists: List[Dict[str, Any]] = []
     procedural_blocks: List[Dict[str, Any]] = []
 
+    _NON_PROCEDURAL_HEADING_PREFIXES = (
+        "statutory analysis and computational methodology",
+        "connected statutory topic cluster",
+        "dual dataset provenance and statutory corroboration",
+        "interactive quantitative model",
+        "frequently asked questions",
+        "common statutory pitfalls",
+        "scenario sensitivity and stress ledger",
+        "parameterized scenario presets",
+    )
+
     for lst in parser.lists:
         l_type = lst["type"]
         items = lst["items"]
@@ -7007,10 +7036,18 @@ def _extract_content_structure_metadata_cached(content: str) -> Dict[str, Any]:
         in_nav = lst.get("in_nav", False)
 
         # Check if list is navigational
-        is_nav = in_nav or any(k in attr_str for k in ("nav", "menu", "breadcrumb", "toc", "pagination"))
+        is_nav = in_nav or any(
+            k in attr_str for k in ("nav", "menu", "breadcrumb", "toc", "pagination", "topic-cluster", "cluster-link")
+        )
 
-        # Check if procedural
-        is_procedural_heading = bool(PROCEDURAL_HEADING_PATTERN.search(context_hdg))
+        # Check if procedural, ignoring analytical/cluster section prefixes that interpolate a 'How To' tool title
+        is_non_procedural_prefix = False
+        if ":" in context_hdg:
+            hdg_prefix = context_hdg.split(":", 1)[0].strip().lower()
+            is_non_procedural_prefix = any(hdg_prefix.startswith(p) for p in _NON_PROCEDURAL_HEADING_PREFIXES)
+        is_procedural_heading = (not is_non_procedural_prefix) and bool(
+            PROCEDURAL_HEADING_PATTERN.search(context_hdg)
+        )
         is_procedural_attr = any(kw in attr_str for kw in ("step", "procedure", "workflow", "process", "instruction"))
         
         # Check item prefixes

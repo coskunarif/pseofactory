@@ -1028,16 +1028,40 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
             property_id=eff_prop,
         )
 
+    def _find_tool_catalog_match(target_slug: str) -> Optional[Dict[str, Any]]:
+        if not target_slug:
+            return None
+        if is_prexvo:
+            preferred = (PREXVO_DEFAULT_TOOLS, PREXVO_EXTENDED_TOOLS)
+        elif is_gainhelm:
+            preferred = (GAINHELM_DEFAULT_TOOLS,)
+        elif is_lienbond:
+            preferred = (LIENBOND_DEFAULT_TOOLS,)
+        else:
+            preferred = (TOOLS, PROFITHELM_DEFAULT_TOOLS, PROFITHELM_EXTENDED_TOOLS)
+        seen_ids = set()
+        for cat in preferred + (
+            TOOLS,
+            PROFITHELM_DEFAULT_TOOLS,
+            PROFITHELM_EXTENDED_TOOLS,
+            PREXVO_DEFAULT_TOOLS,
+            PREXVO_EXTENDED_TOOLS,
+            GAINHELM_DEFAULT_TOOLS,
+            LIENBOND_DEFAULT_TOOLS,
+        ):
+            if id(cat) in seen_ids:
+                continue
+            seen_ids.add(id(cat))
+            found = next((t for t in cat if isinstance(t, dict) and t.get("slug") == target_slug), None)
+            if found:
+                return found
+        return None
+
     if isinstance(tool_or_slug, dict):
         if tool_or_slug.get("slug"):
             tool_dict = dict(tool_or_slug)
             slug = str(tool_dict["slug"]).strip()
-            match = (
-                next((t for t in TOOLS if t.get("slug") == slug), None)
-                or next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == slug), None)
-                or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == slug), None)
-                or next((t for t in GAINHELM_DEFAULT_TOOLS if t.get("slug") == slug), None)
-            )
+            match = _find_tool_catalog_match(slug)
             if match:
                 for k, v in match.items():
                     if k not in tool_dict or not tool_dict[k]:
@@ -1080,12 +1104,7 @@ def _resolve_tool(tool_or_slug: Any, property_id: str = "") -> Dict[str, Any]:
         return _sanitize_tool_metadata_for_property(tool_dict, property_id=eff_prop)
 
     tool_slug = str(tool_or_slug).strip()
-    match = (
-        next((t for t in PROFITHELM_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
-        or next((t for t in PREXVO_EXTENDED_TOOLS if t.get("slug") == tool_slug), None)
-        or next((t for t in GAINHELM_DEFAULT_TOOLS if t.get("slug") == tool_slug), None)
-        or next((t for t in TOOLS if t.get("slug") == tool_slug), None)
-    )
+    match = _find_tool_catalog_match(tool_slug)
     if match:
         res = dict(match)
         c_title, c_short = _clean_tool_title_and_short(res.get("title"), tool_slug, res.get("short_title"))
@@ -2573,7 +2592,7 @@ def generate_linkedin_company_post(tool_slug: str, property_id: Optional[str] = 
     """Generates authoritative, technical LinkedIn post for Company Page."""
     from pseofactory.contracts import assert_linkedin
     from pseofactory.maintenance import TenantRegistry, DEFAULT_TENANT_LINKEDIN_IDS
-    tool = _resolve_tool(tool_slug)
+    tool = _resolve_tool(tool_slug, property_id=property_id or "")
     slug = tool["slug"]
     proof = _resolve_tool_calculation_proof(tool, property_id=property_id or "profithelm")
 
@@ -11271,7 +11290,7 @@ def prioritize_distribution_queue_by_referral_yield(
             continue
         if is_retired_or_consolidated_slug(slug_val, norm_prop):
             continue
-        target_tools.append(_resolve_tool(t) if isinstance(t, (str, dict)) else t)
+        target_tools.append(_resolve_tool(t, property_id=norm_prop) if isinstance(t, (str, dict)) else t)
 
     # Load GSC impressions & positions if available
     gsc_by_slug: Dict[str, Dict[str, float]] = {}
@@ -12359,7 +12378,11 @@ def export_all_syndication_files(
     if not _is_test_context(output_dir, property_id):
         try:
             import sqlite3
-            from pseofactory.affiliates import AFFILIATE_REGISTRY
+            from pseofactory.affiliates import (
+                AFFILIATE_REGISTRY,
+                lookup_affiliate_partner,
+                parse_bounty_estimate,
+            )
 
             if property_id == "profithelm":
                 from profithelm.config import AFFILIATES, BASE_DIR as PH_BASE_DIR
@@ -12404,21 +12427,57 @@ def export_all_syndication_files(
                         else (["suretybonds_direct", "simply_business"] if property_id == "lienbond" else [])
                     )
                 )
+                def _resolve_owned_partner(partner_key: str) -> Optional[Any]:
+                    entry = lookup_affiliate_partner(partner_key, property_id=property_id)
+                    if entry is None:
+                        entry = (
+                            AFFILIATE_REGISTRY.get(f"{property_id}:{partner_key}")
+                            or AFFILIATE_REGISTRY.get(partner_key)
+                        )
+                    if entry is None:
+                        return None
+                    entry_prop = str(
+                        getattr(entry, "property_id", None)
+                        or (entry.get("property_id") if isinstance(entry, dict) else "")
+                        or ""
+                    ).strip().lower()
+                    if entry_prop != str(property_id).strip().lower():
+                        return None
+                    return entry
+
                 for t in target_tools:
                     slug = t["slug"]
-                    raw_affs = [
-                        a for a in t.get("affiliates", [])
-                        if str(AFFILIATE_REGISTRY.get(a, {}).get("property", property_id)).lower() == property_id
-                    ] or fallback_prop_affs
-                    for aff in raw_affs:
-                        reg_entry = AFFILIATE_REGISTRY.get(aff, {})
+                    owned_aff_pairs = []
+                    for a in t.get("affiliates", []):
+                        entry = _resolve_owned_partner(a)
+                        if entry is not None:
+                            owned_aff_pairs.append((a, entry))
+                    if not owned_aff_pairs:
+                        for a in fallback_prop_affs:
+                            entry = _resolve_owned_partner(a)
+                            if entry is not None:
+                                owned_aff_pairs.append((a, entry))
+                    for aff, reg_entry in owned_aff_pairs:
+                        bounty_raw = str(reg_entry.get("bounty_est", "") or "")
+                        parsed_cpa = parse_bounty_estimate(bounty_raw).get("midpoint", 0.0) if bounty_raw else 0.0
+                        expected_cpa_val = float(
+                            parsed_cpa
+                            or reg_entry.get("expected_cpa_usd", 0.0)
+                            or 120.0
+                        )
+                        dest_url = str(
+                            reg_entry.get("url")
+                            or reg_entry.get("default_url")
+                            or reg_entry.get("destination_url")
+                            or ""
+                        )
                         tenant_aff_routes.append({
                             "slug": slug,
                             "partner": aff,
                             "name": reg_entry.get("name", aff),
                             "url": f"/r/{aff}?slug={slug}&property={property_id}",
-                            "destination_url": reg_entry.get("destination_url", ""),
-                            "expected_cpa": float(reg_entry.get("expected_cpa_usd", 120.0) or 120.0),
+                            "destination_url": dest_url,
+                            "expected_cpa": expected_cpa_val,
                             "verdict": "VERIFIED",
                             "status": "ACTIVE",
                         })
@@ -13515,7 +13574,7 @@ def dispatch_to_distribution_lead(
                         continue
                     built_slugs.add(item.name)
                     if item.name not in known_slugs:
-                        target_tools.append(_resolve_tool(item.name))
+                        target_tools.append(_resolve_tool(item.name, property_id=property_id))
                         known_slugs.add(item.name)
             if built_slugs:
                 target_tools = [
@@ -13717,7 +13776,7 @@ def dispatch_to_distribution_lead(
             video_telemetry = run_autonomous_video_pipeline(
                 property_id=property_id,
                 tools=[
-                    t if isinstance(t, dict) else _resolve_tool(str(t))
+                    t if isinstance(t, dict) else _resolve_tool(str(t), property_id=property_id)
                     for t in target_tools
                 ],
                 dist_dir=eff_dist_path,

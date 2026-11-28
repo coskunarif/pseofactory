@@ -4059,11 +4059,12 @@ def compile_prexvo_estate_impl(
         redirects_content=_PREXVO_REDIRECTS,
     )
 
-    # Never write edge functions or finalize into a live /home/ubuntuadmin/projects/ repo
+    # Block live /home/ubuntuadmin/projects/ mutations only under pytest or unmerged worktrees
+    from pseofactory.maintenance import RetroReflectionEngine, _is_live_repo_mutation_blocked
     from pseofactory.porcelain_shell import compile_tenant_porcelain_estate
 
-    safe_root = staging_root if not str(staging_root).startswith("/home/ubuntuadmin/projects/") else dist.parent
-    if not str(safe_root).startswith("/home/ubuntuadmin/projects/"):
+    safe_root = staging_root if not _is_live_repo_mutation_blocked(staging_root) else dist.parent
+    if not _is_live_repo_mutation_blocked(safe_root):
         write_tenant_edge_functions(safe_root, dist, "prexvo")
         sanitize_tenant_overlays(
             safe_root,
@@ -4071,9 +4072,7 @@ def compile_prexvo_estate_impl(
             extra_bad_tokens=("profithelm", "gainhelm", "lienbond", "section-179-calculator"),
             property_id="prexvo",
         )
-    if run_retrofit and not str(dist.resolve()).startswith("/home/ubuntuadmin/projects/"):
-        from pseofactory.maintenance import RetroReflectionEngine
-
+    if run_retrofit and not _is_live_repo_mutation_blocked(dist):
         RetroReflectionEngine.retrofit_estate(
             dist,
             "prexvo",

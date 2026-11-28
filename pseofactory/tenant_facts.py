@@ -5550,21 +5550,52 @@ class TruthReconciliationEngine:
             aff_json_f = s_dir / "affiliate_routes_verified.json"
             if aff_json_f.is_file():
                 try:
+                    from pseofactory.affiliates import (
+                        AFFILIATE_REGISTRY,
+                        AFFILIATE_REGISTRY_BY_PROPERTY,
+                        lookup_affiliate_partner,
+                    )
+                    from pseofactory.maintenance import CrossPropertyContaminationScanner
+
                     raw_aff = _json_lib.loads(aff_json_f.read_text(encoding="utf-8"))
                     routes = raw_aff.get("routes", [])
+                    scanner = CrossPropertyContaminationScanner()
                     cleaned_routes = []
                     for r in routes:
-                        partner_key = (r.get("partner") or r.get("slug") or r.get("route") or "") if isinstance(r, dict) else str(r)
-                        partner_norm = partner_key.lower().replace("/r/", "").replace("-", "_")
-                        if tenant_norm == "prexvo":
-                            if "turbotax" in partner_norm or "quickbooks" in partner_norm or "vanta" in partner_norm:
-                                continue
-                        elif tenant_norm == "gainhelm":
-                            if "turbotax" in partner_norm or "splash" in partner_norm or "sofi" in partner_norm:
-                                continue
-                        elif tenant_norm == "profithelm":
-                            if any(k in partner_norm for k in ("splash", "sofi", "credible", "vanta", "drata", "sprinto")):
-                                continue
+                        if isinstance(r, dict):
+                            route_hint = str(r.get("route") or r.get("url") or "")
+                            partner_key = str(
+                                r.get("partner")
+                                or (route_hint if "/r/" in route_hint else "")
+                                or r.get("slug")
+                                or route_hint
+                            )
+                        else:
+                            partner_key = str(r)
+                        partner_norm = (
+                            partner_key.lower()
+                            .split("?", 1)[0]
+                            .replace("/r/", "")
+                            .strip("/")
+                            .replace("-", "_")
+                        )
+                        owned_entry = lookup_affiliate_partner(partner_norm, property_id=tenant_norm)
+                        if owned_entry is not None:
+                            owned_prop = str(getattr(owned_entry, "property_id", "") or "").strip().lower()
+                            if owned_prop == tenant_norm:
+                                cleaned_routes.append(r)
+                            continue
+                        if partner_norm and (
+                            partner_norm in AFFILIATE_REGISTRY
+                            or any(
+                                prop_key != tenant_norm and partner_norm in prop_reg
+                                for prop_key, prop_reg in AFFILIATE_REGISTRY_BY_PROPERTY.items()
+                            )
+                        ):
+                            continue
+                        route_blob = _json_lib.dumps(r) if isinstance(r, dict) else str(r)
+                        if scanner.scan_text(route_blob, tenant_norm):
+                            continue
                         cleaned_routes.append(r)
 
                     if len(cleaned_routes) != len(routes):

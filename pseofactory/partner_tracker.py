@@ -205,6 +205,11 @@ LOCAL_ENV_ALLOWED_KEYS: Tuple[str, ...] = (
 )
 
 
+def _is_allowed_local_env_key(key: str) -> bool:
+    """Allows non-paid operational keys including per-tenant STRIPE_WEBHOOK_SECRET_<TENANT>."""
+    return key in LOCAL_ENV_ALLOWED_KEYS or key.startswith("STRIPE_WEBHOOK_SECRET_")
+
+
 def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
     """Loads local .env keys into os.environ when absent without logging or returning values."""
     from pathlib import Path
@@ -231,7 +236,7 @@ def _load_local_env(dotenv_path: Optional[str] = None) -> List[str]:
                     line = line[len("export ") :].strip()
                 key, raw_val = line.split("=", 1)
                 key = key.strip()
-                if not key or key not in LOCAL_ENV_ALLOWED_KEYS:
+                if not key or not _is_allowed_local_env_key(key):
                     continue
                 val = raw_val.strip()
                 if len(val) >= 2 and ((val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")):

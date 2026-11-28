@@ -1345,7 +1345,7 @@ class DepartmentHandoffChainVerifier:
         def _verify_verif_tenant(pid: str) -> Dict[str, Any]:
             t_errs: List[str] = []
             adapter = tenant_adapters[pid]
-            evaluator = AssetIntegrityEvaluator(enforce_master_seo=False)
+            evaluator = AssetIntegrityEvaluator(enforce_master_seo=True)
             scanner = CrossPropertyContaminationScanner()
             repo_path_cand = (
                 Path(adapter.repo_path)

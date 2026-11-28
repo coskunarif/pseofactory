@@ -4594,7 +4594,54 @@ class RefactorCascadeEngine:
 
                 # 2. Rebuild in isolated environment
                 with adapter.scoped_environment():
-                    if target_path.is_dir() or target_path == adapter.dist_dir.resolve():
+                    repo_root_reflect = Path(
+                        getattr(adapter, "repo_root", None)
+                        or getattr(adapter, "repo_path", None)
+                        or adapter.dist_dir.parent
+                    ).resolve()
+                    synd_dir_reflect = (repo_root_reflect / "syndication").resolve()
+                    is_synd_target = (
+                        target_path == synd_dir_reflect
+                        or target_path.is_relative_to(synd_dir_reflect)
+                        or target_path.parent.name == "syndication"
+                        or (
+                            target_path.is_relative_to(repo_root_reflect)
+                            and "syndication" in target_path.relative_to(repo_root_reflect).parts
+                        )
+                    )
+                    if is_synd_target:
+                        from pseofactory.distributor import export_all_syndication_files
+
+                        synd_output_dir = (
+                            synd_dir_reflect
+                            if (target_path == synd_dir_reflect or target_path.is_relative_to(synd_dir_reflect))
+                            else target_path.parent
+                        )
+                        export_all_syndication_files(
+                            output_dir=synd_output_dir,
+                            dry_run=False,
+                            property_id=adapter.property_id,
+                        )
+                        for _ck in [
+                            k
+                            for k in list(self.evaluator._audit_cache.keys())
+                            if len(k) >= 2
+                            and (
+                                "syndication/" in str(k[1]).replace("\\", "/")
+                                or str(k[1]).replace("\\", "/").endswith("/syndication")
+                                or str(k[1]) == str(target_path)
+                            )
+                        ]:
+                            self.evaluator._audit_cache.pop(_ck, None)
+                        if target_path.is_dir():
+                            self.replay_quarantine(
+                                property_id=adapter.property_id,
+                                slug=record.slug,
+                                asset_path=record.asset_path,
+                            )
+                            return True
+                        build_ok = True
+                    elif target_path.is_dir() or target_path == adapter.dist_dir.resolve():
                         RetroReflectionEngine.retrofit_estate(
                             dist_dir=adapter.dist_dir,
                             property_id=adapter.property_id,
@@ -4632,7 +4679,7 @@ class RefactorCascadeEngine:
                             )
                             return True
                         raise RuntimeError(f"Estate rebuild failed for property '{adapter.property_id}'")
-                    if target_path.is_file() and target_path.suffix == ".html" and (
+                    elif target_path.is_file() and target_path.suffix == ".html" and (
                         any("Rolled-back " in str(d) for d in (record.details or []))
                         or (
                             isinstance(adapter, SubprocessPropertyAdapter)

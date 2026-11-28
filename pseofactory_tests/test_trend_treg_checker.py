@@ -93,7 +93,7 @@ def test_treg_checker_subprocess_invocation():
             mock_run.assert_called_once()
             call_args = mock_run.call_args[0][0]
             assert "call" in call_args
-            assert "treg.google.keywords.ideas" in call_args
+            assert "treg.google.keywords.volume" in call_args
             assert "X-Treg-Route-Max-Cost: 0.05" in call_args
 
 

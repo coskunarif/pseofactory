@@ -108,6 +108,7 @@ class TregDurabilityResult:
     ai_citation_vacant: bool = False
     ai_cited_domains: List[str] = field(default_factory=list)
     ai_citation_checked: bool = False
+    is_synthetic: bool = False
 
     def __post_init__(self):
         assert_no_forbidden_dashes(self.query, "TregDurabilityResult.query")
@@ -119,7 +120,7 @@ class TregDurabilityResult:
     def from_dict(cls, data: Dict[str, Any]) -> "TregDurabilityResult":
         return cls(
             query=str(data.get("query", "")),
-            endpoint_called=str(data.get("endpoint_called", "treg.google.keywords.ideas")),
+            endpoint_called=str(data.get("endpoint_called", "treg.google.keywords.volume")),
             search_volume=int(data.get("search_volume", 0)),
             cpc_usd=float(data.get("cpc_usd", 0.0)),
             competition_index=float(data.get("competition_index", 0.0)),
@@ -131,6 +132,7 @@ class TregDurabilityResult:
             ai_citation_vacant=bool(data.get("ai_citation_vacant", False)),
             ai_cited_domains=[str(d) for d in (data.get("ai_cited_domains") or [])],
             ai_citation_checked=bool(data.get("ai_citation_checked", False)),
+            is_synthetic=bool(data.get("is_synthetic", False)),
         )
 
 

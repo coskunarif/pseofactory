@@ -2032,6 +2032,10 @@ def execute_autonomous_daily_trend_page_build(
 
         adp = adapters_by_tenant[t_id]
         raw_title = str(item.get("title") or c_query.title()).strip()
+        if re.match(r"^how\s+to\s+calculate\s+", raw_title, re.IGNORECASE):
+            stripped_htc = re.sub(r"^how\s+to\s+calculate\s+", "", raw_title, flags=re.IGNORECASE).strip()
+            if stripped_htc:
+                raw_title = stripped_htc
         if "calculator" not in raw_title.lower() and "simulator" not in raw_title.lower() and "estimator" not in raw_title.lower():
             raw_title = f"{raw_title} Calculator"
 
