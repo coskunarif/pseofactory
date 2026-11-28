@@ -415,15 +415,14 @@ class TregChecker:
 
         global _PROCESS_LIVE_AI_CALLS_MADE
         treg_bin = shutil.which("treg")
-        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
         within_live_cap = (
             is_mocked
-            or live_opt_in
             or (self._live_ai_calls_made < self._max_live_ai_calls and _PROCESS_LIVE_AI_CALLS_MADE < self._max_live_ai_calls)
         )
 
-        if allow_live and treg_bin and (not is_test_env or is_mocked or live_opt_in) and within_live_cap:
+        # Live paid treg calls require explicit PSEUFACTORY_LIVE_TREG=1 opt-in (or mocked subprocess in tests).
+        if allow_live and treg_bin and (live_opt_in or is_mocked) and within_live_cap:
             self._live_ai_calls_made += 1
             if not is_mocked:
                 _PROCESS_LIVE_AI_CALLS_MADE += 1
@@ -894,10 +893,10 @@ class TregChecker:
 
         treg_bin = shutil.which("treg")
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
-        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
 
-        if not (treg_bin and (not is_test_env or is_mocked or live_opt_in)):
+        # Live paid treg calls require explicit PSEUFACTORY_LIVE_TREG=1 opt-in (or mocked subprocess in tests).
+        if not (treg_bin and (live_opt_in or is_mocked)):
             for clean_q in pending:
                 results[clean_q] = self._offline_heuristic(clean_q, reason="offline_fallback")
             return results
@@ -1078,13 +1077,12 @@ class TregChecker:
         if not allow_live:
             return self._offline_heuristic(clean_q, reason="dry_run_offline_fallback")
 
-        # 4. External treg CLI execution if available
+        # 4. External treg CLI execution requires explicit PSEUFACTORY_LIVE_TREG=1 opt-in (or mocked subprocess in tests)
         treg_bin = shutil.which("treg")
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
-        is_test_env = "PYTEST_CURRENT_TEST" in os.environ
         live_opt_in = os.getenv("PSEUFACTORY_LIVE_TREG") == "1"
 
-        if treg_bin and (not is_test_env or is_mocked or live_opt_in):
+        if treg_bin and (live_opt_in or is_mocked):
             call_timeout = (
                 min(self.timeout, max(1.0, remaining_budget - 2.0))
                 if remaining_budget is not None

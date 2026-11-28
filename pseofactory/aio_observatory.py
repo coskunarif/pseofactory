@@ -140,6 +140,9 @@ def treg_sampler(
     and bounded exponential retry on transient HTTP 502/503/504/429 and timeout errors.
     Deterministic client errors (e.g. HTTP 400/401/403/404) fail fast without retrying.
     """
+    is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
+    if os.getenv("PSEUFACTORY_LIVE_TREG") != "1" and not is_mocked:
+        raise RuntimeError("Live treg calls disabled (set PSEUFACTORY_LIVE_TREG=1 to opt in)")
     treg_bin = shutil.which("treg")
     if not treg_bin:
         raise RuntimeError("treg binary not found on PATH")
@@ -411,7 +414,19 @@ class AIOObservatory:
         if max_queries is not None:
             pairs = pairs[: max(0, int(max_queries))]
         fn = sampler or treg_sampler
-        summary = {"sampled": 0, "found": 0, "errors": 0, "skipped_junk": 0, "cost_usd": 0.0, "error_samples": []}
+        summary: Dict[str, Any] = {
+            "sampled": 0,
+            "found": 0,
+            "errors": 0,
+            "skipped_junk": 0,
+            "skipped_live_disabled": 0,
+            "cost_usd": 0.0,
+            "error_samples": [],
+        }
+        is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
+        if sampler is None and os.getenv("PSEUFACTORY_LIVE_TREG") != "1" and not is_mocked:
+            summary["skipped_live_disabled"] = len(pairs)
+            return summary
         for item in pairs:
             if isinstance(item, dict):
                 tenant = str(item.get("tenant") or "")

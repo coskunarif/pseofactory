@@ -1449,8 +1449,11 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
     if action == "sample":
         sampled_cnt = int(out.get("sampled", 0) or 0)
         errors_cnt = int(out.get("errors", 0) or 0)
+        skipped_disabled = int(out.get("skipped_live_disabled", 0) or 0)
         watchlist_sz = int(out.get("watchlist_size", 0) or 0)
         total_attempted = sampled_cnt + errors_cnt
+        if skipped_disabled > 0 and errors_cnt == 0 and sampled_cnt == 0:
+            return 0
         if sampled_cnt == 0 and watchlist_sz > 0:
             return 1
         if total_attempted > 0 and (errors_cnt / total_attempted) >= 0.50:
