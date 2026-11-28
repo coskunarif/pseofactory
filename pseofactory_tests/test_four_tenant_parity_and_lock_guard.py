@@ -589,8 +589,10 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         gsc_rows=[],
         dry_run=False,
     )
-    assert fb_pass1["pages_scanned"] == 13
-    assert fb_pass1["pages_updated"] == 13
+    expected_tool_count = len(before_h2_by_slug)
+    assert expected_tool_count >= 13
+    assert fb_pass1["pages_scanned"] == expected_tool_count
+    assert fb_pass1["pages_updated"] == expected_tool_count
 
     repositioned_slugs = 0
     for html_file in sorted((gh_dist / "tools").glob("*/index.html")):
@@ -614,12 +616,25 @@ def test_gainhelm_gsc_and_empirical_swap_preserve_slot_alignment_and_h2(
         norm_after = normalize_html_callout_message_match(page_html, property_id="gainhelm")
         assert norm_after == page_html, f"normalize_html_callout_message_match reverted/mutated {t_slug}"
 
+    live_eng_doc = json.loads(live_gh_eng.read_text(encoding="utf-8"))
     eng_tool_slugs = {
         s
-        for s in (json.loads(live_gh_eng.read_text(encoding="utf-8")).get("by_slug") or {})
+        for s in (live_eng_doc.get("by_slug") or {})
         if (gh_dist / "tools" / s / "index.html").is_file()
     }
-    assert repositioned_slugs >= max(10, len(eng_tool_slugs))
+    expected_swap_slugs = set()
+    for eng_s in eng_tool_slugs:
+        base_roster = _aff.bind_asset_partner_roster("gainhelm", slug=eng_s)
+        eng_roster = _aff.bind_asset_partner_roster("gainhelm", slug=eng_s, engagement_metrics=live_eng_doc)
+        if eng_roster["slot_plan"].get("gsc_repositioned"):
+            expected_swap_slugs.add(eng_s)
+        else:
+            # When empirical engagement confirms the static baseline winner, no swap is expected
+            base_pk = base_roster["slot_plan"]["slot_bindings"]["partner_matrix_cards"][0]["partner_key"]
+            eng_pk = eng_roster["slot_plan"]["slot_bindings"]["partner_matrix_cards"][0]["partner_key"]
+            assert eng_pk == base_pk, f"Unrepositioned engaged slug {eng_s} diverged: {base_pk} vs {eng_pk}"
+    assert len(expected_swap_slugs) >= 8, f"Expected broad empirical swaps across GainHelm, got {expected_swap_slugs}"
+    assert repositioned_slugs == len(expected_swap_slugs)
     fb_pass2 = run_gsc_affiliate_placement_feedback_pass(
         property_id="gainhelm",
         dist_dir=gh_dist,

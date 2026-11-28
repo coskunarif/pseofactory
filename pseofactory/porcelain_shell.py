@@ -7713,7 +7713,12 @@ def normalize_html_to_porcelain_shell(
         s.strip().replace("'#16a34a'", "'var(--status-positive)'").replace('"#16a34a"', '"var(--status-positive)"')
         for s in trailing_scripts
     ]
-    if not had_runtime_sync and 'id="partner-registration-form"' in inner_main:
+    if not had_runtime_sync and (
+        'id="partner-registration-form"' in inner_main
+        or 'id="workpaper-unlock-card"' in inner_main
+        or "id='workpaper-unlock-card'" in inner_main
+        or "data-checkout-trigger=" in inner_main
+    ):
         had_runtime_sync = True
     if had_runtime_sync:
         if dist_dir is not None or had_external_runtime_sync:

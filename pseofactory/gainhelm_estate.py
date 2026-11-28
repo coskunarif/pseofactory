@@ -2893,9 +2893,41 @@ _DEPLOYED_VOID_PROVENANCE_SPECS: Dict[str, Tuple[Tuple[str, str, str], ...]] = {
 }
 
 
+_DEFAULT_VOID_PROVENANCE_SPEC: Tuple[Tuple[str, str, str], ...] = (
+    ("Dataset 1:", "https://csrc.nist.gov/projects/risk-management", "NIST Cybersecurity Risk Management &amp; Trust Control Mapping"),
+    ("Dataset 2:", "https://www.bls.gov/oes/current/oes151212.htm", "BLS OEWS Information Security Analysts (SOC 15-1212) Wage Series"),
+)
+
+_FRAMEWORK_VOID_PROVENANCE_ROUTES: Tuple[Tuple[Tuple[str, ...], str], ...] = (
+    (("pci-dss", "pci_dss", "pci"), "pci-dss-4-0-compliance-cost-calculator"),
+    (("soc-2", "soc2", "soc-1", "soc1"), "soc-2-audit-cost-calculator"),
+    (("cmmc",), "cmmc-2-0-compliance-cost-calculator"),
+    (("nist", "sprs"), "nist-800-171-sprs-score-calculator"),
+    (("iso-27001", "iso27001"), "iso-27001-certification-cost-calculator"),
+    (("hipaa",), "hipaa-violation-penalty-breach-cost-calculator"),
+    (("fedramp",), "fedramp-authorization-3pao-cost-calculator"),
+    (("hitrust",), "hitrust-csf-e1-i1-r2-certification-cost-calculator"),
+    (("penetration", "pentest"), "penetration-testing-scoping-cost-calculator"),
+    (("cyber-liability", "cyber-insurance"), "cyber-liability-insurance-breach-exposure-calculator"),
+)
+
+
+def _resolve_gainhelm_void_provenance_spec(slug: str) -> Tuple[Tuple[str, str, str], ...]:
+    """Resolves official statutory provenance links for any GainHelm deployed void slug."""
+    s_low = str(slug or "").strip().lower()
+    if s_low in _DEPLOYED_VOID_PROVENANCE_SPECS:
+        return _DEPLOYED_VOID_PROVENANCE_SPECS[s_low]
+    for tokens, core_slug in _FRAMEWORK_VOID_PROVENANCE_ROUTES:
+        if any(tok in s_low for tok in tokens):
+            core_prov = (_CORE_TOOL_CONTENT_SPECS.get(core_slug) or {}).get("provenance")
+            if core_prov:
+                return core_prov
+    return _DEFAULT_VOID_PROVENANCE_SPEC
+
+
 def _inject_gainhelm_void_provenance(html_text: str, slug: str) -> str:
-    """Ensures DORA, EU AI Act, and SEC Form 8-K pages render explicit official EUR-Lex/SEC outbound links."""
-    spec = _DEPLOYED_VOID_PROVENANCE_SPECS.get(str(slug or "").strip().lower())
+    """Ensures every GainHelm deployed void page renders explicit official statutory provenance links."""
+    spec = _resolve_gainhelm_void_provenance_spec(slug)
     if (
         not spec
         or "statutory-provenance-box" in html_text

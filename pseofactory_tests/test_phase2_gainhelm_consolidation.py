@@ -265,9 +265,20 @@ def test_gainhelm_isolated_archive_sync_build_audit_pytest_and_browser(tmp_path:
     for retired_fname in ("sitemap-hubs.xml", "sitemap-leaves.xml", "llms-full.txt", "ai-benchmarks"):
         assert not (dist_dir / retired_fname).exists(), f"Retired artifact dist/{retired_fname} must not exist"
 
-    # All 22 sitemap URLs (including /partners/) resolve cleanly to built HTML files
+    # All sitemap URLs (9 static/governance routes + all core & deployed void tools) resolve cleanly to built HTML files
+    from pseofactory.gainhelm_estate import GAINHELM_TOOLS
+
+    deployed_voids_doc = json.loads((tmp_repo / "content" / "deployed_voids.json").read_text(encoding="utf-8"))
+    expected_tool_slugs = {t["slug"] for t in GAINHELM_TOOLS} | {
+        str(v.get("slug") or "").strip().lower()
+        for v in deployed_voids_doc
+        if isinstance(v, dict) and v.get("slug")
+    }
+    assert len(expected_tool_slugs) >= 13
+    expected_sitemap_count = 9 + len(expected_tool_slugs)
     sitemap_urls = re.findall(r"<loc>(.*?)</loc>", (dist_dir / "sitemap.xml").read_text(encoding="utf-8"))
-    assert len(sitemap_urls) == 22
+    assert len(sitemap_urls) == expected_sitemap_count
+    assert len(set(sitemap_urls)) == expected_sitemap_count
     for url in sitemap_urls:
         rel = url.replace("https://gainhelm.com", "").strip("/")
         target_html = (dist_dir / "index.html") if not rel else (dist_dir / rel / "index.html")
@@ -844,19 +855,26 @@ def test_gainhelm_batch2b_jsonld_primary_sources_and_hash_state(tmp_path: Path) 
     4. 100% (13/13) tools have official primary-source outbound links (incl. eur-lex.europa.eu on DORA/EU AI Act and sec.gov on SEC 8-K).
     5. Hash-fragment state sync (#k=v) via replaceState only and zero crawlable <a href="...?..."> preset links.
     """
-    from pseofactory.gainhelm_estate import compile_gainhelm_estate_impl
+    from pseofactory.gainhelm_estate import GAINHELM_TOOLS, compile_gainhelm_estate_impl
 
     voids_src = Path("/home/ubuntuadmin/projects/gainhelm/content/deployed_voids.json")
+    expected_slugs = {t["slug"] for t in GAINHELM_TOOLS}
     if voids_src.is_file():
         (tmp_path / "content").mkdir(parents=True, exist_ok=True)
         shutil.copy2(voids_src, tmp_path / "content" / "deployed_voids.json")
+        voids_doc = json.loads(voids_src.read_text(encoding="utf-8"))
+        expected_slugs |= {
+            str(v.get("slug") or "").strip().lower()
+            for v in voids_doc
+            if isinstance(v, dict) and v.get("slug")
+        }
 
     res = compile_gainhelm_estate_impl(tmp_path, run_retrofit=True)
     assert res["status"] == "PASS", res
     dist = tmp_path / "dist"
 
     tool_pages = sorted((dist / "tools").glob("*/index.html"))
-    expected_tool_count = 13 if voids_src.is_file() else 10
+    expected_tool_count = len(expected_slugs)
     assert len(tool_pages) == expected_tool_count
 
     for page_path in tool_pages:
