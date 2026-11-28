@@ -1216,8 +1216,11 @@ def _render_scenario_presets_bar_html(
         params: List[str] = []
         for k, v in clamped_inputs.items():
             if isinstance(v, (int, float)):
-                scaled = round(float(v) * mult, 2)
-                val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
+                if k in ("is_heavy_suv",):
+                    val_str = "1" if float(v) >= 0.5 else "0"
+                else:
+                    scaled = round(float(v) * mult, 2)
+                    val_str = str(int(scaled)) if scaled.is_integer() else str(scaled)
                 params.append(f"{k}={val_str}")
         hs = "&amp;".join(params)
         hash_val = f"#{hs}" if hs else "#"
@@ -2379,6 +2382,11 @@ def _render_compiled_calculator_runtime_js(
           var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
           if (params.has(name)) {{
             el.value = params.get(name);
+            if (el.tagName && el.tagName.toUpperCase() === "SELECT" && !el.value && el.options && el.options.length) {{
+              var numP = parseFloat(params.get(name));
+              el.value = (!isNaN(numP) && numP >= 0.5) ? "1" : "0";
+              if (!el.value) el.selectedIndex = 0;
+            }}
             applied = true;
           }}
         }}
@@ -2414,6 +2422,22 @@ def _render_compiled_calculator_runtime_js(
       var formattedResult = formatNumber(result);
       if (outputElem) {{
         outputElem.textContent = formattedResult;
+      }}
+      var sec179CapEl = document.getElementById("metric-sec179-cap-deduction");
+      if (
+        sec179CapEl
+        && typeof inputs.equipment_cost === "number"
+        && typeof inputs.business_use_pct === "number"
+        && typeof inputs.is_heavy_suv === "number"
+      ) {{
+        var sec179Basis = inputs.equipment_cost * inputs.business_use_pct;
+        var sec179PhaseoutCap = Math.max(0.0, 2560000.0 - Math.max(0.0, inputs.equipment_cost - 4090000.0));
+        var sec179Cap = (inputs.is_heavy_suv === 1) ? 32000.0 : sec179PhaseoutCap;
+        var sec179Ded = Math.round(Math.min(sec179Basis, sec179Cap) * 100) / 100;
+        sec179CapEl.textContent = "$" + new Intl.NumberFormat("en-US", {{
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        }}).format(sec179Ded);
       }}
       var wpHeadline = document.getElementById("workpaper-preview-headline");
       if (wpHeadline) wpHeadline.textContent = formattedResult;
@@ -2851,15 +2875,29 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
     for var_name, var_val in clamped_inputs.items():
         label_text = var_name.replace("_", " ").title()
         clean_val_str, clean_min_str, clean_max_str, step_attr = _compute_range_slider_spec(var_name, var_val)
-        form_inputs_html.append(
-            f'        <div class="form-group" style="margin-bottom: 16px;">\n'
-            f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
-            f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
-            f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
-            f'          <input type="range" min="{clean_min_str}" max="{clean_max_str}" step="{step_attr}" id="range-{var_name}" '
-            f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
-            f'        </div>'
-        )
+        if var_name in {"is_heavy_suv"}:
+            is_suv_selected = int(round(float(var_val))) == 1 if isinstance(var_val, (int, float)) else str(var_val).strip() == "1"
+            sel_1 = " selected" if is_suv_selected else ""
+            sel_0 = " selected" if not is_suv_selected else ""
+            form_inputs_html.append(
+                f'        <div class="form-group" style="margin-bottom: 16px;">\n'
+                f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
+                f'          <select id="input-{var_name}" name="{var_name}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;">\n'
+                f'            <option value="1"{sel_1}>Heavy SUV (&gt;6,000 lbs, $32,000 Cap)</option>\n'
+                f'            <option value="0"{sel_0}>General Business Equipment / Truck</option>\n'
+                f'          </select>\n'
+                f'        </div>'
+            )
+        else:
+            form_inputs_html.append(
+                f'        <div class="form-group" style="margin-bottom: 16px;">\n'
+                f'          <label for="input-{var_name}" style="display: block; margin-bottom: 6px; font-weight: 500;">{label_text}</label>\n'
+                f'          <input type="number" step="any" min="0" id="input-{var_name}" name="{var_name}" '
+                f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; padding: 10px 14px; font-size: 16px; width: 100%; box-sizing: border-box;" />\n'
+                f'          <input type="range" min="{clean_min_str}" max="{clean_max_str}" step="{step_attr}" id="range-{var_name}" '
+                f'value="{clean_val_str}" class="touch-target" style="min-height: 44px; min-width: 44px; width: 100%; margin-top: 8px;" />\n'
+                f'        </div>'
+            )
         table_rows_html.append(
             f'            <tr>\n'
             f'              <td>{label_text}</td>\n'
@@ -2880,6 +2918,27 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
         display_output = f"{published_output:,.2f}" if isinstance(published_output, float) and not published_output.is_integer() else f"{published_output:,.0f}"
     if is_lienbond and not display_output.startswith("$"):
         display_output = f"${display_output}"
+    sec179_metric_html = ""
+    if (
+        isinstance(clamped_inputs, dict)
+        and "is_heavy_suv" in clamped_inputs
+        and "equipment_cost" in clamped_inputs
+        and "business_use_pct" in clamped_inputs
+    ):
+        _eq_cost = float(clamped_inputs.get("equipment_cost") or 0.0)
+        _biz_pct = float(clamped_inputs.get("business_use_pct") or 0.0)
+        _is_suv = int(round(float(clamped_inputs.get("is_heavy_suv") or 0.0))) == 1
+        _sec179_basis = _eq_cost * _biz_pct
+        _sec179_phaseout_cap = max(0.0, 2560000.0 - max(0.0, _eq_cost - 4090000.0))
+        _sec179_cap = 32000.0 if _is_suv else _sec179_phaseout_cap
+        _sec179_ded = round(min(_sec179_basis, _sec179_cap), 2)
+        _sec179_ded_str = f"${_sec179_ded:,.2f}"
+        sec179_metric_html = (
+            '\n        <div class="calc-metric-card" style="margin-top: 8px;">'
+            '<span class="calc-metric-label">Section 179 Expensing Deduction: </span>'
+            f'<strong id="metric-sec179-cap-deduction" class="calc-metric-value" data-output="sec179-cap-deduction">{_sec179_ded_str}</strong>'
+            '</div>'
+        )
     # Pre-render SSR 5-Point Scenario Comparison Table
     scenario_table_html = _render_5point_sensitivity_table_html(
         published_output=published_output,
@@ -3498,7 +3557,7 @@ def compile_high_effort_page(candidate_spec: Dict[str, Any]) -> Dict[str, Any]:
       <div class="result-box" style="min-height: 110px; margin-top: 20px;">
         <h3>Published Baseline Calculation</h3>
         <p>Formula: {formula_html_inline}</p>
-        <p>Evaluated Output Result: <strong class="output-value">{display_output}</strong></p>
+        <p>Evaluated Output Result: <strong id="metric-total-first-year-deduction" class="output-value calc-metric-value" data-output="total-first-year-deduction" data-primary-output="true">{display_output}</strong></p>{sec179_metric_html}
         <p>Sample Calculation Methodology: {visible_sample_calc}</p>
         <div class="calculation-variant" id="variant-baseline" style="font-size: 13px; margin-top: 8px;">Baseline Statutory Schedule (= {display_output}, 100.0% baseline{"; Title IV RAP $65k AGI benchmark: $248.23/mo, $59,575.20 total" if is_prexvo else ""}) (<a href="#variant-accelerated" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Compare Accelerated Stress Variant</a>)</div>
         <div class="calculation-variant" id="variant-accelerated" style="font-size: 13px; margin-top: 4px;">Accelerated 1.2x Stress Variant (= {display_output} * 1.20, 120.0% stress{"; Title IV RAP $95k AGI benchmark: $498.23/mo" if is_prexvo else ""}) (<a href="#variant-baseline" class="touch-target" style="display:inline-flex;align-items:center;min-height:44px;min-width:44px;padding:4px 8px;">Return to Baseline Schedule</a>)</div>
@@ -4538,6 +4597,11 @@ def compile_lienbond_estate(output_dir: Any, run_retrofit: bool = True) -> Dict[
           var name = (el.name || el.id || "").replace(/^input-/, "").replace(/^range-/, "");
           if (params.has(name)) {{
             el.value = params.get(name);
+            if (el.tagName && el.tagName.toUpperCase() === "SELECT" && !el.value && el.options && el.options.length) {{
+              var numP = parseFloat(params.get(name));
+              el.value = (!isNaN(numP) && numP >= 0.5) ? "1" : "0";
+              if (!el.value) el.selectedIndex = 0;
+            }}
             applied = true;
           }}
         }}

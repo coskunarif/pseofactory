@@ -2584,6 +2584,100 @@ def _clean_short_label(words_list: List[str], max_chars: int = 32) -> str:
     return res
 
 
+_FLAGSHIP_HARDCODED_META_RULES: Dict[str, Tuple[Tuple[Tuple[str, ...], str], ...]] = {
+    "prexvo": (
+        (("physician-resident-student-loan-refinance-vs-rap-calculator",), "calculate physician and medical resident student loan refinance savings"),
+        (("student-loan-refinance-break-even-calculator",), "calculate student loan refinance apr savings, monthly payment reductions"),
+        (("grad-plus-borrowing-cap-calculator",), "calculate federal graduate student loan borrowing caps"),
+        (("tiered-standard-calculator",), "calculate tiered standard student loan monthly payments under 34 cfr 685.208"),
+        (("married-filing-separately-student-loan-calculator",), "calculate married filing separately student loan payment savings"),
+        (("parent-plus-double-consolidation", "parent-plus-double-consolidation-loophole"), "calculate 2026 parent plus double consolidation loophole"),
+        (("parent-plus-loan-payment-calculator",), "calculate federal parent plus loan monthly payments"),
+        (("parent-plus-loan-payment-calculator",), "calculate parent plus monthly loan payments"),
+        (("parent-plus-double-consolidation",), "calculate parent plus double consolidation repayment options"),
+        (("icr-repayment-calculator",), "calculate income-contingent repayment (icr) monthly payments"),
+        (("ibr-hardship-cap-calculator",), "calculate income-based repayment (ibr) partial financial hardship thresholds"),
+        (("pslf-buyback-months-reconsideration-student-loan-calculator",), "calculate pslf hold harmless buyback lump-sum payments"),
+        (("student-loan-forgiveness-tax-bomb-insolvency-calculator",), "calculate idr student loan forgiveness tax bomb liability"),
+        (("pslf-qualifying-payment-simulator", "pslf-qualifying-payment-calculator"), "calculate pslf 120 qualifying monthly payments"),
+        (("student-loan-forgiveness-2026",), "compare 2026 federal student loan forgiveness timelines"),
+        (("rap-vs-ibr-calculator",), "compare obbba repayment assistance plan (rap) tiered agi payments"),
+    ),
+    "gainhelm": (
+        (("soc-2-type-2-vs-soc-1",), "compare soc 2 type ii trust services security controls against soc 1"),
+        (("dora-ict-third-party-risk-compliance-cost-calculator",), "calculate eu dora regulation 2022/2554 compliance costs"),
+        (("eu-ai-act-high-risk-conformity-assessment-cost-calculator",), "model eu ai act regulation 2024/1689 article 43 conformity assessment fees"),
+        (("sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator",), "calculate sec rule 33-11216 form 8-k item 1.05 cybersecurity materiality readiness"),
+        (("hipaa-violation-penalty-breach-cost-calculator",), "model hipaa civil monetary penalty exposure under 45 cfr 160.404"),
+        (("pci-dss-4-0-compliance-cost-calculator",), "calculate pci dss v4.0.1 level 1 qsa report on compliance (roc) fees"),
+        (("iso-27001-certification-cost-calculator",), "estimate iso/iec 27001:2022 isms certification fees"),
+        (("fedramp-authorization-3pao-cost-calculator",), "model fedramp 20x and rev 5 moderate ato budgets under 44 u.s.c. 3607"),
+        (("hitrust-csf-e1-i1-r2-certification-cost-calculator",), "compare hitrust csf v11 e1, i1, and r2 validated assessment fees"),
+        (("penetration-testing-scoping-cost-calculator",), "scope crest and oscp technical penetration testing fees"),
+        (("cyber-liability-insurance-breach-exposure-calculator",), "estimate commercial cyber liability insurance premiums, self-insured retentions"),
+        (("nist-800-171-sprs-score-calculator",), "calculate dod nist sp 800-171 rev 2 sprs scores"),
+        (("cmmc-2-0-compliance-cost-calculator",), "model dod cmmc 2.0 level 2 c3pao certification fees"),
+        (("soc-2-audit-cost-calculator",), "calculate soc 2 type i and type ii cpa attestation fees"),
+    ),
+    "lienbond": (
+        (("erisa-fidelity-bond-coverage-amount-calculator",), "calculate erisa section 412 fidelity bond coverage limits"),
+        (("how-to-calculate-davis-bacon-overtime",), "calculate davis-bacon 1.5x overtime hourly rates"),
+        (("davis-bacon-prevailing-wage-fringe-benefit-rate-calculator",), "calculate davis-bacon prevailing wage and fringe benefit cash-in-lieu payroll burdens"),
+        (("texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator",), "calculate texas property code chapter 53 10% statutory retainage reserves"),
+        (("commercial-construction-retainage-interest-penalty-calculator-by-state",), "calculate commercial construction retainage caps and statutory late-payment interest penalties"),
+        (("contractor-overhead-and-profit-markup-vs-margin-calculator",), "calculate contractor overhead and profit markup versus gross margin bid divisors"),
+        (("experience-modification-rate-emr-workers-comp-penalty-calculator",), "calculate experience modification rate (emr) workers comp premium penalties"),
+        (("workers-compensation-class-code-rate-calculator-by-state",), "calculate state contractor workers compensation premiums using ncci basic manual"),
+        (("california-texas-florida-preliminary-notice-deadline-calculator",), "calculate california 20-day, texas chapter 53 15th-day, and florida 45-day preliminary notice"),
+        (("contractor-lien-release-statutory-matrix-by-state",), "compare 50-state statutory mechanics lien waiver forms"),
+        (("subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator",), "compare subcontractor default insurance (sdi) base rates"),
+        (("bid-bond-calculator",), "calculate construction bid bond penal sums"),
+        (("miller-act-performance-and-payment-bond-premium-calculator",), "calculate miller act performance and payment bond premiums"),
+        (("performance-bond-calculator", "payment-bond-calculator"), "calculate construction performance and payment bond premiums"),
+        (("contractor-license-bond-cost-calculator-by-credit-score",), "calculate contractor license bond premiums by fico credit score tier"),
+    ),
+    "profithelm": (
+        (("equipment-lease-vs-buy-section-179-calculator",), "compare commercial equipment lease vs buy after-tax cash flow"),
+        (("equipment-lease-tax-deduction",), "calculate commercial equipment operating lease tax deductions"),
+        (("crypto-tax-form-1099-da-mandatory-reporting",), "model irs form 1099-da digital asset broker proceeds"),
+        (("crypto-tax-calculator",), "calculate crypto capital gains, staking yield, short-term vs long-term tax brackets"),
+        (("commercial-heavy-vehicle-section-179-weight-calculator",), "calculate commercial heavy vehicle (gvwr over 6,000 lbs) irc section 179 deductions"),
+        (("section-179-vehicle-equipment-deduction",), "model combined irc section 179 expensing, 100% bonus depreciation"),
+        (("contractor-surety-bond-cost-calculator",), "estimate commercial contractor surety bond costs, state penal sums"),
+    ),
+}
+
+_NON_TOOL_SLUGS_META = frozenset(
+    {"index", "tools", "tools-directory", "about", "methodology", "disclaimers", "privacy", "terms", "contact", "partners", "404"}
+)
+
+
+def _canonical_tool_slug(raw_slug: str) -> str:
+    """Normalizes a route or tool slug into a bare lowercase tool slug."""
+    s = str(raw_slug or "").lower().strip("/")
+    if s.startswith("tools/"):
+        s = s[len("tools/") :]
+    if s.endswith("/index.html"):
+        s = s[: -len("/index.html")]
+    elif s == "index.html":
+        s = "index"
+    return s.strip("/")
+
+
+def _is_colliding_flagship_meta_for_slug(meta_text: str, tenant_id: str, slug: str) -> bool:
+    """Returns True if meta_text matches a hardcoded flagship description belonging to a different slug."""
+    canon_slug = _canonical_tool_slug(slug)
+    if not canon_slug or canon_slug in _NON_TOOL_SLUGS_META:
+        return False
+    m_low = str(meta_text or "").lower().strip()
+    if not m_low:
+        return False
+    for allowed_slugs, prefix in _FLAGSHIP_HARDCODED_META_RULES.get(tenant_id, ()):
+        if prefix in m_low and canon_slug not in allowed_slugs:
+            return True
+    return False
+
+
 def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slug: str = "") -> str:
     """
     Deterministically normalizes meta description length into [120, 155] characters
@@ -2606,12 +2700,14 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
         else:
             short_label = "statutory tax liability"
     slug_low = str(slug or "").lower().strip("/")
+    canon_slug = _canonical_tool_slug(slug_low)
     q_low = f"{query_label.lower()} {short_label.lower()} {slug_low}".strip()
 
     has_meta_defect = bool(
         re.search(r"\bCalculate\s+[^.,;]*?\bCalculator\b", clean, re.IGNORECASE)
         or re.search(r"\bCalculate\s+(?:tools\s+directory|disclaimers|methodology|privacy|about)\b", clean, re.IGNORECASE)
         or re.search(r"\b(?:Break|Married)\s+(?:under|using)\b", clean, re.IGNORECASE)
+        or _is_colliding_flagship_meta_for_slug(clean, tenant_id, canon_slug)
         or (
             any(
                 k in q_low
@@ -2756,75 +2852,104 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "ICR, PSLF Buyback, Parent PLUS, and Refinance analysis.",
                     " Grounded in federal Title IV 34 CFR Part 685 schedules.",
                 )
-            if ("physician" in q_low or "resident" in q_low) and ("refinance" in q_low or "rap" in q_low):
+            if (("physician" in q_low or "resident" in q_low) and ("refinance" in q_low or "rap" in q_low)) and (
+                not canon_slug or canon_slug == "physician-resident-student-loan-refinance-vs-rap-calculator"
+            ):
                 return (
                     "Calculate physician and medical resident student loan refinance savings vs 2026 Title IV "
                     "RAP unpaid interest waivers and PSLF discharge.",
                     " Verified under Title IV 34 CFR Part 685 and 12 CFR Part 1026.",
                 )
-            if "refinance" in q_low or "break-even" in q_low or "break even" in q_low:
+            if ("refinance" in q_low or "break-even" in q_low or "break even" in q_low) and (
+                not canon_slug or canon_slug == "student-loan-refinance-break-even-calculator"
+            ):
                 return (
                     "Calculate student loan refinance APR savings, monthly payment reductions, "
                     "and exact break-even horizons versus federal Title IV protections.",
                     " Verified under TILA Regulation Z and Title IV 34 CFR Part 685.",
                 )
-            if "grad plus" in q_low or "grad-plus" in q_low or "borrowing cap" in q_low or "borrowing-cap" in q_low:
+            if ("grad plus" in q_low or "grad-plus" in q_low or "borrowing cap" in q_low or "borrowing-cap" in q_low) and (
+                not canon_slug or canon_slug == "grad-plus-borrowing-cap-calculator"
+            ):
                 return (
                     "Calculate federal graduate student loan borrowing caps ($20,500 annual Direct "
                     "Unsubsidized, $138,500 aggregate) and Grad PLUS phase-out rules.",
                     " Verified under HEA Section 455(a) and 34 CFR 685.203.",
                 )
-            if "tiered standard" in q_low or "tiered-standard" in q_low or "685.208" in q_low:
+            if ("tiered standard" in q_low or "tiered-standard" in q_low or "685.208" in q_low) and (
+                not canon_slug or canon_slug == "tiered-standard-calculator"
+            ):
                 return (
                     "Calculate Tiered Standard student loan monthly payments under 34 CFR 685.208 "
                     "across fixed 10, 12, 15, 20, and 30-year balance schedules.",
                     " Verified under HEA Section 455(d) and 34 CFR 685.208.",
                 )
-            if "married filing separately" in q_low or "married-filing-separately" in q_low or "mfs" in q_low:
+            if ("married filing separately" in q_low or "married-filing-separately" in q_low or "mfs" in q_low) and (
+                not canon_slug or canon_slug == "married-filing-separately-student-loan-calculator"
+            ):
                 return (
                     "Calculate Married Filing Separately student loan payment savings under 34 CFR "
                     "685.209(e) by excluding spousal AGI vs separate tax filing cost.",
                     " Verified under 34 CFR 685.209(e) and IRC Section 1(j).",
                 )
-            if "loophole" in q_low and ("parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low):
+            if (
+                "loophole" in q_low
+                and ("parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low)
+                and (not canon_slug or canon_slug in ("parent-plus-double-consolidation", "parent-plus-double-consolidation-loophole"))
+            ):
                 return (
                     "Calculate 2026 Parent PLUS Double Consolidation Loophole sunset eligibility, "
                     "two-step Direct Consolidation rules, and 10% IDR vs 20% ICR caps.",
                     " Verified under Title IV 34 CFR 685.209(b) and 685.220.",
                 )
-            if "double" not in q_low and ("parent plus loan payment" in q_low or "parent-plus-loan-payment" in q_low or ("parent plus" in q_low and "payment" in q_low)):
+            if (
+                "double" not in q_low
+                and ("parent plus loan payment" in q_low or "parent-plus-loan-payment" in q_low or ("parent plus" in q_low and "payment" in q_low))
+                and (not canon_slug or canon_slug == "parent-plus-loan-payment-calculator")
+            ):
                 return (
                     "Calculate federal Parent PLUS Loan monthly payments across Standard, Graduated, "
                     "Extended, and 20% ICR consolidation schedules under 34 CFR 685.208.",
                     " Verified under Title IV 34 CFR 685.208 and 685.209(b).",
                 )
-            if ("parent plus" in q_low or "parent-plus" in q_low) and "double" not in q_low and "consolidation" not in q_low:
+            if (
+                ("parent plus" in q_low or "parent-plus" in q_low)
+                and "double" not in q_low
+                and "consolidation" not in q_low
+                and (not canon_slug or canon_slug == "parent-plus-loan-payment-calculator")
+            ):
                 return (
                     "Calculate Parent PLUS monthly loan payments, 10-year Standard vs 20% ICR schedules, "
                     "and origination fee amortization under 34 CFR 685.208.",
                     " Verified under HEA Section 455 and Title IV 34 CFR 685.208.",
                 )
-            if "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low:
+            if (
+                "parent plus" in q_low or "parent-plus" in q_low or "double consolidation" in q_low or "double-consolidation" in q_low
+            ) and (not canon_slug or canon_slug == "parent-plus-double-consolidation"):
                 return (
                     "Calculate Parent PLUS Double Consolidation repayment options comparing 10% IDR "
                     "discretionary formulas against 20% single-consolidation ICR.",
                     " Verified under Title IV 34 CFR 685.209(b) and 685.220.",
                 )
-            if "icr" in q_low or "income contingent" in q_low or "income-contingent" in q_low:
+            if ("icr" in q_low or "income contingent" in q_low or "income-contingent" in q_low) and (
+                not canon_slug or canon_slug == "icr-repayment-calculator"
+            ):
                 return (
                     "Calculate Income-Contingent Repayment (ICR) monthly payments under 34 CFR "
                     "685.209(b) using 20% discretionary income or 12-year fixed IPF rules.",
                     " Verified under Title IV 34 CFR 685.209(b) statutory rules.",
                 )
-            if "hardship" in q_low or ("ibr" in q_low and "rap" not in q_low):
+            if ("hardship" in q_low or ("ibr" in q_low and "rap" not in q_low)) and (
+                not canon_slug or canon_slug == "ibr-hardship-cap-calculator"
+            ):
                 return (
                     "Calculate Income-Based Repayment (IBR) Partial Financial Hardship thresholds "
                     "and the 10-year Standard payment ceiling under HEA Section 493C.",
                     " Verified under 20 U.S.C. 1098e and 34 CFR 685.221 rules.",
                 )
             is_buyback_route = (
-                ("buyback" in slug_low or "reconsideration" in slug_low)
-                if slug_low
+                (canon_slug == "pslf-buyback-months-reconsideration-student-loan-calculator")
+                if canon_slug
                 else ("buyback" in q_low or "reconsideration" in q_low)
             )
             if is_buyback_route:
@@ -2834,8 +2959,8 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     " Verified under Title IV 34 CFR 685.219(g) reconsideration rules.",
                 )
             is_insolvency_route = (
-                ("insolvency" in slug_low or "tax-bomb" in slug_low or "tax bomb" in slug_low)
-                if slug_low
+                (canon_slug == "student-loan-forgiveness-tax-bomb-insolvency-calculator")
+                if canon_slug
                 else ("insolvency" in q_low or "tax bomb" in q_low or "tax-bomb" in q_low or "982" in q_low)
             )
             if is_insolvency_route:
@@ -2844,19 +2969,25 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "insolvency exclusion relief under IRC Section 108(a)(1)(B) in 2026.",
                     " Verified under 26 U.S.C. 108(a)(1)(B) and Section 108(f)(5).",
                 )
-            if "pslf" in q_low or "public service" in q_low:
+            if ("pslf" in q_low or "public service" in q_low) and (
+                not canon_slug or canon_slug in ("pslf-qualifying-payment-simulator", "pslf-qualifying-payment-calculator")
+            ):
                 return (
                     "Calculate PSLF 120 qualifying monthly payments, tax-free discharge timelines, "
                     "and ECF certification progress under Title IV 34 CFR 685.219(c).",
                     " Verified under Title IV 34 CFR 685.219 public service rules.",
                 )
-            if "forgiveness 2026" in q_low or "forgiveness-2026" in q_low:
+            if ("forgiveness 2026" in q_low or "forgiveness-2026" in q_low) and (
+                not canon_slug or canon_slug == "student-loan-forgiveness-2026"
+            ):
                 return (
                     "Compare 2026 federal student loan forgiveness timelines, PSLF 120-month "
                     "tax-free discharge, and post-ARPA IDR taxability under 34 CFR Part 685.",
                     " Verified under Title IV 34 CFR Part 685 and IRC Section 108(f).",
                 )
-            if "rap vs ibr" in q_low or ("rap" in q_low and "ibr" in q_low):
+            if ("rap vs ibr" in q_low or ("rap" in q_low and "ibr" in q_low)) and (
+                not canon_slug or canon_slug == "rap-vs-ibr-calculator"
+            ):
                 return (
                     "Compare OBBBA Repayment Assistance Plan (RAP) tiered AGI payments against "
                     "statutory New and Old IBR monthly caps under Title IV 34 CFR Part 685.",
@@ -2934,86 +3065,136 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "CMMC 2.0 C3PAO, NIST 800-171 SPRS, ISO 27001, and HIPAA penalties.",
                     " Grounded in AICPA SSAE 18 and 32 CFR Part 170 standards.",
                 )
-            if ("soc-1" in q_low or "soc 1" in q_low) and ("soc-2" in q_low or "soc 2" in q_low):
+            if ("soc-1" in q_low or "soc 1" in q_low) and ("soc-2" in q_low or "soc 2" in q_low) and (
+                not canon_slug or canon_slug == "soc-2-type-2-vs-soc-1"
+            ):
                 return (
                     "Compare SOC 2 Type II Trust Services security controls against SOC 1 "
                     "ICFR financial reporting audits, CPA attestation fees, and SSAE 18 scope.",
                     " Verified under AICPA SSAE 18 AT-C 205 and 320.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("dora", "ict-third-party", "2022/2554")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("dora", "ict-third-party", "2022/2554"))
+                and (not canon_slug or canon_slug == "dora-ict-third-party-risk-compliance-cost-calculator")
+            ):
                 return (
                     "Calculate EU DORA Regulation 2022/2554 compliance costs, Article 26 TLPT red "
                     "teaming, ICT vendor audits, and Article 28 Register of Information.",
                     " Verified under Regulation (EU) 2022/2554 rules.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("eu-ai-act", "eu ai act", "2024/1689", "article43", "conformity"))
+                and (not canon_slug or canon_slug == "eu-ai-act-high-risk-conformity-assessment-cost-calculator")
+            ):
                 return (
                     "Model EU AI Act Regulation 2024/1689 Article 43 conformity assessment fees, "
                     "Annex IV technical dossiers, and Article 17 QMS engineering costs.",
                     " Verified under Regulation (EU) 2024/1689 and NIST AI RMF.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("sec-cybersecurity", "8k-item-105", "item-105", "item 1.05", "229.106", "materiality"))
+                and (not canon_slug or canon_slug == "sec-cybersecurity-incident-materiality-8k-item-105-cost-calculator")
+            ):
                 return (
                     "Calculate SEC Rule 33-11216 Form 8-K Item 1.05 cybersecurity materiality readiness, "
                     "DFIR incident retainers, and Regulation S-K Item 106 costs.",
                     " Verified under 17 CFR 229.106 and Item 1.05 rules.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("hipaa", "hitech", "ephi", "160.404")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("hipaa", "hitech", "ephi", "160.404"))
+                and (not canon_slug or canon_slug == "hipaa-violation-penalty-breach-cost-calculator")
+            ):
                 return (
                     "Model HIPAA civil monetary penalty exposure under 45 CFR 160.404 across four "
                     "culpability tiers plus 45 CFR Part 164 breach response costs.",
                     " Verified under 45 CFR 160.404 and 42 U.S.C. 1320d-5.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("pci-dss", "pci dss", "qsa", "roc")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("pci-dss", "pci dss", "qsa", "roc"))
+                and (not canon_slug or canon_slug == "pci-dss-4-0-compliance-cost-calculator")
+            ):
                 return (
                     "Calculate PCI DSS v4.0.1 Level 1 QSA Report on Compliance (ROC) fees, quarterly "
                     "ASV scans, penetration tests, and CDE remediation labor.",
                     " Verified under PCI Security Standards Council v4.0.1.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("iso-27001", "iso 27001", "27006")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("iso-27001", "iso 27001", "27006"))
+                and (not canon_slug or canon_slug == "iso-27001-certification-cost-calculator")
+            ):
                 return (
                     "Estimate ISO/IEC 27001:2022 ISMS certification fees, Stage 1 and Stage 2 "
                     "auditor-day schedules under ISO/IEC 27006-1:2024, and gap closure.",
                     " Verified under ISO/IEC 27006-1:2024 Annex B tables.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("fedramp", "3pao", "3607")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("fedramp", "3pao", "3607"))
+                and (not canon_slug or canon_slug == "fedramp-authorization-3pao-cost-calculator")
+            ):
                 return (
                     "Model FedRAMP 20x and Rev 5 Moderate ATO budgets under 44 U.S.C. 3607, including "
                     "3PAO SAR fees, FIPS 140-3 engineering, and annual ConMon.",
                     " Verified under NIST SP 800-53 Rev 5 baselines.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("hitrust", "mycsf")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("hitrust", "mycsf"))
+                and (not canon_slug or canon_slug == "hitrust-csf-e1-i1-r2-certification-cost-calculator")
+            ):
                 return (
                     "Compare HITRUST CSF v11 e1, i1, and r2 Validated Assessment fees, MyCSF licensing, "
                     "External Assessor validation costs, and gap remediation.",
                     " Verified under HITRUST CSF v11 assurance standards.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("pentest", "penetration", "800-115")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("pentest", "penetration", "800-115"))
+                and (not canon_slug or canon_slug == "penetration-testing-scoping-cost-calculator")
+            ):
                 return (
                     "Scope CREST and OSCP technical penetration testing fees across web apps, APIs, "
                     "cloud IAM, and retesting under NIST SP 800-115 and OWASP.",
                     " Verified under NIST SP 800-115 and PCI Req 11.4.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("cyber-liability", "cyber insurance", "cyber liability", "naic"))
+                and (not canon_slug or canon_slug == "cyber-liability-insurance-breach-exposure-calculator")
+            ):
                 return (
                     "Estimate commercial cyber liability insurance premiums, self-insured retentions, "
                     "and first-incident financial exposure under NAIC cyber rules.",
                     " Verified against SEC Item 1.05 and NAIC data.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("sprs", "800-171")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("sprs", "800-171"))
+                and (not canon_slug or canon_slug == "nist-800-171-sprs-score-calculator")
+            ):
                 return (
                     "Calculate DoD NIST SP 800-171 Rev 2 SPRS scores from -203 to +110, 5/3/1-point "
                     "control deductions, and 32 CFR 170.21 180-day POA&M eligibility.",
                     " Verified under DFARS 252.204-7019 assessment rules.",
                 )
-            if not is_vs_slug_or_unslugged and any(k in q_low for k in ("cmmc", "c3pao", "32 cfr")):
+            if (
+                not is_vs_slug_or_unslugged
+                and any(k in q_low for k in ("cmmc", "c3pao", "32 cfr"))
+                and (not canon_slug or canon_slug == "cmmc-2-0-compliance-cost-calculator")
+            ):
                 return (
                     "Model DoD CMMC 2.0 Level 2 C3PAO certification fees, 110 NIST 800-171 controls, "
                     "enclave licensing, and RPO advisory under 32 CFR Part 170.",
                     " Verified under 32 CFR Part 170 and DFARS 7021.",
                 )
             if any(k in q_low for k in ("soc-2", "soc 2", "ssae")) and (
-                slug_low == "soc-2-audit-cost-calculator" or not is_vs_slug_or_unslugged
+                not canon_slug or canon_slug == "soc-2-audit-cost-calculator"
             ):
                 return (
                     "Calculate SOC 2 Type I and Type II CPA attestation fees, Trust Services Criteria "
@@ -3050,97 +3231,130 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "workers comp class codes, EMR, 50-state mechanics liens, and WH-347 payroll.",
                     " Grounded in 40 U.S.C. Section 3131 and NCCI rate filings.",
                 )
-            if any(k in q_low for k in ("erisa", "fidelity-bond", "fidelity bond", "1112", "section 412")):
+            if any(k in q_low for k in ("erisa", "fidelity-bond", "fidelity bond", "1112", "section 412")) and (
+                not canon_slug or canon_slug == "erisa-fidelity-bond-coverage-amount-calculator"
+            ):
                 return (
                     "Calculate ERISA Section 412 fidelity bond coverage limits (10% of qualifying plan "
                     "assets, $1,000 minimum to $500,000 cap) under 29 U.S.C. Section 1112.",
                     " Verified under 29 CFR 2580.412-1 and Treasury Circular 570.",
                 )
-            if "overtime" in q_low and any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347")):
+            if (
+                "overtime" in q_low
+                and any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347"))
+                and (not canon_slug or canon_slug == "how-to-calculate-davis-bacon-overtime")
+            ):
                 return (
                     "Calculate Davis-Bacon 1.5x overtime hourly rates, base prevailing wages, and "
                     "bona fide fringe credits under 40 U.S.C. Section 3141 and 29 CFR Section 5.5.",
                     " Verified under DOL WH-347 certified payroll rules.",
                 )
-            if any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347", "fringe")):
+            if any(k in q_low for k in ("davis-bacon", "davis bacon", "prevailing-wage", "prevailing wage", "wh-347", "fringe")) and (
+                not canon_slug or canon_slug == "davis-bacon-prevailing-wage-fringe-benefit-rate-calculator"
+            ):
                 return (
                     "Calculate Davis-Bacon prevailing wage and fringe benefit cash-in-lieu payroll "
                     "burdens under 40 U.S.C. Section 3141 and 29 CFR Section 5.5 Form WH-347.",
                     " Verified under DOL Wage Determinations and IRC Section 3111.",
                 )
-            if any(k in q_low for k in ("texas-chapter-53", "texas chapter 53", "chapter-53", "chapter 53", "fund-trapping", "fund trapping")):
+            if any(k in q_low for k in ("texas-chapter-53", "texas chapter 53", "chapter-53", "chapter 53", "fund-trapping", "fund trapping")) and (
+                not canon_slug or canon_slug == "texas-chapter-53-statutory-retainage-and-fund-trapping-notice-calculator"
+            ):
                 return (
                     "Calculate Texas Property Code Chapter 53 10% statutory retainage reserves, "
                     "Section 53.056 fund-trapping notices, and commercial lien recovery limits.",
                     " Verified under Texas Property Code Sections 53.101 and 53.056.",
                 )
-            if any(k in q_low for k in ("retainage", "prompt-payment", "prompt payment", "3903")):
+            if any(k in q_low for k in ("retainage", "prompt-payment", "prompt payment", "3903")) and (
+                not canon_slug or canon_slug == "commercial-construction-retainage-interest-penalty-calculator-by-state"
+            ):
                 return (
                     "Calculate commercial construction retainage caps and statutory late-payment "
                     "interest penalties under 31 U.S.C. Section 3903 and state prompt pay laws.",
                     " Verified under 48 CFR 52.232-5 and state retainage statutes.",
                 )
-            if any(k in q_low for k in ("markup", "margin", "overhead", "far-31", "aia-a102")):
+            if any(k in q_low for k in ("markup", "margin", "overhead", "far-31", "aia-a102")) and (
+                not canon_slug or canon_slug == "contractor-overhead-and-profit-markup-vs-margin-calculator"
+            ):
                 return (
                     "Calculate contractor overhead and profit markup versus gross margin bid divisors "
                     "under 48 CFR Part 31 FAR cost principles and IRC Section 460 rules.",
                     " Verified under AIA A102 and BLS construction PPI.",
                 )
-            if any(k in q_low for k in ("emr", "experience-modification", "experience modification")):
+            if any(k in q_low for k in ("emr", "experience-modification", "experience modification")) and (
+                not canon_slug or canon_slug == "experience-modification-rate-emr-workers-comp-penalty-calculator"
+            ):
                 return (
                     "Calculate Experience Modification Rate (EMR) workers comp premium penalties and "
                     "credits using NCCI split-point loss ratios and expected loss factors.",
                     " Verified under NCCI Experience Rating Plan manuals.",
                 )
-            if any(k in q_low for k in ("workers-comp", "workers comp", "class-code", "class code")):
+            if any(k in q_low for k in ("workers-comp", "workers comp", "class-code", "class code")) and (
+                not canon_slug or canon_slug == "workers-compensation-class-code-rate-calculator-by-state"
+            ):
                 return (
                     "Calculate state contractor workers compensation premiums using NCCI Basic Manual "
                     "class code rates per $100 of payroll, EMR multipliers, and credits.",
                     " Verified under NCCI Basic Manual state rate filings.",
                 )
             if any(k in q_low for k in ("preliminary-notice", "preliminary notice")):
-                if all(st in q_low for st in ("california", "texas", "florida")):
+                if all(st in q_low for st in ("california", "texas", "florida")) and (
+                    not canon_slug or canon_slug == "california-texas-florida-preliminary-notice-deadline-calculator"
+                ):
                     return (
                         "Calculate California 20-day, Texas Chapter 53 15th-day, and Florida 45-day "
                         "preliminary notice deadlines to preserve commercial mechanics lien rights.",
                         " Verified under state mechanics lien statutory timelines.",
                     )
-                return (
-                    "Calculate statutory construction preliminary notice deadlines, first-furnishing "
-                    "lookback windows, and state mechanics lien preservation filing rules.",
-                    " Verified under state mechanics lien statutory timelines.",
-                )
-            if any(k in q_low for k in ("lien-release", "lien release", "lien-waiver", "lien waiver", "mechanics-lien", "mechanics lien")):
+                if not canon_slug or canon_slug == "preliminary-notice-deadline-calculator":
+                    return (
+                        "Calculate statutory construction preliminary notice deadlines, first-furnishing "
+                        "lookback windows, and state mechanics lien preservation filing rules.",
+                        " Verified under state mechanics lien statutory timelines.",
+                    )
+            if any(k in q_low for k in ("lien-release", "lien release", "lien-waiver", "lien waiver", "mechanics-lien", "mechanics lien")) and (
+                not canon_slug or canon_slug == "contractor-lien-release-statutory-matrix-by-state"
+            ):
                 return (
                     "Compare 50-state statutory mechanics lien waiver forms, conditional versus "
                     "unconditional progress and final releases, and notarization requirements.",
                     " Verified under 50-state mechanics lien waiver statutes.",
                 )
-            if any(k in q_low for k in ("subcontractor-default", "subcontractor default")) or re.search(r"\bsdi\b", q_low):
+            if (any(k in q_low for k in ("subcontractor-default", "subcontractor default")) or re.search(r"\bsdi\b", q_low)) and (
+                not canon_slug or canon_slug == "subcontractor-default-insurance-sdi-vs-performance-bond-cost-calculator"
+            ):
                 return (
                     "Compare Subcontractor Default Insurance (SDI) base rates and self-insured "
                     "retentions against AIA A312 performance bond premiums on subcontract volume.",
                     " Verified under AIA A312 and SFAA commercial surety benchmarks.",
                 )
-            if any(k in q_low for k in ("bid-bond", "bid bond")):
+            if any(k in q_low for k in ("bid-bond", "bid bond")) and (
+                not canon_slug or canon_slug == "bid-bond-calculator"
+            ):
                 return (
                     "Calculate construction bid bond penal sums (5% to 20% of bid), forfeiture spread "
                     "exposure, and surety underwriting tiers under FAR 28.101 bid rules.",
                     " Verified under FAR 28.101 and U.S. Treasury Circular 570.",
                 )
-            if any(k in q_low for k in ("miller-act", "miller act")):
+            if any(k in q_low for k in ("miller-act", "miller act")) and (
+                not canon_slug or canon_slug == "miller-act-performance-and-payment-bond-premium-calculator"
+            ):
                 return (
                     "Calculate Miller Act performance and payment bond premiums using SFAA sliding-scale "
                     "contract rate tiers under 40 U.S.C. Section 3131 and FAR 28.102-2.",
                     " Verified under U.S. Treasury Circular 570.",
                 )
-            if any(k in q_low for k in ("performance-bond", "performance bond", "payment-bond", "payment bond")):
+            if any(k in q_low for k in ("performance-bond", "performance bond", "payment-bond", "payment bond")) and (
+                not canon_slug or canon_slug in ("performance-bond-calculator", "payment-bond-calculator")
+            ):
                 return (
                     "Calculate construction performance and payment bond premiums using SFAA sliding-scale "
                     "contract rate tiers, penal sum limits, and FAR 28.102-2 rules.",
                     " Verified under U.S. Treasury Circular 570.",
                 )
-            if any(k in q_low for k in ("license-bond", "license bond")):
+            if any(k in q_low for k in ("license-bond", "license bond")) and (
+                not canon_slug or canon_slug == "contractor-license-bond-cost-calculator-by-credit-score"
+            ):
                 return (
                     "Calculate contractor license bond premiums by FICO credit score tier, state "
                     "statutory penal sum limits, and 31 CFR Part 223 Treasury Circular 570 rules.",
@@ -3188,17 +3402,20 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in Internal Revenue Code statutory schedules.",
             )
         if "equipment lease" in q_low or "equipment-lease" in q_low or "162(a)(3)" in q_low:
-            if "vs buy" in q_low or "vs-buy" in q_low or "lease-vs-buy" in (slug or "").lower():
+            if ("vs buy" in q_low or "vs-buy" in q_low or "lease-vs-buy" in slug_low) and (
+                not canon_slug or canon_slug == "equipment-lease-vs-buy-section-179-calculator"
+            ):
                 return (
                     "Compare commercial equipment lease vs buy after-tax cash flow under IRC Section "
                     "162(a)(3) lease deductions and IRC Section 179 purchase expensing.",
                     " Grounded in IRC Section 162(a)(3), Section 179, and ASC 842 rules.",
                 )
-            return (
-                "Calculate commercial equipment operating lease tax deductions under IRC Section "
-                "162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
-                " Grounded in IRC Section 162(a)(3) and FASB ASC 842 rules.",
-            )
+            if not canon_slug or canon_slug == "equipment-lease-tax-deduction":
+                return (
+                    "Calculate commercial equipment operating lease tax deductions under IRC Section "
+                    "162(a)(3) and ASC 842 vs Section 179 purchase expensing.",
+                    " Grounded in IRC Section 162(a)(3) and FASB ASC 842 rules.",
+                )
         if "1031" in q_low or "like-kind" in q_low or "exchange" in q_low:
             return (
                 f"Calculate {lbl} deferral under IRC Section 1031(a)(3), modeling 45/180-day deadlines, "
@@ -3206,7 +3423,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                 " Grounded in Treasury Reg. 1.1031(k)-1 and IRS Form 8824.",
             )
         if "crypto" in q_low or "8949" in q_low or "1099-da" in q_low or "1099 da" in q_low:
-            if "1099-da" in slug_low or "mandatory-reporting" in slug_low or (not slug_low and "1099" in lbl.lower()):
+            if canon_slug == "crypto-tax-form-1099-da-mandatory-reporting" or (not canon_slug and "1099" in lbl.lower()):
                 return (
                     "Model IRS Form 1099-DA digital asset broker proceeds, IRC Section 1012 per-wallet "
                     "cost basis, and Rev. Proc. 2024-28 reconciliation rules.",
@@ -3224,7 +3441,7 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "1012 basis tracking, Form 8949 capital gains, and 3.8% NIIT.",
                     " Grounded in IRS Rev. Rul. 2023-14 and Form 8949 schedules.",
                 )
-            if slug_low == "crypto-tax-calculator" or not slug_low:
+            if canon_slug == "crypto-tax-calculator" or not canon_slug:
                 return (
                     "Calculate crypto capital gains, staking yield, short-term vs long-term tax "
                     "brackets, and 3.8% Section 1411 NIIT under IRC Section 1012.",
@@ -3258,16 +3475,20 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
             is_vehicle_spoke = slug_low.startswith("section-179-calculator/") or slug_low.startswith(
                 "section-179-calculator-"
             )
-            if not is_vehicle_spoke and (
-                "heavy" in q_low or "gvwr" in q_low or "weight" in q_low or "heavy-vehicle" in slug_low
+            if (
+                not is_vehicle_spoke
+                and ("heavy" in q_low or "gvwr" in q_low or "weight" in q_low or "heavy-vehicle" in slug_low)
+                and (not canon_slug or canon_slug == "commercial-heavy-vehicle-section-179-weight-calculator")
             ):
                 return (
                     "Calculate commercial heavy vehicle (GVWR over 6,000 lbs) IRC Section 179 deductions "
                     "($32,000 SUV cap vs full truck expensing) on IRS Form 4562.",
                     " Grounded in IRC Section 179(b)(5) and Section 280F limits.",
                 )
-            if not is_vehicle_spoke and (
-                "vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low
+            if (
+                not is_vehicle_spoke
+                and ("vehicle" in q_low or "section-179-vehicle" in q_low or "vehicle-equipment" in q_low)
+                and (not canon_slug or canon_slug == "section-179-vehicle-equipment-deduction")
             ):
                 return (
                     "Model combined IRC Section 179 expensing, 100% bonus depreciation, "
@@ -3304,9 +3525,15 @@ def _normalize_meta_120_155(raw_meta: str, tenant_id: str, query_label: str, slu
                     "40 U.S.C. Section 3131, state penal sums, and credit-tier underwriting rates.",
                     " Grounded in U.S. Treasury Circular 570 surety schedules.",
                 )
+            if not canon_slug or canon_slug == "contractor-surety-bond-cost-calculator":
+                return (
+                    "Estimate commercial contractor surety bond costs, state penal sums, "
+                    "credit-tier rates, and IRC Section 162(a) deductibility.",
+                    " Grounded in 31 U.S.C. Section 9304 and IRC Section 162 rules.",
+                )
             return (
-                "Estimate commercial contractor surety bond costs, state penal sums, "
-                "credit-tier rates, and IRC Section 162(a) deductibility.",
+                f"Estimate {lbl} surety bond costs, state penal sums, "
+                f"credit-tier rates, and IRC Section 162(a) deductibility.",
                 " Grounded in 31 U.S.C. Section 9304 and IRC Section 162 rules.",
             )
         return (
@@ -11249,6 +11476,10 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
         from pseofactory.contracts import detect_sentence_truncation_issues
 
         ov_slug_q = f"{overlay_data.get('slug') or ''} {overlay_data.get('query') or ''} {canon_url_ov}".strip()
+        ov_slug_hint = str(overlay_data.get("slug") or "").strip().strip("/")
+        if not ov_slug_hint and canon_url_ov:
+            m_cs_ov = re.search(r"/tools/([^?#]+?)/?$", canon_url_ov)
+            ov_slug_hint = m_cs_ov.group(1).strip("/") if m_cs_ov else canon_url_ov.rstrip("/").split("/")[-1]
         if (
             len(meta_desc) < 70
             or len(meta_desc) > 160
@@ -11333,9 +11564,9 @@ def inject_overlay_into_html(html: str, overlay_data: Dict[str, Any]) -> str:
                 )
                 and "calculate soc 2 type i and type ii cpa attestation fees" in meta_desc.lower()
             )
+            or _is_colliding_flagship_meta_for_slug(meta_desc, ov_tenant, ov_slug_hint)
         ):
-            q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or "Statutory Calculator").replace("-", " ")
-            ov_slug_hint = str(overlay_data.get("slug") or canon_url_ov.rstrip("/").split("/")[-1])
+            q_lbl = str(overlay_data.get("query") or overlay_data.get("slug") or ov_slug_hint or "Statutory Calculator").replace("-", " ")
             meta_desc = _normalize_meta_120_155("", ov_tenant, q_lbl, slug=ov_slug_hint)
     if meta_desc:
         meta_desc = normalize_statutory_acronym_casing(meta_desc)

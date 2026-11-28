@@ -5949,6 +5949,17 @@ def _consolidate_calculator_partner_blocks(
     if not partner_blocks:
         return ""
 
+    if len(partner_blocks) == 1:
+        single_blk = partner_blocks[0].strip()
+        single_low = single_blk.lower()
+        if (
+            re.match(r'^<section\b[^>]*\bclass=["\'][^"\']*\bcontextual-referral-card\b', single_blk, re.IGNORECASE)
+            and "sponsored placement" in single_low
+            and re.search(r'class=["\'][^"\']*\baffiliate-disclosure\b', single_blk, re.IGNORECASE)
+            and re.search(r'<a\b[^>]*\bhref=["\']/r/', single_blk, re.IGNORECASE)
+        ):
+            return f"      {single_blk}"
+
     anchor_re = re.compile(
         r'<a\b([^>]*\bhref=["\'](/r/[^"\']+)["\'][^>]*)>([\s\S]*?)</a>',
         re.IGNORECASE,
@@ -6214,6 +6225,7 @@ def _enforce_calculator_leaf_slot_order(
 
     # 3. Extract #workpaper-unlock-card from anywhere (including inside <form> or calc_block)
     unlock_block = ""
+    synthesized_unlock = False
     while True:
         um = _WORKPAPER_UNLOCK_OPEN_RE.search(body_rest)
         if not um:
@@ -6221,6 +6233,58 @@ def _enforce_calculator_leaf_slot_order(
         u_raw, body_rest = _extract_balanced_element(body_rest, um, um.group(1))
         if not unlock_block and not is_restricted:
             unlock_block = u_raw.strip()
+
+    rel_low = str(rel_path or "").strip().lstrip("/").lower()
+    is_tool_leaf = (
+        rel_low.startswith("tools/")
+        and rel_low != "tools/index.html"
+        and rel_low.endswith("/index.html")
+    )
+    has_calc_form = bool(re.search(r"<form\b", body_rest, flags=re.IGNORECASE))
+    if not unlock_block and not is_restricted and is_tool_leaf and has_calc_form:
+        leaf_slug = rel_low[len("tools/") : -len("/index.html")].strip("/")
+        prop_id = str(profile.get("property_id") or "profithelm").strip().lower()
+        from pseofactory.affiliates import (
+            build_workpaper_unlock_card_html,
+            is_restricted_public_service_slug,
+        )
+
+        h1_u = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", hero_inner, flags=re.IGNORECASE)
+        topic_lbl = (
+            html_lib.unescape(re.sub(r"<[^>]+>", "", h1_u.group(1))).strip()
+            if h1_u
+            else (
+                html_lib.unescape(re.sub(r"<[^>]+>", "", str(page_title or ""))).strip()
+                or leaf_slug.replace("-", " ").title()
+            )
+        )
+        if not is_restricted_public_service_slug(leaf_slug, topic_lbl):
+            stat_auth = _extract_explicit_statutory_authority_from_html(inner_html) or str(
+                profile.get("primary_statutory_authority") or ""
+            )
+            out_m = re.search(
+                r'<([a-zA-Z0-9]+)\b[^>]*class=["\'][^"\']*\b(?:output-value|kpi-value)\b[^"\']*["\'][^>]*>([\s\S]*?)</\1>',
+                body_rest,
+                re.IGNORECASE,
+            )
+            baseline_amt: Optional[float] = None
+            if out_m:
+                out_plain = html_lib.unescape(re.sub(r"<[^>]+>", "", out_m.group(2)).strip())
+                num_m = re.search(r"-?\d[\d,]*(?:\.\d+)?", out_plain)
+                if num_m:
+                    try:
+                        baseline_amt = float(num_m.group(0).replace(",", ""))
+                    except ValueError:
+                        baseline_amt = None
+            unlock_block = build_workpaper_unlock_card_html(
+                property_id=prop_id,
+                slug=leaf_slug,
+                query=topic_lbl,
+                topic_label=topic_lbl,
+                statutory_authority=stat_auth,
+                baseline_amount=baseline_amt,
+            ).strip()
+            synthesized_unlock = bool(unlock_block)
 
     # 4. Extract ALL affiliate partner containers and stray /r/ cards from anywhere
     _affiliate_partner_aside_re = re.compile(
@@ -6262,6 +6326,52 @@ def _enforce_calculator_leaf_slot_order(
         if is_restricted
         else _consolidate_calculator_partner_blocks(extracted_partner_blocks, profile)
     )
+    if not is_restricted and synthesized_unlock and partner_block and is_tool_leaf:
+        from pseofactory.affiliates import build_contextual_referral_card_html
+
+        leaf_slug_p = rel_low[len("tools/") : -len("/index.html")].strip("/")
+        prop_id_p = str(profile.get("property_id") or "profithelm").strip().lower()
+        h1_p = re.search(r"<h1\b[^>]*>([\s\S]*?)</h1>", hero_inner, flags=re.IGNORECASE)
+        topic_lbl_p = (
+            html_lib.unescape(re.sub(r"<[^>]+>", "", h1_p.group(1))).strip()
+            if h1_p
+            else leaf_slug_p.replace("-", " ").title()
+        )
+        canon_ref = build_contextual_referral_card_html(prop_id_p, slug=leaf_slug_p, query=topic_lbl_p)
+        if canon_ref:
+            pk_canon_m = re.search(r'\bdata-partner=["\']([^"\']+)["\']', canon_ref, re.IGNORECASE)
+            pk_canon = (pk_canon_m.group(1) if pk_canon_m else "").strip().lower()
+            extra_bodies: List[str] = []
+            seen_extra: Set[str] = {pk_canon} if pk_canon else set()
+            body_div_re = re.compile(
+                r'<div\b[^>]*class=["\'][^"\']*\bcontextual-referral-body\b[^"\']*["\'][^>]*>',
+                re.IGNORECASE,
+            )
+            scan_pb = partner_block
+            while True:
+                bm_pb = body_div_re.search(scan_pb)
+                if not bm_pb:
+                    break
+                b_raw, scan_pb = _extract_balanced_element(scan_pb, bm_pb, "div")
+                pk_b_m = re.search(
+                    r'(?:\bdata-partner=["\']([^"\']+)["\']|\bhref=["\']/r/([a-z0-9_.-]+))',
+                    b_raw,
+                    re.IGNORECASE,
+                )
+                pk_b = (pk_b_m.group(1) or pk_b_m.group(2) or "").strip().lower() if pk_b_m else ""
+                if pk_b and pk_b not in seen_extra:
+                    seen_extra.add(pk_b)
+                    extra_bodies.append(b_raw.strip())
+            if extra_bodies:
+                indented_extras = "\n".join(f"      {b}" for b in extra_bodies)
+                canon_ref = re.sub(
+                    r"</section>\s*$",
+                    f"\n{indented_extras}\n    </section>",
+                    canon_ref,
+                    count=1,
+                    flags=re.IGNORECASE,
+                )
+            partner_block = f"      {canon_ref.strip()}"
 
     # 5. Extract Interactive <form> + Inline #calc-results container (slot 2)
     calc_m = re.search(
