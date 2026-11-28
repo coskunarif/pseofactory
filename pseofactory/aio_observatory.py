@@ -426,6 +426,7 @@ class AIOObservatory:
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
         if sampler is None and os.getenv("PSEUFACTORY_LIVE_TREG") != "1" and not is_mocked:
             summary["skipped_live_disabled"] = len(pairs)
+            summary["reason"] = "PSEUFACTORY_LIVE_TREG != '1'; live treg calls disabled"
             return summary
         for item in pairs:
             if isinstance(item, dict):

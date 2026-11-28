@@ -4233,4 +4233,60 @@ def test_instant_19_quick_unlock_skus_inline_worksheet_capture_and_tax_bracket_c
     assert "2210-SH" in ph_lc_js
 
 
+def test_expansion_queue_strips_bloat_and_caps_summary(tmp_path) -> None:
+    """
+    rank_revenue_weighted_expansion_queue strips oversized candidate_spec/overlay_spec
+    from summary queues while preserving full records in void_candidates.jsonl on persist,
+    and get_lead_monitoring_summary keeps its JSON payload compact without duplicating the queue.
+    """
+    import json as _json
+    from pseofactory.partner_tracker import (
+        get_lead_monitoring_summary,
+        rank_revenue_weighted_expansion_queue,
+    )
+
+    vc_file = tmp_path / "void_candidates.jsonl"
+    giant_matrix = [{"year": 2020 + i, "note": "x" * 200} for i in range(40)]
+    records = [
+        {
+            "property_id": "profithelm",
+            "action": "BUILD_PAGE",
+            "slug": f"tax-calc-{i}",
+            "query": f"tax calc {i}",
+            "composite_profit_yield": 90.0 - i,
+            "candidate_spec": {"statutory_economic_matrix": giant_matrix},
+            "overlay_spec": {"rows": giant_matrix},
+        }
+        for i in range(25)
+    ]
+    vc_file.write_text("\n".join(_json.dumps(r) for r in records) + "\n", encoding="utf-8")
+
+    res = rank_revenue_weighted_expansion_queue(
+        void_candidates_path=vc_file,
+        persist_reweighted_queue=True,
+        max_queue_items=5,
+    )
+    assert res["total_actionable_items"] == 25
+    assert len(res["before_queue"]) == 5
+    assert len(res["after_queue"]) == 5
+    for item in res["after_queue"]:
+        assert "candidate_spec" not in item
+        assert "overlay_spec" not in item
+        assert "before_rank" in item and "after_rank" in item
+
+    persisted_lines = [_json.loads(line) for line in vc_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len(persisted_lines) == 25
+    assert "candidate_spec" in persisted_lines[0]
+
+    leads_file = tmp_path / "captured_leads.jsonl"
+    leads_file.write_text(
+        _json.dumps({"lead_id": "l_1", "property_id": "profithelm", "email": "buyer@acme.com", "lead_origin": "real"}) + "\n",
+        encoding="utf-8",
+    )
+    mon = get_lead_monitoring_summary(leads_ledger_path=leads_file)
+    assert len(mon["revenue_weighted_expansion_queue"]["after_queue"]) <= 10
+    assert mon["monetization_e2e_audit"]["revenue_weighted_expansion_queue"].get("omitted") is True
+
+
+
 

@@ -9254,11 +9254,40 @@ def resolve_candidate_realized_revenue_signal(
     }
 
 
+_EXPANSION_QUEUE_BLOAT_KEYS = frozenset(
+    {
+        "candidate_spec",
+        "overlay_spec",
+        "statutory_economic_matrix",
+        "reconciliation_schedule",
+        "sensitivity_matrix",
+        "statutory_trend_timeseries",
+        "longitudinal_benchmark_series",
+        "html_report",
+        "csv_content",
+        "_action_priority",
+    }
+)
+
+
+def _compact_expansion_queue_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a compact expansion queue summary dict without giant nested spec/matrix blobs."""
+    out: Dict[str, Any] = {}
+    for k, v in item.items():
+        if k in _EXPANSION_QUEUE_BLOAT_KEYS:
+            continue
+        if isinstance(v, (dict, list)) and len(json.dumps(v)) > 1024:
+            continue
+        out[k] = v
+    return out
+
+
 def rank_revenue_weighted_expansion_queue(
     void_candidates_path: Optional[Any] = None,
     property_id: Optional[str] = None,
     leads_ledger_path: Optional[Any] = None,
     persist_reweighted_queue: bool = False,
+    max_queue_items: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Re-weights the autonomous topic expansion queue (`void_candidates.jsonl`) using live
@@ -9374,108 +9403,93 @@ def rank_revenue_weighted_expansion_queue(
         }
         enriched_items.append(item)
 
-    active_prop_ids = set(_discover_active_tenant_bases().keys())
+    active_prop_ids = set(
+        _discover_active_tenant_bases(
+            extra_ids=[prop_filter] if prop_filter else None
+        ).keys()
+    )
     actionable_items = [
-        x
+        _compact_expansion_queue_item(x)
         for x in enriched_items
         if x.get("property_id") in active_prop_ids
         and x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE", "MONITOR")
         and float(x.get("before_composite_profit_yield") or 0.0) > 0.0
     ]
 
-    before_queue = sorted(
-        [dict(x) for x in actionable_items],
-        key=lambda x: (
+    def _action_prio(item: Dict[str, Any]) -> int:
+        return action_priority_map.get(str(item.get("action") or "MONITOR").strip().upper(), 0)
+
+    def _before_key(item: Dict[str, Any]) -> Tuple[int, float, int, str]:
+        return (
             1
-            if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
-            and float(x["before_composite_profit_yield"]) >= 30.0
+            if item.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+            and float(item["before_composite_profit_yield"]) >= 30.0
             else 0,
-            float(x["before_composite_profit_yield"]),
-            int(x["_action_priority"]),
-            str(x.get("slug") or ""),
-        ),
-        reverse=True,
-    )
+            float(item["before_composite_profit_yield"]),
+            _action_prio(item),
+            str(item.get("slug") or ""),
+        )
+
+    def _after_key(item: Dict[str, Any]) -> Tuple[int, float, float, float, int, float]:
+        return (
+            1
+            if item.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
+            and float(item["before_composite_profit_yield"]) >= 30.0
+            else 0,
+            float(item["realized_calculator_revenue_usd"]),
+            float(item["revenue_weighted_yield"]),
+            float(item["scenario_attributed_revenue_usd"]),
+            _action_prio(item),
+            float(item["before_composite_profit_yield"]),
+        )
+
+    before_queue = sorted([dict(x) for x in actionable_items], key=_before_key, reverse=True)
     for idx, b_item in enumerate(before_queue, start=1):
         b_item["before_rank"] = idx
-        b_item.pop("_action_priority", None)
 
     before_rank_by_slug = {f"{x['property_id']}:{x['slug']}": x["before_rank"] for x in before_queue}
 
-    after_queue = sorted(
-        [dict(x) for x in actionable_items],
-        key=lambda x: (
-            1
-            if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
-            and float(x["before_composite_profit_yield"]) >= 30.0
-            else 0,
-            float(x["realized_calculator_revenue_usd"]),
-            float(x["revenue_weighted_yield"]),
-            float(x["scenario_attributed_revenue_usd"]),
-            int(x["_action_priority"]),
-            float(x["before_composite_profit_yield"]),
-        ),
-        reverse=True,
-    )
+    after_queue = sorted([dict(x) for x in actionable_items], key=_after_key, reverse=True)
     for idx, a_item in enumerate(after_queue, start=1):
         key = f"{a_item['property_id']}:{a_item['slug']}"
         b_rk = before_rank_by_slug.get(key, idx)
         a_item["before_rank"] = b_rk
         a_item["after_rank"] = idx
         a_item["rank_delta"] = b_rk - idx
-        a_item.pop("_action_priority", None)
+
+    total_actionable_items = len(before_queue)
+    item_cap = max(0, int(max_queue_items)) if max_queue_items is not None else None
 
     per_tenant: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
-    for t_id in ("profithelm", "prexvo", "gainhelm", "lienbond"):
-        if prop_filter and t_id != prop_filter:
-            continue
+    tenant_ids_for_summary = [prop_filter] if prop_filter else sorted(active_prop_ids)
+    for t_id in tenant_ids_for_summary:
         t_items = [x for x in actionable_items if x.get("property_id") == t_id]
-        t_before = sorted(
-            [dict(x) for x in t_items],
-            key=lambda x: (
-                1
-                if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
-                and float(x["before_composite_profit_yield"]) >= 30.0
-                else 0,
-                float(x["before_composite_profit_yield"]),
-                int(x["_action_priority"]),
-                str(x.get("slug") or ""),
-            ),
-            reverse=True,
-        )
+        t_before = sorted([dict(x) for x in t_items], key=_before_key, reverse=True)
         t_before_map: Dict[str, int] = {}
         for i_b, tb in enumerate(t_before, start=1):
             tb["tenant_before_rank"] = i_b
-            tb.pop("_action_priority", None)
             t_before_map[str(tb.get("slug") or "")] = i_b
 
-        t_after = sorted(
-            [dict(x) for x in t_items],
-            key=lambda x: (
-                1
-                if x.get("action") in ("BUILD_PAGE", "REFACTOR_PAGE")
-                and float(x["before_composite_profit_yield"]) >= 30.0
-                else 0,
-                float(x["realized_calculator_revenue_usd"]),
-                float(x["revenue_weighted_yield"]),
-                float(x["scenario_attributed_revenue_usd"]),
-                int(x["_action_priority"]),
-                float(x["before_composite_profit_yield"]),
-            ),
-            reverse=True,
-        )
+        t_after = sorted([dict(x) for x in t_items], key=_after_key, reverse=True)
         for i_a, ta in enumerate(t_after, start=1):
             s_k = str(ta.get("slug") or "")
             tb_rk = t_before_map.get(s_k, i_a)
             ta["tenant_before_rank"] = tb_rk
             ta["tenant_after_rank"] = i_a
             ta["tenant_rank_delta"] = tb_rk - i_a
-            ta.pop("_action_priority", None)
+
+        if item_cap is not None:
+            t_before = t_before[:item_cap]
+            t_after = t_after[:item_cap]
 
         per_tenant[t_id] = {
             "before_queue": t_before,
             "after_queue": t_after,
         }
+
+    if item_cap is not None:
+        before_queue = before_queue[:item_cap]
+        after_queue = after_queue[:item_cap]
 
     if persist_reweighted_queue and os.path.isfile(eff_vc_path) and not prop_filter:
         sorted_all = sorted(
@@ -9502,6 +9516,7 @@ def rank_revenue_weighted_expansion_queue(
                 json.dump(
                     {
                         "generated_at": datetime.now(timezone.utc).isoformat(),
+                        "total_actionable_items": total_actionable_items,
                         "fleet_conversion_totals": scenario_metrics["fleet_conversion_totals"],
                         "per_calculator_metrics": scenario_metrics["per_calculator_metrics"],
                         "before_queue": before_queue,
@@ -9518,6 +9533,7 @@ def rank_revenue_weighted_expansion_queue(
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "void_candidates_path": eff_vc_path,
+        "total_actionable_items": total_actionable_items,
         "fleet_conversion_totals": scenario_metrics["fleet_conversion_totals"],
         "per_calculator_metrics": scenario_metrics["per_calculator_metrics"],
         "before_queue": before_queue,
@@ -12299,9 +12315,11 @@ def get_lead_monitoring_summary(
             property_id=property_id,
             leads_ledger_path=leads_ledger_path,
             persist_reweighted_queue=False,
+            max_queue_items=10,
         ),
         "monetization_e2e_audit": audit_end_to_end_monetization_and_fulfillment(
-            execute_live=verify_live_providers
+            execute_live=verify_live_providers,
+            include_expansion_queue=False,
         ),
         "leads": leads,
     }
@@ -12808,6 +12826,7 @@ def audit_end_to_end_monetization_and_fulfillment(
     persist_path: Optional[Any] = None,
     repo_roots: Optional[Dict[str, Any]] = None,
     edge_redirect_sources: Optional[Dict[str, str]] = None,
+    include_expansion_queue: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes an autonomous end-to-end self-audit across:
@@ -13146,8 +13165,13 @@ def audit_end_to_end_monetization_and_fulfillment(
         "scenario_demand_attribution": compute_scenario_demand_and_conversion_metrics(
             include_live_edge_telemetry=execute_live,
         ),
-        "revenue_weighted_expansion_queue": rank_revenue_weighted_expansion_queue(
-            persist_reweighted_queue=False,
+        "revenue_weighted_expansion_queue": (
+            rank_revenue_weighted_expansion_queue(
+                persist_reweighted_queue=False,
+                max_queue_items=20,
+            )
+            if include_expansion_queue
+            else {"omitted": True, "reason": "provided_by_parent_summary"}
         ),
         "ymyl_public_service_isolation": {
             "isolated": ymyl_isolated,

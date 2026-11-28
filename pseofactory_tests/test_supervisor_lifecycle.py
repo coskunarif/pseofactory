@@ -1516,6 +1516,41 @@ def test_supervisor_root_fixes_breaker_alignment_pipeline_and_self_heal(
     assert heal_idx_ok[0]["status"] == "RECOVERED"
 
 
+def test_supervisor_refreshes_missing_and_stale_portfolio_revenue_truth(tmp_path: Path) -> None:
+    """
+    AutonomousLifecycleSupervisor refreshes portfolio_revenue_truth.json when missing or >24h stale,
+    skips when fresh, and never writes during dry_run=True.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    ws = tmp_path / "ws"
+    (ws / "pseofactory" / ".agy").mkdir(parents=True, exist_ok=True)
+    truth_file = ws / "pseofactory" / ".agy" / "portfolio_revenue_truth.json"
+    sup = AutonomousLifecycleSupervisor(workspace_root=ws, portfolio_truth_path=truth_file)
+
+    dry_res = sup._refresh_portfolio_revenue_truth_if_stale(dry_run=True)
+    assert dry_res["status"] == "SKIPPED_DRY_RUN"
+    assert not truth_file.exists()
+
+    miss_res = sup._refresh_portfolio_revenue_truth_if_stale(dry_run=False)
+    assert miss_res["status"] == "REFRESHED"
+    assert truth_file.is_file()
+
+    fresh_res = sup._refresh_portfolio_revenue_truth_if_stale(dry_run=False)
+    assert fresh_res["status"] == "FRESH"
+
+    doc = json.loads(truth_file.read_text(encoding="utf-8"))
+    old_ts = (datetime.now(timezone.utc) - timedelta(hours=73)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    doc["generated_at"] = old_ts
+    truth_file.write_text(json.dumps(doc), encoding="utf-8")
+
+    stale_res = sup._refresh_portfolio_revenue_truth_if_stale(dry_run=False)
+    assert stale_res["status"] == "REFRESHED"
+    refreshed_doc = json.loads(truth_file.read_text(encoding="utf-8"))
+    assert refreshed_doc["generated_at"] != old_ts
+
+
+
 
 
 

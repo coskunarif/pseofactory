@@ -54,10 +54,13 @@ def discover_active_tenants(
     discovered: Dict[str, Path] = {}
     if ws.is_dir():
         for child in sorted(ws.iterdir()):
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            marker = child / ".pseofactory.json"
-            if not marker.is_file():
+            try:
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                marker = child / ".pseofactory.json"
+                if not marker.is_file():
+                    continue
+            except OSError:
                 continue
             raw_pid = child.name.lower()
             try:

@@ -2865,12 +2865,16 @@ class AutonomousLifecycleSupervisor:
         void_candidates_path: Optional[Union[str, Path]] = None,
         daily_build_ledger_path: Optional[Union[str, Path]] = None,
         max_pages_per_tenant_per_day: int = 1,
+        portfolio_truth_path: Optional[Union[str, Path]] = None,
     ):
         self.void_candidates_path = (
             Path(void_candidates_path).resolve() if void_candidates_path else None
         )
         self.daily_build_ledger_path = (
             Path(daily_build_ledger_path).resolve() if daily_build_ledger_path else None
+        )
+        self.portfolio_truth_path = (
+            Path(portfolio_truth_path).resolve() if portfolio_truth_path else None
         )
         self.max_pages_per_tenant_per_day = max(1, int(max_pages_per_tenant_per_day))
         self.workspace_root = Path(
@@ -3135,6 +3139,94 @@ class AutonomousLifecycleSupervisor:
                     pass
         return cleared
 
+    def _resolve_portfolio_truth_path(self) -> Path:
+        """Resolve the target portfolio_revenue_truth.json path for this supervisor workspace."""
+        if self.portfolio_truth_path is not None:
+            return self.portfolio_truth_path
+        if (self.workspace_root / "pseofactory").is_dir():
+            return self.workspace_root / "pseofactory" / ".agy" / "portfolio_revenue_truth.json"
+        return self.workspace_root / ".agy" / "portfolio_revenue_truth.json"
+
+    def _refresh_portfolio_revenue_truth_if_stale(
+        self,
+        dry_run: bool = False,
+        max_age_hours: float = 24.0,
+    ) -> Dict[str, Any]:
+        """Refresh portfolio_revenue_truth.json when missing or older than max_age_hours (never on dry-run)."""
+        if dry_run:
+            return {"status": "SKIPPED_DRY_RUN"}
+        if (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and self.portfolio_truth_path is None
+            and str(self.workspace_root) == "/home/ubuntuadmin/projects"
+        ):
+            return {"status": "SKIPPED_TEST_PROD_GUARD"}
+
+        target_path = self._resolve_portfolio_truth_path()
+        now_utc = datetime.now(timezone.utc)
+        if target_path.is_file():
+            try:
+                doc = json.loads(target_path.read_text(encoding="utf-8"))
+                raw_ts = str(doc.get("generated_at") or "").strip()
+                if raw_ts:
+                    if raw_ts.endswith("Z"):
+                        raw_ts = raw_ts[:-1] + "+00:00"
+                    gen_dt = datetime.fromisoformat(raw_ts)
+                    if gen_dt.tzinfo is None:
+                        gen_dt = gen_dt.replace(tzinfo=timezone.utc)
+                    age_hours = (now_utc - gen_dt.astimezone(timezone.utc)).total_seconds() / 3600.0
+                    if 0.0 <= age_hours <= max_age_hours:
+                        return {
+                            "status": "FRESH",
+                            "path": str(target_path),
+                            "age_hours": round(age_hours, 2),
+                            "generated_at": doc.get("generated_at"),
+                        }
+            except Exception:
+                pass
+
+        is_fast_mode = (
+            os.environ.get("PSEUFACTORY_FAST_MODE") == "1"
+            or os.environ.get("PSEOFACTORY_FAST_MODE") == "1"
+        )
+        pkg_root: Optional[Path] = None
+        if (self.workspace_root / "pseofactory").is_dir():
+            pkg_root = self.workspace_root / "pseofactory"
+        elif (self.workspace_root / ".agy" / "captured_leads.jsonl").is_file():
+            pkg_root = self.workspace_root
+
+        try:
+            from pseofactory.revenue_truth import build_portfolio_revenue_truth_report
+
+            try:
+                rep = build_portfolio_revenue_truth_report(
+                    live_network=not is_fast_mode,
+                    persist=True,
+                    output_path=target_path,
+                    package_root=pkg_root,
+                )
+            except Exception:
+                if is_fast_mode:
+                    raise
+                rep = build_portfolio_revenue_truth_report(
+                    live_network=False,
+                    persist=True,
+                    output_path=target_path,
+                    package_root=pkg_root,
+                )
+            return {
+                "status": "REFRESHED",
+                "path": str(target_path),
+                "generated_at": rep.get("generated_at"),
+                "live_network_queried": bool(rep.get("live_network_queried")),
+            }
+        except Exception as exc:
+            return {
+                "status": "ERROR",
+                "path": str(target_path),
+                "error": str(exc),
+            }
+
     def compute_backoff(self, consecutive_failures: int) -> float:
         """
         Computes bounded exponential backoff with jitter (HWL-1231).
@@ -3379,6 +3471,8 @@ class AutonomousLifecycleSupervisor:
             except Exception as exc:
                 partner_sync_summary = {"status": "ERROR", "error": str(exc)}
 
+        truth_refresh_summary = self._refresh_portfolio_revenue_truth_if_stale(dry_run=dry_run)
+
         monetization_status = (
             "FAILED" if partner_sync_summary.get("status") == "ERROR" else "COMPLETED"
         )
@@ -3539,6 +3633,7 @@ class AutonomousLifecycleSupervisor:
                     "consecutive_failures": self.consecutive_failures,
                     "department_pipeline": pipeline_state,
                     "daily_trend_page_build": daily_trend_build_summary,
+                    "portfolio_revenue_truth_refresh": truth_refresh_summary,
                 }
 
         current_tenant_box: List[Optional[str]] = [None]
@@ -3993,6 +4088,7 @@ class AutonomousLifecycleSupervisor:
                     "consecutive_failures": self.consecutive_failures,
                     "department_pipeline": pipeline_state,
                     "daily_trend_page_build": daily_trend_build_summary,
+                    "portfolio_revenue_truth_refresh": truth_refresh_summary,
                 }
             else:
                 self.consecutive_failures += 1

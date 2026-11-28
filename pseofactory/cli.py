@@ -1423,6 +1423,7 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
     obs = AIOObservatory(getattr(args, "db", None))
     window = float(getattr(args, "window_days", 7) or 7)
     action = args.action
+    is_dry_run = bool(getattr(args, "dry_run", False))
     effective_pairs: List[Any] = []
     if action == "sample":
         tenants = [args.tenant] if getattr(args, "tenant", None) else None
@@ -1433,6 +1434,15 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
         effective_pairs = list(pairs[: max(0, int(max_q))]) if max_q is not None else list(pairs)
         out: Any = obs.sample(pairs, max_queries=max_q)
         out["watchlist_size"] = len(effective_pairs)
+        if int(out.get("skipped_live_disabled", 0) or 0) > 0 and int(out.get("sampled", 0) or 0) == 0:
+            if is_dry_run:
+                out["status"] = "DRY_RUN"
+            else:
+                out["status"] = "FAIL"
+                out.setdefault(
+                    "reason",
+                    "PSEUFACTORY_LIVE_TREG != '1'; live treg sampling is disabled and 0 queries were sampled",
+                )
     elif action == "watchlist":
         out = [{"tenant": t, "query": q} for t, q in load_watchlist(tenants=[args.tenant] if args.tenant else None)]
     elif action in ("analyze", "blueprint"):
@@ -1453,7 +1463,14 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
         watchlist_sz = int(out.get("watchlist_size", 0) or 0)
         total_attempted = sampled_cnt + errors_cnt
         if skipped_disabled > 0 and errors_cnt == 0 and sampled_cnt == 0:
-            return 0
+            if is_dry_run:
+                return 0
+            print(
+                "aio-observe sample failed closed: PSEUFACTORY_LIVE_TREG != '1' "
+                "(0 queries sampled; live treg calls disabled).",
+                file=sys.stderr,
+            )
+            return 1
         if sampled_cnt == 0 and watchlist_sz > 0:
             return 1
         if total_attempted > 0 and (errors_cnt / total_attempted) >= 0.50:
@@ -2901,6 +2918,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_aio.add_argument("--window-days", type=float, default=7.0)
     p_aio.add_argument("--max-queries", type=int, default=None)
     p_aio.add_argument("--db", type=str, default=None, help="Override observatory SQLite path")
+    p_aio.add_argument("--dry-run", action="store_true", help="Exit 0 when live treg sampling is disabled")
 
     # partner-sync
     p_psync = subparsers.add_parser(

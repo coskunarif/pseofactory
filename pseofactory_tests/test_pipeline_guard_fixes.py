@@ -648,3 +648,58 @@ def test_load_and_enrich_deployed_voids_skips_legacy_off_jurisdiction_entries(
     )
     assert [v["slug"] for v in gh_voids] == ["eu-ai-act-conformity-fee-estimator"]
 
+
+def test_cmd_aio_observe_fails_closed_when_live_treg_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """
+    aio-observe sample must exit non-zero (fail closed) with clear status/reason
+    when PSEUFACTORY_LIVE_TREG != '1' and 0 queries were sampled, unless --dry-run is set.
+    """
+    import subprocess
+    import pseofactory.cli as cli_mod
+
+    monkeypatch.delenv("PSEUFACTORY_LIVE_TREG", raising=False)
+    monkeypatch.delattr(subprocess.run, "assert_called", raising=False)
+    monkeypatch.delattr(subprocess.run, "mock", raising=False)
+
+    db_path = str(tmp_path / "aio_disabled.db")
+    rc_fail = cli_mod.cmd_aio_observe(
+        argparse.Namespace(
+            action="sample",
+            db=db_path,
+            window_days=7,
+            tenant=None,
+            query=None,
+            max_queries=1,
+            dry_run=False,
+        )
+    )
+    captured_fail = capsys.readouterr()
+    assert rc_fail == 1
+    out_fail = json.loads(captured_fail.out)
+    assert out_fail["sampled"] == 0
+    assert out_fail["skipped_live_disabled"] == 1
+    assert out_fail["status"] == "FAIL"
+    assert "PSEUFACTORY_LIVE_TREG" in out_fail["reason"]
+    assert "PSEUFACTORY_LIVE_TREG" in captured_fail.err
+
+    rc_dry = cli_mod.cmd_aio_observe(
+        argparse.Namespace(
+            action="sample",
+            db=db_path,
+            window_days=7,
+            tenant=None,
+            query=None,
+            max_queries=1,
+            dry_run=True,
+        )
+    )
+    captured_dry = capsys.readouterr()
+    assert rc_dry == 0
+    out_dry = json.loads(captured_dry.out)
+    assert out_dry["status"] == "DRY_RUN"
+
+
