@@ -114,6 +114,9 @@ class PartnerStatusSummary:
     def is_live(self) -> bool:
         return self.is_live_link
 
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
 
 _OUTBOUND_CLICK_EVENT_TYPES = frozenset(
     {
@@ -457,9 +460,6 @@ def aggregate_verified_outbound_partner_engagement(
                 slot_rec["estimated_revenue_yield_usd"] = round(yield_by_slot.get(slot_k, 0.0), 4)
 
     return base_agg
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
 
 @dataclass

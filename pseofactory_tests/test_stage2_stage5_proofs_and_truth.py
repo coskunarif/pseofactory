@@ -350,3 +350,44 @@ def test_earn_proof_and_syndicate_proof_cli_fail_closed_and_pass(
         assert any("GSC indexation ratio critically low" in f for f in syn_out["failures"])
         assert any("parasite-ledger" in f for f in syn_out["failures"])
         assert any("YouTube uploads disabled" in f for f in syn_out["failures"])
+
+
+def test_partner_status_summary_and_property_readiness_report_to_dict() -> None:
+    """Regression: PartnerStatusSummary.to_dict() and PropertyReadinessReport.to_dict() serialize cleanly."""
+    from pseofactory.partner_tracker import PartnerStatusSummary, PropertyReadinessReport
+
+    partner = PartnerStatusSummary(
+        key="mercury",
+        name="Mercury",
+        property_id="profithelm",
+        category="banking",
+        operational_status="LIVE_ACTIVE",
+        registry_status="live",
+        network="direct",
+        bounty_est="$250 CPA",
+        destination_url="https://mercury.com",
+        is_live_link=True,
+    )
+    p_dict = partner.to_dict()
+    assert p_dict["key"] == "mercury"
+    assert p_dict["is_live_link"] is True
+
+    report = PropertyReadinessReport(
+        property_id="profithelm",
+        property_name="ProfitHelm",
+        monetization_readiness_score=85.0,
+        active_partners_count=1,
+        awaiting_response_count=0,
+        requires_followup_count=0,
+        pending_expansion_count=0,
+        total_registered_partners=1,
+        property_isolation_verified=True,
+        sub_affiliate_redirects_prohibited=False,
+        disclosure_compliant=True,
+        standing_restrictions="none",
+        partners=[partner],
+    )
+    r_dict = report.to_dict()
+    assert r_dict["property_id"] == "profithelm"
+    assert len(r_dict["partners"]) == 1
+    assert r_dict["partners"][0]["key"] == "mercury"
