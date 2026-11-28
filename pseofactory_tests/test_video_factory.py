@@ -1216,16 +1216,44 @@ def test_resolve_tenant_youtube_credentials_and_cmd_video_wiring(
     bad_tok, _ = resolver("profithelm")
     assert bad_tok is None
 
-    # 3. Resolves PROFITHELM_YOUTUBE_TOKEN_PATH when _in_pytest() is False and env is unset
+    # 3. Resolves PROFITHELM_YOUTUBE_TOKEN_PATH + matching channel ID when _in_pytest() is False and env is unset,
+    #    and run_autonomous_video_pipeline resolves them automatically when omitted (as called by distributor.py)
     monkeypatch.delenv("FACTORY_PROFITHELM_YOUTUBE_TOKEN_PATH", raising=False)
     monkeypatch.delenv("YOUTUBE_TOKEN_PATH", raising=False)
+    monkeypatch.delenv("FACTORY_PROFITHELM_YOUTUBE_CHANNEL_ID", raising=False)
+    monkeypatch.delenv("YOUTUBE_CHANNEL_ID", raising=False)
+    monkeypatch.setenv("PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD", "1")
     with (
         patch.object(vf_mod, "PROFITHELM_YOUTUBE_TOKEN_PATH", tok_file),
         patch("pseofactory.video_factory._in_pytest", return_value=False),
         patch("pseofactory.video_factory._resolve_default_tenant_repo", return_value=tmp_path),
     ):
-        resolved_tok, _ = resolver("profithelm")
+        resolved_tok, resolved_chan = resolver("profithelm")
         assert resolved_tok == tok_file
+        assert resolved_chan == "UCyq8gE7s0Vhh1xVL43X9Z1w"
+        allowed, reason = vf_mod._evaluate_youtube_upload_policy(True, resolved_tok, resolved_chan)
+        assert allowed is True and reason is None
+
+        with (
+            patch("pseofactory.video_factory.check_youtube_cli_diagnostics", return_value={"ready": True, "authenticated": True, "token_path": str(tok_file)}) as diag_mock,
+            patch("pseofactory.video_factory.evaluate_page_video_eligibility", return_value=[]),
+        ):
+            pipe_auto = vf_mod.run_autonomous_video_pipeline(
+                property_id="profithelm",
+                tools=[{"slug": "section-179-calculator", "title": "Section 179"}],
+                dist_dir=tmp_path / "dist",
+                repo_root=tmp_path,
+                max_renders=0,
+                synthesize_missing=False,
+                live_upload=False,
+                quota_governor=vf_mod.YouTubeQuotaGovernor(
+                    ledger_path=tmp_path / "yt_q.json",
+                    upload_log_path=tmp_path / "yt_u.json",
+                ),
+            )
+            assert pipe_auto["stages"]["1_cli_and_quota_preflight"]["upload_policy_allowed"] is True
+            assert pipe_auto["stages"]["1_cli_and_quota_preflight"]["cli_diagnostics"]["ready"] is True
+            assert diag_mock.call_args.kwargs.get("token_path") == tok_file
 
 
 

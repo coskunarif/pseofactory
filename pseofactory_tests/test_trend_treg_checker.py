@@ -277,4 +277,65 @@ def test_treg_checker_falls_back_to_serpstat_on_402_route_max_cost():
             assert r_single.keyword_difficulty == 33.0
 
 
+def test_serpstat_row_parser_handles_blank_and_non_numeric_strings():
+    """
+    Serpstat rows with blank ('') or non-numeric ('N/A') fields must coerce safely without
+    crashing, and one corrupt row in a batch must never drop valid rows in the same response.
+    """
+    serpstat_endpoint = "serpstat.google.keywords.volume"
+    mixed_stdout = json.dumps(
+        {
+            "id": "1",
+            "result": {
+                "data": [
+                    "corrupt_non_dict_entry",
+                    {"keyword": "bad_row", "region_queries_count": "N/A", "cost": "N/A"},
+                    {
+                        "keyword": "k1",
+                        "region_queries_count": 500,
+                        "cost": 2.0,
+                        "difficulty": "",
+                        "concurrency": "",
+                    },
+                    {
+                        "keyword": "k2",
+                        "region_queries_count": 500,
+                        "cost": "",
+                        "difficulty": "N/A",
+                        "concurrency": 20,
+                    },
+                ]
+            },
+        }
+    )
+
+    def _side_effect(cmd, *args, **kwargs):
+        if "treg.google.keywords.volume" in cmd:
+            return MagicMock(returncode=1, stdout="", stderr="HTTP 402 route_max_cost")
+        if serpstat_endpoint in cmd:
+            return MagicMock(returncode=0, stdout=mixed_stdout, stderr="")
+        return MagicMock(returncode=1, stdout="", stderr="unexpected")
+
+    with patch("shutil.which", return_value="/usr/local/bin/treg"):
+        with patch("subprocess.run", side_effect=_side_effect):
+            checker = TregChecker(max_cost="0.05", timeout=5.0)
+            res = checker.check_queries_batch(["k1", "k2", "bad_row"])
+            assert res["k1"].endpoint_called == serpstat_endpoint
+            assert res["k1"].is_synthetic is False
+            assert res["k1"].search_volume == 500
+            assert res["k1"].cpc_usd == 2.0
+            assert res["k1"].keyword_difficulty == 50.0
+            assert res["k1"].competition_index == 0.0
+
+            assert res["k2"].endpoint_called == serpstat_endpoint
+            assert res["k2"].is_synthetic is False
+            assert res["k2"].search_volume == 500
+            assert res["k2"].cpc_usd == 0.0
+            assert res["k2"].keyword_difficulty == 50.0
+            assert res["k2"].competition_index == 0.2
+
+            assert res["bad_row"].is_synthetic is True
+
+
+
 

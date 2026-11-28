@@ -701,8 +701,38 @@ class TregChecker:
         return result
 
     @staticmethod
-    def _normalize_competition(raw_comp: Any) -> float:
-        comp = float(raw_comp if raw_comp is not None else 0.0)
+    def _safe_float(val: Any, default: float = 0.0) -> float:
+        if val is None or isinstance(val, bool):
+            return default
+        if isinstance(val, (int, float)):
+            return float(val)
+        s = str(val).strip()
+        if not s:
+            return default
+        try:
+            return float(s)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _safe_int(val: Any, default: int = 0) -> int:
+        if val is None or isinstance(val, bool):
+            return default
+        if isinstance(val, int):
+            return val
+        if isinstance(val, float):
+            return int(val)
+        s = str(val).strip()
+        if not s:
+            return default
+        try:
+            return int(float(s))
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _normalize_competition(cls, raw_comp: Any) -> float:
+        comp = cls._safe_float(raw_comp, 0.0)
         if comp > 1.0:
             comp = round(min(1.0, comp / 100.0), 4)
         return comp
@@ -755,14 +785,14 @@ class TregChecker:
             if raw_vol is None and raw_cpc is None:
                 return None
 
-            volume = int(raw_vol or 0)
-            cpc = float(raw_cpc or 0.0)
+            volume = self._safe_int(raw_vol, 0)
+            cpc = self._safe_float(raw_cpc, 0.0)
             raw_kd = (
                 matched_row["keyword_difficulty"]
                 if matched_row.get("keyword_difficulty") is not None
                 else matched_row.get("difficulty")
             )
-            kd = float(raw_kd if raw_kd is not None else 50.0)
+            kd = self._safe_float(raw_kd, 50.0)
             raw_comp = (
                 matched_row["competition_index"]
                 if matched_row.get("competition_index") is not None
@@ -772,7 +802,7 @@ class TregChecker:
             p0_flag = matched_row.get("position_zero_vacant")
             p0_vacant = bool(p0_flag) if p0_flag is not None else (kd < 25.0)
             raw_stab = matched_row.get("historical_stability")
-            stability = float(raw_stab if raw_stab is not None else 0.85)
+            stability = self._safe_float(raw_stab, 0.85)
 
             return {
                 "search_volume": volume,
@@ -794,15 +824,15 @@ class TregChecker:
             }
 
         if "search_volume" in res_body or "cpc_usd" in res_body:
-            volume = int(res_body.get("search_volume") or 0)
-            cpc = float(res_body.get("cpc_usd") or 0.0)
+            volume = self._safe_int(res_body.get("search_volume"), 0)
+            cpc = self._safe_float(res_body.get("cpc_usd"), 0.0)
             comp = self._normalize_competition(res_body.get("competition_index"))
             raw_kd = res_body.get("keyword_difficulty")
-            kd = float(raw_kd if raw_kd is not None else 50.0)
+            kd = self._safe_float(raw_kd, 50.0)
             p0_flag = res_body.get("position_zero_vacant")
             p0_vacant = bool(p0_flag) if p0_flag is not None else (kd < 25.0)
             raw_stab = res_body.get("historical_stability")
-            stability = float(raw_stab if raw_stab is not None else 0.85)
+            stability = self._safe_float(raw_stab, 0.85)
             return {
                 "search_volume": volume,
                 "cpc_usd": cpc,
@@ -873,16 +903,18 @@ class TregChecker:
             if row.get("cost") is not None
             else (row.get("cpc_usd") if row.get("cpc_usd") is not None else row.get("cpc"))
         )
-        if raw_vol is None and raw_cpc is None:
+        vol_parsed = self._safe_int(raw_vol, -1)
+        cpc_parsed = self._safe_float(raw_cpc, -1.0)
+        if vol_parsed < 0 and cpc_parsed < 0.0:
             return None
-        volume = int(raw_vol or 0)
-        cpc = float(raw_cpc or 0.0)
+        volume = max(0, vol_parsed)
+        cpc = max(0.0, cpc_parsed)
         raw_kd = (
             row.get("difficulty")
             if row.get("difficulty") is not None
             else row.get("keyword_difficulty")
         )
-        kd = float(raw_kd if raw_kd is not None else 50.0)
+        kd = self._safe_float(raw_kd, 50.0)
         raw_comp = (
             row.get("concurrency")
             if row.get("concurrency") is not None
@@ -954,14 +986,19 @@ class TregChecker:
                 return {}
             parsed_by_kw: Dict[str, Dict[str, Any]] = {}
             for row in rows:
-                parsed = self._parse_serpstat_volume_row(row)
-                if parsed is None:
+                try:
+                    if not isinstance(row, dict):
+                        continue
+                    parsed = self._parse_serpstat_volume_row(row)
+                    if parsed is None:
+                        continue
+                    kw_key = str(row.get("keyword") or "").strip().lower()
+                    if not kw_key and len(queries) == 1 and len(rows) == 1:
+                        kw_key = queries[0].strip().lower()
+                    if kw_key:
+                        parsed_by_kw[kw_key] = parsed
+                except Exception:
                     continue
-                kw_key = str(row.get("keyword") or "").strip().lower()
-                if not kw_key and len(queries) == 1 and len(rows) == 1:
-                    kw_key = queries[0].strip().lower()
-                if kw_key:
-                    parsed_by_kw[kw_key] = parsed
             return parsed_by_kw
         except (subprocess.TimeoutExpired, Exception):
             return {}

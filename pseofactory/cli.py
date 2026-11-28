@@ -1432,17 +1432,30 @@ def cmd_aio_observe(args: argparse.Namespace) -> int:
             pairs = [(args.tenant or "unassigned", args.query.strip().lower())]
         max_q = getattr(args, "max_queries", None)
         effective_pairs = list(pairs[: max(0, int(max_q))]) if max_q is not None else list(pairs)
+        if is_dry_run:
+            out = {
+                "sampled": 0,
+                "found": 0,
+                "errors": 0,
+                "skipped_junk": 0,
+                "skipped_live_disabled": 0 if os.getenv("PSEUFACTORY_LIVE_TREG") == "1" else len(effective_pairs),
+                "cost_usd": 0.0,
+                "error_samples": [],
+                "watchlist_size": len(effective_pairs),
+                "status": "DRY_RUN",
+                "dry_run": True,
+                "reason": "dry_run=True; zero live treg_sampler calls and zero SQLite writes executed",
+            }
+            print(json.dumps(out, indent=2))
+            return 0
         out: Any = obs.sample(pairs, max_queries=max_q)
         out["watchlist_size"] = len(effective_pairs)
         if int(out.get("skipped_live_disabled", 0) or 0) > 0 and int(out.get("sampled", 0) or 0) == 0:
-            if is_dry_run:
-                out["status"] = "DRY_RUN"
-            else:
-                out["status"] = "FAIL"
-                out.setdefault(
-                    "reason",
-                    "PSEUFACTORY_LIVE_TREG != '1'; live treg sampling is disabled and 0 queries were sampled",
-                )
+            out["status"] = "FAIL"
+            out.setdefault(
+                "reason",
+                "PSEUFACTORY_LIVE_TREG != '1'; live treg sampling is disabled and 0 queries were sampled",
+            )
     elif action == "watchlist":
         out = [{"tenant": t, "query": q} for t, q in load_watchlist(tenants=[args.tenant] if args.tenant else None)]
     elif action in ("analyze", "blueprint"):

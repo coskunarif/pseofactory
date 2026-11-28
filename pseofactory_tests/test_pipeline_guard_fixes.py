@@ -702,4 +702,44 @@ def test_cmd_aio_observe_fails_closed_when_live_treg_disabled(
     out_dry = json.loads(captured_dry.out)
     assert out_dry["status"] == "DRY_RUN"
 
+    # Even with PSEUFACTORY_LIVE_TREG=1, --dry-run must NOT call treg_sampler or write rows
+    import sqlite3
+    import pseofactory.aio_observatory as aio_mod
+
+    live_db = str(tmp_path / "aio_live_dry.db")
+    monkeypatch.setenv("PSEUFACTORY_LIVE_TREG", "1")
+    sampler_calls = 0
+
+    def _fail_if_called(_q: str) -> Dict[str, Any]:
+        nonlocal sampler_calls
+        sampler_calls += 1
+        return {"found": True, "answer": "x", "citations": [], "provider": "fake", "cost_usd": 0.01}
+
+    monkeypatch.setattr(aio_mod, "treg_sampler", _fail_if_called)
+    rc_live_dry = cli_mod.cmd_aio_observe(
+        argparse.Namespace(
+            action="sample",
+            db=live_db,
+            window_days=7,
+            tenant=None,
+            query=None,
+            max_queries=2,
+            dry_run=True,
+        )
+    )
+    out_live_dry = json.loads(capsys.readouterr().out)
+    assert rc_live_dry == 0
+    assert out_live_dry["status"] == "DRY_RUN"
+    assert out_live_dry["sampled"] == 0
+    assert out_live_dry["cost_usd"] == 0.0
+    assert sampler_calls == 0
+    with sqlite3.connect(live_db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM aio_snapshots").fetchone()[0] == 0
+
+    obs_direct = aio_mod.AIOObservatory(live_db)
+    direct_dry = obs_direct.sample([("profithelm", "q1")], sampler=_fail_if_called, dry_run=True)
+    assert direct_dry["sampled"] == 0
+    assert direct_dry["status"] == "DRY_RUN"
+    assert sampler_calls == 0
+
 

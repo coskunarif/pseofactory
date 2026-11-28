@@ -408,6 +408,7 @@ class AIOObservatory:
         watchlist: Optional[Sequence[Any]] = None,
         sampler: Optional[Sampler] = None,
         max_queries: Optional[int] = None,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Take one AI Overview sample per watchlist query and store it."""
         pairs = list(watchlist if watchlist is not None else load_watchlist(include_intent=True))
@@ -423,6 +424,12 @@ class AIOObservatory:
             "cost_usd": 0.0,
             "error_samples": [],
         }
+        if dry_run:
+            summary["status"] = "DRY_RUN"
+            summary["dry_run"] = True
+            summary["watchlist_size"] = len(pairs)
+            summary["reason"] = "dry_run=True; zero live treg_sampler calls and zero SQLite writes executed"
+            return summary
         is_mocked = hasattr(subprocess.run, "assert_called") or hasattr(subprocess.run, "mock")
         if sampler is None and os.getenv("PSEUFACTORY_LIVE_TREG") != "1" and not is_mocked:
             summary["skipped_live_disabled"] = len(pairs)

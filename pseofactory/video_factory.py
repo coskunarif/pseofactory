@@ -90,7 +90,9 @@ DEFAULT_YOUTUBE_TOKEN_PATH: Optional[Path] = None
 PROFITHELM_YOUTUBE_TOKEN_PATH: Path = Path(
     "/home/ubuntuadmin/projects/arif-cli/social/youtube-toolkit/secrets/token.json"
 )
+PROFITHELM_YOUTUBE_CHANNEL_ID: str = "UCyq8gE7s0Vhh1xVL43X9Z1w"
 YOUTUBE_UPLOAD_OPT_IN_ENV: str = "PSEUFACTORY_ENABLE_YOUTUBE_UPLOAD"
+_UNSET_YOUTUBE_CRED: Any = object()
 
 
 def resolve_tenant_youtube_credentials(
@@ -100,7 +102,8 @@ def resolve_tenant_youtube_credentials(
     """
     Resolves per-tenant (youtube_token_path, youtube_channel_id) from environment variables,
     tenant `.pseofactory.json`, or verified on-disk tenant credentials for `profithelm`,
-    while strictly rejecting the forbidden shared MindBall token path.
+    while strictly rejecting the forbidden shared MindBall token path and never resolving
+    a channel ID without a verified token path.
     Zero em-dashes. Zero en-dashes.
     """
     prop = _normalize_property_id(property_id)
@@ -134,17 +137,24 @@ def resolve_tenant_youtube_credentials(
             except Exception:
                 pass
 
+    resolved_profithelm_default_token = False
     if not raw_tok and prop == "profithelm" and not _in_pytest() and PROFITHELM_YOUTUBE_TOKEN_PATH.is_file():
         raw_tok = str(PROFITHELM_YOUTUBE_TOKEN_PATH)
+        resolved_profithelm_default_token = True
+
+    eff_tok, tok_err = _validate_explicit_youtube_token_path(raw_tok)
+    if tok_err is not None or eff_tok is None:
+        return None, None
 
     if not raw_chan:
         brand_chan = (TENANT_VIDEO_BRANDING.get(prop) or {}).get("youtube_channel_id")
         if brand_chan:
             raw_chan = str(brand_chan).strip()
+        elif prop == "profithelm" and (
+            resolved_profithelm_default_token or eff_tok == PROFITHELM_YOUTUBE_TOKEN_PATH
+        ):
+            raw_chan = PROFITHELM_YOUTUBE_CHANNEL_ID
 
-    eff_tok, tok_err = _validate_explicit_youtube_token_path(raw_tok)
-    if tok_err is not None:
-        eff_tok = None
     eff_chan = str(raw_chan).strip() if raw_chan and str(raw_chan).strip() else None
     return eff_tok, eff_chan
 
@@ -3879,8 +3889,8 @@ def run_autonomous_video_pipeline(
     use_neural_tts: bool = True,
     quota_governor: Optional[YouTubeQuotaGovernor] = None,
     youtube_bin: Union[str, Path] = DEFAULT_YOUTUBE_CLI_BIN,
-    youtube_token_path: Optional[Union[str, Path]] = None,
-    youtube_channel_id: Optional[str] = None,
+    youtube_token_path: Optional[Union[str, Path]] = _UNSET_YOUTUBE_CRED,
+    youtube_channel_id: Optional[str] = _UNSET_YOUTUBE_CRED,
 ) -> Dict[str, Any]:
     """
     Executes the 5-stage autonomous video synthesis and YouTube distribution pipeline
@@ -3921,15 +3931,28 @@ def run_autonomous_video_pipeline(
             base_tools = [{"slug": target_slug, "title": target_slug.replace("-", " ").title()}]
 
     # Stage 1: CLI & Quota Preflight
+    if youtube_token_path is _UNSET_YOUTUBE_CRED and youtube_channel_id is _UNSET_YOUTUBE_CRED:
+        eff_youtube_token_path, eff_youtube_channel_id = resolve_tenant_youtube_credentials(
+            prop,
+            repo_root=eff_repo,
+        )
+    else:
+        eff_youtube_token_path = (
+            None if youtube_token_path is _UNSET_YOUTUBE_CRED else youtube_token_path
+        )
+        eff_youtube_channel_id = (
+            None if youtube_channel_id is _UNSET_YOUTUBE_CRED else youtube_channel_id
+        )
+
     policy_allowed, policy_reason = _evaluate_youtube_upload_policy(
-        live_upload=live_upload,
-        youtube_token_path=youtube_token_path,
-        youtube_channel_id=youtube_channel_id,
+        live_upload=True,
+        youtube_token_path=eff_youtube_token_path,
+        youtube_channel_id=eff_youtube_channel_id,
     )
     eff_live_upload = bool(live_upload and policy_allowed)
     cli_diag = check_youtube_cli_diagnostics(
         youtube_bin=youtube_bin,
-        token_path=youtube_token_path,
+        token_path=eff_youtube_token_path,
     )
     initial_budget = gov.get_budget_status(
         include_thumbnail=True,
@@ -3942,7 +3965,7 @@ def run_autonomous_video_pipeline(
         "cli_diagnostics": cli_diag,
         "initial_quota_budget": initial_budget.to_dict(),
         "upload_policy_allowed": policy_allowed,
-        "upload_skip_reason": policy_reason,
+        "upload_skip_reason": policy_reason if live_upload else (None if policy_allowed else policy_reason),
     }
 
     # Stage 2: Page-Value Eligibility & 3-Sentence Precision Gate
@@ -4064,8 +4087,8 @@ def run_autonomous_video_pipeline(
             live_upload=live_upload,
             quota_governor=gov,
             youtube_bin=youtube_bin,
-            youtube_token_path=youtube_token_path,
-            youtube_channel_id=youtube_channel_id,
+            youtube_token_path=eff_youtube_token_path,
+            youtube_channel_id=eff_youtube_channel_id,
         )
         upload_results[elig.slug] = up_res
         u_status = up_res.get("status")
