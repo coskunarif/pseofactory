@@ -310,6 +310,9 @@ def _load_trend_db_cache(db_path: Optional[Union[str, Path]] = None) -> Dict[str
                 ORDER BY composite_profit_yield DESC, jev_score DESC, latest_velocity DESC
                 """
             ).fetchall()
+            from pseofactory.maintenance import CrossPropertyContaminationScanner
+
+            _contam_scanner = CrossPropertyContaminationScanner()
             for kr in kw_rows:
                 qs_low = str(kr["query_slug"]).lower()
                 cp_low = str(kr["current_property_id"] or "").lower()
@@ -327,11 +330,30 @@ def _load_trend_db_cache(db_path: Optional[Union[str, Path]] = None) -> Dict[str
                     prop = "gainhelm"
                 elif any(
                     k in qs_low
-                    for k in ("surety-bond", "miller-act", "mechanics-lien", "license-bond", "workers-comp", "performance-bond", "payment-bond")
+                    for k in (
+                        "surety-bond",
+                        "miller-act",
+                        "mechanics-lien",
+                        "license-bond",
+                        "workers-comp",
+                        "performance-bond",
+                        "payment-bond",
+                        "wh-347",
+                        "davis-bacon",
+                        "prevailing-wage",
+                        "retainage",
+                        "preliminary-notice",
+                        "lien-waiver",
+                        "lien-release",
+                        "fidelity-bond",
+                        "subcontractor-default",
+                    )
                 ):
                     prop = "lienbond"
                 else:
                     prop = "profithelm"
+                if _contam_scanner.scan_text(f"{kr['query_slug']} {kr['query']}", property_id=prop):
+                    continue
                 kw_entry = {
                     "query_slug": str(kr["query_slug"]),
                     "query": str(kr["query"]),
