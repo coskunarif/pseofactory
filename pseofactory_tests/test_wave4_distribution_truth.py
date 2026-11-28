@@ -808,3 +808,40 @@ def test_zero_live_writes_to_arif_cli_linkedin_queue_during_pytest(tmp_path: Pat
     if existed_before:
         assert hashlib.sha256(LIVE_QUEUE_PATH.read_bytes()).hexdigest() == before_sha
         assert LIVE_QUEUE_PATH.stat().st_mtime_ns == before_mtime
+
+
+def test_clean_syndication_preserves_github_repo_bundle_and_isolates_tmp_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    Regression:
+    1. _clean_syndication_directories_and_ledgers must never delete github_repo_bundle
+       even when dist/tools/<active_slug> is populated.
+    2. When root is an isolated tmp/staging directory (even with PYTEST_CURRENT_TEST unset),
+       _is_real_tenant_repo_root returns False so central_synd is never touched.
+    """
+    from pseofactory.qualification import _is_real_tenant_repo_root
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    stage_root = tmp_path / "build_proof_stage"
+    (stage_root / "dist" / "tools" / "irs-2027-tax-brackets").mkdir(parents=True)
+    (stage_root / "dist" / "tools" / "irs-2027-tax-brackets" / "index.html").write_text(
+        "<html><body>ok</body></html>", encoding="utf-8"
+    )
+    (stage_root / ".pseofactory.json").write_text('{"property_id": "profithelm"}\n', encoding="utf-8")
+
+    gh_bundle = stage_root / "syndication" / "github_repo_bundle"
+    gh_bundle.mkdir(parents=True)
+    (gh_bundle / "README.md").write_text("# Statutory Dataset Bundle\n", encoding="utf-8")
+    stale_dir = stage_root / "syndication" / "stale-retired-tool"
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "post.md").write_text("stale\n", encoding="utf-8")
+
+    assert _is_real_tenant_repo_root(stage_root) is False
+    assert _is_real_tenant_repo_root(Path("/home/ubuntuadmin/projects/.agy/worktrees/pseo_review_t1_isolation")) is False
+    assert _is_real_tenant_repo_root(Path("/home/ubuntuadmin/projects/pseofactory")) is False
+
+    removed = _clean_syndication_directories_and_ledgers(stage_root, "profithelm", {"stale-retired-tool"})
+    assert removed >= 1
+    assert (gh_bundle / "README.md").is_file()
+    assert not stale_dir.exists()

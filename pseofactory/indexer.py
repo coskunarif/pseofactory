@@ -5047,17 +5047,6 @@ class PushIndexer:
         else:
             urls_to_submit = []
 
-        engines_accepted = [
-            "Google Search Console",
-            "Microsoft Bing (IndexNow)",
-            "Microsoft Copilot (IndexNow)",
-            "Perplexity AI (IndexNow Partner)",
-            "OpenAI GPTBot & ChatGPT (/llms.txt)",
-            "Anthropic ClaudeBot (Schema.org)",
-            "Meta AI (Meta-ExternalAgent)",
-            "Apple Intelligence (Applebot-Extended)",
-        ]
-
         if (had_candidate_urls and not urls_to_submit) or (blocked_urls and not urls_to_submit):
             report = {
                 "status": "QUARANTINED_ALL",
@@ -5072,7 +5061,7 @@ class PushIndexer:
                 "assets_submitted_count": 0,
                 "assets_submitted": [],
                 "urls_submitted": [],
-                "engines_accepted": engines_accepted,
+                "engines_accepted": [],
                 "indexnow": {
                     "host": self.domain,
                     "urls_submitted": 0,
@@ -5224,6 +5213,64 @@ class PushIndexer:
                 }
 
         audit = self.audit_asset_submission_status(assets=inspection["assets"], live=live)
+
+        engines_accepted: List[str] = []
+        if live:
+            inv = audit.get("engine_invariants", {}) if isinstance(audit, dict) else {}
+            gsc_sitemap_ok = (
+                isinstance(sitemap_reg, dict)
+                and str(sitemap_reg.get("status") or "").upper() in ("ACCEPTED", "PARTIAL", "SUCCESS")
+                and int(sitemap_reg.get("sitemaps_submitted_count") or 0) > 0
+            )
+            gsc_api_ok = (
+                isinstance(gsc_res, dict)
+                and str(gsc_res.get("status") or "").upper() in ("ACCEPTED", "DISPATCHED", "SUCCESS")
+                and int(gsc_res.get("urls_submitted") or 0) > 0
+            )
+            oracle_dict = gsc_res.get("inspection_oracle") if isinstance(gsc_res, dict) else None
+            gsc_inspection_ok = (
+                isinstance(oracle_dict, dict)
+                and str(oracle_dict.get("mode") or "").upper() == "LIVE"
+                and int(oracle_dict.get("total_inspected") or 0) > 0
+                and any(
+                    isinstance(item, dict) and str(item.get("status") or "").upper() == "INSPECTED"
+                    for item in (oracle_dict.get("inspections") or [])
+                )
+            )
+            if inv.get("googlebot_robots_allowed", True) and (gsc_sitemap_ok or gsc_api_ok or gsc_inspection_ok):
+                engines_accepted.append("Google Search Console")
+
+            indexnow_status = str(indexnow_res.get("status") or "").upper() if isinstance(indexnow_res, dict) else ""
+            indexnow_dispatched = int(indexnow_res.get("urls_dispatched") or 0) if isinstance(indexnow_res, dict) else 0
+            indexnow_results = indexnow_res.get("results") if isinstance(indexnow_res, dict) else None
+            if isinstance(indexnow_results, list) and indexnow_results:
+                indexnow_http_ok = any(
+                    isinstance(r, dict)
+                    and (
+                        r.get("status_code") in (200, 202)
+                        or str(r.get("status") or "").upper() in ("SUCCESS", "ACCEPTED", "DISPATCHED")
+                    )
+                    for r in indexnow_results
+                )
+            else:
+                indexnow_http_ok = True
+            if (
+                indexnow_dispatched > 0
+                and indexnow_status in ("DISPATCHED", "ACCEPTED", "SUCCESS", "PARTIAL")
+                and indexnow_http_ok
+            ):
+                if inv.get("bingbot_robots_allowed", True):
+                    engines_accepted.append("Microsoft Bing (IndexNow)")
+                    engines_accepted.append("Microsoft Copilot (IndexNow)")
+                if inv.get("perplexity_robots_allowed", True):
+                    engines_accepted.append("Perplexity AI (IndexNow Partner)")
+
+            if (
+                isinstance(indexmysite_res, dict)
+                and str(indexmysite_res.get("status") or "").upper() in ("SUCCESS", "QUEUED", "SUBMITTED")
+                and int(indexmysite_res.get("urls_submitted") or 0) > 0
+            ):
+                engines_accepted.append("IndexMySite")
 
         domain_health_pacing = (
             gsc_res.get("domain_health_pacing")

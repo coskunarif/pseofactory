@@ -314,6 +314,26 @@ console.log(JSON.stringify({
     assert tracker.hub.get_direct_contract_upgrades("profithelm")["koinly"] == expected_url
 
 
+def test_lookup_affiliate_partner_fails_closed_for_unknown_or_cross_tenant_property():
+    from pseofactory.affiliates import lookup_affiliate_partner
+
+    assert lookup_affiliate_partner("mercury", property_id="acme_solar") is None
+    assert lookup_affiliate_partner("profithelm:mercury", property_id="acme_solar") is None
+    assert lookup_affiliate_partner("profithelm:mercury", property_id="lienbond") is None
+
+    ph_mercury = lookup_affiliate_partner("mercury", property_id="profithelm")
+    assert ph_mercury is not None
+    assert ph_mercury.default_url == "https://mercury.com/r/profithelm-llc"
+
+    unscoped_mercury = lookup_affiliate_partner("mercury")
+    assert unscoped_mercury is not None
+    assert unscoped_mercury.default_url == "https://mercury.com/r/profithelm-llc"
+
+    lb_bond = lookup_affiliate_partner("suretybonds_direct", property_id="lienbond")
+    assert lb_bond is not None
+    assert lb_bond.property_id == "lienbond"
+
+
 
 
 

@@ -657,4 +657,115 @@ def test_indexnow_retry_after_backoff_and_persisted_cooldown(tmp_path: Path) -> 
     assert urlopen_should_not_run.call_count == 0
 
 
+def test_dispatch_automated_indexing_engines_accepted_honest_live_and_robots_guarded(tmp_path: Path) -> None:
+    """
+    Verifies dispatch_automated_indexing never fabricates engines_accepted when:
+    - mode is SIMULATED (live=False)
+    - 0 URLs were dispatched (IDEMPOTENT_NO_OP)
+    - robots.txt disallows GPTBot, ClaudeBot, Meta-ExternalAgent, Applebot-Extended, or Bingbot
+    And accurately records only engines with accepted live submissions/signals.
+    """
+    base_dir = tmp_path / "profithelm"
+    dist_dir = base_dir / "dist"
+    agy_dir = base_dir / ".agy"
+    agy_dir.mkdir(parents=True, exist_ok=True)
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    (dist_dir / "robots.txt").write_text(
+        "User-agent: *\nAllow: /\n"
+        "User-agent: GPTBot\nDisallow: /\n"
+        "User-agent: ClaudeBot\nDisallow: /\n"
+        "User-agent: Meta-ExternalAgent\nDisallow: /\n"
+        "User-agent: Applebot-Extended\nDisallow: /\n",
+        encoding="utf-8",
+    )
+    url = "https://profithelm.com/tools/calc-honest/"
+    _write_test_html(dist_dir / "tools" / "calc-honest" / "index.html", url, "Calc Honest")
+
+    indexer = PushIndexer(
+        domain="profithelm.com",
+        canonical_base="https://profithelm.com",
+        base_dir=base_dir,
+        dist_dir=dist_dir,
+        ledger_path=agy_dir / "index_push_ledger.json",
+        audit_log_path=agy_dir / "indexing_audit_log.json",
+        rollover_queue_path=agy_dir / "gsc_rollover_queue.json",
+        tenant_id="profithelm",
+    )
+
+    # 1. Simulated run must report empty engines_accepted
+    sim_res = indexer.dispatch_automated_indexing(urls=[url], live=False)
+    assert sim_res["engines_accepted"] == []
+
+    # 2. Live run with IndexNow HTTP 202 and GSC sitemap FAIL must report only Bing/Copilot/Perplexity
+    with (
+        patch.object(
+            indexer,
+            "submit_indexnow_batch",
+            return_value={
+                "status": "DISPATCHED",
+                "urls_submitted": 1,
+                "urls_dispatched": 1,
+                "results": [{"endpoint": "https://api.indexnow.org/indexnow", "status_code": 202, "status": "SUCCESS"}],
+            },
+        ),
+        patch.object(indexer, "submit_gsc_sitemaps", return_value={"status": "FAIL", "sitemaps_submitted_count": 0, "submissions": []}),
+        patch.object(indexer, "verify_gsc_indexation_loop", return_value={"mode": "LIVE", "total_inspected": 0, "inspections": []}),
+        patch.object(indexer, "submit_indexmysite", return_value={"status": "ZERO_COST_GUARD", "urls_submitted": 0}),
+        patch.object(indexer, "submit_fast_index", return_value={"status": "DISPATCHED", "actions": []}),
+    ):
+        live_res = indexer.dispatch_automated_indexing(urls=[url], live=True)
+
+    assert live_res["engines_accepted"] == [
+        "Microsoft Bing (IndexNow)",
+        "Microsoft Copilot (IndexNow)",
+        "Perplexity AI (IndexNow Partner)",
+    ]
+    assert "Google Search Console" not in live_res["engines_accepted"]
+    assert all("GPTBot" not in e and "ClaudeBot" not in e and "Meta AI" not in e and "Apple" not in e for e in live_res["engines_accepted"])
+
+    # 3. Live IDEMPOTENT_NO_OP with 0 dispatches must report empty engines_accepted
+    with (
+        patch.object(indexer, "submit_gsc_sitemaps", return_value={"status": "IDEMPOTENT_NO_OP", "sitemaps_submitted_count": 0, "submissions": []}),
+        patch.object(indexer, "verify_gsc_indexation_loop", return_value={"mode": "LIVE", "total_inspected": 0, "inspections": []}),
+        patch.object(indexer, "submit_fast_index", return_value={"status": "IDEMPOTENT_NO_OP", "actions": []}),
+    ):
+        noop_res = indexer.dispatch_automated_indexing(live=True)
+    assert noop_res["dispatch_type"] == "IDEMPOTENT_NO_OP"
+    assert noop_res["engines_accepted"] == []
+
+    # 4. Live run with GSC sitemap ACCEPTED + IndexNow 202 + AI bots disallowed in robots.txt
+    with (
+        patch.object(
+            indexer,
+            "submit_indexnow_batch",
+            return_value={
+                "status": "DISPATCHED",
+                "urls_submitted": 1,
+                "urls_dispatched": 1,
+                "results": [{"endpoint": "https://api.indexnow.org/indexnow", "status_code": 202, "status": "SUCCESS"}],
+            },
+        ),
+        patch.object(indexer, "submit_gsc_sitemaps", return_value={"status": "ACCEPTED", "sitemaps_submitted_count": 1, "submissions": []}),
+        patch.object(indexer, "verify_gsc_indexation_loop", return_value={"mode": "LIVE", "total_inspected": 0, "inspections": []}),
+        patch.object(indexer, "submit_indexmysite", return_value={"status": "ZERO_COST_GUARD", "urls_submitted": 0}),
+        patch.object(indexer, "submit_fast_index", return_value={"status": "DISPATCHED", "actions": []}),
+    ):
+        gsc_and_bing_res = indexer.dispatch_automated_indexing(urls=[url], live=True)
+    assert gsc_and_bing_res["engines_accepted"] == [
+        "Google Search Console",
+        "Microsoft Bing (IndexNow)",
+        "Microsoft Copilot (IndexNow)",
+        "Perplexity AI (IndexNow Partner)",
+    ]
+
+    # 5. When robots.txt disallows Bingbot, preflight quarantines and engines_accepted is empty
+    (dist_dir / "robots.txt").write_text(
+        "User-agent: *\nAllow: /\nUser-agent: Bingbot\nDisallow: /\n",
+        encoding="utf-8",
+    )
+    robots_res = indexer.dispatch_automated_indexing(urls=[url], live=True)
+    assert robots_res["status"] == "QUARANTINED_ALL"
+    assert robots_res["engines_accepted"] == []
+
+
 

@@ -5131,6 +5131,28 @@ class TruthReconciliationEngine:
             cls._AUDIT_TRUTH_CACHE[cache_key] = list(violations)
         return violations
 
+    @staticmethod
+    def _is_real_tenant_repo_root(repo_root: Optional[Path]) -> bool:
+        """
+        Returns True only when repo_root resolves to a real tenant repository
+        directly under /home/ubuntuadmin/projects/ (never /tmp, /var/tmp, pytest,
+        .agy/worktrees/, or isolated staging directories).
+        """
+        if repo_root is None or "PYTEST_CURRENT_TEST" in os.environ:
+            return False
+        try:
+            resolved = repo_root.resolve()
+            projects_base = Path("/home/ubuntuadmin/projects").resolve()
+            rel = resolved.relative_to(projects_base)
+        except Exception:
+            return False
+        if len(rel.parts) != 1:
+            return False
+        top_name = rel.parts[0]
+        if not top_name or top_name.startswith(".") or top_name == "pseofactory":
+            return False
+        return (resolved / ".pseofactory.json").is_file()
+
     @classmethod
     def reconcile_estate_assets(
         cls,
@@ -5150,6 +5172,11 @@ class TruthReconciliationEngine:
         tenant_norm = resolve_canonical_property_id(property_id, default=str(property_id or "").strip().lower() or "profithelm")
         d = Path(dist_dir).resolve()
         r_root = Path(repo_root).resolve() if repo_root else (d.parent if d.parent.is_dir() else None)
+        is_live_tenant_repo = (
+            cls._is_real_tenant_repo_root(r_root)
+            and r_root is not None
+            and d.is_relative_to(r_root)
+        )
         repaired_paths: List[str] = []
 
         # 1. Reconcile dist/manifests/*.json FIRST
@@ -5391,9 +5418,10 @@ class TruthReconciliationEngine:
         target_benchmark_dirs = [d / "ai-benchmarks"]
         if r_root:
             target_benchmark_dirs.append(r_root / "syndication" / "ai_benchmarks")
-        central_bench = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}/ai_benchmarks")
-        if central_bench.is_dir():
-            target_benchmark_dirs.append(central_bench)
+        if is_live_tenant_repo:
+            central_bench = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}/ai_benchmarks")
+            if central_bench.is_dir():
+                target_benchmark_dirs.append(central_bench)
 
         for bench_dir in target_benchmark_dirs:
             if not bench_dir.is_dir():
@@ -5539,9 +5567,10 @@ class TruthReconciliationEngine:
         target_synd_dirs = []
         if r_root and (r_root / "syndication").is_dir():
             target_synd_dirs.append(r_root / "syndication")
-        central_synd = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}")
-        if central_synd.is_dir():
-            target_synd_dirs.append(central_synd)
+        if is_live_tenant_repo:
+            central_synd = Path(f"/home/ubuntuadmin/projects/pseofactory/syndication/{tenant_norm}")
+            if central_synd.is_dir():
+                target_synd_dirs.append(central_synd)
 
         for s_dir in target_synd_dirs:
             if not s_dir.is_dir():

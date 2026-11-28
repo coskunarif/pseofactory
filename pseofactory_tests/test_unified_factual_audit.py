@@ -382,3 +382,35 @@ def test_sync_cloudflare_secret_does_not_push_stale_oauth_when_wrangler_whoami_f
     assert res["reason"] == "wrangler_whoami_rc_1"
     assert "stale_oauth_token_must_not_be_pushed" not in str(res)
     assert calls == [["npx", "wrangler", "whoami"]]
+
+
+def test_reconcile_estate_assets_never_mutates_central_syndication_from_isolated_tmp_dir(tmp_path, monkeypatch):
+    """
+    Regression: even when PYTEST_CURRENT_TEST is unset (like build-proof),
+    reconcile_estate_assets on a /tmp staging directory must not touch
+    /home/ubuntuadmin/projects/pseofactory/syndication/<tenant>.
+    """
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    stage_root = tmp_path / "stage_profithelm"
+    dist_dir = stage_root / "dist"
+    dist_dir.mkdir(parents=True)
+    (stage_root / ".pseofactory.json").write_text('{"property_id": "profithelm"}\n', encoding="utf-8")
+    (stage_root / "syndication" / "ai_benchmarks").mkdir(parents=True)
+    (stage_root / "syndication" / "ai_benchmarks" / "ai_citations_reference.md").write_text(
+        "IRC Sections 179 overview.\n", encoding="utf-8"
+    )
+
+    assert TruthReconciliationEngine._is_real_tenant_repo_root(stage_root) is False
+    assert TruthReconciliationEngine._is_real_tenant_repo_root(
+        Path("/home/ubuntuadmin/projects/.agy/worktrees/pseo_review_t1_isolation")
+    ) is False
+
+    repaired = TruthReconciliationEngine.reconcile_estate_assets(
+        dist_dir=dist_dir,
+        property_id="profithelm",
+        repo_root=stage_root,
+        sync_llms=False,
+    )
+    assert all("/home/ubuntuadmin/projects/pseofactory/syndication" not in p for p in repaired)
+    assert any(str(stage_root) in p for p in repaired)

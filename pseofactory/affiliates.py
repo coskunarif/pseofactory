@@ -3482,22 +3482,38 @@ def lookup_affiliate_partner(
     """
     Tenant-isolated affiliate partner lookup so shared partner keys
     (e.g., suretybonds_direct, simply_business, next_insurance_b2b)
-    never bleed across profithelm and lienbond.
+    never bleed across tenants or fall back to another tenant's registry
+    when an explicit property_id is provided.
     """
     pk = (partner_key or "").strip().lower()
     if not pk:
         return None
+    prop = (property_id or "").strip().lower() if property_id is not None else ""
     if ":" in pk:
         ns_prop, ns_pk = pk.split(":", 1)
-        reg = AFFILIATE_REGISTRY_BY_PROPERTY.get(ns_prop.strip().lower())
+        ns_prop = ns_prop.strip().lower()
+        ns_pk = ns_pk.strip().lower()
+        if prop and ns_prop != prop:
+            return None
+        reg = AFFILIATE_REGISTRY_BY_PROPERTY.get(ns_prop)
         if reg and ns_pk in reg:
-            return reg[ns_pk]
+            entry = reg[ns_pk]
+            if prop and str(getattr(entry, "property_id", "") or "").strip().lower() != prop:
+                return None
+            return entry
+        if prop:
+            return None
         pk = ns_pk
-    if property_id:
-        prop = property_id.strip().lower()
+    if prop:
         reg = AFFILIATE_REGISTRY_BY_PROPERTY.get(prop)
-        if reg is not None:
-            return reg.get(pk)
+        if reg is None:
+            return None
+        entry = reg.get(pk)
+        if entry is None:
+            return None
+        if str(getattr(entry, "property_id", "") or "").strip().lower() != prop:
+            return None
+        return entry
     return AFFILIATE_REGISTRY.get(pk)
 
 

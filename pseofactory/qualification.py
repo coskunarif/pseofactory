@@ -3589,6 +3589,28 @@ def reconcile_void_candidates_queue(
     return updated_count
 
 
+def _is_real_tenant_repo_root(repo_root: Optional[Path]) -> bool:
+    """
+    Returns True only when repo_root resolves to a real tenant repository
+    directly under /home/ubuntuadmin/projects/ (never /tmp, /var/tmp, pytest,
+    .agy/worktrees/, or isolated staging directories).
+    """
+    if repo_root is None or "PYTEST_CURRENT_TEST" in os.environ:
+        return False
+    try:
+        resolved = repo_root.resolve()
+        projects_base = Path("/home/ubuntuadmin/projects").resolve()
+        rel = resolved.relative_to(projects_base)
+    except Exception:
+        return False
+    if len(rel.parts) != 1:
+        return False
+    top_name = rel.parts[0]
+    if not top_name or top_name.startswith(".") or top_name == "pseofactory":
+        return False
+    return (resolved / ".pseofactory.json").is_file()
+
+
 def _clean_syndication_directories_and_ledgers(
     root: Path,
     prop: str,
@@ -3603,7 +3625,7 @@ def _clean_syndication_directories_and_ledgers(
     removed_count = 0
     synd_dirs = [root / "syndication"]
     is_foreign_pytest = bool("PYTEST_CURRENT_TEST" in os.environ)
-    if not is_foreign_pytest:
+    if _is_real_tenant_repo_root(root):
         central_synd = Path(__file__).resolve().parent.parent / "syndication" / prop
         if central_synd.is_dir() and central_synd not in synd_dirs:
             synd_dirs.append(central_synd)
@@ -3621,6 +3643,8 @@ def _clean_syndication_directories_and_ledgers(
             continue
         for item in sorted(synd_dir.iterdir()):
             if item.name.startswith("."):
+                continue
+            if item.name == "github_repo_bundle" and item.is_dir():
                 continue
             if item.name == "ai_benchmarks" and item.is_dir():
                 for b_item in sorted(item.iterdir()):
